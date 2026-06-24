@@ -1,2 +1,7 @@
 # 本地环境配置文件
 .env
+
+.venv/
+.vscode
+
+memoria.db
