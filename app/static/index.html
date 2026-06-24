@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>角色模拟验证台</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@600;700&family=Noto+Sans+SC:wght@400;500&family=JetBrains+Mono:wght@500&display=swap');
+
+  :root{
+    --bg: #1a1614;
+    --bg-panel: #221d1a;
+    --ember: #d4622a;
+    --ember-dim: #8a3f1f;
+    --copper: #b8895a;
+    --iron: #3d3835;
+    --iron-light: #57504c;
+    --parchment: #e8dfd0;
+    --parchment-dim: #a89c8a;
+    --ash-red: #8a2e1f;
+  }
+
+  *{ box-sizing: border-box; }
+
+  body{
+    margin:0;
+    background: radial-gradient(ellipse at 30% 0%, #2a2220 0%, var(--bg) 55%);
+    color: var(--parchment);
+    font-family: 'Noto Sans SC', sans-serif;
+    min-height: 100vh;
+  }
+
+  .layout{
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    max-width: 1100px;
+    margin: 0 auto;
+    min-height: 100vh;
+  }
+  @media (max-width: 760px){
+    .layout{ grid-template-columns: 1fr; }
+  }
+
+  /* ---------- 左侧面板：工坊记录牌 ---------- */
+  .panel{
+    background: var(--bg-panel);
+    border-right: 1px solid var(--iron);
+    padding: 28px 22px;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+  }
+
+  .brand{
+    font-family: 'Noto Serif SC', serif;
+    font-weight: 700;
+    font-size: 19px;
+    letter-spacing: 1px;
+    color: var(--parchment);
+    border-bottom: 2px solid var(--ember);
+    padding-bottom: 14px;
+  }
+  .brand small{
+    display:block;
+    font-family: 'Noto Sans SC', sans-serif;
+    font-weight: 400;
+    font-size: 12px;
+    color: var(--parchment-dim);
+    margin-top: 4px;
+    letter-spacing: 0.5px;
+  }
+
+  .section-label{
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: var(--copper);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  .char-list{ display:flex; flex-direction: column; gap: 8px; }
+  .char-card{
+    background: var(--iron);
+    border: 1px solid var(--iron-light);
+    border-radius: 4px;
+    padding: 12px 14px;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .char-card:hover{ border-color: var(--ember-dim); }
+  .char-card.active{
+    border-color: var(--ember);
+    background: linear-gradient(135deg, var(--iron) 0%, #4a2f23 100%);
+  }
+  .char-card .cname{
+    font-family: 'Noto Serif SC', serif;
+    font-weight: 700;
+    font-size: 15px;
+  }
+  .char-card .csub{
+    font-size: 12px;
+    color: var(--parchment-dim);
+    margin-top: 4px;
+    line-height: 1.5;
+  }
+
+  .status-block{
+    border-top: 1px solid var(--iron);
+    padding-top: 18px;
+  }
+  .status-row{
+    display:flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 10px;
+  }
+  .status-row .label{ font-size: 13px; color: var(--parchment-dim); }
+  .status-row .value{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    color: var(--parchment);
+  }
+
+  /* 锻造火花：好感度可视化的签名元素 */
+  .sparks{
+    display:flex;
+    gap: 4px;
+    margin-top: 6px;
+    flex-wrap: wrap;
+  }
+  .spark{
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--iron-light);
+  }
+  .spark.lit{
+    background: var(--ember);
+    box-shadow: 0 0 6px 1px var(--ember-dim);
+  }
+  .spark.lit.high{
+    background: #f0a05a;
+    box-shadow: 0 0 8px 2px var(--ember);
+  }
+
+  .mood-tag{
+    display:inline-block;
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    border: 1px solid var(--copper);
+    color: var(--copper);
+  }
+
+  /* ---------- 右侧：对话区 ---------- */
+  .chat-area{
+    display:flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  .chat-header{
+    padding: 24px 30px 16px;
+    border-bottom: 1px solid var(--iron);
+  }
+  .chat-header h1{
+    font-family: 'Noto Serif SC', serif;
+    font-size: 20px;
+    margin: 0 0 4px;
+  }
+  .chat-header p{
+    margin:0;
+    font-size: 13px;
+    color: var(--parchment-dim);
+  }
+
+  .chat-log{
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 30px;
+    display:flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .msg{
+    max-width: 78%;
+    display:flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .msg.player{ align-self: flex-end; align-items: flex-end; }
+  .msg.npc{ align-self: flex-start; align-items: flex-start; }
+
+  .bubble{
+    padding: 14px 18px;
+    border-radius: 4px;
+    font-size: 14.5px;
+    line-height: 1.75;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    transition: box-shadow 0.2s ease;
+  }
+  .bubble:hover{
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.25);
+  }
+  .msg.player .bubble{
+    background: linear-gradient(135deg, var(--iron) 0%, #35302d 100%);
+    border: 1px solid var(--iron-light);
+    border-top-right-radius: 14px;
+  }
+  .msg.npc .bubble{
+    background: linear-gradient(135deg, #2d2219 0%, #221a14 100%);
+    border: 1px solid var(--ember-dim);
+    border-top-left-radius: 14px;
+  }
+  
+  /* 移除旧的 action-tag，不再在气泡外显示 */
+  .msg .action-tag{
+    display: none;
+  }
+  
+  /* 动作渲染优化 - 统一在对话内渲染 */
+  .action-inline{
+    display: inline-block;
+    font-style: italic;
+    font-weight: 500;
+    color: #ff9966;
+    background: linear-gradient(135deg, rgba(212, 98, 42, 0.18) 0%, rgba(212, 98, 42, 0.12) 100%);
+    padding: 4px 10px;
+    border-radius: 6px;
+    margin: 0 4px;
+    font-size: 0.90em;
+    border: 1px solid rgba(212, 98, 42, 0.3);
+    white-space: nowrap;
+    vertical-align: baseline;
+    line-height: 1.4;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    transition: all 0.2s ease;
+  }
+  
+  .action-inline:hover{
+    background: linear-gradient(135deg, rgba(212, 98, 42, 0.25) 0%, rgba(212, 98, 42, 0.18) 100%);
+    box-shadow: 0 2px 5px rgba(212, 98, 42, 0.25);
+  }
+  
+  .msg.player .action-inline{
+    color: #d4a574;
+    background: linear-gradient(135deg, rgba(184, 137, 90, 0.15) 0%, rgba(184, 137, 90, 0.10) 100%);
+    border-color: rgba(184, 137, 90, 0.25);
+  }
+  
+  .msg.player .action-inline:hover{
+    background: linear-gradient(135deg, rgba(184, 137, 90, 0.22) 0%, rgba(184, 137, 90, 0.15) 100%);
+    box-shadow: 0 2px 5px rgba(184, 137, 90, 0.2);
+  }
+  .msg .delta-tag{
+    font-size: 11.5px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 4px;
+    margin-top: 6px;
+    display: inline-block;
+  }
+  .msg .delta-tag.positive{
+    color: #7acc7a;
+    background: rgba(122, 204, 122, 0.12);
+    border: 1px solid rgba(122, 204, 122, 0.25);
+  }
+  .msg .delta-tag.negative{
+    color: #e07070;
+    background: rgba(224, 112, 112, 0.12);
+    border: 1px solid rgba(224, 112, 112, 0.25);
+  }
+  .msg .delta-tag.neutral{
+    color: var(--parchment-dim);
+    background: rgba(168, 156, 138, 0.08);
+    border: 1px solid rgba(168, 156, 138, 0.15);
+  }
+
+  .typing{
+    font-size: 13px;
+    color: var(--parchment-dim);
+    padding-left: 4px;
+  }
+
+  .composer{
+    border-top: 1px solid var(--iron);
+    padding: 18px 30px 24px;
+    display:flex;
+    gap: 10px;
+  }
+  .composer input{
+    flex:1;
+    background: var(--iron);
+    border: 1px solid var(--iron-light);
+    border-radius: 4px;
+    color: var(--parchment);
+    padding: 12px 14px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  .composer input:focus{
+    outline: none;
+    border-color: var(--ember);
+  }
+  .composer button{
+    background: var(--ember);
+    color: #1a1614;
+    border: none;
+    border-radius: 4px;
+    padding: 0 22px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  .composer button:hover{ background: #e07840; }
+  .composer button:disabled{ background: var(--iron-light); cursor: not-allowed; }
+
+  .empty-state{
+    flex:1;
+    display:flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--parchment-dim);
+    font-size: 14px;
+    text-align: center;
+    padding: 40px;
+  }
+  
+  /* 滚动条美化 */
+  .chat-log::-webkit-scrollbar{
+    width: 8px;
+  }
+  .chat-log::-webkit-scrollbar-track{
+    background: var(--bg-panel);
+  }
+  .chat-log::-webkit-scrollbar-thumb{
+    background: var(--iron-light);
+    border-radius: 4px;
+  }
+  .chat-log::-webkit-scrollbar-thumb:hover{
+    background: var(--ember-dim);
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="panel">
+    <div class="brand">角色模拟验证台
+      <small>NPC PERSONA SIMULATION · DEMO</small>
+    </div>
+
+    <!-- 玩家昵称区域 -->
+    <div style="margin-bottom: 18px;">
+      <div class="section-label">玩家昵称</div>
+      <div style="display:flex; gap:6px;">
+        <input type="text" id="playerNameInput" placeholder="输入你的昵称" 
+               style="flex:1; background:var(--iron); border:1px solid var(--iron-light); 
+                      border-radius:4px; color:var(--parchment); padding:8px 10px; font-size:13px;">
+        <button id="confirmPlayerBtn" 
+                style="background:var(--ember); color:#1a1614; border:none; border-radius:4px; 
+                       padding:0 14px; font-size:13px; cursor:pointer; font-weight:500;">
+          确认
+        </button>
+      </div>
+      <div id="currentPlayerLabel" style="font-size:12px; color:var(--copper); margin-top:6px; display:none;">
+        当前玩家：<span id="currentPlayerName"></span>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">选择角色</div>
+      <div class="char-list" id="charList"></div>
+    </div>
+
+    <div class="status-block" id="statusBlock" style="display:none">
+      <div class="section-label">当前状态</div>
+      <div class="status-row">
+        <span class="label">好感度</span>
+        <span class="value" id="affinityValue">0</span>
+      </div>
+      <div class="sparks" id="sparks"></div>
+      <div class="status-row" style="margin-top:14px">
+        <span class="label">心情</span>
+        <span class="mood-tag" id="moodTag">平静</span>
+      </div>
+    </div>
+  </aside>
+
+  <main class="chat-area">
+    <div class="chat-header">
+      <h1 id="headerName">请选择左侧角色开始对话</h1>
+      <p id="headerSub">这里会展示角色的一句话设定</p>
+    </div>
+
+    <div class="chat-log" id="chatLog">
+      <div class="empty-state" id="emptyState">选择一个角色，对话会从这里开始</div>
+    </div>
+
+    <div class="composer">
+      <input type="text" id="msgInput" placeholder="输入要说的话…" disabled>
+      <button id="sendBtn" disabled>发送</button>
+    </div>
+  </main>
+</div>
+
+<script>
+const API_BASE = '/api/v1';
+let currentCharacterId = null;
+let currentSessionId = null;
+let currentAffinity = 0;
+let currentPlayerId = null;
+let historyOffset = 0;
+let hasMoreHistory = false;
+
+// ========== 玩家昵称管理 ==========
+
+function loadPlayerFromStorage(){
+  const saved = localStorage.getItem('memoria_player_id');
+  if(saved){
+    currentPlayerId = saved;
+    document.getElementById('playerNameInput').value = saved;
+    document.getElementById('currentPlayerName').textContent = saved;
+    document.getElementById('currentPlayerLabel').style.display = 'block';
+  }
+}
+
+function confirmPlayer(){
+  const input = document.getElementById('playerNameInput');
+  const name = input.value.trim();
+  if(!name){
+    alert('请输入昵称');
+    return;
+  }
+  
+  // 如果切换了玩家，清空当前UI状态
+  if(currentPlayerId && currentPlayerId !== name){
+    console.log('切换玩家:', currentPlayerId, '->', name);
+    currentSessionId = null;
+    currentCharacterId = null;
+    historyOffset = 0;
+    hasMoreHistory = false;
+    localStorage.removeItem('memoria_session_id');
+    localStorage.removeItem('memoria_character_id');
+    document.getElementById('chatLog').innerHTML = '<div class="empty-state" id="emptyState">已切换玩家，请重新选择角色</div>';
+    document.getElementById('statusBlock').style.display = 'none';
+    document.querySelectorAll('.char-card').forEach(el => el.classList.remove('active'));
+    document.getElementById('headerName').textContent = '请选择左侧角色开始对话';
+    document.getElementById('headerSub').textContent = '这里会展示角色的一句话设定';
+    document.getElementById('msgInput').disabled = true;
+    document.getElementById('sendBtn').disabled = true;
+  }
+  
+  currentPlayerId = name;
+  localStorage.setItem('memoria_player_id', name);
+  document.getElementById('currentPlayerName').textContent = name;
+  document.getElementById('currentPlayerLabel').style.display = 'block';
+  
+  console.log('当前玩家:', currentPlayerId);
+}
+
+// ========== 历史恢复 ==========
+
+async function tryRestoreSession(){
+  const savedCharId = localStorage.getItem('memoria_character_id');
+  const savedSessionId = localStorage.getItem('memoria_session_id');
+  
+  console.log('尝试恢复会话:', { currentPlayerId, savedCharId, savedSessionId });
+  
+  if(!currentPlayerId || !savedCharId || !savedSessionId) {
+    console.log('跳过恢复：缺少必要信息');
+    return;
+  }
+  
+  try{
+    console.log('验证会话存在...');
+    // 验证会话是否存在
+    const res = await fetch(`${API_BASE}/dialogue/history?session_id=${savedSessionId}&offset=0&limit=20`);
+    if(!res.ok) {
+      console.error('会话验证失败:', res.status);
+      throw new Error('会话不存在');
+    }
+    
+    const data = await res.json();
+    console.log('会话数据:', data);
+    
+    // 恢复角色选择
+    const charRes = await fetch(`${API_BASE}/characters`);
+    const characters = await charRes.json();
+    const char = characters.find(c => c.character_id === savedCharId);
+    if(!char) throw new Error('角色不存在');
+    
+    currentCharacterId = savedCharId;
+    currentSessionId = savedSessionId;
+    
+    console.log('恢复会话成功，消息数量:', data.messages.length);
+    
+    // 更新UI
+    document.querySelectorAll('.char-card').forEach(el => {
+      el.classList.toggle('active', el.dataset.id === savedCharId);
+    });
+    document.getElementById('headerName').textContent = char.display_name;
+    document.getElementById('headerSub').textContent = char.core_identity_summary;
+    
+    // 恢复消息历史
+    const chatLog = document.getElementById('chatLog');
+    chatLog.innerHTML = '';
+    
+    // 先添加"加载更多"按钮
+    const loadMoreBtn = document.createElement('button');
+    loadMoreBtn.id = 'loadMoreBtn';
+    loadMoreBtn.style.cssText = 'width:100%; padding:10px; background:var(--iron); border:1px solid var(--iron-light); border-radius:4px; color:var(--parchment); cursor:pointer; font-size:13px; margin-bottom:12px;';
+    loadMoreBtn.textContent = '加载更多历史消息';
+    loadMoreBtn.style.display = data.has_more ? 'block' : 'none';
+    loadMoreBtn.addEventListener('click', loadMoreHistory);
+    chatLog.appendChild(loadMoreBtn);
+    
+    historyOffset = 0;
+    hasMoreHistory = data.has_more;
+    
+    data.messages.forEach(msg => {
+      appendMessage(msg.role === 'user' ? 'user' : 'assistant', msg.content, null, null);
+    });
+    
+    updateStatus(data.current_affinity, data.current_mood);
+    
+    document.getElementById('msgInput').disabled = false;
+    document.getElementById('sendBtn').disabled = false;
+    
+  }catch(e){
+    console.error('恢复会话失败:', e);
+    // 清理无效的缓存
+    localStorage.removeItem('memoria_session_id');
+    localStorage.removeItem('memoria_character_id');
+  }
+}
+
+// ========== 加载更多历史 ==========
+
+async function loadMoreHistory(){
+  if(!currentSessionId || !hasMoreHistory) return;
+  
+  const btn = document.getElementById('loadMoreBtn');
+  btn.disabled = true;
+  btn.textContent = '加载中...';
+  
+  try{
+    const newOffset = historyOffset + 20;
+    const res = await fetch(`${API_BASE}/dialogue/history?session_id=${currentSessionId}&offset=${newOffset}&limit=20`);
+    const data = await res.json();
+    
+    const log = document.getElementById('chatLog');
+    const oldHeight = log.scrollHeight;
+    
+    // 在顶部插入历史消息
+    data.messages.reverse().forEach(msg => {
+      const msgEl = createMessageElement(msg.role === 'user' ? 'user' : 'assistant', msg.content, null, null);
+      log.insertBefore(msgEl, log.firstChild.nextSibling); // 插在loadMoreBtn之后
+    });
+    
+    historyOffset = newOffset;
+    hasMoreHistory = data.has_more;
+    
+    // 保持滚动位置
+    log.scrollTop = log.scrollHeight - oldHeight;
+    
+    if(!hasMoreHistory){
+      btn.style.display = 'none';
+    }
+  }catch(e){
+    alert('加载失败: ' + e.message);
+  }finally{
+    btn.disabled = false;
+    btn.textContent = '加载更多历史消息';
+  }
+}
+
+// ========== 原有功能 ==========
+
+async function loadCharacters(){
+  const listEl = document.getElementById('charList');
+  try{
+    const res = await fetch(`${API_BASE}/characters`);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const characters = await res.json();
+    listEl.innerHTML = '';
+    characters.forEach(c => {
+      const card = document.createElement('div');
+      card.className = 'char-card';
+      card.dataset.id = c.character_id;
+      card.innerHTML = `
+        <div class="cname">${escapeHtml(c.display_name)}</div>
+        <div class="csub">${escapeHtml(c.core_identity_summary)}</div>
+      `;
+      card.addEventListener('click', () => selectCharacter(c));
+      listEl.appendChild(card);
+    });
+  }catch(e){
+    console.error('加载角色列表失败:', e);
+    listEl.innerHTML = '<div style="color:var(--ash-red); font-size:13px;">角色列表加载失败，请刷新重试</div>';
+  }
+}
+
+function renderSparks(affinity){
+  const sparksEl = document.getElementById('sparks');
+  sparksEl.innerHTML = '';
+  const litCount = Math.max(0, Math.round((affinity + 100) / 200 * 20));
+  for(let i=0;i<20;i++){
+    const s = document.createElement('div');
+    s.className = 'spark';
+    if(i < litCount){
+      s.classList.add('lit');
+      if(affinity > 50) s.classList.add('high');
+    }
+    sparksEl.appendChild(s);
+  }
+}
+
+function updateStatus(affinity, mood){
+  currentAffinity = affinity;
+  document.getElementById('affinityValue').textContent = affinity;
+  document.getElementById('moodTag').textContent = mood;
+  renderSparks(affinity);
+  document.getElementById('statusBlock').style.display = 'block';
+}
+
+function createMessageElement(role, text, action, deltaText){
+  const msg = document.createElement('div');
+  msg.className = `msg ${role === 'user' ? 'player' : 'npc'}`;
+
+  // 处理动作标记：将 [动作] 转换为特殊样式
+  // 先转义 HTML，再替换动作标记
+  const escapedText = escapeHtml(text);
+  const processedText = escapedText.replace(/\[([^\]]+)\]/g, (match, actionText) => {
+    return `<span class="action-inline">${actionText}</span>`;
+  });
+
+  let deltaHtml = '';
+  if(deltaText){
+    // 判断正负来设置不同样式
+    let deltaClass = 'neutral';
+    if(deltaText.includes('+')) deltaClass = 'positive';
+    else if(deltaText.includes('-')) deltaClass = 'negative';
+    deltaHtml = `<div class="delta-tag ${deltaClass}">${escapeHtml(deltaText)}</div>`;
+  }
+
+  msg.innerHTML = `
+    <div class="bubble">${processedText}</div>
+    ${deltaHtml}
+  `;
+  return msg;
+}
+
+function appendMessage(role, text, action, deltaText){
+  const log = document.getElementById('chatLog');
+  const empty = document.getElementById('emptyState');
+  if(empty) empty.remove();
+
+  const msg = createMessageElement(role, text, action, deltaText);
+  log.appendChild(msg);
+  log.scrollTop = log.scrollHeight;
+}
+
+function escapeHtml(s){
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+async function selectCharacter(c){
+  if(!currentPlayerId){
+    alert('请先确认玩家昵称');
+    return;
+  }
+  
+  document.querySelectorAll('.char-card').forEach(el => {
+    el.classList.toggle('active', el.dataset.id === c.character_id);
+  });
+
+  currentCharacterId = c.character_id;
+  document.getElementById('headerName').textContent = c.display_name;
+  document.getElementById('headerSub').textContent = c.core_identity_summary;
+  
+  // 先尝试查找该玩家和该角色的已有会话
+  console.log('查询已有会话:', { character_id: c.character_id, player_id: currentPlayerId });
+  
+  try{
+    const sessionsRes = await fetch(`${API_BASE}/dialogue/sessions?character_id=${c.character_id}&player_id=${currentPlayerId}`);
+    const sessions = await sessionsRes.json();
+    
+    console.log('查询到的会话:', sessions);
+    
+    if(sessions && sessions.length > 0){
+      // 找到已有会话，恢复最近的一个
+      const latestSession = sessions[0];
+      currentSessionId = latestSession.session_id;
+      
+      console.log('恢复已有会话:', currentSessionId);
+      
+      // 保存到localStorage
+      localStorage.setItem('memoria_session_id', currentSessionId);
+      localStorage.setItem('memoria_character_id', c.character_id);
+      
+      // 加载历史消息
+      const historyRes = await fetch(`${API_BASE}/dialogue/history?session_id=${currentSessionId}&offset=0&limit=20`);
+      const historyData = await historyRes.json();
+      
+      const chatLog = document.getElementById('chatLog');
+      chatLog.innerHTML = '';
+      
+      // 添加"加载更多"按钮
+      const loadMoreBtn = document.createElement('button');
+      loadMoreBtn.id = 'loadMoreBtn';
+      loadMoreBtn.style.cssText = 'width:100%; padding:10px; background:var(--iron); border:1px solid var(--iron-light); border-radius:4px; color:var(--parchment); cursor:pointer; font-size:13px; margin-bottom:12px;';
+      loadMoreBtn.textContent = '加载更多历史消息';
+      loadMoreBtn.style.display = historyData.has_more ? 'block' : 'none';
+      loadMoreBtn.addEventListener('click', loadMoreHistory);
+      chatLog.appendChild(loadMoreBtn);
+      
+      historyOffset = 0;
+      hasMoreHistory = historyData.has_more;
+      
+      historyData.messages.forEach(msg => {
+        appendMessage(msg.role === 'user' ? 'user' : 'assistant', msg.content, null, null);
+      });
+      
+      updateStatus(historyData.current_affinity, historyData.current_mood);
+      
+      document.getElementById('msgInput').disabled = false;
+      document.getElementById('sendBtn').disabled = false;
+      
+      return; // 恢复成功，直接返回
+    }
+  }catch(e){
+    console.error('查询会话失败:', e);
+  }
+  
+  // 没有已有会话，创建新会话
+  console.log('创建新会话');
+  document.getElementById('chatLog').innerHTML = '<div class="typing">正在接触角色…</div>';
+
+  try{
+    const res = await fetch(`${API_BASE}/dialogue/session/start`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        character_id: c.character_id,
+        player_id: currentPlayerId,
+        player_name: currentPlayerId
+      })
+    });
+    
+    if(!res.ok) throw new Error('创建会话失败');
+    
+    const data = await res.json();
+    currentSessionId = data.session_id;
+    
+    // 保存到localStorage
+    localStorage.setItem('memoria_session_id', currentSessionId);
+    localStorage.setItem('memoria_character_id', c.character_id);
+
+    const chatLog = document.getElementById('chatLog');
+    chatLog.innerHTML = '';
+    
+    // 添加"加载更多"按钮
+    const loadMoreBtn = document.createElement('button');
+    loadMoreBtn.id = 'loadMoreBtn';
+    loadMoreBtn.style.cssText = 'width:100%; padding:10px; background:var(--iron); border:1px solid var(--iron-light); border-radius:4px; color:var(--parchment); cursor:pointer; font-size:13px; margin-bottom:12px; display:none;';
+    loadMoreBtn.textContent = '加载更多历史消息';
+    loadMoreBtn.addEventListener('click', loadMoreHistory);
+    chatLog.appendChild(loadMoreBtn);
+    
+    historyOffset = 0;
+    hasMoreHistory = false;
+    
+    appendMessage('assistant', data.opening_line, data.action, null);
+    updateStatus(data.current_affinity, '平静');
+
+    document.getElementById('msgInput').disabled = false;
+    document.getElementById('sendBtn').disabled = false;
+  }catch(e){
+    alert('启动会话失败: ' + e.message);
+  }
+}
+
+async function sendMessage(){
+  const input = document.getElementById('msgInput');
+  const text = input.value.trim();
+  if(!text || !currentSessionId) return;
+
+  appendMessage('user', text, null, null);
+  input.value = '';
+  document.getElementById('sendBtn').disabled = true;
+
+  const log = document.getElementById('chatLog');
+  const typing = document.createElement('div');
+  typing.className = 'typing';
+  typing.textContent = '对方正在回应…';
+  log.appendChild(typing);
+  log.scrollTop = log.scrollHeight;
+
+  try{
+    const res = await fetch(`${API_BASE}/dialogue/turn`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ session_id: currentSessionId, player_message: text })
+    });
+    
+    if(!res.ok) throw new Error('发送消息失败');
+    
+    const data = await res.json();
+    typing.remove();
+
+    const deltaStr = data.affinity_delta !== 0
+      ? `好感度 ${data.affinity_delta > 0 ? '+' : ''}${data.affinity_delta}`
+      : null;
+    appendMessage('assistant', data.dialogue, data.action, deltaStr);
+    updateStatus(data.current_affinity, data.current_mood);
+  }catch(e){
+    typing.textContent = '请求失败: ' + e.message;
+  }finally{
+    document.getElementById('sendBtn').disabled = false;
+    input.focus();
+  }
+}
+
+// ========== 事件绑定 ==========
+
+document.getElementById('confirmPlayerBtn').addEventListener('click', confirmPlayer);
+document.getElementById('sendBtn').addEventListener('click', sendMessage);
+document.getElementById('msgInput').addEventListener('keydown', (e) => {
+  if(e.key === 'Enter' && !e.isComposing) sendMessage();
+});
+
+// ========== 初始化 ==========
+
+loadPlayerFromStorage();
+loadCharacters().then(() => {
+  tryRestoreSession();
+});
+</script>
+
+</body>
+</html>

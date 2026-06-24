@@ -9,25 +9,23 @@ LLM 调用适配层
 4. 永不因模型输出格式问题导致系统崩溃
 """
 
-import code
-from email import message
 import json
+import logging
 import re
 from typing import Optional
-from urllib import response
-from venv import logger
 
-from click import Option
 from openai import BadRequestError, OpenAI
 
 from app.core.config import configs
+
+logger = logging.getLogger(__name__)
 
 # =========================
 # OpenAI Client（轻量单例）
 # =========================
 _client = OpenAI(
     base_url = configs.llm_base_url,
-    api_key = configs.llm_api_key
+    api_key = configs.llm_api_key.get_secret_value()
 )
 
 # =========================
@@ -39,7 +37,7 @@ class LLMOutputParseError(Exception):
 # =========================
 # JSON 提取器（宽松模式）
 # =========================
-def _extract_json(raw_text: str) -> Option[dict]:
+def _extract_json(raw_text: str) -> Optional[dict]:
     """
     从模型输出中尽可能提取 JSON
 
@@ -224,11 +222,11 @@ def call_light_task(prompt: str) -> str:
     """
     
     response = _client.chat.completions.create(
-        model = configs.llm_light_model,
+        model = configs.light_model,
         messages = [{"role": "user", "content": prompt}],
         max_tokens = 300,
         temperature = 0.3,
     )
     
-    return (response.choices[0].message.content or "").strip
+    return (response.choices[0].message.content or "").strip()
 

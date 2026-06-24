@@ -8,14 +8,14 @@
 4. 防止模型输出破坏沉浸感内容
 """
 
-from email import message
-from email.policy import default
+import logging
 import re
 import uuid
-from venv import logger
 
 from app.core import character_loader, llm_client, prompt_builder
 from app.db import repository
+
+logger = logging.getLogger(__name__)
 
 
 # =========================
@@ -46,6 +46,8 @@ def _safety_check(dialogue: str, fallback: str = FALLBACK_LINE) -> str:
         logger.warning("检测到高风险输出，已替换: %s", dialogue[:200])
         return fallback
     
+    return dialogue
+    
 
 # =========================
 # 数值裁剪
@@ -67,7 +69,7 @@ def _safe_float(value, default: float = 0.0) -> float:
 def start_session(character_id: str, player_id: str, player_name: str) -> dict:
     """对应 /dialogue/session/start"""
     
-    card =character_loader.load_character_card(character_id)
+    card = character_loader.load_character_card(character_id)
     runtime_state = repository.get_runtime_state(character_id, player_id, card)
     
     session_id = str(uuid.uuid4())
@@ -122,13 +124,13 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
         card, runtime_state, player_name
     )
     
-    message = history + [
+    messages = history + [
         {"role": "user", "content": player_message}
     ]
     
     result = llm_client.call_role_turn(
         system_prompt = system_prompt,
-        history = history,
+        history = messages,
     )
     
     # =========================
@@ -192,15 +194,15 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
         mood_after,
     )
     
-    repository.append_short_term_message(session, "user", player_message)
-    repository.append_short_term_message(session, "assistant", dialogue)
+    repository.append_short_term_message(session_id, "user", player_message)
+    repository.append_short_term_message(session_id, "assistant", dialogue)
     
     # =========================
     # 长期记忆写入
     # =========================
     memory_fact = result.get("memory_worth_keeping")
     
-    if memory_fact and str(memory_fact).strip.lower() not in ("none", "null", ""):
+    if memory_fact and str(memory_fact).strip().lower() not in ("none", "null", ""):
         repository.save_long_term_fact(
             character_id,
             player_id,

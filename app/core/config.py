@@ -16,8 +16,7 @@ class Configs(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env", 
         env_file_encoding="utf-8", 
-        env_prefix="APP_",
-        extra="forbid")
+        extra="ignore")
     
     # LLM 配置
     llm_base_url: str = "https://api.deepseek.com/v1"
@@ -25,8 +24,8 @@ class Configs(BaseSettings):
     llm_model: str = "deepseek-chat"
     llm_light_model: str = ""
     
-    #应用配置
-    database_url: Path = Path("sqlite:///./memoria.db")
+    # 应用配置
+    database_path: str = "./memoria.db"
     short_term_memory_turns: int = Field(default = 8, ge = 1, le = 50)
     max_output_tokens: int = Field(default = 600, ge = 1, le = 4096)
     

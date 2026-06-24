@@ -69,16 +69,27 @@ SYSTEM_PROMPT_TEMPLATE = """你现在要完全代入并扮演游戏中的角色"
 必须保持沉浸式对话。
 
 【输出要求（极其重要）】
-你必须且只能输出一个 JSON 对象，不允许任何额外文本。
-不允许 Markdown，不允许解释，不允许代码块。
+⚠️ 你的回复必须是且仅仅是一个合法的 JSON 对象。
+⚠️ 禁止使用 Markdown 代码块（禁止 ```json 或 ``` 标记）
+⚠️ 禁止在 JSON 前后添加任何解释文字
+⚠️ 直接输出 JSON 本身，确保格式完全正确
 
-JSON 格式如下：
-{{"dialogue": "角色对话（可含[动作]）",
-  "action": "从上述所有动作分类中选择最符合当前语境的一个动作（必须是原始动作字符串之一，不要自造）",
-  "affinity_delta": 整数(-10~10),
-  "mood_after": "必须从列表选择：{mood_values}",
-  "memory_worth_keeping": "重要事实总结或 null"
+JSON 格式示例：
+{{"dialogue": "角色对话内容（可含[动作描述]）",
+  "action": "从上述动作列表原文选择一个",
+  "affinity_delta": 0,
+  "mood_after": "从 {mood_values} 列表中选择",
+  "memory_worth_keeping": null
 }}
+
+字段要求：
+- dialogue: 必填字符串，角色说的话
+- action: 必填字符串，从上面5类动作中选择原始字符串（不要修改）
+- affinity_delta: 必填整数，-10到10之间
+- mood_after: 必填字符串，必须是 {mood_values} 中的一个
+- memory_worth_keeping: 字符串或 null
+
+⚠️ 最终强调：直接输出 JSON 对象，前后不要有任何其他内容！
 """
 
 # =========================

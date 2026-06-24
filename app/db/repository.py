@@ -8,7 +8,7 @@
 """
 
 from contextlib import contextmanager
-import datetime
+from datetime import datetime, timezone
 import sqlite3
 
 from app.core.config import configs
@@ -18,7 +18,7 @@ from app.core.config import configs
 # =========================
 def _now() -> str:
     """统一时间格式（UTC ISO8601）"""
-    return datetime.now(datetime.timezone.utc).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 def _row_to_dict(row):
     """安全转换 sqlite Row -> dict"""
@@ -34,7 +34,7 @@ def get_conn():
     SQLite 连接上下文管理
     """
     conn = sqlite3.connect(
-        configs.database_url,
+        configs.database_path,
         check_same_thread = False # 避免多线程问题
     )
     

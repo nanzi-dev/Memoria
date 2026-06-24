@@ -36,13 +36,13 @@ logger = logging.getLogger(__name__)
 # 路径定义
 # =========================
 BASE_DIR = Path(__file__).parent.parent
-STATIC_DIR = BASE_DIR / "static"
+STATIC_DIR = BASE_DIR / "app" / "static"
 
 # =========================
 # 生命周期管理（推荐方式）
 # =========================
 @asynccontextmanager
-def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI):
     """
     应用启动/关闭生命周期管理
     """
@@ -65,7 +65,7 @@ def lifespan(app: FastAPI):
 # FastAPI app
 # =========================
 app = FastAPI(
-    tiitle = "角色模拟系统 - 验证Demo",
+    title = "角色模拟系统 - 验证Demo",
     version = "0.1.0",
     lifespan = lifespan,
 )

@@ -26,7 +26,7 @@ class Meta(BaseModel):
 # =========================
 class Identity(BaseModel):
     """角色身份信息"""
-    age: int                        # 角色年龄
+    age: str | int                  # 角色年龄（可以是数字或描述性字符串）
     gender: str                     # 角色性别
     occupation: str                 # 角色职业
     race_or_species: str            # 角色种族或物种
@@ -104,8 +104,8 @@ class GoalsAndMotivations(BaseModel):
     """角色目标与动机"""
     current_goals: list[str] = Field(default_factory=list)          # 当前目标列表
     long_term_goals: list[str] = Field(default_factory=list)        # 长期目标列表
-    what__triggers_anger: list[str] = Field(default_factory=list)   # 触发愤怒的因素列表
-    what__brings_joy: list[str] = Field(default_factory=list)       # 带来快乐的因素列表
+    what_triggers_anger: list[str] = Field(default_factory=list)   # 触发愤怒的因素列表
+    what_brings_joy: list[str] = Field(default_factory=list)       # 带来快乐的因素列表
     
 # =========================
 # 交互规则
