@@ -20,6 +20,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.dialogue import router as dialogue_router
+from app.api.character_admin import router as character_admin_router
+from app.api.relationship import router as relationship_router
 from app.db.repository import init_db
 
 # =========================
@@ -74,6 +76,8 @@ app = FastAPI(
 # 路由注册
 # =========================
 app.include_router(dialogue_router, prefix = "/api/v1")
+app.include_router(character_admin_router, prefix = "/api/v1")
+app.include_router(relationship_router, prefix = "/api/v1")
 
 
 # =========================
@@ -107,3 +111,41 @@ def serve_demo_page():
         )
 
     return FileResponse(str(index_file))
+
+# =========================
+# 管理后台页面
+# =========================
+@app.get("/admin")
+def serve_admin_page():
+    """
+    返回角色卡管理后台页面
+    """
+    admin_file = STATIC_DIR / "admin.html"
+
+    if not admin_file.exists():
+        return FileResponse(
+            path=None,
+            content=b"admin.html not found",
+            media_type="text/plain"
+        )
+
+    return FileResponse(str(admin_file))
+
+# =========================
+# 可视化角色卡编辑器
+# =========================
+@app.get("/editor")
+def serve_editor_page():
+    """
+    返回可视化角色卡编辑器页面
+    """
+    editor_file = STATIC_DIR / "editor.html"
+
+    if not editor_file.exists():
+        return FileResponse(
+            path=None,
+            content=b"editor.html not found",
+            media_type="text/plain"
+        )
+
+    return FileResponse(str(editor_file))

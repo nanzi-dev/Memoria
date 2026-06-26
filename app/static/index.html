@@ -509,14 +509,14 @@ async function tryRestoreSession(){
     const chatLog = document.getElementById('chatLog');
     chatLog.innerHTML = '';
     
-    // 先添加"加载更多"按钮
-    const loadMoreBtn = document.createElement('button');
-    loadMoreBtn.id = 'loadMoreBtn';
-    loadMoreBtn.style.cssText = 'width:100%; padding:10px; background:var(--iron); border:1px solid var(--iron-light); border-radius:4px; color:var(--parchment); cursor:pointer; font-size:13px; margin-bottom:12px;';
-    loadMoreBtn.textContent = '加载更多历史消息';
-    loadMoreBtn.style.display = data.has_more ? 'block' : 'none';
-    loadMoreBtn.addEventListener('click', loadMoreHistory);
-    chatLog.appendChild(loadMoreBtn);
+    // 添加加载指示器（替代按钮）
+    if(data.has_more){
+      const indicator = document.createElement('div');
+      indicator.id = 'loadingIndicator';
+      indicator.style.cssText = 'padding:10px; text-align:center; background:var(--iron); border-radius:4px; color:var(--parchment-dim); font-size:13px; margin-bottom:12px; display:none;';
+      indicator.textContent = '加载中...';
+      chatLog.appendChild(indicator);
+    }
     
     historyOffset = 0;
     hasMoreHistory = data.has_more;
@@ -540,12 +540,14 @@ async function tryRestoreSession(){
 
 // ========== 加载更多历史 ==========
 
+let isLoadingHistory = false; // 防止重复加载
+
 async function loadMoreHistory(){
-  if(!currentSessionId || !hasMoreHistory) return;
+  if(!currentSessionId || !hasMoreHistory || isLoadingHistory) return;
   
-  const btn = document.getElementById('loadMoreBtn');
-  btn.disabled = true;
-  btn.textContent = '加载中...';
+  isLoadingHistory = true;
+  const indicator = document.getElementById('loadingIndicator');
+  if(indicator) indicator.style.display = 'block';
   
   try{
     const newOffset = historyOffset + 20;
@@ -553,29 +555,61 @@ async function loadMoreHistory(){
     const data = await res.json();
     
     const log = document.getElementById('chatLog');
-    const oldHeight = log.scrollHeight;
+    const oldScrollHeight = log.scrollHeight;
+    const oldScrollTop = log.scrollTop;
     
-    // 在顶部插入历史消息
-    data.messages.reverse().forEach(msg => {
+    // 在加载指示器之后插入历史消息（这些是更早的消息，应该在上面）
+    const insertPoint = indicator ? indicator.nextSibling : log.firstChild;
+    data.messages.forEach(msg => {
       const msgEl = createMessageElement(msg.role === 'user' ? 'user' : 'assistant', msg.content, null, null);
-      log.insertBefore(msgEl, log.firstChild.nextSibling); // 插在loadMoreBtn之后
+      if(insertPoint){
+        log.insertBefore(msgEl, insertPoint);
+      }else{
+        log.appendChild(msgEl);
+      }
     });
     
     historyOffset = newOffset;
     hasMoreHistory = data.has_more;
     
-    // 保持滚动位置
-    log.scrollTop = log.scrollHeight - oldHeight;
+    // 保持滚动位置（让用户停留在之前看的消息位置）
+    const newScrollHeight = log.scrollHeight;
+    log.scrollTop = oldScrollTop + (newScrollHeight - oldScrollHeight);
     
-    if(!hasMoreHistory){
-      btn.style.display = 'none';
+    if(!hasMoreHistory && indicator){
+      indicator.textContent = '没有更多历史消息了';
+      setTimeout(() => {
+        indicator.style.display = 'none';
+      }, 2000);
     }
   }catch(e){
-    alert('加载失败: ' + e.message);
+    console.error('加载历史失败:', e);
+    const indicator = document.getElementById('loadingIndicator');
+    if(indicator){
+      indicator.textContent = '加载失败，请重试';
+      indicator.style.background = 'var(--ash-red)';
+      setTimeout(() => {
+        indicator.style.display = 'none';
+        indicator.style.background = 'var(--iron)';
+        indicator.textContent = '加载中...';
+      }, 3000);
+    }
   }finally{
-    btn.disabled = false;
-    btn.textContent = '加载更多历史消息';
+    isLoadingHistory = false;
   }
+}
+
+// ========== 滚动加载监听 ==========
+
+function setupScrollLoading(){
+  const log = document.getElementById('chatLog');
+  
+  log.addEventListener('scroll', () => {
+    // 当滚动到距离顶部 100px 以内时，触发加载
+    if(log.scrollTop < 100 && hasMoreHistory && !isLoadingHistory){
+      loadMoreHistory();
+    }
+  });
 }
 
 // ========== 原有功能 ==========
@@ -711,14 +745,14 @@ async function selectCharacter(c){
       const chatLog = document.getElementById('chatLog');
       chatLog.innerHTML = '';
       
-      // 添加"加载更多"按钮
-      const loadMoreBtn = document.createElement('button');
-      loadMoreBtn.id = 'loadMoreBtn';
-      loadMoreBtn.style.cssText = 'width:100%; padding:10px; background:var(--iron); border:1px solid var(--iron-light); border-radius:4px; color:var(--parchment); cursor:pointer; font-size:13px; margin-bottom:12px;';
-      loadMoreBtn.textContent = '加载更多历史消息';
-      loadMoreBtn.style.display = historyData.has_more ? 'block' : 'none';
-      loadMoreBtn.addEventListener('click', loadMoreHistory);
-      chatLog.appendChild(loadMoreBtn);
+      // 添加加载指示器
+      if(historyData.has_more){
+        const indicator = document.createElement('div');
+        indicator.id = 'loadingIndicator';
+        indicator.style.cssText = 'padding:10px; text-align:center; background:var(--iron); border-radius:4px; color:var(--parchment-dim); font-size:13px; margin-bottom:12px; display:none;';
+        indicator.textContent = '加载中...';
+        chatLog.appendChild(indicator);
+      }
       
       historyOffset = 0;
       hasMoreHistory = historyData.has_more;
@@ -765,13 +799,12 @@ async function selectCharacter(c){
     const chatLog = document.getElementById('chatLog');
     chatLog.innerHTML = '';
     
-    // 添加"加载更多"按钮
-    const loadMoreBtn = document.createElement('button');
-    loadMoreBtn.id = 'loadMoreBtn';
-    loadMoreBtn.style.cssText = 'width:100%; padding:10px; background:var(--iron); border:1px solid var(--iron-light); border-radius:4px; color:var(--parchment); cursor:pointer; font-size:13px; margin-bottom:12px; display:none;';
-    loadMoreBtn.textContent = '加载更多历史消息';
-    loadMoreBtn.addEventListener('click', loadMoreHistory);
-    chatLog.appendChild(loadMoreBtn);
+    // 添加加载指示器（新会话没有更多历史）
+    const indicator = document.createElement('div');
+    indicator.id = 'loadingIndicator';
+    indicator.style.cssText = 'padding:10px; text-align:center; background:var(--iron); border-radius:4px; color:var(--parchment-dim); font-size:13px; margin-bottom:12px; display:none;';
+    indicator.textContent = '加载中...';
+    chatLog.appendChild(indicator);
     
     historyOffset = 0;
     hasMoreHistory = false;
@@ -838,6 +871,7 @@ document.getElementById('msgInput').addEventListener('keydown', (e) => {
 // ========== 初始化 ==========
 
 loadPlayerFromStorage();
+setupScrollLoading(); // 设置滚动加载监听
 loadCharacters().then(() => {
   tryRestoreSession();
 });

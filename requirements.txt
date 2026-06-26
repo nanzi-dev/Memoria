@@ -16,6 +16,10 @@ openai==1.54.3
 # 数据库（SQLite 内置，无需额外安装）
 # sqlite3 is built-in
 
+# 向量数据库
+chromadb==0.4.22
+sentence-transformers==2.3.1
+
 # 开发工具（可选）
 # pytest==8.3.3
 # black==24.10.0

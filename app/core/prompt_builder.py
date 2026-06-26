@@ -44,6 +44,9 @@ SYSTEM_PROMPT_TEMPLATE = """你现在要完全代入并扮演游戏中的角色"
 当前情绪：{current_mood}
 已知玩家信息：{known_player_facts}
 
+【历史互动记录】
+{past_summaries}
+
 【交互规则】
 初始态度：{initial_attitude_to_player}
 未建立信任时避免话题：{topics_to_avoid_unless_trusted}
@@ -116,7 +119,12 @@ def _safe_get_runtime(runtime_state: dict, key: str, default):
 # =========================
 # 主 Prompt 构建函数
 # =========================
-def build_system_prompt(card: CharacterCard, runtime_state: dict, player_name: str):
+def build_system_prompt(
+    card: CharacterCard, 
+    runtime_state: dict, 
+    player_name: str,
+    past_summaries: list[str] = None
+):
     """
     构建 system prompt（核心函数）
 
@@ -124,6 +132,7 @@ def build_system_prompt(card: CharacterCard, runtime_state: dict, player_name: s
     - card: 角色静态设定
     - runtime_state: 动态状态（好感度/信任/记忆等）
     - player_name: 当前玩家名称
+    - past_summaries: 历史会话摘要列表（可选）
     """
     
     identity = card.identity    # 角色身份
@@ -151,6 +160,14 @@ def build_system_prompt(card: CharacterCard, runtime_state: dict, player_name: s
         known_facts_str = _join(known_facts)
     else:
         known_facts_str = str(known_facts) if known_facts else "暂无"
+    
+    # -------------------------
+    # 历史摘要处理
+    # -------------------------
+    if past_summaries and len(past_summaries) > 0:
+        past_summaries_str = "\n".join([f"- {s}" for s in past_summaries])
+    else:
+        past_summaries_str = "无历史互动记录"
         
     # -------------------------
     # Prompt 渲染
@@ -187,6 +204,7 @@ def build_system_prompt(card: CharacterCard, runtime_state: dict, player_name: s
         trust=trust,
         current_mood=current_mood,
         known_player_facts=known_facts_str,
+        past_summaries=past_summaries_str,
 
         # rules
         initial_attitude_to_player=rules.initial_attitude_to_player,

@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Memoria - 角色卡管理后台</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .toolbar {
+            padding: 20px 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5568d3;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+        .character-list {
+            padding: 30px;
+        }
+
+        .character-card {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 15px;
+            transition: all 0.3s;
+        }
+
+        .character-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+        }
+
+        .character-card.inactive {
+            opacity: 0.6;
+            background: #f8f9fa;
+        }
+
+        .character-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .character-title {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .character-title h3 {
+            font-size: 20px;
+            color: #333;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge-active {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .badge-inactive {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .badge-db {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .badge-file {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .character-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .character-info {
+            color: #666;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .character-info p {
+            margin-bottom: 5px;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 800px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-header h2 {
+            font-size: 24px;
+            color: #333;
+        }
+
+        .close-btn {
+            font-size: 28px;
+            color: #999;
+            cursor: pointer;
+            border: none;
+            background: none;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .close-btn:hover {
+            color: #333;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        textarea.form-control {
+            min-height: 400px;
+            resize: vertical;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+
+        .empty-state svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 8px;
+            color: white;
+            font-weight: 500;
+            z-index: 2000;
+            animation: slideIn 0.3s;
+        }
+
+        .toast-success {
+            background: #28a745;
+        }
+
+        .toast-error {
+            background: #dc3545;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎭 Memoria 角色卡管理后台</h1>
+            <p>创建、编辑和管理游戏角色卡</p>
+        </div>
+
+        <div class="toolbar">
+            <div style="display: flex; gap: 10px;">
+                <button class="btn btn-primary" onclick="showCreateModal()">➕ 新建角色卡</button>
+                <button class="btn btn-secondary" onclick="showImportModal()">📥 从文件导入</button>
+            </div>
+            <button class="btn btn-secondary" onclick="loadCharacters()">🔄 刷新列表</button>
+        </div>
+
+        <div class="character-list" id="characterList">
+            <div class="loading">正在加载角色列表...</div>
+        </div>
+    </div>
+
+    <!-- 创建/编辑模态框 -->
+    <div class="modal" id="editorModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">新建角色卡</h2>
+                <button class="close-btn" onclick="closeModal('editorModal')">&times;</button>
+            </div>
+            <form id="characterForm">
+                <div class="form-group">
+                    <label>角色 ID *</label>
+                    <input type="text" class="form-control" id="characterId" placeholder="例如: npc_merchant_01" required>
+                </div>
+                <div class="form-group">
+                    <label>角色卡 JSON 数据 *</label>
+                    <textarea class="form-control" id="characterData" placeholder="粘贴完整的角色卡 JSON 数据..." required></textarea>
+                </div>
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('editorModal')">取消</button>
+                    <button type="submit" class="btn btn-primary" id="submitBtn">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 导入模态框 -->
+    <div class="modal" id="importModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>从文件导入角色卡</h2>
+                <button class="close-btn" onclick="closeModal('importModal')">&times;</button>
+            </div>
+            <form id="importForm">
+                <div class="form-group">
+                    <label>角色 ID 或文件路径 *</label>
+                    <input type="text" class="form-control" id="importCharacterId" placeholder="npc_blacksmith_garran 或完整路径" required>
+                    <small style="color: #666; display: block; margin-top: 5px;">
+                        支持输入格式：<br>
+                        • 仅角色 ID: <code>npc_blacksmith_garran</code><br>
+                        • 完整路径: <code>/home/nanzi/PY3/Memoria/app/characters/npc_blacksmith_garran.json</code><br>
+                        系统会自动解析
+                    </small>
+                </div>
+                <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('importModal')">取消</button>
+                    <button type="submit" class="btn btn-success">导入</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/v1';
+        let currentEditId = null;
+
+        // 加载角色列表
+        async function loadCharacters() {
+            const listEl = document.getElementById('characterList');
+            listEl.innerHTML = '<div class="loading">正在加载角色列表...</div>';
+
+            try {
+                const response = await fetch(`${API_BASE}/admin/characters?only_active=false`);
+                if (!response.ok) throw new Error('加载失败');
+                
+                const characters = await response.json();
+                
+                if (characters.length === 0) {
+                    listEl.innerHTML = `
+                        <div class="empty-state">
+                            <div style="font-size: 48px; margin-bottom: 20px;">📭</div>
+                            <h3>还没有角色卡</h3>
+                            <p style="margin-top: 10px;">点击"新建角色卡"或"从文件导入"开始创建</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                listEl.innerHTML = characters.map(char => `
+                    <div class="character-card ${char.is_active ? '' : 'inactive'}">
+                        <div class="character-header">
+                            <div class="character-title">
+                                <h3>${char.display_name || char.name || char.character_id}</h3>
+                                <span class="badge ${char.is_active ? 'badge-active' : 'badge-inactive'}">
+                                    ${char.is_active ? '✓ 启用' : '✗ 禁用'}
+                                </span>
+                                <span class="badge ${char.source === 'db' ? 'badge-db' : 'badge-file'}">
+                                    ${char.source === 'db' ? '数据库' : '文件'}
+                                </span>
+                            </div>
+                            <div class="character-actions">
+                                <button class="btn btn-primary" onclick="viewCharacter('${char.character_id}')">👁️ 查看</button>
+                                <button class="btn btn-secondary" onclick="editCharacter('${char.character_id}')">✏️ 编辑</button>
+                                ${char.is_active 
+                                    ? `<button class="btn btn-danger" onclick="deleteCharacter('${char.character_id}')">🗑️ 禁用</button>`
+                                    : `<button class="btn btn-success" onclick="activateCharacter('${char.character_id}')">✓ 启用</button>`
+                                }
+                            </div>
+                        </div>
+                        <div class="character-info">
+                            <p><strong>ID:</strong> ${char.character_id}</p>
+                            <p><strong>版本:</strong> ${char.version || 'N/A'}</p>
+                            <p><strong>创建时间:</strong> ${formatDate(char.created_at)}</p>
+                            <p><strong>更新时间:</strong> ${formatDate(char.updated_at)}</p>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                listEl.innerHTML = `<div class="empty-state">❌ 加载失败: ${error.message}</div>`;
+            }
+        }
+
+        // 显示创建模态框
+        function showCreateModal() {
+            currentEditId = null;
+            document.getElementById('modalTitle').textContent = '新建角色卡';
+            document.getElementById('characterId').value = '';
+            document.getElementById('characterId').disabled = false;
+            document.getElementById('characterData').value = '';
+            document.getElementById('editorModal').classList.add('active');
+        }
+
+        // 查看角色详情
+        async function viewCharacter(characterId) {
+            try {
+                const response = await fetch(`${API_BASE}/admin/characters/${characterId}`);
+                if (!response.ok) throw new Error('获取失败');
+                
+                const data = await response.json();
+                
+                document.getElementById('modalTitle').textContent = `查看角色: ${data.display_name || data.name}`;
+                document.getElementById('characterId').value = characterId;
+                document.getElementById('characterId').disabled = true;
+                document.getElementById('characterData').value = JSON.stringify(data.card_data, null, 2);
+                document.getElementById('characterData').disabled = true;
+                document.getElementById('submitBtn').style.display = 'none';
+                document.getElementById('editorModal').classList.add('active');
+            } catch (error) {
+                showToast('获取角色详情失败: ' + error.message, 'error');
+            }
+        }
+
+        // 编辑角色
+        async function editCharacter(characterId) {
+            try {
+                const response = await fetch(`${API_BASE}/admin/characters/${characterId}`);
+                if (!response.ok) throw new Error('获取失败');
+                
+                const data = await response.json();
+                
+                currentEditId = characterId;
+                document.getElementById('modalTitle').textContent = '编辑角色卡';
+                document.getElementById('characterId').value = characterId;
+                document.getElementById('characterId').disabled = true;
+                document.getElementById('characterData').value = JSON.stringify(data.card_data, null, 2);
+                document.getElementById('characterData').disabled = false;
+                document.getElementById('submitBtn').style.display = 'inline-block';
+                document.getElementById('editorModal').classList.add('active');
+            } catch (error) {
+                showToast('获取角色详情失败: ' + error.message, 'error');
+            }
+        }
+
+        // 删除（禁用）角色
+        async function deleteCharacter(characterId) {
+            if (!confirm(`确定要禁用角色 "${characterId}" 吗？\n\n禁用后可以重新启用。`)) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/admin/characters/${characterId}?permanent=false`, {
+                    method: 'DELETE'
+                });
+                
+                if (!response.ok) throw new Error('禁用失败');
+                
+                showToast('角色已禁用', 'success');
+                loadCharacters();
+            } catch (error) {
+                showToast('禁用失败: ' + error.message, 'error');
+            }
+        }
+
+        // 启用角色
+        async function activateCharacter(characterId) {
+            try {
+                const response = await fetch(`${API_BASE}/admin/characters/${characterId}/activate`, {
+                    method: 'POST'
+                });
+                
+                if (!response.ok) throw new Error('启用失败');
+                
+                showToast('角色已启用', 'success');
+                loadCharacters();
+            } catch (error) {
+                showToast('启用失败: ' + error.message, 'error');
+            }
+        }
+
+        // 显示导入模态框
+        function showImportModal() {
+            document.getElementById('importCharacterId').value = '';
+            document.getElementById('importModal').classList.add('active');
+        }
+
+        // 关闭模态框
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('active');
+            // 重置表单状态
+            if (modalId === 'editorModal') {
+                document.getElementById('characterData').disabled = false;
+                document.getElementById('submitBtn').style.display = 'inline-block';
+            }
+        }
+
+        // 提交表单
+        document.getElementById('characterForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const characterId = document.getElementById('characterId').value.trim();
+            const characterDataStr = document.getElementById('characterData').value.trim();
+            
+            try {
+                const characterData = JSON.parse(characterDataStr);
+                
+                const url = currentEditId 
+                    ? `${API_BASE}/admin/characters/${currentEditId}`
+                    : `${API_BASE}/admin/characters`;
+                
+                const method = currentEditId ? 'PUT' : 'POST';
+                
+                const response = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ character_data: characterData })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || '保存失败');
+                }
+                
+                showToast(currentEditId ? '角色卡已更新' : '角色卡已创建', 'success');
+                closeModal('editorModal');
+                loadCharacters();
+            } catch (error) {
+                showToast('保存失败: ' + error.message, 'error');
+            }
+        });
+
+        // 导入表单
+        document.getElementById('importForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            let characterId = document.getElementById('importCharacterId').value.trim();
+            
+            // 如果用户输入了完整路径，提取文件名
+            if (characterId.includes('/')) {
+                // 提取最后一个 / 后的文件名
+                characterId = characterId.split('/').pop();
+            }
+            
+            // 移除 .json 后缀
+            if (characterId.endsWith('.json')) {
+                characterId = characterId.slice(0, -5);
+            }
+            
+            if (!characterId) {
+                showToast('请输入有效的角色 ID', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/admin/characters/import`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ character_id: characterId })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || '导入失败');
+                }
+                
+                showToast('角色卡导入成功', 'success');
+                closeModal('importModal');
+                loadCharacters();
+                document.getElementById('importCharacterId').value = ''; // 清空输入框
+            } catch (error) {
+                showToast('导入失败: ' + error.message, 'error');
+            }
+        });
+
+        // 显示提示消息
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.remove();
+            }, 3000);
+        }
+
+        // 格式化日期
+        function formatDate(dateStr) {
+            if (!dateStr) return 'N/A';
+            const date = new Date(dateStr);
+            return date.toLocaleString('zh-CN');
+        }
+
+        // 页面加载时获取角色列表
+        loadCharacters();
+    </script>
+</body>
+</html>

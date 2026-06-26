@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException
 
 from app.core import character_loader, orchestrator
+from app.core.memory_extractor import summarize_session
 from app.db import repository
 
 router = APIRouter()
@@ -45,7 +46,24 @@ class DialogueTurnResponse(BaseModel):
     affinity_delta: int
     current_affinity: int
     current_mood: str
-    triggered_events: list[str]
+    triggered_events: list[dict] = []
+    event_notification: str | None = None
+
+class SessionEndRequest(BaseModel):
+    session_id: str
+
+class SessionEndResponse(BaseModel):
+    session_id: str
+    summary: str | None
+    message_count: int
+
+class SessionSummaryInfo(BaseModel):
+    id: int
+    session_id: str
+    summary_text: str
+    message_count: int
+    created_at: str | None = None
+    session_created_at: str | None = None
 
 
 class CharacterSummary(BaseModel):
@@ -177,3 +195,67 @@ def get_history(session_id: str, offset: int = 0, limit: int = 20):
         current_affinity=runtime_state.get("affection_level", 0),
         current_mood=runtime_state.get("current_mood", "neutral"),
     )
+
+# =========================
+# Session end
+# =========================
+@router.post("/dialogue/session/end", response_model=SessionEndResponse)
+def session_end(req: SessionEndRequest):
+    """结束会话并生成摘要"""
+    
+    session = repository.get_session(req.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    
+    # 检查会话是否已经结束
+    if session.get("status") == "ended":
+        # 获取已有的摘要
+        existing_summary = repository.get_session_summary(req.session_id)
+        return SessionEndResponse(
+            session_id=req.session_id,
+            summary=existing_summary.get("summary_text") if existing_summary else None,
+            message_count=existing_summary.get("message_count", 0) if existing_summary else 0
+        )
+    
+    # 获取完整对话历史
+    history = repository.get_short_term_history(req.session_id, limit_turns=1000)
+    
+    # 生成摘要
+    summary_text = None
+    if len(history) > 0:
+        summary_text = summarize_session(history)
+    
+    # 保存摘要
+    if summary_text:
+        repository.save_session_summary(
+            session_id=req.session_id,
+            character_id=session["character_id"],
+            player_id=session["player_id"],
+            summary_text=summary_text,
+            message_count=len(history)
+        )
+    
+    # 标记会话结束
+    repository.end_session(req.session_id)
+    
+    return SessionEndResponse(
+        session_id=req.session_id,
+        summary=summary_text,
+        message_count=len(history)
+    )
+
+
+# =========================
+# Session summaries
+# =========================
+@router.get("/dialogue/summaries", response_model=list[SessionSummaryInfo])
+def get_summaries(character_id: str, player_id: str, limit: int = 5):
+    """获取角色与玩家的最近会话摘要"""
+    
+    summaries = repository.get_recent_summaries(
+        character_id=character_id,
+        player_id=player_id,
+        limit=limit
+    )
+    
+    return [SessionSummaryInfo(**s) for s in summaries]

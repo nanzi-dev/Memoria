@@ -6,13 +6,19 @@
 2. 维护 runtime_state
 3. 写入短期 + 长期记忆
 4. 防止模型输出破坏沉浸感内容
+5. 🆕 检测和执行事件
 """
 
+import json
 import logging
 import re
 import uuid
+from datetime import datetime, timezone
 
 from app.core import character_loader, llm_client, prompt_builder
+from app.core.event_schema import EventContext, EventDefinition
+from app.core.event_detector import get_event_detector
+from app.core.event_executor import get_event_executor
 from app.db import repository
 
 logger = logging.getLogger(__name__)
@@ -75,7 +81,13 @@ def start_session(character_id: str, player_id: str, player_name: str) -> dict:
     session_id = str(uuid.uuid4())
     repository.create_session(session_id, character_id, player_id, player_name)
     
-    system_prompt = prompt_builder.build_system_prompt(card, runtime_state, player_name)
+    # 获取历史会话摘要（最近3次）
+    past_summaries_raw = repository.get_recent_summaries(character_id, player_id, limit=3)
+    past_summaries = [s["summary_text"] for s in past_summaries_raw] if past_summaries_raw else []
+    
+    system_prompt = prompt_builder.build_system_prompt(
+        card, runtime_state, player_name, past_summaries=past_summaries
+    )
     opening_instruction = prompt_builder.build_opening_line_prompt(card, runtime_state, player_name)
     
     result = llm_client.call_role_turn(
@@ -110,7 +122,14 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
     player_name = session["player_name"]
     
     card = character_loader.load_character_card(character_id)
-    runtime_state = repository.get_runtime_state(character_id, player_id, card)
+    
+    # 使用玩家消息作为查询上下文，进行向量检索
+    runtime_state = repository.get_runtime_state(
+        character_id, 
+        player_id, 
+        card,
+        query_context=player_message
+    )
     
     # =========================
     # 短期记忆
@@ -120,8 +139,12 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
         limit_turns = 8
     )
     
+    # 获取历史会话摘要（最近3次，用于上下文增强）
+    past_summaries_raw = repository.get_recent_summaries(character_id, player_id, limit=3)
+    past_summaries = [s["summary_text"] for s in past_summaries_raw] if past_summaries_raw else []
+    
     system_prompt = prompt_builder.build_system_prompt(
-        card, runtime_state, player_name
+        card, runtime_state, player_name, past_summaries=past_summaries
     )
     
     messages = history + [
@@ -208,15 +231,141 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
             player_id,
             str(memory_fact).strip()
         )
+    
+    # =========================
+    # 事件系统检测和执行
+    # =========================
+    triggered_events_info = []
+    event_notification = None
+    
+    try:
+        # 构建事件上下文
+        session_created = datetime.fromisoformat(session["created_at"]) if session.get("created_at") else datetime.now(timezone.utc)
+        session_duration = (datetime.now(timezone.utc) - session_created).total_seconds() / 60.0
+        
+        event_context = EventContext(
+            character_id=character_id,
+            player_id=player_id,
+            session_id=session_id,
+            current_affinity=new_affinity,
+            current_trust=runtime_state.get("trust_level", 0),
+            current_mood=mood_after,
+            player_message=player_message,
+            npc_response=dialogue,
+            dialogue_count=len(history) // 2 + 1,
+            total_dialogue_count=len(history) // 2 + 1,  # 简化实现，后续可扩展
+            session_duration_minutes=session_duration,
+            unlocked_content=[],
+            character_relationships={}
+        )
+        
+        # 加载事件定义
+        event_defs_raw = repository.list_event_definitions(
+            character_id=character_id,
+            only_active=True
+        )
+        
+        # 转换为 EventDefinition 对象
+        event_definitions = []
+        for event_raw in event_defs_raw:
+            try:
+                event_def = EventDefinition(
+                    event_id=event_raw["event_id"],
+                    event_name=event_raw["event_name"],
+                    description=event_raw.get("description"),
+                    character_id=event_raw.get("character_id"),
+                    trigger_condition=json.loads(event_raw["trigger_config"]),
+                    effects=json.loads(event_raw["effects_config"]),
+                    priority=event_raw.get("priority", 0),
+                    is_active=bool(event_raw.get("is_active", 1)),
+                    created_at=event_raw.get("created_at"),
+                    updated_at=event_raw.get("updated_at"),
+                    trigger_count=event_raw.get("trigger_count", 0),
+                    last_triggered_at=event_raw.get("last_triggered_at")
+                )
+                event_definitions.append(event_def)
+            except Exception as e:
+                logger.error(f"解析事件定义失败: {event_raw.get('event_id')}, 错误: {e}")
+        
+        # 检测事件
+        detector = get_event_detector()
+        triggered_events = detector.check_events(event_context, event_definitions)
+        
+        # 执行事件
+        executor = get_event_executor()
+        for event in triggered_events:
+            try:
+                event_result = executor.execute_event(event, event_context)
+                
+                # 应用事件效果到状态
+                if event_result.state_changes:
+                    # 应用好感度变化
+                    if "affection_level" in event_result.state_changes:
+                        new_affinity += event_result.state_changes["affection_level"]
+                        new_affinity = _clip(new_affinity, -100, 100)
+                    
+                    # 应用信任度变化
+                    if "trust_level" in event_result.state_changes:
+                        trust_delta = event_result.state_changes["trust_level"]
+                        new_trust = _clip(
+                            runtime_state.get("trust_level", 0) + trust_delta,
+                            0,
+                            100
+                        )
+                        repository.save_runtime_state(
+                            character_id,
+                            player_id,
+                            new_affinity,
+                            new_trust,
+                            mood_after
+                        )
+                    
+                    # 应用情绪变化
+                    if "current_mood" in event_result.state_changes:
+                        mood_after = event_result.state_changes["current_mood"]
+                
+                # 对话覆盖（优先级最高的事件生效）
+                if event_result.dialogue_override and not dialogue.startswith("[事件触发]"):
+                    dialogue = f"[事件触发] {event_result.dialogue_override}"
+                
+                # 玩家通知
+                if event_result.notification:
+                    event_notification = event_result.notification
+                
+                # 记录触发信息
+                triggered_events_info.append({
+                    "event_id": event.event_id,
+                    "event_name": event.event_name,
+                    "effects": event_result.effects_applied
+                })
+                
+                logger.info(f"事件已执行: {event.event_id} - {event.event_name}")
+                
+            except Exception as e:
+                logger.error(f"执行事件失败: {event.event_id}, 错误: {e}")
+        
+        # 更新最终状态
+        if triggered_events:
+            repository.save_runtime_state(
+                character_id,
+                player_id,
+                new_affinity,
+                runtime_state.get("trust_level", 0),
+                mood_after
+            )
+    
+    except Exception as e:
+        logger.error(f"事件系统处理失败: {e}", exc_info=True)
         
     # =========================
     # 返回结果
     # =========================
-    return{
+    return {
         "dialogue": dialogue,
         "action": action,
         "affinity_delta": affinity_delta,
         "current_affinity": new_affinity,
         "current_mood": mood_after,
-        "triggered_events": [],
+        "triggered_events": triggered_events_info,
+        "event_notification": event_notification,
     }
