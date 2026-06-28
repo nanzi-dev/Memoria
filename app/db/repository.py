@@ -1058,7 +1058,7 @@ def list_character_relationships(character_id: str) -> list[dict]:
             """,
             (character_id, character_id),
         ).fetchall()
-    
+        
     return [dict(r) for r in rows]
 
 def delete_character_relationship(character_id_a: str, character_id_b: str) -> bool:
@@ -1079,6 +1079,18 @@ def delete_character_relationship(character_id_a: str, character_id_b: str) -> b
     except Exception as e:
         logger.error(f"删除角色关系失败: {e}")
         return False
+    
+def delete_all_relationships_of_character(character_id: str) -> int:
+    """删除某个角色涉及的所有关系"""
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            DELETE FROM character_relationship
+            WHERE character_id_a = ? OR character_id_b = ?
+            """,
+            (character_id, character_id),
+        )
+        return cur.rowcount
 
 def update_relationship_affinity(
     character_id_a: str,

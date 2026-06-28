@@ -1,12 +1,22 @@
 # 本地环境配置文件
 .env
 
+.gitignore
 .venv/
 .vscode
 
-memoria.db
+app/tests
 
+memoria.db
+chroma_db/
+models/
+sqlite_db/
+
+FINAL_TEST_SUMMARY.md
+run_all_tests.sh
 QUICKSTART_STAGE2.md
 STAGE2_SUMMARY.md
 STAGE3_SUMMARY.md
 API_USAGE_ANALYSIS.md
+.gitignore
+.gitignore

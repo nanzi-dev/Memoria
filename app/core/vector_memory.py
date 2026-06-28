@@ -8,12 +8,16 @@
 """
 
 import logging
+import os
 from typing import List, Optional
 import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 
 from app.core.config import configs
+
+# 设置 HuggingFace 镜像以加速模型下载
+os.environ.setdefault('HF_ENDPOINT', 'https://hf-mirror.com')
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +29,11 @@ class VectorMemoryStore:
         """初始化向量数据库和嵌入模型"""
         try:
             # 初始化 ChromaDB 客户端（持久化模式）
-            self.client = chromadb.Client(Settings(
-                persist_directory=configs.vector_db_path,
-                anonymized_telemetry=False,
-            ))
+            # 注意：必须使用 PersistentClient 而不是 Client
+            self.client = chromadb.PersistentClient(
+                path=configs.vector_db_path,
+                settings=Settings(anonymized_telemetry=False)
+            )
             
             # 获取或创建集合
             self.collection = self.client.get_or_create_collection(

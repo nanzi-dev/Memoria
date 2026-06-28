@@ -118,7 +118,7 @@ def create_relationship(req: RelationshipCreateRequest):
 # =========================
 # 获取关系详情
 # =========================
-@router.get("/relationships/{character_id_a}/{character_id_b}", response_model=RelationshipInfo)
+@router.get("/relationships/pair/{character_id_a}/{character_id_b}", response_model=RelationshipInfo)
 def get_relationship(character_id_a: str, character_id_b: str):
     """获取两个角色之间的关系"""
     relationship = repository.get_character_relationship(
@@ -138,7 +138,7 @@ def get_relationship(character_id_a: str, character_id_b: str):
 # =========================
 # 更新关系
 # =========================
-@router.put("/relationships/{character_id_a}/{character_id_b}", response_model=OperationResponse)
+@router.put("/relationships/pair/{character_id_a}/{character_id_b}", response_model=OperationResponse)
 def update_relationship(
     character_id_a: str,
     character_id_b: str,

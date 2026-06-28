@@ -31,7 +31,7 @@ class Configs(BaseSettings):
     
     # 向量数据库配置
     vector_db_path: str = "./chroma_db"
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_model: str = "./models/sentence-transformers/all-MiniLM-L6-v2"
     vector_search_top_k: int = Field(default = 10, ge = 1, le = 50)
     
     @property

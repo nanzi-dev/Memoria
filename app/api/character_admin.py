@@ -256,7 +256,10 @@ def delete_character(character_id: str, permanent: bool = False):
         if not existing:
             raise HTTPException(status_code=404, detail=f"角色卡 '{character_id}' 不存在")
         
-        # 删除
+        # 删除角色关系
+        repository.delete_all_relationships_of_character(character_id)
+        
+        # 删除角色
         success = repository.delete_character_card_from_db(
             character_id=character_id,
             soft_delete=not permanent
