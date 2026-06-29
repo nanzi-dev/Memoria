@@ -16,6 +16,7 @@
 - [API 文档](#-api-文档)
   - [对话系统 API](#对话系统-api)
   - [角色卡管理 API](#角色卡管理-api)
+  - [事件管理 API](#事件管理-api)
   - [角色关系 API](#角色关系-api)
 - [数据库结构](#-数据库结构)
 - [角色卡开发指南](#-角色卡开发指南)
@@ -457,6 +458,267 @@ Content-Type: application/json
 
 {
   "character_id": "npc_luo_xiaohei"
+}
+```
+
+---
+
+### 事件管理 API
+
+---
+
+#### 1. 获取事件列表
+
+```http
+GET /api/v1/admin/events?character_id=&only_active=true
+```
+
+**查询参数：**
+- `character_id` (可选): 过滤某角色事件（同时包含全局事件）
+- `only_active` (可选): 是否仅返回启用事件，默认 true
+
+**响应示例：**
+```json
+[
+  {
+    "event_id": "evt_npc_luo_xiaohei_idle",
+    "event_name": "闲聊触发",
+    "description": "角色进入闲置状态时触发",
+    "character_id": "npc_luo_xiaohei",
+    "priority": 1,
+    "is_active": true,
+    "trigger_count": 12,
+    "last_triggered_at": "2026-06-28T10:12:00Z",
+    "created_at": "2026-06-01T00:00:00Z",
+    "updated_at": "2026-06-20T12:00:00Z",
+    "trigger_type": "state"
+  }
+]
+```
+
+---
+
+#### 2. 获取事件详情
+
+```http
+GET /api/v1/admin/events/{event_id}
+```
+
+**响应示例：**
+```json
+{
+  "event_id": "evt_npc_luo_xiaohei_idle",
+  "event_name": "闲聊触发",
+  "description": "角色进入闲置状态时触发",
+  "character_id": "npc_luo_xiaohei",
+  "priority": 1,
+  "is_active": true,
+  "trigger_count": 12,
+  "last_triggered_at": "2026-06-28T10:12:00Z",
+  "created_at": "2026-06-01T00:00:00Z",
+  "updated_at": "2026-06-20T12:00:00Z",
+
+  "trigger_type": "state",
+
+  "trigger_condition": {
+    "trigger_type": "state",
+    "threshold": 0.6,
+    "comparison": "gte",
+    "logic_operator": "and",
+    "cooldown_hours": 2
+  },
+
+  "effects": [
+    {
+      "effect_type": "dialogue",
+      "dialogue_text": "你在做什么呀？",
+      "dialogue_action": "curious_talk"
+    }
+  ]
+}
+```
+
+---
+
+#### 3. 创建事件
+
+```http
+POST /api/v1/admin/events
+Content-Type: application/json
+
+{
+  "event_id": "evt_npc_luo_xiaohei_idle",
+  "event_name": "闲聊触发",
+  "description": "角色进入闲置状态时触发",
+  "character_id": "npc_luo_xiaohei",
+
+  "trigger_condition": {
+    "trigger_type": "state",
+    "threshold": 0.5,
+    "comparison": "gte",
+    "cooldown_hours": 1
+  },
+
+  "effects": [
+    {
+      "effect_type": "dialogue",
+      "dialogue_text": "你在干嘛？",
+      "memory_text": "角色主动发起闲聊"
+    }
+  ],
+
+  "priority": 1,
+  "is_active": true
+}
+```
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "message": "事件创建成功",
+  "event_id": "evt_npc_luo_xiaohei_idle"
+}
+```
+
+---
+
+#### 4. 更新事件（可部分更新）
+
+```http
+PUT /api/v1/admin/events/{event_id}
+Content-Type: application/json
+
+{
+  "event_name": "更新后的事件名称",
+  "priority": 2,
+  "is_active": false
+}
+```
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "message": "事件更新成功",
+  "event_id": "evt_npc_luo_xiaohei_idle"
+}
+```
+
+---
+
+#### 5. 删除事件
+
+```http
+DELETE /api/v1/admin/events/{event_id}?permanent=true
+```
+
+**查询参数：**
+- `permanent` (可选): 是否永久删除（默认 true）
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "message": "事件删除成功",
+  "event_id": "evt_npc_luo_xiaohei_idle"
+}
+```
+
+---
+
+#### 6. 启用 / 禁用事件
+
+```http
+POST /api/v1/admin/events/{event_id}/toggle
+Content-Type: application/json
+```
+**查询参数：**
+- `active` : 是否启用
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "message": "事件已启用",
+  "event_id": "evt_npc_luo_xiaohei_idle"
+}
+```
+
+---
+
+#### 7. 查询事件触发历史
+
+```http
+GET /api/v1/admin/events/{event_id}/history?character_id=&player_id=&limit=50
+```
+
+**查询参数：**
+- `character_id` (可选)
+- `player_id` (可选)
+- `limit` (可选): 默认 50
+
+**响应示例：**
+```json
+[
+  {
+    "id": 1,
+    "event_id": "evt_npc_luo_xiaohei_idle",
+    "character_id": "npc_luo_xiaohei",
+    "player_id": "player_001",
+    "session_id": "xxx",
+    "triggered_at": "2026-06-28T10:12:00Z",
+    "effects_applied": "{}"
+  }
+]
+```
+
+---
+
+#### 8. 查询全部触发历史
+
+```http
+GET /api/v1/admin/events/history/all?character_id=&player_id=&limit=100
+```
+
+**查询参数：**
+- `character_id` (可选)
+- `player_id` (可选)
+- `limit` (可选): 默认 100
+
+**响应示例：**
+```json
+[
+  {
+    "id": 2,
+    "event_id": "evt_npc_luo_xiaohei_idle",
+    "character_id": "npc_luo_xiaohei",
+    "player_id": "player_001",
+    "session_id": "xxx",
+    "triggered_at": "2026-06-28T11:00:00Z",
+    "effects_applied": "{}"
+  }
+]
+```
+
+---
+
+#### 9. 重置触发记录（调试）
+
+```http
+DELETE /api/v1/admin/events/{event_id}/history?character_id=&player_id=
+```
+
+**查询参数：**
+- `character_id` (必填)
+- `player_id` (必填)
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "message": "触发记录已清除",
+  "event_id": "evt_npc_luo_xiaohei_idle"
 }
 ```
 

@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 import logging
 import sqlite3
 
+from app.api.event_admin import OperationResponse
 from app.core.config import configs
 
 logger = logging.getLogger(__name__)
@@ -991,6 +992,25 @@ def get_last_trigger_time(event_id: str, character_id: str, player_id: str) -> s
     
     return row["triggered_at"] if row else None
 
+def delete_trigger_history(
+    event_id: str,
+    character_id: str,
+    player_id: str,
+) -> int:
+    """
+    删除某事件对特定玩家的所有触发记录
+    返回删除的行数
+    """
+    with get_conn() as conn:
+        cur = conn.execute(
+            """
+            DELETE FROM event_trigger_log
+            WHERE event_id = ? AND character_id = ? AND player_id = ?
+            """,
+            (event_id, character_id, player_id),
+        )
+        return cur.rowcount
+    
 
 # =========================
 # 角色关系网络
