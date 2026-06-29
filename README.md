@@ -927,53 +927,6 @@ conn = psycopg2.connect(configs.database_url)
 
 ### 🚧 待开发功能
 
-#### 事件系统集成
-虽然事件检测和执行引擎已经实现，但尚未集成到主对话流程中。
-
-**需要完成的工作：**
-1. 在 `orchestrator.py` 的 `run_dialogue_turn()` 中集成事件检测
-2. 将触发的事件结果注入对话响应
-3. 创建事件管理 Web 界面
-4. 实现事件可视化编辑器
-
-**集成示例代码：**
-```python
-# 在 orchestrator.py 中添加
-from app.core.event_detector import get_event_detector
-from app.core.event_executor import get_event_executor
-
-def run_dialogue_turn(session_id: str, player_message: str) -> dict:
-    # ... 现有逻辑 ...
-    
-    # 检测事件触发
-    detector = get_event_detector()
-    executor = get_event_executor()
-    
-    event_context = EventContext(
-        character_id=character_id,
-        player_id=player_id,
-        session_id=session_id,
-        player_message=player_message,
-        current_affinity=runtime_state["affection_level"],
-        current_trust=runtime_state["trust_level"],
-        current_mood=runtime_state["current_mood"],
-        ...
-    )
-    
-    triggered_events = detector.check_events(event_context, event_definitions)
-    
-    event_results = []
-    for event in triggered_events:
-        result = executor.execute_event(event, event_context)
-        event_results.append(result)
-        
-        # 如果事件覆盖了对话，使用事件对话
-        if result.dialogue_override:
-            llm_response["dialogue"] = result.dialogue_override
-    
-    # ... 返回结果 ...
-```
-
 #### 多角色对话
 目前系统仅支持单角色与玩家对话，计划扩展为多角色群聊模式。
 
@@ -982,15 +935,6 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
 - 角色间互动逻辑（基于关系网络）
 - 多角色上下文管理
 - 发言顺序和频率控制
-
-#### 道具和任务系统
-事件效果中预留了 `GRANT_ITEM` 和 `START_QUEST` 类型，但尚未实现。
-
-**需要实现：**
-- 道具数据表和管理 API
-- 任务数据表和状态机
-- 背包系统
-- 任务日志和完成追踪
 
 #### 语音集成
 计划集成 TTS（文本转语音）和 STT（语音转文本）。
@@ -1836,7 +1780,6 @@ async def extract_and_save_memory(...):
 ### 🔄 进行中
 
 #### 第四阶段 - 事件系统集成与扩展
-- [ ] 将事件系统集成到对话流程（Orchestrator）
 - [ ] 事件管理 Web 界面
 - [ ] 事件可视化编辑器
 - [ ] 预设事件模板库
