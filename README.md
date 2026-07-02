@@ -271,15 +271,28 @@ GET /api/v1/dialogue/sessions?character_id=npc_luo_xiaohei&player_id=player_001
 **响应示例：**
 ```json
 [
-  {
-    "session_id": "550e8400-e29b-41d4-a716-446655440000",
-    "character_id": "npc_luo_xiaohei",
-    "player_id": "player_001",
-    "player_name": "旅行者",
-    "created_at": "2026-06-23T10:30:00.000000+00:00",
-    "last_message": "那我们做朋友吧！",
-    "message_count": 12
-  }
+    {
+        "session_id": "d3096e32-58de-45fc-8ca6-89e758c7c7ae",
+        "character_id": "npc_merchant_lina",
+        "player_id": "南子",
+        "player_name": "南子",
+        "created_at": "2026-06-25T14:58:29.988857+00:00",
+        "ended_at": "2026-06-25T15:02:35.799106+00:00",
+        "status": "ended",
+        "last_message": "您...您慢走啊！[强扯着嘴角挥着手，声音发虚]抓...抓不着您的！您这么厉害，谁能抓得着啊...[看着他的背影，悄悄用袖子擦了把额头的冷汗，心里默念]明天...明天我绝对不开摊...不不不，换个地方摆摊...[深吸一口气]来来来，下一位客官！看货看货！没事了没事了！",
+        "message_count": 39
+    },
+    {
+        "session_id": "7da35e0a-9196-4c1c-b781-886d54b03abc",
+        "character_id": "npc_merchant_lina",
+        "player_id": "南子",
+        "player_name": "南子",
+        "created_at": "2026-06-23T12:05:29.899912+00:00",
+        "ended_at": null,
+        "status": "active",
+        "last_message": "[深吸一口气，强忍怒意，脸上职业性的笑容已经有点挂不住了]行，行吧。买卖不成仁义在嘛，这位...客官，您要是觉得不满意，那我也不强求了。[开始收拾摊位，动作明显加快]我先去别的地方转转，等您心情好些了再说。",
+        "message_count": 25
+    }
 ]
 ```
 
@@ -289,7 +302,8 @@ GET /api/v1/dialogue/history
 ```
 
 **查询参数：**
-- `session_id` (必需): 会话 ID
+- `character_id` : 角色 ID
+- `player_id`: 用户ID
 - `offset` (可选): 偏移量，默认 0
 - `limit` (可选): 每页数量，默认 20
 
