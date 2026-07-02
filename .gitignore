@@ -1,22 +1,58 @@
-# 本地环境配置文件
+# =========================
+# Environment
+# =========================
 .env
-
-.gitignore
 .venv/
-.vscode
 
-app/tests
+# =========================
+# IDE / Editor
+# =========================
+.vscode/
+.codex/
+.agents/
 
-memoria.db
-chroma_db/
-models/
+# =========================
+# Python cache
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# =========================
+# Tests (本地测试目录，不进仓库)
+# =========================
+app/tests/
+
+# =========================
+# Databases / Local runtime data
+# =========================
+*.db
+*.sqlite
+*.sqlite3
 sqlite_db/
 
-FINAL_TEST_SUMMARY.md
+memoria.db
+memoria.db-*
+chroma_db/
+
+# =========================
+# ML / Model artifacts
+# =========================
+models/
+
+# =========================
+# Logs
+# =========================
+*.log
+
+# =========================
+# OS
+# =========================
+.DS_Store
+
+
+# =========================
+# Scripts 
+# =========================
 run_all_tests.sh
-QUICKSTART_STAGE2.md
-STAGE2_SUMMARY.md
-STAGE3_SUMMARY.md
-API_USAGE_ANALYSIS.md
-.gitignore
-.gitignore

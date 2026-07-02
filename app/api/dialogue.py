@@ -79,6 +79,8 @@ class SessionInfo(BaseModel):
     player_id: str
     player_name: str
     created_at: str | None = None
+    ended_at: str | None = None
+    status: str
     last_message: str | None = None
     message_count: int = 0
 
@@ -168,29 +170,33 @@ def get_sessions(character_id: str, player_id: str):
 # History
 # =========================
 @router.get("/dialogue/history", response_model=HistoryResponse)
-def get_history(session_id: str, offset: int = 0, limit: int = 20):
-    """分页获取对话历史"""
+def get_history(character_id: str, player_id: str, offset: int = 0, limit: int = 20):
+    """分页获取跨会话历史消息"""
 
-    session = repository.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="会话不存在")
-
-    messages, has_more = repository.get_messages_paginated(
-        session_id,
-        offset,
-        limit
+    messages, has_more = repository.get_messages_by_player_and_character(
+        character_id=character_id,
+        player_id=player_id,
+        offset=offset,
+        limit=limit,
     )
 
-    card = character_loader.load_character_card(session["character_id"])
+    card = character_loader.load_character_card(character_id)
 
     runtime_state = repository.get_runtime_state(
-        session["character_id"],
-        session["player_id"],
-        card
+        character_id,
+        player_id,
+        card,
     )
 
     return HistoryResponse(
-        messages=[HistoryMessage(**m) for m in messages],
+        messages=[
+            HistoryMessage(
+                role=m["role"],
+                content=m["content"],
+                created_at=m.get("created_at"),
+            )
+            for m in messages
+        ],
         has_more=has_more,
         current_affinity=runtime_state.get("affection_level", 0),
         current_mood=runtime_state.get("current_mood", "neutral"),
@@ -223,17 +229,23 @@ def session_end(req: SessionEndRequest):
     # 生成摘要
     summary_text = None
     if len(history) > 0:
-        summary_text = summarize_session(history)
+        try:
+            summary_text = summarize_session(history)
+        except Exception as e:
+            print(f"[ERROR] summarize_session failed: {e}")
     
     # 保存摘要
     if summary_text:
-        repository.save_session_summary(
-            session_id=req.session_id,
-            character_id=session["character_id"],
-            player_id=session["player_id"],
-            summary_text=summary_text,
-            message_count=len(history)
-        )
+        try:
+            repository.save_session_summary(
+                session_id=req.session_id,
+                character_id=session["character_id"],
+                player_id=session["player_id"],
+                summary_text=summary_text,
+                message_count=len(history)
+            )
+        except Exception as e:
+            print(f"[ERROR] Failed to save summary: {e}")
     
     # 标记会话结束
     repository.end_session(req.session_id)

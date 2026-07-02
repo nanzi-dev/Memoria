@@ -24,6 +24,10 @@ class Configs(BaseSettings):
     llm_model: str = "deepseek-chat"
     llm_light_model: str = ""
     
+    # 轻量任务专用 LLM 配置（可选，留空则使用主 LLM）
+    llm_light_base_url: str = ""
+    llm_light_api_key: SecretStr = ""
+    
     # 应用配置
     database_path: str = "./memoria.db"
     short_term_memory_turns: int = Field(default = 8, ge = 1, le = 50)

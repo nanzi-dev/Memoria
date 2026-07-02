@@ -19,7 +19,13 @@ from app.core.config import configs
 # 设置 HuggingFace 镜像以加速模型下载
 os.environ.setdefault('HF_ENDPOINT', 'https://hf-mirror.com')
 
+# 禁用 ChromaDB 遥测
+os.environ['ANONYMIZED_TELEMETRY'] = 'False'
+
 logger = logging.getLogger(__name__)
+
+# 抑制 ChromaDB 遥测错误日志
+logging.getLogger('chromadb.telemetry').setLevel(logging.CRITICAL)
 
 
 class VectorMemoryStore:
@@ -32,7 +38,11 @@ class VectorMemoryStore:
             # 注意：必须使用 PersistentClient 而不是 Client
             self.client = chromadb.PersistentClient(
                 path=configs.vector_db_path,
-                settings=Settings(anonymized_telemetry=False)
+                settings=Settings(
+                    anonymized_telemetry=False,
+                    allow_reset=True,
+                    is_persistent=True
+                )
             )
             
             # 获取或创建集合

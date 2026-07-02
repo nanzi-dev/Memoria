@@ -951,7 +951,6 @@ conn = psycopg2.connect(configs.database_url)
 - [ ] 角色头像和动画
 - [ ] 记忆时间轴可视化
 - [ ] 关系网络图谱展示（D3.js / vis.js）
-- [ ] 事件触发历史展示
 - [ ] 好感度和信任度仪表盘
 
 ## 🎯 技术亮点

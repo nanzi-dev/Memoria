@@ -28,6 +28,17 @@ _client = OpenAI(
     api_key = configs.llm_api_key.get_secret_value()
 )
 
+# 轻量任务专用 Client（如果配置了则使用，否则使用主 Client）
+if configs.llm_light_base_url and configs.llm_light_api_key.get_secret_value():
+    _light_client = OpenAI(
+        base_url = configs.llm_light_base_url,
+        api_key = configs.llm_light_api_key.get_secret_value()
+    )
+    logger.info(f"Light task client initialized: {configs.llm_light_base_url}")
+else:
+    _light_client = _client
+    logger.info("Light task using main LLM client")
+
 # =========================
 # 自定义异常（保留扩展能力）
 # =========================
@@ -221,12 +232,39 @@ def call_light_task(prompt: str) -> str:
     使用轻量模型处理辅助任务（低成本）
     """
     
-    response = _client.chat.completions.create(
-        model = configs.light_model,
-        messages = [{"role": "user", "content": prompt}],
-        max_tokens = 300,
-        temperature = 0.3,
-    )
+    logger.debug(f"Calling light model: {configs.light_model}")
     
-    return (response.choices[0].message.content or "").strip()
+    try:
+        response = _light_client.chat.completions.create(
+            model = configs.light_model,
+            messages = [{"role": "user", "content": prompt}],
+            max_tokens = 800,
+            temperature = 0.3,
+        )
+        
+        if not response.choices:
+            logger.warning("No choices in LLM response")
+            return ""
+        
+        message = response.choices[0].message
+        
+        # 优先使用 content，如果为空则尝试 reasoning_content（推理模型）
+        content = message.content
+        
+        if not content or content.strip() == "":
+            if hasattr(message, 'reasoning_content') and message.reasoning_content:
+                logger.debug("Using reasoning_content instead of content")
+                content = message.reasoning_content
+            else:
+                logger.warning("Both content and reasoning_content are empty")
+                return ""
+        
+        result = content.strip()
+        logger.debug(f"Light task completed, result length: {len(result)}")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Exception in call_light_task: {e}")
+        return ""
 

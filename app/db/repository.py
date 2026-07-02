@@ -545,6 +545,8 @@ def get_sessions_by_player_and_character(character_id: str, player_id: str) -> l
                 s.player_id,
                 s.player_name,
                 s.created_at,
+                s.ended_at,
+                s.status,
                 (
                     SELECT content
                     FROM short_term_message
@@ -603,6 +605,51 @@ def get_messages_paginated(session_id: str, offset: int, limit: int) -> tuple[li
 
     return messages, has_more
 
+
+# 跨多个 Session 分页获取消息
+def get_messages_by_player_and_character(
+    character_id: str,
+    player_id: str,
+    offset: int = 0,
+    limit: int = 20,
+):
+    """
+    跨多个 Session 分页获取消息
+    """
+
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                m.role,
+                m.content,
+                m.created_at,
+                m.session_id
+            FROM short_term_message m
+            INNER JOIN session s
+                ON m.session_id = s.session_id
+            WHERE
+                s.character_id = ?
+                AND s.player_id = ?
+            ORDER BY
+                m.created_at DESC
+            LIMIT ?
+            OFFSET ?
+            """,
+            (
+                character_id,
+                player_id,
+                limit + 1,
+                offset,
+            ),
+        ).fetchall()
+
+    has_more = len(rows) > limit
+
+    return (
+        [dict(r) for r in rows[:limit]],
+        has_more,
+    )
 
 # =========================
 # 会话摘要（中期记忆）

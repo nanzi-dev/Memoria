@@ -8,23 +8,38 @@
 """
 from app.core.llm_client import call_light_task
 
-SUMMARY_PROMPT_TEMPLATE = """请阅读以下这段游戏NPC与玩家的对话，用1-3句话概括这次对话中发生的关键事情（比如玩家做了什么承诺、送了什么礐物、透露了什么个人信息、关系发生了什么变化）。忽略寒暄和不重要的细节。如果这段对话没有值得记录的内容，输出"无"。
+SUMMARY_PROMPT_TEMPLATE = """请阅读以下这段游戏NPC与玩家的对话，用1-3句话概括这次对话中发生的关键事情（比如玩家做了什么承诺、送了什么礼物、透露了什么个人信息、关系发生了什么变化等）。
+
+**重要提示**：
+- 请忽略寒暄和不重要的细节
+- 如果这段对话确实没有任何值得记录的内容，请输出"无"
+- 如果有值得记录的内容，请直接输出摘要文本，不要添加任何前缀或说明
 
 对话内容：
 {transcript}
 
-请直接输出摘要文本，不要输出任何前缀说明。"""
+摘要："""
 
 
 def summarize_session(history: list[dict]) -> str | None:
     """对一段对话历史做摘要萃取，用于会话结束时写入 session_summary 表。"""
     if not history:
         return None
+    
     transcript = "\n".join(
         f"{'玩家' if m['role'] == 'user' else 'NPC'}：{m['content']}" for m in history
     )
+    
     prompt = SUMMARY_PROMPT_TEMPLATE.format(transcript=transcript)
     result = call_light_task(prompt)
-    if not result or result.strip() in ("无", "None", "null"):
+    
+    if not result:
         return None
-    return result.strip()
+    
+    result_stripped = result.strip()
+    
+    # 检查是否是无效回复
+    if result_stripped.lower() in ("无", "none", "null", "无。", "none.", "null."):
+        return None
+    
+    return result_stripped
