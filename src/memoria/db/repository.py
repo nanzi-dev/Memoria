@@ -14,6 +14,8 @@ import sqlite3
 
 from memoria.api.event_admin import OperationResponse
 from memoria.core.config import configs
+import re
+from difflib import SequenceMatcher
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,38 @@ def _now() -> str:
 def _row_to_dict(row):
     """安全转换 sqlite Row -> dict"""
     return dict(row) if row is not None else None
+
+
+# =========================
+# 去重引擎
+# =========================
+
+def _normalize(text: str) -> str:
+    """归一化文本"""
+    if not text:
+        return ""
+    return re.sub(r'\s+', ' ', text.strip().lower())
+
+def _text_similarity(a: str, b: str) -> float:
+    """文本相似度"""
+    na, nb = _normalize(a), _normalize(b)
+    if na == nb:
+        return 1.0
+    return SequenceMatcher(None, na, nb).ratio()
+
+def _dedup_check(conn, table, text_col, text, where_clause, params, threshold=0.75):
+    """检查是否存在相似记录，返回匹配的行或None"""
+    norm = _normalize(text)
+    if len(norm) < 2:
+        return None
+    rows = conn.execute(
+        f"SELECT *, {text_col} as _cmp FROM {table} WHERE {where_clause}",
+        params
+    ).fetchall()
+    for row in rows:
+        if _text_similarity(text, row["_cmp"]) >= threshold:
+            return dict(row)
+    return None
 
 
 # =========================
@@ -298,6 +332,37 @@ ON event_definition(character_id, is_active);
 CREATE INDEX IF NOT EXISTS idx_event_trigger_log
 ON event_trigger_log(event_id, character_id, player_id, triggered_at DESC);
 
+
+-- =========================
+-- 多角色共享记忆（角色间）
+-- =========================
+CREATE TABLE IF NOT EXISTS shared_memory (
+    id              TEXT PRIMARY KEY,
+    character_a_id  TEXT NOT NULL,
+    character_b_id  TEXT NOT NULL,
+    memory_text     TEXT NOT NULL,
+    context         TEXT,
+    importance      REAL DEFAULT 0.5,
+    created_at      TEXT,
+    last_referenced TEXT,
+    reference_count INTEGER DEFAULT 0
+);
+
+-- =========================
+-- 多角色群体记忆（会话级）
+-- =========================
+CREATE TABLE IF NOT EXISTS group_memory (
+    id              TEXT PRIMARY KEY,
+    session_id      TEXT NOT NULL,
+    memory_text     TEXT NOT NULL,
+    participants    TEXT,
+    context         TEXT,
+    importance      REAL DEFAULT 0.5,
+    created_at      TEXT,
+    last_referenced TEXT,
+    reference_count INTEGER DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_relationship_lookup
 ON character_relationship(character_id_a, character_id_b);
 """
@@ -467,6 +532,22 @@ def save_long_term_fact(
         int: 新插入的 fact_id
     """
     with get_conn() as conn:
+        # 去重检查
+        existing = _dedup_check(
+            conn, "long_term_fact", "fact_text", fact_text,
+            "character_id = ? AND player_id = ?",
+            (character_id, player_id),
+            threshold=0.75
+        )
+        if existing:
+            new_imp = max(existing.get("importance", 0), importance)
+            conn.execute(
+                "UPDATE long_term_fact SET importance = ?, last_referenced = ? WHERE id = ?",
+                (new_imp, _now(), existing["id"]),
+            )
+            logger.debug(f"长期记忆去重: id={existing['id']}")
+            return existing["id"]
+
         cursor = conn.execute(
             """
             INSERT INTO long_term_fact
@@ -701,16 +782,26 @@ def save_session_summary(
     summary_text: str,
     message_count: int
 ):
-    """保存会话摘要"""
+    """
+    保存会话摘要。同一 session+character+player 只保留一条。
+    """
     with get_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO session_summary
-            (session_id, character_id, player_id, summary_text, message_count, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (session_id, character_id, player_id, summary_text, message_count, _now()),
-        )
+        existing = conn.execute(
+            "SELECT id FROM session_summary WHERE session_id=? AND character_id=? AND player_id=? LIMIT 1",
+            (session_id, character_id, player_id),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE session_summary SET summary_text=?, message_count=?, created_at=? WHERE id=?",
+                (summary_text, message_count, _now(), existing["id"]),
+            )
+        else:
+            conn.execute(
+                """INSERT INTO session_summary
+                   (session_id, character_id, player_id, summary_text, message_count, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (session_id, character_id, player_id, summary_text, message_count, _now()),
+            )
         
 def get_session_summary(session_id: str) -> dict | None:
     """获取指定会话的摘要"""
@@ -748,6 +839,111 @@ def get_recent_summaries(
         
     return [dict(r) for r in rows]
 
+
+
+# =========================
+# 角色间共享记忆（shared_memory）
+# =========================
+def save_shared_memory(
+    character_a_id: str,
+    character_b_id: str,
+    memory_text: str,
+    context: str = None,
+    importance: float = 0.5
+) -> str:
+    """保存两个角色之间的共享记忆。含去重检查。"""
+    import uuid
+    memory_id = str(uuid.uuid4())
+    a, b = sorted([character_a_id, character_b_id])
+
+    with get_conn() as conn:
+        existing = _dedup_check(
+            conn, "shared_memory", "memory_text", memory_text,
+            "character_a_id = ? AND character_b_id = ?",
+            (a, b), threshold=0.75
+        )
+        if existing:
+            new_imp = max(existing.get("importance", 0), importance)
+            conn.execute("UPDATE shared_memory SET importance=?, last_referenced=? WHERE id=?",
+                         (new_imp, _now(), existing["id"]))
+            return existing["id"]
+
+        conn.execute(
+            "INSERT INTO shared_memory (id, character_a_id, character_b_id, memory_text, context, importance, created_at, last_referenced, reference_count) VALUES (?,?,?,?,?,?,?,?,0)",
+            (memory_id, a, b, memory_text, context, importance, _now(), _now()))
+
+    return memory_id
+
+
+def get_shared_memories(character_id_a: str, character_id_b: str, limit: int = 10) -> list[dict]:
+    """获取两个角色之间的共享记忆"""
+    a, b = sorted([character_id_a, character_id_b])
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, memory_text, context, importance, created_at FROM shared_memory WHERE character_a_id=? AND character_b_id=? ORDER BY importance DESC, last_referenced DESC LIMIT ?",
+            (a, b, limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_character_shared_memories(character_id: str, limit: int = 20) -> list[dict]:
+    """获取某个角色与其他所有角色的共享记忆"""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, character_a_id, character_b_id, memory_text, context, importance, created_at FROM shared_memory WHERE character_a_id=? OR character_b_id=? ORDER BY importance DESC, last_referenced DESC LIMIT ?",
+            (character_id, character_id, limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
+# =========================
+# 群体记忆（group_memory）
+# =========================
+def save_group_memory(
+    session_id: str,
+    memory_text: str,
+    participants: list[str] = None,
+    context: str = None,
+    importance: float = 0.5
+) -> str:
+    """保存多角色会话的群体记忆。含去重检查。"""
+    import uuid, json
+    memory_id = str(uuid.uuid4())
+    participants_json = json.dumps(participants) if participants else None
+
+    with get_conn() as conn:
+        existing = _dedup_check(
+            conn, "group_memory", "memory_text", memory_text,
+            "session_id = ?",
+            (session_id,), threshold=0.75
+        )
+        if existing:
+            new_imp = max(existing.get("importance", 0), importance)
+            conn.execute("UPDATE group_memory SET importance=?, last_referenced=? WHERE id=?",
+                         (new_imp, _now(), existing["id"]))
+            return existing["id"]
+
+        conn.execute(
+            "INSERT INTO group_memory (id, session_id, memory_text, participants, context, importance, created_at, last_referenced, reference_count) VALUES (?,?,?,?,?,?,?,?,0)",
+            (memory_id, session_id, memory_text, participants_json, context, importance, _now(), _now()))
+
+    return memory_id
+
+
+def get_session_group_memories(session_id: str, limit: int = 20) -> list[dict]:
+    """获取某个会话的群体记忆"""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, memory_text, participants, context, importance, created_at FROM group_memory WHERE session_id=? ORDER BY importance DESC, last_referenced DESC LIMIT ?",
+            (session_id, limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_character_group_memories(character_id: str, limit: int = 20) -> list[dict]:
+    """获取某个角色参与过的群体记忆"""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, session_id, memory_text, participants, context, importance, created_at FROM group_memory WHERE participants LIKE ? ORDER BY importance DESC, last_referenced DESC LIMIT ?",
+            (f"%{character_id}%", limit)).fetchall()
+    return [dict(r) for r in rows]
 
 # =========================
 # 角色卡管理（CRUD）

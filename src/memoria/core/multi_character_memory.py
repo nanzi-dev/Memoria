@@ -3,8 +3,8 @@
 
 功能：
 1. 管理多角色场景下的记忆
-2. 角色间共享记忆（群体事件）
-3. 角色对其他角色的印象记忆
+2. 角色间共享记忆（shared_memory 表）
+3. 群体记忆（group_memory 表）
 4. 多角色会话摘要生成
 """
 
@@ -46,10 +46,8 @@ def extract_multi_character_memories(
     if not recent_messages:
         return {}
     
-    # 构建对话文本
     dialogue_text = _format_messages_for_extraction(recent_messages)
     
-    # 为每个角色提取记忆
     character_memories = {}
     
     for char_id in character_ids:
@@ -71,15 +69,7 @@ def extract_multi_character_memories(
 
 
 def _format_messages_for_extraction(messages: list[dict]) -> str:
-    """
-    格式化消息用于记忆提取
-    
-    Args:
-        messages: 消息列表
-    
-    Returns:
-        str: 格式化后的对话文本
-    """
+    """格式化消息用于记忆提取"""
     lines = []
     
     for msg in messages:
@@ -100,18 +90,7 @@ def _extract_character_specific_memories(
     dialogue_text: str,
     all_character_ids: list[str]
 ) -> list[str]:
-    """
-    为特定角色提取记忆
-    
-    Args:
-        character_id: 角色ID
-        dialogue_text: 对话文本
-        all_character_ids: 所有参与角色ID
-    
-    Returns:
-        list[str]: 记忆列表
-    """
-    # 构建提取提示
+    """为特定角色提取记忆"""
     prompt = f"""
 分析以下多角色对话，从角色 {character_id} 的视角，提取值得记住的信息。
 
@@ -137,10 +116,7 @@ def _extract_character_specific_memories(
 """
     
     try:
-        # 调用LLM提取记忆
         response = llm_client.call_light_task(prompt)
-        
-        # 解析JSON
         memories = json.loads(response)
         
         if isinstance(memories, list):
@@ -150,7 +126,7 @@ def _extract_character_specific_memories(
             return []
     
     except json.JSONDecodeError as e:
-        logger.error(f"记忆提取JSON解析失败: {e}, response={response[:200]}")
+        logger.error(f"记忆提取JSON解析失败: {e}")
         return []
     
     except Exception as e:
@@ -159,14 +135,15 @@ def _extract_character_specific_memories(
 
 
 # =========================
-# 角色间印象记忆
+# 角色间印象记忆（shared_memory）
 # =========================
 
 def save_character_impression(
     observer_id: str,
     target_id: str,
     impression: str,
-    session_id: str
+    session_id: str,
+    importance: float = 0.6
 ):
     """
     保存角色对其他角色的印象
@@ -175,29 +152,31 @@ def save_character_impression(
         observer_id: 观察者角色ID
         target_id: 目标角色ID
         impression: 印象描述
-        session_id: 会话ID
-    """
-    # 构建印象记忆文本
-    memory_text = f"对{target_id}的印象：{impression}"
+        session_id: 会话ID（作为上下文）
+        importance: 重要性权重（默认 0.6）
     
-    # 保存为长期记忆（使用observer_id作为player_id的特殊标记）
-    fact_id = repository.save_long_term_fact(
-        character_id=observer_id,
-        player_id=f"char_{target_id}",  # 特殊标记：角色间记忆
-        fact_text=memory_text,
-        importance=6  # 中等重要性
+    Returns:
+        str: 记忆ID
+    """
+    memory_text = f"对 {target_id} 的印象：{impression}"
+    
+    memory_id = repository.save_shared_memory(
+        character_a_id=observer_id,
+        character_b_id=target_id,
+        memory_text=memory_text,
+        context=f"session:{session_id}",
+        importance=importance
     )
     
-    logger.info(f"保存角色印象: {observer_id} -> {target_id}")
-    
-    return fact_id
+    logger.info(f"保存角色印象: {observer_id} -> {target_id}, id={memory_id}")
+    return memory_id
 
 
 def get_character_impressions(
     observer_id: str,
     target_id: str,
     limit: int = 5
-) -> list[str]:
+) -> list[dict]:
     """
     获取角色对其他角色的印象记忆
     
@@ -207,55 +186,59 @@ def get_character_impressions(
         limit: 最大返回数量
     
     Returns:
-        list[str]: 印象记忆列表
+        list[dict]: 印象记忆列表，每项含 memory_text、importance 等字段
     """
-    impressions = repository.get_long_term_facts(
-        character_id=observer_id,
-        player_id=f"char_{target_id}",
+    return repository.get_shared_memories(
+        character_id_a=observer_id,
+        character_id_b=target_id,
         limit=limit
     )
-    
-    return impressions
 
 
 # =========================
-# 群体记忆
+# 群体记忆（group_memory）
 # =========================
 
 def save_group_event_memory(
     event_description: str,
     character_ids: list[str],
     session_id: str,
-    importance: int = 7
+    importance: float = 0.7
 ):
     """
-    保存群体事件记忆（所有参与角色共享）
+    保存群体事件记忆
     
     Args:
         event_description: 事件描述
         character_ids: 参与角色ID列表
         session_id: 会话ID
-        importance: 重要性（1-10）
-    """
-    # 为每个角色保存相同的群体记忆
-    for char_id in character_ids:
-        repository.save_long_term_fact(
-            character_id=char_id,
-            player_id=f"group_{session_id}",  # 特殊标记：群体记忆
-            fact_text=f"群体事件：{event_description}",
-            importance=importance
-        )
+        importance: 重要性权重（默认 0.7）
     
-    logger.info(f"保存群体记忆给 {len(character_ids)} 个角色")
+    Returns:
+        str: 记忆ID
+    """
+    memory_text = f"群体事件：{event_description}"
+    
+    memory_id = repository.save_group_memory(
+        session_id=session_id,
+        memory_text=memory_text,
+        participants=character_ids,
+        importance=importance
+    )
+    
+    logger.info(f"保存群体记忆: session={session_id}, participants={len(character_ids)}, id={memory_id}")
+    return memory_id
 
 
 def get_group_memories(
     character_id: str,
     session_id: str,
     limit: int = 10
-) -> list[str]:
+) -> list[dict]:
     """
-    获取角色的群体记忆
+    获取某个角色在某会话中的群体记忆
+    
+    优先按 session_id 精确查询，若该会话无群体记忆则按角色查询。
     
     Args:
         character_id: 角色ID
@@ -263,15 +246,22 @@ def get_group_memories(
         limit: 最大返回数量
     
     Returns:
-        list[str]: 群体记忆列表
+        list[dict]: 群体记忆列表
     """
-    memories = repository.get_long_term_facts(
-        character_id=character_id,
-        player_id=f"group_{session_id}",
+    # 先按会话精确查询
+    memories = repository.get_session_group_memories(
+        session_id=session_id,
         limit=limit
     )
     
-    return memories
+    if memories:
+        return memories
+    
+    # 回退：按角色查询历史群体记忆
+    return repository.get_character_group_memories(
+        character_id=character_id,
+        limit=limit
+    )
 
 
 # =========================
@@ -299,7 +289,6 @@ def generate_multi_character_summary(
     if not messages:
         return "空会话"
     
-    # 格式化对话
     dialogue_text = []
     for msg in messages:
         role = msg.get("role")
@@ -313,8 +302,6 @@ def generate_multi_character_summary(
             dialogue_text.append(f"{char_name}: {content}")
     
     dialogue_str = "\n".join(dialogue_text)
-    
-    # 构建摘要提示
     participants_str = "、".join(character_names.values())
     
     prompt = f"""
@@ -338,9 +325,7 @@ def generate_multi_character_summary(
     try:
         summary = llm_client.call_light_task(prompt)
         summary = summary.strip()
-        
         logger.info(f"生成多角色会话摘要: session={session_id}, length={len(summary)}")
-        
         return summary
     
     except Exception as e:
@@ -356,7 +341,9 @@ def save_multi_character_summary(
     message_count: int
 ):
     """
-    保存多角色会话摘要（为每个角色保存一份）
+    保存多角色会话摘要
+    
+    同时保存到 session_summary（每个角色一份）和 group_memory（群体记忆）。
     
     Args:
         session_id: 会话ID
@@ -365,7 +352,7 @@ def save_multi_character_summary(
         summary_text: 摘要文本
         message_count: 消息数量
     """
-    # 为每个角色保存摘要
+    # 为每个角色保存独立摘要（兼容单角色查询逻辑）
     for char_id in character_ids:
         repository.save_session_summary(
             session_id=session_id,
@@ -374,6 +361,15 @@ def save_multi_character_summary(
             summary_text=summary_text,
             message_count=message_count
         )
+    
+    # 同时保存为群体记忆
+    repository.save_group_memory(
+        session_id=session_id,
+        memory_text=f"会话摘要：{summary_text}",
+        participants=character_ids,
+        context=f"共 {message_count} 条消息",
+        importance=0.5
+    )
     
     logger.info(f"为 {len(character_ids)} 个角色保存会话摘要")
 
@@ -393,9 +389,9 @@ def integrate_multi_character_context(
     整合多角色场景的完整上下文
     
     包括：
-    - 对玩家的记忆
-    - 对其他角色的印象
-    - 群体记忆
+    - 对玩家的记忆（long_term_fact）
+    - 对其他角色的印象（shared_memory）
+    - 群体记忆（group_memory）
     
     Args:
         character_id: 当前角色ID
@@ -422,24 +418,28 @@ def integrate_multi_character_context(
     )
     context["player_memories"] = player_memories
     
-    # 2. 对其他角色的印象
+    # 2. 对其他角色的印象（从 shared_memory 表查询）
     for other_id in other_character_ids:
         if other_id != character_id:
-            impressions = get_character_impressions(
-                observer_id=character_id,
-                target_id=other_id,
+            impressions = repository.get_shared_memories(
+                character_id_a=character_id,
+                character_id_b=other_id,
                 limit=3
             )
             if impressions:
-                context["character_impressions"][other_id] = impressions
+                # 提取 memory_text 用于 prompt 构建
+                context["character_impressions"][other_id] = [
+                    imp["memory_text"] for imp in impressions
+                ]
     
-    # 3. 群体记忆
-    group_memories = get_group_memories(
-        character_id=character_id,
+    # 3. 群体记忆（从 group_memory 表查询）
+    group_memories = repository.get_session_group_memories(
         session_id=session_id,
         limit=5
     )
-    context["group_memories"] = group_memories
+    context["group_memories"] = [
+        gm["memory_text"] for gm in group_memories
+    ]
     
     return context
 
@@ -465,7 +465,6 @@ def auto_process_multi_character_memories(
         player_id: 玩家ID
         trigger_threshold: 触发阈值（消息数）
     """
-    # 获取最近的消息
     recent_messages = repository.get_multi_character_history(
         session_id=session_id,
         limit_messages=trigger_threshold
@@ -476,14 +475,13 @@ def auto_process_multi_character_memories(
     
     logger.info(f"自动处理多角色记忆: session={session_id}, messages={len(recent_messages)}")
     
-    # 1. 提取记忆
+    # 1. 提取记忆并保存为个人长期记忆
     character_memories = extract_multi_character_memories(
         session_id=session_id,
         recent_messages=recent_messages,
         character_ids=character_ids
     )
     
-    # 保存提取的记忆
     for char_id, memories in character_memories.items():
         for memory in memories:
             repository.save_long_term_fact(
@@ -492,9 +490,6 @@ def auto_process_multi_character_memories(
                 fact_text=memory,
                 importance=7
             )
-    
-    # 2. 生成摘要（可选，根据需要）
-    # 注意：这里可以选择性地生成中期摘要
     
     logger.info(f"自动记忆处理完成: 为 {len(character_memories)} 个角色提取了记忆")
 
@@ -540,19 +535,24 @@ def query_multi_character_memories(
     )
     results["player_memories"] = player_memories
     
-    # 查询对其他角色的印象（如果需要）
+    # 查询对其他角色的印象
     if include_impressions:
-        # 这里简化处理，实际可以遍历所有其他角色
-        # 暂时留空，可根据需要扩展
-        pass
-    
-    # 查询群体记忆（如果需要）
-    if include_group:
-        group_memories = get_group_memories(
+        shared = repository.get_character_shared_memories(
             character_id=character_id,
-            session_id=session_id,
+            limit=10
+        )
+        results["character_impressions"] = [
+            {"with": s["character_b_id"] if s["character_a_id"] == character_id else s["character_a_id"],
+             "memory": s["memory_text"]}
+            for s in shared
+        ]
+    
+    # 查询群体记忆
+    if include_group:
+        group_memories = repository.get_character_group_memories(
+            character_id=character_id,
             limit=5
         )
-        results["group_memories"] = group_memories
+        results["group_memories"] = [gm["memory_text"] for gm in group_memories]
     
     return results
