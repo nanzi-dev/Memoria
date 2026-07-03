@@ -1,0 +1,27 @@
+# Memoria 配置文件
+# 此文件为参考配置，实际运行时优先使用 .env 环境变量
+# 复制 .env.example 为 .env 并填入实际值
+
+app:
+  title: 角色模拟系统
+  version: 0.1.0
+  host: 0.0.0.0
+  port: 8000
+  reload: true
+llm:
+  base_url: https://api.deepseek.com/v1
+  model: deepseek-chat
+  max_output_tokens: 600
+  light_model: ''
+  light_base_url: ''
+  light_api_key: ''
+memory:
+  short_term_turns: 8
+  vector_search_top_k: 10
+database:
+  sqlite_path: ./data/sqlite_db/memoria.db
+  vector_db_path: ./data/chroma_db
+  embedding_model: ./models/sentence-transformers/all-MiniLM-L6-v2
+logging:
+  level: INFO
+  format: '%(asctime)s | %(levelname)s | %(message)s'

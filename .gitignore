@@ -20,21 +20,13 @@ __pycache__/
 *.pyd
 
 # =========================
-# Tests (本地测试目录，不进仓库)
-# =========================
-app/tests/
-
-# =========================
 # Databases / Local runtime data
 # =========================
 *.db
 *.sqlite
 *.sqlite3
-sqlite_db/
-
-memoria.db
-memoria.db-*
-chroma_db/
+data/sqlite_db/
+data/chroma_db/
 
 # =========================
 # ML / Model artifacts
@@ -45,14 +37,10 @@ models/
 # Logs
 # =========================
 *.log
+test_*.log
+tests/
 
 # =========================
 # OS
 # =========================
 .DS_Store
-
-
-# =========================
-# Scripts 
-# =========================
-run_all_tests.sh
