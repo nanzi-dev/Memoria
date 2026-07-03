@@ -196,7 +196,34 @@ CREATE TABLE IF NOT EXISTS session (
     player_name     TEXT NOT NULL,
     created_at      TEXT,
     ended_at        TEXT,           -- 会话结束时间
-    status          TEXT DEFAULT 'active'  -- active / ended
+    status          TEXT DEFAULT 'active',  -- active / ended
+    
+    -- 多角色会话标识
+    is_multi_character INTEGER DEFAULT 0  -- 0=单角色, 1=多角色群聊
+);
+
+-- =========================
+-- 多角色会话参与者表
+-- =========================
+CREATE TABLE IF NOT EXISTS multi_session_participant (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    
+    session_id      TEXT NOT NULL,
+    character_id    TEXT NOT NULL,
+    
+    -- 参与配置
+    join_order      INTEGER DEFAULT 0,      -- 加入顺序
+    speak_frequency REAL DEFAULT 1.0,       -- 发言频率权重（0.0~2.0）
+    is_active       INTEGER DEFAULT 1,      -- 是否活跃（可以临时移除角色）
+    
+    -- 统计信息
+    message_count   INTEGER DEFAULT 0,      -- 该角色的发言次数
+    
+    created_at      TEXT,
+    last_spoke_at   TEXT,                   -- 最后发言时间
+    
+    FOREIGN KEY (session_id) REFERENCES session(session_id),
+    UNIQUE(session_id, character_id)
 );
 
 -- =========================
@@ -206,9 +233,13 @@ CREATE TABLE IF NOT EXISTS short_term_message (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
 
     session_id      TEXT NOT NULL,
-    role            TEXT NOT NULL,   -- user / assistant
+    role            TEXT NOT NULL,          -- user / assistant
     content         TEXT NOT NULL,
-
+    
+    -- 多角色会话扩展
+    character_id    TEXT,                   -- 发言角色ID（多角色会话时必填）
+    character_name  TEXT,                   -- 发言角色显示名称
+    
     created_at      TEXT
 );
 
@@ -237,8 +268,17 @@ CREATE TABLE IF NOT EXISTS session_summary (
 CREATE INDEX IF NOT EXISTS idx_session_lookup
 ON session(character_id, player_id, created_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_session_multi
+ON session(is_multi_character, player_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_multi_participant
+ON multi_session_participant(session_id, is_active);
+
 CREATE INDEX IF NOT EXISTS idx_message_session
 ON short_term_message(session_id, id ASC);
+
+CREATE INDEX IF NOT EXISTS idx_message_character
+ON short_term_message(session_id, character_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_fact_lookup
 ON long_term_fact(character_id, player_id, importance DESC, last_referenced DESC);
@@ -1182,3 +1222,287 @@ def update_relationship_affinity(
 
 
  
+
+
+# =========================
+# 多角色会话管理
+# =========================
+
+def create_multi_character_session(
+    session_id: str,
+    player_id: str,
+    player_name: str,
+    character_ids: list[str],
+    speak_frequencies: dict[str, float] = None
+) -> bool:
+    """
+    创建多角色群聊会话
+    
+    Args:
+        session_id: 会话 ID
+        player_id: 玩家 ID
+        player_name: 玩家名称
+        character_ids: 参与角色ID列表
+        speak_frequencies: 角色发言频率配置 {character_id: frequency}
+    
+    Returns:
+        bool: 是否创建成功
+    """
+    if not character_ids:
+        logger.error("多角色会话必须至少包含一个角色")
+        return False
+    
+    speak_frequencies = speak_frequencies or {}
+    
+    try:
+        with get_conn() as conn:
+            # 创建会话（使用第一个角色作为主角色）
+            conn.execute(
+                """
+                INSERT INTO session
+                (session_id, character_id, player_id, player_name, created_at, status, is_multi_character)
+                VALUES (?, ?, ?, ?, ?, 'active', 1)
+                """,
+                (session_id, character_ids[0], player_id, player_name, _now()),
+            )
+            
+            # 添加参与者
+            for idx, char_id in enumerate(character_ids):
+                frequency = speak_frequencies.get(char_id, 1.0)
+                conn.execute(
+                    """
+                    INSERT INTO multi_session_participant
+                    (session_id, character_id, join_order, speak_frequency, is_active, created_at)
+                    VALUES (?, ?, ?, ?, 1, ?)
+                    """,
+                    (session_id, char_id, idx, frequency, _now()),
+                )
+        
+        logger.info(f"多角色会话已创建: {session_id}, 参与角色: {character_ids}")
+        return True
+    
+    except Exception as e:
+        logger.error(f"创建多角色会话失败: {e}")
+        return False
+
+
+def get_session_participants(session_id: str, only_active: bool = True) -> list[dict]:
+    """
+    获取会话参与者列表
+    
+    Args:
+        session_id: 会话 ID
+        only_active: 是否仅返回活跃参与者
+    
+    Returns:
+        list[dict]: 参与者信息列表
+    """
+    with get_conn() as conn:
+        query = """
+            SELECT p.*, c.name, c.display_name
+            FROM multi_session_participant p
+            LEFT JOIN character_card c ON p.character_id = c.character_id
+            WHERE p.session_id = ?
+        """
+        
+        if only_active:
+            query += " AND p.is_active = 1"
+        
+        query += " ORDER BY p.join_order ASC"
+        
+        rows = conn.execute(query, (session_id,)).fetchall()
+    
+    return [dict(r) for r in rows]
+
+
+def update_participant_speak_time(session_id: str, character_id: str):
+    """
+    更新参与者最后发言时间和发言次数
+    
+    Args:
+        session_id: 会话 ID
+        character_id: 角色 ID
+    """
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE multi_session_participant
+            SET last_spoke_at = ?,
+                message_count = message_count + 1
+            WHERE session_id = ? AND character_id = ?
+            """,
+            (_now(), session_id, character_id),
+        )
+
+
+def append_multi_character_message(
+    session_id: str,
+    role: str,
+    content: str,
+    character_id: str = None,
+    character_name: str = None
+):
+    """
+    添加多角色会话消息
+    
+    Args:
+        session_id: 会话 ID
+        role: 角色类型 (user/assistant)
+        content: 消息内容
+        character_id: 发言角色ID（assistant时必填）
+        character_name: 发言角色显示名称
+    """
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO short_term_message
+            (session_id, role, content, character_id, character_name, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (session_id, role, content, character_id, character_name, _now()),
+        )
+    
+    # 如果是角色发言，更新参与者统计
+    if role == "assistant" and character_id:
+        update_participant_speak_time(session_id, character_id)
+
+
+def get_multi_character_history(
+    session_id: str,
+    limit_messages: int = 20
+) -> list[dict]:
+    """
+    获取多角色会话历史
+    
+    Args:
+        session_id: 会话 ID
+        limit_messages: 最大消息数量
+    
+    Returns:
+        list[dict]: 消息列表，包含 role, content, character_id, character_name
+    """
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT role, content, character_id, character_name, created_at
+            FROM short_term_message
+            WHERE session_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (session_id, limit_messages),
+        ).fetchall()
+    
+    messages = [dict(r) for r in rows]
+    messages.reverse()  # 按时间正序返回
+    return messages
+
+
+def add_participant_to_session(
+    session_id: str,
+    character_id: str,
+    speak_frequency: float = 1.0
+) -> bool:
+    """
+    向现有会话添加新参与者
+    
+    Args:
+        session_id: 会话 ID
+        character_id: 要添加的角色 ID
+        speak_frequency: 发言频率权重
+    
+    Returns:
+        bool: 是否添加成功
+    """
+    try:
+        with get_conn() as conn:
+            # 获取当前最大加入顺序
+            max_order = conn.execute(
+                """
+                SELECT COALESCE(MAX(join_order), -1) as max_order
+                FROM multi_session_participant
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()["max_order"]
+            
+            # 添加新参与者
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO multi_session_participant
+                (session_id, character_id, join_order, speak_frequency, is_active, created_at)
+                VALUES (?, ?, ?, ?, 1, ?)
+                """,
+                (session_id, character_id, max_order + 1, speak_frequency, _now()),
+            )
+        
+        logger.info(f"角色 {character_id} 已加入会话 {session_id}")
+        return True
+    
+    except Exception as e:
+        logger.error(f"添加参与者失败: {e}")
+        return False
+
+
+def remove_participant_from_session(session_id: str, character_id: str) -> bool:
+    """
+    从会话中移除参与者（软删除，标记为不活跃）
+    
+    Args:
+        session_id: 会话 ID
+        character_id: 要移除的角色 ID
+    
+    Returns:
+        bool: 是否移除成功
+    """
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                """
+                UPDATE multi_session_participant
+                SET is_active = 0
+                WHERE session_id = ? AND character_id = ?
+                """,
+                (session_id, character_id),
+            )
+        
+        logger.info(f"角色 {character_id} 已从会话 {session_id} 中移除")
+        return True
+    
+    except Exception as e:
+        logger.error(f"移除参与者失败: {e}")
+        return False
+
+
+def update_participant_frequency(
+    session_id: str,
+    character_id: str,
+    speak_frequency: float
+) -> bool:
+    """
+    更新参与者的发言频率
+    
+    Args:
+        session_id: 会话 ID
+        character_id: 角色 ID
+        speak_frequency: 新的发言频率权重
+    
+    Returns:
+        bool: 是否更新成功
+    """
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                """
+                UPDATE multi_session_participant
+                SET speak_frequency = ?
+                WHERE session_id = ? AND character_id = ?
+                """,
+                (speak_frequency, session_id, character_id),
+            )
+        
+        return True
+    
+    except Exception as e:
+        logger.error(f"更新参与者频率失败: {e}")
+        return False

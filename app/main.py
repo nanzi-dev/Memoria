@@ -25,6 +25,7 @@ from app.api.dialogue import router as dialogue_router
 from app.api.character_admin import router as character_admin_router
 from app.api.event_admin import router as event_admin_router
 from app.api.relationship import router as relationship_router
+from app.api.multi_dialogue import router as multi_dialogue_router
 from app.db.repository import init_db
 
 # =========================
@@ -79,6 +80,7 @@ app = FastAPI(
 # 路由注册
 # =========================
 app.include_router(dialogue_router, prefix = "/api/v1")
+app.include_router(multi_dialogue_router)  # 已包含 /api/v1 前缀
 app.include_router(character_admin_router, prefix = "/api/v1")
 app.include_router(event_admin_router, prefix="/api/v1")
 app.include_router(relationship_router, prefix = "/api/v1")

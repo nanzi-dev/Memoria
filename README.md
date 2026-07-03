@@ -18,6 +18,7 @@
   - [角色卡管理 API](#角色卡管理-api)
   - [事件管理 API](#事件管理-api)
   - [角色关系 API](#角色关系-api)
+  - [多角色对话 API](#多角色对话-api)
 - [数据库结构](#-数据库结构)
 - [角色卡开发指南](#-角色卡开发指南)
 - [高级功能](#-高级功能)
@@ -45,6 +46,7 @@
 - **RAG 向量检索**：基于语义相似度智能召回相关记忆，提升召回精准度
 - **记忆萃取引擎**：使用 AI 从对话中智能提取关键信息并评估重要性
 - **自动摘要生成**：会话结束时自动生成对话摘要
+- **向量存储同步**：长期记忆自动同步到向量数据库，支持语义检索
 
 ### 💖 关系与情感追踪
 - **好感度系统**：根据对话内容动态调整角色对玩家的好感度（-100 ~ 100）
@@ -52,6 +54,14 @@
 - **情绪状态**：实时跟踪角色当前情绪，影响对话表现和反应
 - **角色关系网络**：支持角色间关系定义（朋友、敌人、家人、师徒等）
 - **关系可视化**：提供关系网络查询 API，支持关系图谱展示
+
+### 👥 多角色对话系统（新功能）
+- **群聊模式**：支持 2-5 个 NPC 同时参与对话
+- **讨论模式**：🎉 **角色可以连续发言**，每轮最多 3 个角色回应，实现真实的群体讨论
+- **智能发言策略**：5 种策略（轮询、权重、智能、触发、混合）
+- **角色间互动**：角色会相互回应和讨论
+- **多角色记忆**：个人记忆、角色间记忆、群体记忆三层管理
+- **动态参与者管理**：支持运行时添加/移除角色
 
 ### 🎯 事件系统（未实装）
 - **多类型触发条件**：好感度阈值、信任度阈值、关键词匹配、对话次数、时间、情绪、复合条件
@@ -828,6 +838,418 @@ Content-Type: application/json
 ]
 ```
 
+---
+
+### 多角色对话 API
+
+多角色对话系统支持2个或更多NPC同时参与群聊，提供自然的多角色互动体验。
+
+#### 1. 开始多角色会话
+```http
+POST /api/v1/multi-dialogue/session/start
+Content-Type: application/json
+
+{
+  "player_id": "player_001",
+  "player_name": "旅行者",
+  "character_ids": ["npc_luo_xiaohei", "npc_wuxian"],
+  "speak_frequencies": {
+    "npc_luo_xiaohei": 1.2,
+    "npc_wuxian": 0.8
+  },
+  "strategy_type": "hybrid"
+}
+```
+
+**参数说明：**
+- `player_id`: 玩家ID
+- `player_name`: 玩家显示名称
+- `character_ids`: 参与角色ID列表（至少2个）
+- `speak_frequencies` (可选): 角色发言频率配置，默认1.0
+- `strategy_type` (可选): 发言策略类型
+  - `round_robin`: 轮询策略
+  - `weighted`: 权重随机
+  - `smart`: 智能选择
+  - `trigger`: 触发式
+  - `hybrid`: 混合策略（推荐，默认）
+
+**响应示例：**
+```json
+{
+  "session_id": "multi-session-uuid",
+  "strategy_type": "hybrid",
+  "opening": {
+    "character_id": "npc_luo_xiaohei",
+    "character_name": "小黑",
+    "dialogue": "[好奇地看着周围]哇，这里好多人呀！",
+    "action": "greeting_curious",
+    "current_affinity": 0,
+    "current_mood": "好奇"
+  }
+}
+```
+
+#### 2. 发送对话消息
+```http
+POST /api/v1/multi-dialogue/turn
+Content-Type: application/json
+
+{
+  "session_id": "multi-session-uuid",
+  "player_message": "大家好！",
+  "strategy_type": "hybrid"
+}
+```
+
+**响应示例：**
+```json
+{
+  "character_id": "npc_wuxian",
+  "character_name": "无限",
+  "dialogue": "[微笑]你好，欢迎。",
+  "action": "greeting_polite",
+  "affinity_delta": 1,
+  "current_affinity": 1,
+  "current_mood": "平静"
+}
+```
+
+#### 3. 触发角色间互动
+```http
+POST /api/v1/multi-dialogue/interaction/trigger
+Content-Type: application/json
+
+{
+  "session_id": "multi-session-uuid",
+  "trigger_character_id": "npc_luo_xiaohei"
+}
+```
+
+**功能说明：**
+让角色主动发言，可用于：
+- 角色间的自发对话
+- 场景氛围营造
+- 推进剧情发展
+
+留空`trigger_character_id`则自动选择一个角色。
+
+**响应示例：**
+```json
+{
+  "character_id": "npc_luo_xiaohei",
+  "character_name": "小黑",
+  "dialogue": "[转向无限]师傅，我们接下来去哪里？",
+  "action": "curious_talk"
+}
+```
+
+#### 4. 获取会话信息
+```http
+GET /api/v1/multi-dialogue/session/{session_id}
+```
+
+**响应示例：**
+```json
+{
+  "session_id": "multi-session-uuid",
+  "player_id": "player_001",
+  "player_name": "旅行者",
+  "created_at": "2026-07-02T10:00:00Z",
+  "status": "active",
+  "participants": [
+    {
+      "character_id": "npc_luo_xiaohei",
+      "name": "罗小黑",
+      "display_name": "小黑",
+      "join_order": 0,
+      "speak_frequency": 1.2,
+      "is_active": true,
+      "message_count": 5,
+      "last_spoke_at": "2026-07-02T10:15:00Z"
+    },
+    {
+      "character_id": "npc_wuxian",
+      "name": "无限",
+      "display_name": "无限",
+      "join_order": 1,
+      "speak_frequency": 0.8,
+      "is_active": true,
+      "message_count": 3,
+      "last_spoke_at": "2026-07-02T10:12:00Z"
+    }
+  ]
+}
+```
+
+#### 5. 获取对话历史
+```http
+GET /api/v1/multi-dialogue/history/{session_id}?limit=50
+```
+
+**响应示例：**
+```json
+{
+  "messages": [
+    {
+      "role": "assistant",
+      "content": "[好奇地看着周围]哇，这里好多人呀！",
+      "character_id": "npc_luo_xiaohei",
+      "character_name": "小黑",
+      "created_at": "2026-07-02T10:00:00Z"
+    },
+    {
+      "role": "user",
+      "content": "大家好！",
+      "character_id": null,
+      "character_name": null,
+      "created_at": "2026-07-02T10:01:00Z"
+    },
+    {
+      "role": "assistant",
+      "content": "[微笑]你好，欢迎。",
+      "character_id": "npc_wuxian",
+      "character_name": "无限",
+      "created_at": "2026-07-02T10:02:00Z"
+    }
+  ],
+  "session_info": {
+    "session_id": "multi-session-uuid",
+    "player_name": "旅行者",
+    "created_at": "2026-07-02T10:00:00Z",
+    "status": "active",
+    "participants": [...]
+  }
+}
+```
+
+#### 6. 管理参与者
+
+**添加参与者：**
+```http
+POST /api/v1/multi-dialogue/participant/add
+Content-Type: application/json
+
+{
+  "session_id": "multi-session-uuid",
+  "character_id": "npc_luye",
+  "speak_frequency": 1.0
+}
+```
+
+**移除参与者：**
+```http
+POST /api/v1/multi-dialogue/participant/remove?session_id=xxx&character_id=yyy
+```
+
+**更新参与者配置：**
+```http
+PUT /api/v1/multi-dialogue/participant/update
+Content-Type: application/json
+
+{
+  "session_id": "multi-session-uuid",
+  "character_id": "npc_luo_xiaohei",
+  "speak_frequency": 1.5
+}
+```
+
+#### 7. 结束会话
+```http
+POST /api/v1/multi-dialogue/session/end?session_id=xxx
+```
+
+---
+
+## 🎭 多角色对话系统
+
+### 系统概述
+
+多角色对话系统是Memoria的高级功能，支持2个或更多NPC同时参与对话，提供真实的群聊体验。
+
+### 核心特性
+
+#### 1. 智能发言策略
+
+系统提供5种发言策略，可根据场景选择：
+
+**轮询策略（Round Robin）**
+- 按加入顺序轮流发言
+- 适合规整的对话流程
+- 确保每个角色都有机会发言
+
+**权重随机策略（Weighted Random）**
+- 根据`speak_frequency`权重随机选择
+- 控制角色活跃度
+- 保持一定随机性
+
+**智能选择策略（Smart Selection）**
+- 综合考虑多种因素：
+  - 关键词匹配（被提及的角色优先）
+  - 角色关系（与上一发言者的关系）
+  - 发言频率配置
+  - 发言均衡性（避免某角色过度发言）
+  - 情绪状态匹配
+- 最自然的对话流
+
+**触发策略（Trigger Based）**
+- 基于关键词强制触发
+- 适合剧情关键节点
+- 无触发时回退到其他策略
+
+**混合策略（Hybrid）**
+- 结合以上策略的优点
+- 推荐作为默认策略
+- 平衡自然度和可控性
+
+#### 2. 角色间关系集成
+
+多角色对话自动集成角色关系网络：
+- 系统提示中包含角色间关系信息
+- 角色会根据关系做出相应反应
+- 亲密关系的角色更可能互动
+
+**示例：**
+```
+场景中还有以下角色：
+- 无限（猫妖管理者） - mentor: 无限是小黑的师傅
+- 旅行者（玩家）
+```
+
+#### 3. 多角色记忆系统
+
+每个角色维护独立的记忆，同时支持：
+
+**个人记忆**
+- 对玩家的了解
+- 个人经历和感受
+
+**角色间印象**
+- 对其他角色的观察
+- 关系变化记录
+
+**群体记忆**
+- 共同经历的事件
+- 群体决定和结论
+
+#### 4. 上下文管理
+
+系统智能构建多角色上下文：
+- 对话历史格式化（区分发言者）
+- 其他角色状态可见
+- 角色关系信息注入
+- 长期记忆召回
+
+### 使用场景
+
+#### 场景1：多NPC商店
+
+```python
+# 铁匠铺场景：老板+学徒
+characters = ["npc_blacksmith_garran", "npc_apprentice"]
+session = start_multi_character_session(
+    player_id="player_001",
+    player_name="冒险者",
+    character_ids=characters,
+    speak_frequencies={
+        "npc_blacksmith_garran": 1.5,  # 老板更主动
+        "npc_apprentice": 0.7           # 学徒相对害羞
+    },
+    strategy_type="smart"
+)
+```
+
+#### 场景2：剧情对话
+
+```python
+# 师徒对话场景
+characters = ["npc_luo_xiaohei", "npc_wuxian"]
+session = start_multi_character_session(
+    player_id="player_001",
+    player_name="旅行者",
+    character_ids=characters,
+    strategy_type="hybrid"
+)
+
+# 触发角色互动
+interaction = trigger_interaction(session_id, trigger_character_id="npc_luo_xiaohei")
+```
+
+#### 场景3：动态群聊
+
+```python
+# 开始时2个角色
+session = start_multi_character_session(...)
+
+# 中途加入新角色
+add_participant(session_id, character_id="npc_luye", speak_frequency=1.0)
+
+# 某角色离开
+remove_participant(session_id, character_id="npc_wuxian")
+```
+
+### 最佳实践
+
+1. **角色数量**
+   - 2-4个角色最佳
+   - 超过5个可能导致对话混乱
+
+2. **发言频率配置**
+   - 主要角色：1.2-1.5
+   - 普通角色：1.0
+   - 次要角色：0.5-0.8
+
+3. **策略选择**
+   - 自然对话：`hybrid` 或 `smart`
+   - 规整流程：`round_robin`
+   - 特殊场景：`trigger`
+
+4. **关系设置**
+   - 提前配置角色间关系
+   - 关系描述要具体明确
+   - 利用关系推动互动
+
+### 技术架构
+
+```
+MultiCharacterOrchestrator
+    ├── SpeakingStrategy (发言策略)
+    ├── PromptBuilder (多角色提示构建)
+    ├── MultiCharacterMemory (记忆系统)
+    └── RelationshipNetwork (关系网络)
+```
+
+### API示例代码
+
+```python
+import requests
+
+# 1. 开始多角色会话
+response = requests.post("http://localhost:8000/api/v1/multi-dialogue/session/start", json={
+    "player_id": "player_001",
+    "player_name": "旅行者",
+    "character_ids": ["npc_luo_xiaohei", "npc_wuxian"],
+    "strategy_type": "hybrid"
+})
+session_id = response.json()["session_id"]
+
+# 2. 玩家发言
+response = requests.post("http://localhost:8000/api/v1/multi-dialogue/turn", json={
+    "session_id": session_id,
+    "player_message": "你们好！"
+})
+print(response.json()["dialogue"])
+
+# 3. 触发角色互动
+response = requests.post("http://localhost:8000/api/v1/multi-dialogue/interaction/trigger", json={
+    "session_id": session_id
+})
+print(response.json()["dialogue"])
+
+# 4. 获取历史
+response = requests.get(f"http://localhost:8000/api/v1/multi-dialogue/history/{session_id}")
+messages = response.json()["messages"]
+```
+
 ## 🎨 角色卡开发指南
 
 ### 角色卡结构
@@ -941,14 +1363,16 @@ conn = psycopg2.connect(configs.database_url)
 
 ### 🚧 待开发功能
 
-#### 多角色对话
-目前系统仅支持单角色与玩家对话，计划扩展为多角色群聊模式。
+#### ~~多角色对话~~ ✅ 已完成
+多角色群聊系统已实现，支持2个或更多NPC同时参与对话。详见 [多角色对话系统](#多角色对话系统) 章节。
 
-**需要实现：**
-- 角色轮流发言机制
-- 角色间互动逻辑（基于关系网络）
-- 多角色上下文管理
-- 发言顺序和频率控制
+**已实现功能：**
+- ✅ 多角色会话管理
+- ✅ 5种发言策略（轮询、权重、智能、触发、混合）
+- ✅ 角色间关系集成
+- ✅ 多角色记忆系统
+- ✅ 群体事件记忆
+- ✅ 完整的 REST API
 
 #### 语音集成
 计划集成 TTS（文本转语音）和 STT（语音转文本）。

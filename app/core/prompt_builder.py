@@ -229,3 +229,219 @@ def build_opening_line_prompt(card: CharacterCard, runtime_state: dict, player_n
         f"请你作为{card.meta.name}，根据当前好感度（{runtime_state.get('affinity', 0)}）和心情，"
         f"主动说一句开场白打招呼，不需要玩家先说话。仍然按要求只输出 JSON。"
     )
+
+
+# =========================
+# 多角色场景 Prompt 构建
+# =========================
+
+def build_multi_character_system_prompt(
+    card: CharacterCard,
+    runtime_state: dict,
+    player_name: str,
+    other_characters: list[dict],
+    character_relationships: dict = None,
+    past_summaries: list[str] = None,
+    is_opening: bool = False,
+    is_interaction: bool = False
+) -> str:
+    """
+    构建多角色场景的系统提示
+    
+    Args:
+        card: 当前发言角色卡
+        runtime_state: 角色状态
+        player_name: 玩家名称
+        other_characters: 其他参与角色信息列表 
+            [{"character_id": str, "name": str, "display_name": str, "occupation": str}, ...]
+        character_relationships: 角色关系字典 {f"{char_a}_{char_b}": relationship}
+        past_summaries: 历史会话摘要
+        is_opening: 是否是开场白
+        is_interaction: 是否是角色间互动
+    
+    Returns:
+        str: 多角色场景的系统提示
+    """
+    identity = card.identity
+    personality = card.personality
+    speech_style = card.speech_style
+    mood_values = card.runtime_state_schema.current_mood.emotions
+    
+    # runtime 状态提取
+    known_facts = _safe_get_runtime(runtime_state, "known_player_facts", [])
+    affinity = _safe_get_runtime(runtime_state, "affection_level", 0)
+    trust = _safe_get_runtime(runtime_state, "trust_level", 0)
+    current_mood = _safe_get_runtime(runtime_state, "current_mood", card.runtime_state_schema.current_mood.default_mood)
+    
+    # 处理known facts
+    if isinstance(known_facts, dict):
+        known_facts_str = "; ".join([f"{k}: {v}" for k, v in known_facts.items()])
+    elif isinstance(known_facts, list):
+        known_facts_str = "\n".join([f"- {fact}" for fact in known_facts[:10]])
+    else:
+        known_facts_str = str(known_facts) if known_facts else "暂无"
+    
+    # 历史摘要
+    past_summaries_str = "无历史互动记录"
+    if past_summaries and len(past_summaries) > 0:
+        past_summaries_str = "\n".join([f"- {s}" for s in past_summaries])
+    
+    # 构建其他角色信息
+    other_chars_info = []
+    character_relationships = character_relationships or {}
+    current_char_id = getattr(card, 'character_id', None)
+    
+    for other in other_characters:
+        other_id = other.get("character_id")
+        other_name = other.get("display_name") or other.get("name")
+        other_occupation = other.get("occupation", "")
+        
+        char_desc = f"{other_name}"
+        if other_occupation:
+            char_desc += f"（{other_occupation}）"
+        
+        # 查找关系
+        if current_char_id:
+            rel_key = f"{current_char_id}_{other_id}"
+            rel_key_rev = f"{other_id}_{current_char_id}"
+            relationship = character_relationships.get(rel_key) or character_relationships.get(rel_key_rev)
+            
+            if relationship:
+                rel_type = relationship.get("relationship_type", "")
+                rel_desc = relationship.get("description", "")
+                if rel_type:
+                    char_desc += f" - {rel_type}"
+                if rel_desc:
+                    char_desc += f": {rel_desc}"
+        
+        other_chars_info.append(f"- {char_desc}")
+    
+    other_chars_str = "\n".join(other_chars_info) if other_chars_info else "- （暂无其他角色）"
+    
+    # 构建提示文本
+    prompt_parts = [
+        f"# 角色设定",
+        f"你正在扮演：{card.meta.display_name or card.meta.name}",
+        f"",
+        f"## 身份背景",
+        f"- 年龄：{identity.age}",
+        f"- 性别：{identity.gender}",
+        f"- 职业：{identity.occupation}",
+        f"- 外貌：{identity.appearance}",
+        f"- 简介：{card.background.story_bio}",
+        f"",
+        f"## 性格特质",
+        f"核心特质：{_join(personality.core_traits)}",
+        f"价值观：{_join(personality.values_and_beliefs)}",
+        f"恐惧与禁忌：{_join(personality.fears_and_tabooes)}",
+        f"",
+        f"## 语言风格",
+        f"- 语气：{speech_style.tone_register}",
+        f"- 用词：{speech_style.vocabulary_notes}",
+        f"- 句式：{_join(speech_style.sentence_patterns)}",
+    ]
+    
+    # 口头禅
+    if hasattr(speech_style, "catchphrases") and speech_style.catchphrases:
+        prompt_parts.append(f"- 口头禅：{_join(speech_style.catchphrases)}")
+    
+    prompt_parts.extend([
+        f"",
+        f"# 当前场景",
+        f"这是一个多角色群聊场景，除了你之外，还有以下角色在场：",
+        f"",
+        other_chars_str,
+        f"- {player_name}（玩家）",
+        f"",
+        f"# 当前状态",
+        f"- 当前情绪：{current_mood}",
+        f"- 对玩家的好感度：{affinity}/100",
+        f"- 信任度：{trust}/100",
+        f"",
+    ])
+    
+    # 长期记忆
+    if known_facts_str and known_facts_str != "暂无":
+        prompt_parts.extend([
+            "# 你对玩家的了解",
+            known_facts_str,
+            ""
+        ])
+    
+    # 历史摘要
+    if past_summaries_str != "无历史互动记录":
+        prompt_parts.extend([
+            "# 历史互动记录",
+            past_summaries_str,
+            ""
+        ])
+    
+    # 行为指引
+    prompt_parts.extend([
+        "# 行为指引",
+        "1. 严格按照角色设定进行对话，保持性格一致性",
+        "2. 注意你与其他角色的关系，在对话中自然体现",
+        "3. 可以对其他角色的发言做出反应，形成自然的群聊氛围",
+        "4. 使用符合角色的语言风格和表达方式",
+        "5. 根据当前情绪调整对话语气",
+        "6. 禁止提及'我是AI'、'语言模型'等任何现实身份",
+        "7. 必须保持沉浸式对话，不跳出角色",
+        ""
+    ])
+    
+    # 特殊模式提示
+    if is_opening:
+        prompt_parts.append("（请生成开场白，欢迎玩家并介绍当前场景）")
+    elif is_interaction:
+        prompt_parts.append("（你现在可以主动发言，或对之前的对话做出评论）")
+    
+    prompt_parts.extend([
+        "",
+        "# 输出格式",
+        "⚠️ 必须且仅输出合法的 JSON 对象（不使用 Markdown 代码块）",
+        "⚠️ 禁止在 JSON 前后添加任何解释文字",
+        "",
+        "JSON 格式：",
+        '{',
+        '  "dialogue": "你的对话内容（可包含动作描述，用[]括起来）",',
+        '  "action": "动作标签",',
+        '  "affinity_delta": 好感度变化(-10到10),',
+        '  "mood_after": "对话后的情绪",',
+        '  "memory_worth_keeping": "值得记住的信息（可选，无则填null）"',
+        '}',
+        "",
+        f"可用情绪选项：{_join(mood_values)}",
+        "",
+        "⚠️ 直接输出 JSON 对象，前后不要有任何其他内容！"
+    ])
+    
+    return "\n".join(prompt_parts)
+
+
+def build_multi_character_opening_prompt(
+    card: CharacterCard,
+    runtime_state: dict,
+    player_name: str,
+    other_character_names: list[str]
+) -> str:
+    """
+    构建多角色场景的开场白提示（追加到system prompt后）
+    
+    Args:
+        card: 角色卡
+        runtime_state: 角色状态
+        player_name: 玩家名称
+        other_character_names: 其他角色名称列表
+    
+    Returns:
+        str: 开场白提示
+    """
+    affinity = _safe_get_runtime(runtime_state, "affection_level", 0)
+    other_names = "、".join(other_character_names) if other_character_names else "其他角色"
+    
+    return (
+        f"\n【特别说明】这是与玩家'{player_name}'的多角色群聊场景，"
+        f"场景中还有：{other_names}。"
+        f"请你作为{card.meta.name}，根据当前好感度（{affinity}）和心情，"
+        f"主动说一句开场白，欢迎玩家或介绍场景。仍然按要求只输出 JSON。"
+    )
