@@ -166,6 +166,28 @@ sqlite3 data/sqlite_db/memoria.db \
 
 ---
 
+
+
+### Q: 如何调整日志级别
+
+启动时设置环境变量：`LOG_LEVEL=DEBUG uvicorn memoria.main:app`
+
+运行时动态调整：`curl -X POST http://localhost:8000/admin/log-level?level=DEBUG`
+
+可选级别：DEBUG / INFO / WARNING / ERROR
+
+### Q: API 返回 429 Too Many Requests
+
+触发了 per-player 速率限制（60次/60秒）。等待窗口重置后重试。可通过 `X-Player-ID` 请求头区分不同玩家。
+
+### Q: 启动时出现配置警告
+
+系统会检查 `LLM_API_KEY` 等必需配置。警告不影响服务启动，但对话功能需要有效 API Key 才能正常工作。
+
+### Q: LLM 调用偶发失败
+
+系统内置 3 次指数退避重试（1s → 2s → 4s），大部分临时网络故障会自动恢复。持续失败需检查 API Key 和网络连接。
+
 ## 调试技巧
 
 ### 1. 启用详细日志

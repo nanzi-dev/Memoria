@@ -10,6 +10,7 @@
 .vscode/
 .codex/
 .agents/
+.github/
 
 # =========================
 # Python cache

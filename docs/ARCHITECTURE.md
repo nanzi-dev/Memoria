@@ -20,10 +20,10 @@ Memoria/
 │   ├── core/                   # 核心业务逻辑
 │   │   ├── config.py           # 全局配置管理 (Pydantic Settings + .env)
 │   │   ├── orchestrator.py     # 单角色对话编排核心
-│   │   ├── llm_client.py       # LLM 调用适配层 (OpenAI SDK)
+│   │   ├── llm_client.py       # LLM 调用适配层（懒加载 + 指数退避重试） (OpenAI SDK)
 │   │   ├── memory_extractor.py # 记忆萃取模块
 │   │   ├── prompt_builder.py   # Prompt 组装器
-│   │   ├── vector_memory.py    # 向量记忆管理 (ChromaDB)
+│   │   ├── vector_memory.py    # 向量记忆管理（懒加载） (ChromaDB)
 │   │   ├── character_loader.py # 角色卡加载与 LRU 缓存
 │   │   ├── character_schema.py # 角色卡 Pydantic 数据模型
 │   │   ├── event_detector.py   # 事件检测引擎
@@ -52,6 +52,14 @@ Memoria/
 ```
 
 ---
+
+## 系统管理端点
+
+- `GET /health` — 存活检查，返回 `{"status": "ok", "version": "0.4.0"}`
+- `GET /ready` — 数据库就绪检查，失败返回 503
+- `POST /admin/log-level?level=DEBUG` — 动态调整日志级别
+
+API 路由通过 per-player 速率限制中间件保护（60 请求 / 60 秒窗口，`X-Player-ID` 头识别）。
 
 ## 核心架构模式
 
@@ -512,6 +520,7 @@ Memoria 使用 SQLite (WAL 模式)，共 12 张表。
 ```
 
 ---
+
 
 ## 技术栈
 

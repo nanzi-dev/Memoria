@@ -10,9 +10,9 @@
 import logging
 import os
 from typing import List, Optional
-import chromadb
-from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
+# import chromadb  # lazy
+# from chromadb.config import Settings  # lazy
+# from sentence_transformers import SentenceTransformer  # lazy
 
 from memoria.core.config import configs
 
@@ -32,7 +32,10 @@ class VectorMemoryStore:
     """向量记忆存储管理类"""
     
     def __init__(self):
-        """初始化向量数据库和嵌入模型"""
+        """初始化向量数据库和嵌入模型(懒加载)"""
+        import chromadb
+        from chromadb.config import Settings
+        from sentence_transformers import SentenceTransformer
         try:
             # 初始化 ChromaDB 客户端（持久化模式）
             # 注意：必须使用 PersistentClient 而不是 Client

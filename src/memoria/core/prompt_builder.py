@@ -406,6 +406,7 @@ def build_multi_character_system_prompt(
         '  "dialogue": "你的对话内容（可包含动作描述，用[]括起来）",',
         '  "action": "动作标签",',
         '  "affinity_delta": 好感度变化(-10到10),',
+        '  "trust_delta": 信任度变化(-10到10),',
         '  "mood_after": "对话后的情绪",',
         '  "memory_worth_keeping": "值得记住的信息（可选，无则填null）"',
         '}',

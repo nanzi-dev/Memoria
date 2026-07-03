@@ -49,18 +49,18 @@
 
 **目标：** 提升系统健壮性，为生产环境做准备。
 
-**当前进度：** 测试覆盖从 61 → 106 完成；记忆去重已上线。
+**当前进度：** 测试覆盖 61→128；记忆去重、重试、限流、健康检查、懒加载、CI/CD 已上线。
 
 - [x] 单元测试覆盖（当前 106 tests，覆盖 schema/repository/orchestrator/events/API models）
-- [ ] 单元测试覆盖持续扩展（目标 ≥ 200）
+- [x] 单元测试覆盖持续扩展（当前 128 tests，新增 test_memory_extractor.py: memory_extractor/prompt_builder/llm_client/config/character_loader/dedup_helpers）
 - [ ] 数据库迁移到 PostgreSQL（保留 SQLite 开发模式）
-- [ ] LLM 调用重试机制（指数退避 + fallback 模型）
-- [ ] 请求速率限制（per-player rate limiting）
-- [ ] 结构化日志 + 日志级别动态调整
-- [ ] 健康检查端点 (`/health`, `/ready`)
-- [ ] 配置文件校验（启动时检查必需配置项）
-- [ ] 内存使用优化（向量模型懒加载、会话缓存过期策略）
-- [ ] CI/CD 流水线（GitHub Actions 自动测试）
+- [x] LLM 调用重试机制（指数退避 3 次，base_delay=1s，max 7s）
+- [x] 请求速率限制（per-player，60s 窗口 60 次，X-Player-ID 头识别）
+- [x] 结构化日志（LOG_LEVEL 环境变量控制）+ 动态调整（POST /admin/log-level）
+- [x] 健康检查端点（`/health` 存活 + `/ready` 数据库就绪）
+- [x] 配置文件校验（启动时检查 LLM_API_KEY 等必需项，警告而非崩溃）
+- [x] 内存使用优化（LLM Client 懒加载 + vector_memory 懒加载，首次调用时初始化）
+- [x] CI/CD 流水线（GitHub Actions: Python 3.10/3.11/3.12 自动测试）
 
 ### 第六阶段 - Web 前端
 
@@ -130,7 +130,9 @@
 | `tests/test_orchestrator.py` | 6 | _clip/_safe_float, HistoryFormatting, LoadRelationships, CharInteraction |
 | `tests/test_events.py` | 11 | EventExecutor 全部 8 种效果类型, EventDetector 边界 |
 | `tests/test_api_models.py` | 11 | Dialogue(3), CharacterAdmin(2), EventAdmin(2), Relationship(2), MultiDialogue(2) |
-| **合计** | **106** | |
+| `tests/test_memory_extractor.py` | 22 | MemoryExtractor, PromptBuilder, Config, LLMClient, CharacterLoader, DedupHelpers |
+| `tests/test_system.py` | 13 | 健康检查, 配置校验, 速率限制, 日志级别, 懒加载 |
+| **合计** | **141** | |
 
 ## 版本规划
 

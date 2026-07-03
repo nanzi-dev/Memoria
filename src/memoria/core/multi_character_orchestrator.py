@@ -450,6 +450,13 @@ class MultiCharacterOrchestrator:
             100
         )
         
+        trust_delta = _clip(_safe_float(result.get("trust_delta", 0)), -10, 10)
+        new_trust = _clip(
+            runtime_state.get("trust_level", 0) + trust_delta,
+            0,
+            100
+        )
+        
         mood_after = result.get("mood_after") or runtime_state.get("current_mood", "neutral")
         
         # 持久化状态
@@ -457,7 +464,7 @@ class MultiCharacterOrchestrator:
             character_id,
             self.player_id,
             new_affinity,
-            runtime_state.get("trust_level", 0),
+            new_trust,
             mood_after
         )
         

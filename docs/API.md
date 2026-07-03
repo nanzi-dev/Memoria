@@ -10,6 +10,7 @@
   - [事件管理 API](#事件管理-api)
   - [角色关系 API](#角色关系-api)
   - [多角色对话 API](#多角色对话-api)
+  - [系统管理 API](#系统管理-api)
   - [发言策略说明](#发言策略说明)
 ---
 
@@ -871,6 +872,102 @@ POST /api/v1/multi-dialogue/session/end?session_id=xxx
 
 ---
 
+
+## 系统管理 API
+
+---
+
+### 1. 存活检查（Health Check）
+
+用于检测服务是否正常运行，常用于 Kubernetes / Docker 健康探针。
+
+```http
+GET /health
+```
+
+**响应示例：**
+```json
+{
+  "status": "ok",
+  "version": "0.4.0"
+}
+```
+
+---
+
+### 2. 就绪检查（Readiness Check）
+
+用于检查服务依赖是否已就绪（如数据库连接、缓存服务等）。当依赖不可用时返回 503。
+
+```http
+GET /ready
+```
+
+**响应示例（正常）：**
+```json
+{
+  "status": "ready",
+  "database": "ok"
+}
+```
+
+**响应示例（不可用）：**
+```json
+{
+  "status": "not_ready",
+  "database": "down"
+}
+```
+
+---
+
+### 3. 动态调整日志级别
+
+无需重启服务即可动态修改全局日志级别。
+
+```http
+POST /admin/log-level?level=DEBUG
+```
+
+**查询参数：**
+
+| 参数  | 必需 | 说明                     |
+|------|------|--------------------------|
+| level | 是   | DEBUG / INFO / WARNING / ERROR |
+
+**响应示例：**
+```json
+{
+  "log_level": "DEBUG"
+}
+```
+
+---
+
+### 4. 速率限制（Rate Limiting）
+
+所有 `/api/*` 路由均受基于玩家的速率限制保护。
+
+```http
+X-Player-ID: player_001
+```
+
+| 项目       | 值                    |
+|------------|-----------------------|
+| 窗口大小   | 60 秒                 |
+| 最大请求数 | 60 次 / 窗口          |
+| 识别方式   | X-Player-ID 请求头    |
+| 兜底策略   | 未提供则使用客户端 IP |
+| 超限响应码 | HTTP 429             |
+
+**超限响应示例：**
+```json
+{
+  "error": "请求过于频繁，请稍后再试",
+  "retry_after": 60.0
+}
+```
+
 ## 发言策略说明
 
 ### 策略对比
@@ -921,3 +1018,6 @@ POST /api/v1/multi-dialogue/session/end?session_id=xxx
 | `CHANGE_MOOD` | 改变情绪 |
 | `NOTIFY_PLAYER` | 通知玩家 |
 | `MODIFY_RELATIONSHIP` | 修改角色间关系 |
+
+---
+

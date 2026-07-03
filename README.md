@@ -113,9 +113,13 @@ Memoria/
 │   │   └── repository.py       # SQLite 数据库操作
 │   └── main.py                 # 应用入口
 ├── tests/                      # 测试文件
-│   ├── test_01_core_modules.py # 核心模块测试
-│   ├── test_02_api_endpoints.py# API 端点测试
-│   └── test_03_integration.py  # 集成测试
+│   ├── test_core.py             # 核心模块测试（61 tests）
+│   ├── test_repository.py       # 数据库层测试（17 tests）
+│   ├── test_events.py           # 事件系统测试（11 tests）
+│   ├── test_orchestrator.py     # 编排器测试（6 tests）
+│   ├── test_api_models.py       # API 模型测试（11 tests）
+│   ├── test_memory_extractor.py # 记忆/提示测试（22 tests）
+│   ├── test_system.py           # 系统级测试（13 tests）
 ├── docs/                       # 项目文档
 │   ├── API.md                  # API 文档
 │   ├── ARCHITECTURE.md         # 系统架构与数据库
@@ -211,8 +215,8 @@ uvicorn memoria.main:app --reload --host 0.0.0.0 --port 8000
 
 | 文档 | 内容 |
 |------|------|
-| [API 文档](docs/API.md) | 完整 REST API 参考，包含对话、角色卡管理、事件管理、角色关系、多角色对话所有端点的请求/响应示例 |
-| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（9张表）、三层记忆架构、角色卡开发规范 |
+| [API 文档](docs/API.md) | 完整 REST API 参考（对话/角色卡/事件/关系/多角色/系统管理），含请求/响应示例 |
+| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（12张表）、三层记忆架构、角色卡开发规范 |
 | [开发路线图](docs/ROADMAP.md) | 已完成功能和未来规划 |
 | [故障排查](docs/FAQ.md) | 常见问题解决方案、调试技巧、性能优化建议 |
 | [贡献指南](docs/CONTRIBUTING.md) | 如何贡献代码、Commit 规范、代码审查标准 |
@@ -256,10 +260,11 @@ pip install -e ".[dev]"
 # 运行所有测试
 PYTHONPATH=src pytest tests/ -v
 
-# 按类别运行
-PYTHONPATH=src pytest tests/test_01_core_modules.py -v   # 核心模块
-PYTHONPATH=src pytest tests/test_02_api_endpoints.py -v  # API 端点
-PYTHONPATH=src pytest tests/test_03_integration.py -v    # 集成测试
+PYTHONPATH=src pytest tests/test_core.py -v              # 核心模块
+PYTHONPATH=src pytest tests/test_repository.py -v      # 数据库层
+PYTHONPATH=src pytest tests/test_events.py -v           # 事件系统
+PYTHONPATH=src pytest tests/test_memory_extractor.py -v # 记忆/提示
+PYTHONPATH=src pytest tests/test_system.py -v           # 系统级（需启动服务）
 ```
 
 ---

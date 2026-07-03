@@ -21,12 +21,18 @@ from memoria.core.config import configs
 logger = logging.getLogger(__name__)
 
 # =========================
-# OpenAI Client（轻量单例）
+# OpenAI Client（懒加载单例）
 # =========================
-_client = OpenAI(
-    base_url = configs.llm_base_url,
-    api_key = configs.llm_api_key.get_secret_value()
-)
+_client = None
+
+def _get_client():
+    global _client
+    if _client is None:
+        _client = OpenAI(
+            base_url=configs.llm_base_url,
+            api_key=configs.llm_api_key.get_secret_value()
+        )
+    return _client
 
 # 轻量任务专用 Client（如果配置了则使用，否则使用主 Client）
 if configs.llm_light_base_url and configs.llm_light_api_key.get_secret_value():
@@ -122,7 +128,7 @@ JSON 结构如下：
 """.strip()
 
     try:
-        response = _client.chat.completions.create(
+        response = _retry_call(_get_client().chat.completions.create, 
             model = model,
             messages = [{"role": "user", "content": fix_prompt}],
             max_tokens = 300,
@@ -158,6 +164,26 @@ def _plain_text_fallback(raw_text: str, default_action: str = "neutral") -> dict
     }
     
 
+
+import time as _time
+
+_MAX_RETRIES = 3
+_BASE_DELAY = 1.0
+
+def _retry_call(fn, *args, **kwargs):
+    last_err = None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:
+            last_err = e
+            if attempt < _MAX_RETRIES - 1:
+                delay = _BASE_DELAY * (2 ** attempt)
+                logger.warning("LLM重试 %d/%d (%.1fs后): %s", attempt + 1, _MAX_RETRIES, delay, e)
+                _time.sleep(delay)
+    raise last_err
+
+
 # =========================
 # 主 Role 调用函数
 # =========================
@@ -181,7 +207,7 @@ def call_role_turn(
     # 1. 主请求
     # =========================
     try:
-        response = _client.chat.completions.create(
+        response = _retry_call(_get_client().chat.completions.create, 
             model = model,
             messages = messages,
             max_tokens = configs.max_output_tokens,
@@ -194,7 +220,7 @@ def call_role_turn(
         # 某些厂商不支持 response_format
         logger.warning("模型不支持 response_format，已降级为普通调用")
         
-        response = _client.chat.completions.create(
+        response = _retry_call(_get_client().chat.completions.create, 
             model = model,
             messages = messages,
             max_tokens = configs.max_output_tokens,
@@ -235,7 +261,7 @@ def call_light_task(prompt: str) -> str:
     logger.debug(f"Calling light model: {configs.light_model}")
     
     try:
-        response = _light_client.chat.completions.create(
+        response = _light_retry_call(_get_client().chat.completions.create, 
             model = configs.light_model,
             messages = [{"role": "user", "content": prompt}],
             max_tokens = 800,
