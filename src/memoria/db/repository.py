@@ -1364,6 +1364,19 @@ def list_character_relationships(character_id: str) -> list[dict]:
         
     return [dict(r) for r in rows]
 
+def list_all_character_relationships() -> list[dict]:
+    """列出所有角色关系（用于关系网络可视化）"""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM character_relationship
+            ORDER BY affinity DESC, updated_at DESC
+            """
+        ).fetchall()
+    
+    return [dict(r) for r in rows]
+
+
 def delete_character_relationship(character_id_a: str, character_id_b: str) -> bool:
     """删除角色关系"""
     try:
@@ -1701,4 +1714,41 @@ def update_participant_frequency(
     
     except Exception as e:
         logger.error(f"更新参与者频率失败: {e}")
+        return False
+    
+
+def activate_participant_in_session(session_id: str, character_id: str) -> bool:
+    """
+    重新激活会话中的参与者（从软删除状态恢复为活跃）
+    
+    与 remove_participant_from_session 对称：将 is_active 由 0 恢复为 1。
+    若参与者记录不存在则返回 False。
+    
+    Args:
+        session_id: 会话 ID
+        character_id: 要激活的角色 ID
+    
+    Returns:
+        bool: 是否激活成功（无匹配行时返回 False）
+    """
+    try:
+        with get_conn() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE multi_session_participant
+                SET is_active = 1
+                WHERE session_id = ? AND character_id = ?
+                """,
+                (session_id, character_id),
+            )
+        
+        if cursor.rowcount == 0:
+            logger.warning(f"未找到要激活的参与者: session={session_id}, character={character_id}")
+            return False
+        
+        logger.info(f"角色 {character_id} 已在会话 {session_id} 中重新激活")
+        return True
+    
+    except Exception as e:
+        logger.error(f"激活参与者失败: {e}")
         return False

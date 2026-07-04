@@ -6,7 +6,7 @@
 2. 维护 runtime_state
 3. 写入短期 + 长期记忆
 4. 防止模型输出破坏沉浸感内容
-5. 🆕 检测和执行事件
+5. 检测和执行事件
 """
 
 import json
@@ -257,9 +257,9 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
             character_id=character_id,
             player_id=player_id,
             session_id=session_id,
-            current_affinity=new_affinity,
-            current_trust=runtime_state.get("trust_level", 0),
-            current_mood=mood_after,
+           current_affinity=new_affinity,
+            current_trust=new_trust,
+           current_mood=mood_after,
             player_message=player_message,
             npc_response=dialogue,
             dialogue_count=len(history) // 2 + 1,
@@ -316,19 +316,8 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
                     
                     # 应用信任度变化
                     if "trust_level" in event_result.state_changes:
-                        trust_delta = event_result.state_changes["trust_level"]
-                        new_trust = _clip(
-                            runtime_state.get("trust_level", 0) + trust_delta,
-                            0,
-                            100
-                        )
-                        repository.save_runtime_state(
-                            character_id,
-                            player_id,
-                            new_affinity,
-                            new_trust,
-                            mood_after
-                        )
+                        new_trust += event_result.state_changes["trust_level"]
+                        new_trust = _clip(new_trust, 0, 100)
                     
                     # 应用情绪变化
                     if "current_mood" in event_result.state_changes:

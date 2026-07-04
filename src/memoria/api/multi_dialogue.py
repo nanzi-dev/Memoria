@@ -517,9 +517,14 @@ async def update_participant(request: UpdateParticipantRequest):
         # 更新活跃状态
         if request.is_active is not None:
             if request.is_active:
-                # 激活参与者（从不活跃变为活跃）
-                # TODO: 需要添加相应的数据库函数
-                pass
+                # 激活参与者（从软删除状态恢复为活跃）
+                success = repository.activate_participant_in_session(
+                    session_id=request.session_id,
+                    character_id=request.character_id
+                )
+                
+                if not success:
+                    raise HTTPException(status_code=404, detail="参与者不存在，无法激活")
             else:
                 # 停用参与者
                 success = repository.remove_participant_from_session(
@@ -529,7 +534,6 @@ async def update_participant(request: UpdateParticipantRequest):
                 
                 if not success:
                     raise HTTPException(status_code=500, detail="停用参与者失败")
-        
         return {
             "success": True,
             "message": "参与者配置已更新"

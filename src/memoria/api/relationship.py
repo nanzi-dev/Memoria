@@ -252,9 +252,8 @@ def get_relationship_network(character_ids: str | None = None):
                     unique_rels.append(rel)
             all_relationships = unique_rels
         else:
-            # 获取所有角色的关系（需要实现全局查询）
-            # 暂时返回空，后续可扩展
-            all_relationships = []
+            # 获取所有角色的关系
+            all_relationships = repository.list_all_character_relationships()
         
         # 构建节点和边
         nodes_dict = {}

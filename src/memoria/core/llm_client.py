@@ -261,7 +261,7 @@ def call_light_task(prompt: str) -> str:
     logger.debug(f"Calling light model: {configs.light_model}")
     
     try:
-        response = _light_retry_call(_get_client().chat.completions.create, 
+        response = _retry_call(_get_client().chat.completions.create, 
             model = configs.light_model,
             messages = [{"role": "user", "content": prompt}],
             max_tokens = 800,

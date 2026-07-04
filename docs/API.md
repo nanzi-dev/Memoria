@@ -610,6 +610,9 @@ GET /api/v1/relationships/character/{character_id}
 GET /api/v1/relationships/network?character_ids=npc_luo_xiaohei,npc_wuxian
 ```
 
+**参数说明：**
+- `character_ids`（可选）：逗号分隔的角色 ID 列表。若提供，仅返回这些角色相关的关系；若不传，返回数据库中所有角色的完整关系网络。
+
 **响应示例：**
 ```json
 {
@@ -1020,4 +1023,3 @@ X-Player-ID: player_001
 | `MODIFY_RELATIONSHIP` | 修改角色间关系 |
 
 ---
-
