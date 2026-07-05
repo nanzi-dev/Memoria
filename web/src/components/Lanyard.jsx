@@ -197,27 +197,45 @@ function Band({
       card.current?.setNextKinematicTranslation({ x: vec.x - dragged.x, y: vec.y - dragged.y, z: vec.z - dragged.z });
     }
 
-    // Occasional gentle breeze: mostly sway, rarely spin
+    // Gentle breeze: per-card random phase + slow drift for uniqueness
     if (card.current && !dragged) {
       windTimer.current += cdt;
-      if (windTimer.current > nextBreezeTime.current) {
-        windTimer.current = 0;
-        nextBreezeTime.current = 25 + Math.random() * 35;
-        // Gentle sway — always
-        card.current.applyImpulse({
-          x: (Math.random() - 0.5) * 0.10,
-          y: (Math.random() - 0.5) * 0.05,
-          z: (Math.random() - 0.5) * 0.03,
-        }, true);
-        // Rare subtle rotation — ~20% chance
-        if (Math.random() < 0.2) {
-          card.current.applyTorqueImpulse({
-            x: (Math.random() - 0.5) * 0.015,
-            y: (Math.random() - 0.5) * 0.02,
-            z: (Math.random() - 0.5) * 0.008,
-          }, true);
-        }
+      const t = windTimer.current;
+      // Per-card random phases (set once via ref)
+      if (!card._breezePhases) {
+        card._breezePhases = [
+          Math.random() * Math.PI * 2,
+          Math.random() * Math.PI * 2,
+          Math.random() * Math.PI * 2,
+          Math.random() * Math.PI * 2,
+          Math.random() * Math.PI * 2,
+          Math.random() * Math.PI * 2,
+        ];
+        card._breezeFreqs = [
+          0.2 + Math.random() * 0.3,
+          0.15 + Math.random() * 0.25,
+          0.18 + Math.random() * 0.28,
+          0.12 + Math.random() * 0.22,
+          0.1 + Math.random() * 0.2,
+          0.08 + Math.random() * 0.18,
+        ];
       }
+      const p = card._breezePhases;
+      const f = card._breezeFreqs;
+      const swayX = Math.sin(t * f[0] + p[0]) * 0.02 + Math.sin(t * f[1] + p[1]) * 0.014;
+      const swayY = Math.cos(t * f[2] + p[2]) * 0.008 + Math.sin(t * f[3] + p[3]) * 0.006;
+      const swayZ = Math.sin(t * f[4] + p[4]) * 0.006 + Math.cos(t * f[5] + p[5]) * 0.004;
+      const vel = card.current.linvel();
+      card.current.setLinvel({
+        x: vel.x + swayX,
+        y: vel.y + swayY,
+        z: vel.z + swayZ,
+      }, true);
+      card.current.setAngvel({
+        x: swayY * 0.3,
+        y: -swayX * 0.3,
+        z: swayZ * 0.5,
+      }, true);
     }
 
     if (fixed.current) {

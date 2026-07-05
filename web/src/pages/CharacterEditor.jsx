@@ -39,21 +39,39 @@ export default function CharacterEditor() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(!!characterId);
   const [saveMessage, setSaveMessage] = useState('');
+  const [isActive, setIsActive] = useState(true);
 
   // Load existing character data
   useEffect(() => {
     if (!characterId) return;
     (async () => {
       try {
-        const detail = await characterAdmin.get(characterId);
+        // 重试最多2次，应对 429
+        let detail;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            detail = await characterAdmin.get(characterId);
+            break;
+          } catch (err) {
+            if (attempt === 1) throw err;
+            await new Promise(r => setTimeout(r, 800));
+          }
+        }
         setFormData(detail.card_data);
+        // is_active: 1=active, 0=disabled (int)
+        const active = detail.is_active === undefined ? true : (detail.is_active === 1 || detail.is_active === true);
+        setIsActive(active);
       } catch (e) {
         console.warn('Failed to load from backend, trying localStorage:', e.message);
         const stored = localStorage.getItem('memoria-characters');
         if (stored) {
           const chars = JSON.parse(stored);
           const found = chars.find(c => c.character_id === characterId);
-          if (found) setFormData(found);
+          if (found) {
+            setFormData(found);
+            const active = found.is_active === undefined ? true : (found.is_active === 1 || found.is_active === true);
+            setIsActive(active);
+          }
         }
       } finally {
         setLoading(false);
@@ -123,12 +141,28 @@ export default function CharacterEditor() {
     }
   }
 
+  async function handleToggleActive() {
+    if (!characterId) return;
+    const action = isActive ? '禁用' : '启用';
+    if (!window.confirm(`确定要${action}这个角色卡吗？`)) return;
+    try {
+      if (isActive) {
+        await characterAdmin.delete(characterId, false); // soft delete = disable
+      } else {
+        await characterAdmin.activate(characterId);
+      }
+      setIsActive(!isActive);
+    } catch (e) {
+      console.error(`${action}失败:`, e.message);
+    }
+  }
+
   function handleDelete() {
     if (!characterId) return;
-    if (!window.confirm('Are you sure you want to delete this character?')) return;
+    if (!window.confirm('确定要永久删除这个角色卡吗？此操作不可撤销！')) return;
     (async () => {
       try {
-        await characterAdmin.delete(characterId);
+        await characterAdmin.delete(characterId, true); // permanent delete
       } catch {
         const stored = localStorage.getItem('memoria-characters');
         if (stored) {
@@ -167,12 +201,24 @@ export default function CharacterEditor() {
           </h1>
           <div className="flex items-center gap-2">
             {characterId && (
-              <button
-                onClick={handleDelete}
-                className="px-3 py-1 text-xs font-mono text-red-400/60 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 rounded transition-colors"
-              >
-                Delete
-              </button>
+              <>
+                <button
+                  onClick={handleToggleActive}
+                  className={`px-3 py-1 text-xs font-mono rounded transition-colors border ${
+                    isActive
+                      ? 'text-amber-400/70 hover:text-amber-400 border-amber-400/20 hover:border-amber-400/40'
+                      : 'text-green-400/70 hover:text-green-400 border-green-400/20 hover:border-green-400/40'
+                  }`}
+                >
+                  {isActive ? 'Disable' : 'Enable'}
+                </button>
+                <button
+                  onClick={handleDelete}
+                  className="px-3 py-1 text-xs font-mono text-red-400/60 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 rounded transition-colors"
+                >
+                  Delete
+                </button>
+              </>
             )}
             <button
               onClick={handleSave}

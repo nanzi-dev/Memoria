@@ -19,33 +19,35 @@ export default function Home() {
       setLoading(true);
       try {
         const list = await characterAdmin.list(false);
-        const enriched = await Promise.all(
-          list.map(async (c) => {
-            try {
-              const detail = await characterAdmin.get(c.character_id);
-              const d = detail.card_data || {};
-              return {
-                character_id: c.character_id,
-                name: c.name || c.display_name || c.character_id,
-                display_name: c.display_name || c.name,
-                avatar_url: d.avatar_url || null,
-                gender: d.identity?.gender || null,
-                age: d.identity?.age || null,
-                is_active: c.is_active,
-              };
-            } catch {
-              return {
-                character_id: c.character_id,
-                name: c.name || c.display_name || c.character_id,
-                display_name: c.display_name || c.name,
-                avatar_url: null,
-                gender: null,
-                age: null,
-                is_active: c.is_active,
-              };
-            }
-          })
-        );
+        // 串行获取详情，避免并发触发 429
+        const enriched = [];
+        for (const c of list) {
+          try {
+            const detail = await characterAdmin.get(c.character_id);
+            const d = detail.card_data || {};
+            enriched.push({
+              character_id: c.character_id,
+              name: c.name || c.display_name || c.character_id,
+              display_name: c.display_name || c.name,
+              avatar_url: d.avatar_url || null,
+              gender: d.identity?.gender || null,
+              age: d.identity?.age || null,
+              is_active: c.is_active,
+            });
+          } catch {
+            enriched.push({
+              character_id: c.character_id,
+              name: c.name || c.display_name || c.character_id,
+              display_name: c.display_name || c.name,
+              avatar_url: null,
+              gender: null,
+              age: null,
+              is_active: c.is_active,
+            });
+          }
+        }
+                // 排序：启用的在前，禁用的在后
+        enriched.sort((a, b) => (b.is_active ? 1 : 0) - (a.is_active ? 1 : 0)); // is_active: 1/0 or true/false
         setCharacters(enriched);
       } catch (apiErr) {
         console.warn('后端不可用，使用 localStorage 回退:', apiErr.message);
@@ -130,6 +132,7 @@ export default function Home() {
                 key={char.character_id}
                 character={char}
                 onClick={handleBadgeClick}
+                isActive={!!char.is_active}
               />
             ))}
             <AddCharacterBadge />

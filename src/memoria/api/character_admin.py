@@ -97,7 +97,7 @@ def get_character_detail(character_id: str):
         character_id: 角色 ID
     """
     try:
-        db_card = repository.get_character_card_from_db(character_id)
+        db_card = repository.get_character_card_from_db(character_id, include_inactive=True)
         
         if not db_card:
             raise HTTPException(status_code=404, detail=f"角色卡 '{character_id}' 不存在")

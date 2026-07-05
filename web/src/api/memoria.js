@@ -33,7 +33,9 @@ export const characterAdmin = {
     });
   },
   delete(characterId, permanent = false) {
-    return request(`/admin/characters/${characterId}?permanent=${permanent}`);
+    return request(`/admin/characters/${characterId}?permanent=${permanent}`, {
+      method: 'DELETE',
+    });
   },
   activate(characterId) {
     return request(`/admin/characters/${characterId}/activate`, { method: 'POST' });
