@@ -18,3 +18,27 @@
   ::-webkit-scrollbar-track { background: #0b0b0c; }
   ::-webkit-scrollbar-thumb { background: #7C3AED; border-radius: 3px; }
 }
+
+/* ═══ Disabled Card ═══ */
+.card-disabled {
+  filter: grayscale(0.85) brightness(0.55);
+}
+
+.card-disabled::after {
+  content: "DISABLED";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-25deg);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 36px;
+  font-weight: 900;
+  color: rgba(200, 40, 40, 0.45);
+  border: 3px solid rgba(200, 40, 40, 0.4);
+  padding: 8px 28px;
+  border-radius: 4px;
+  letter-spacing: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 10;
+}

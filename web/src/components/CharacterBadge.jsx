@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMemo } from 'react';
 import Lanyard from './Lanyard';
 
-export default function CharacterBadge({ character, onClick }) {
+export default function CharacterBadge({ character, onClick, isActive = true }) {
   const navigate = useNavigate();
 
   const characterInfo = useMemo(() => ({
@@ -18,14 +18,11 @@ export default function CharacterBadge({ character, onClick }) {
 
   return (
     <div
-      className="group relative cursor-pointer transition-all duration-300 hover:z-10"
+      className={`group relative cursor-pointer transition-all duration-300 hover:z-10 ${!isActive ? 'card-disabled' : ''}`}
       style={{ width: 320, height: 460, pointerEvents: 'auto' }}
       onDoubleClick={handleClick}
     >
-      {/* 3D 卡片 */}
       <Lanyard characterInfo={characterInfo} />
-
-      {/* hover 发光边框 */}
       <div className="absolute inset-0 rounded-xl ring-1 ring-cyber-green/0 group-hover:ring-cyber-green/30 transition-all duration-500 pointer-events-none" />
     </div>
   );
@@ -44,7 +41,6 @@ export function AddCharacterBadge({ onClick }) {
       style={{ width: 320, height: 460, pointerEvents: 'auto' }}
       onClick={handleClick}
     >
-      {/* 网格背景 */}
       <div
         className="absolute inset-0 opacity-[0.04]"
         style={{
