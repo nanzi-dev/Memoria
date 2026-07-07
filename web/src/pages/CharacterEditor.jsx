@@ -18,6 +18,7 @@ const STEPS = [
 
 const DEFAULT_DATA = {
   character_id: '',
+  avatar_url: null,
   version: '1.0.0',
   meta: { name: '', display_name: '', aliases: [], game_module: '', created_by: '', last_updated: '' },
   identity: { age: '', gender: '', occupation: '', race_or_species: '', appearance: '', social_status: '', core_identity_summary: '' },
@@ -343,19 +344,6 @@ export default function CharacterEditor() {
               <div className="p-6 pt-4 border-t flex items-center justify-between" style={{ borderColor: '#C4B594' }}>
                 <div className="flex items-center gap-4">
                   <div>
-                    <label className="text-[10px] text-amber-700/60 font-mono uppercase">档案状态</label>
-                    <select
-                      value={formData.fileStatus || '机密'}
-                      onChange={(e) => updateField('fileStatus', e.target.value)}
-                      className="text-xs font-mono text-cyber-ink bg-transparent border-b border-amber-700/30 focus:outline-none focus:border-amber-700"
-                    >
-                      <option value="机密">机密</option>
-                      <option value="绝密">绝密</option>
-                      <option value="公开">公开</option>
-                      <option value="保密">保密</option>
-                    </select>
-                  </div>
-                  <div>
                     <span className="text-[10px] text-amber-700/60 font-mono uppercase">最后更新</span>
                     <p className="text-xs font-mono text-amber-700/80">
                       {formData.meta?.last_updated || new Date().toISOString().split('T')[0]}
@@ -368,18 +356,14 @@ export default function CharacterEditor() {
                   className="relative"
                   style={{
                     transform: 'rotate(-8deg)',
-                    border: '2px solid #8B0000',
+                    border: isActive ? '2px solid #0B6E0B' : '2px solid #8B0000',
                     borderRadius: 4,
                     padding: '4px 12px',
                     opacity: 0.6,
                   }}
                 >
-                  <span className="text-xs font-bold text-red-900/70 font-mono whitespace-nowrap">
-                    机密档案
-                  </span>
-                  <br />
-                  <span className="text-[8px] text-red-900/50 font-mono">
-                    CONFIDENTIAL
+                  <span className={`text-xs font-bold font-mono whitespace-nowrap ${isActive ? 'text-green-800/70' : 'text-red-900/70'}`}>
+                    {isActive ? '启用档案' : '禁用档案'}
                   </span>
                 </div>
               </div>

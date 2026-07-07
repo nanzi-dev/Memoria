@@ -29,7 +29,7 @@ export default function Home() {
               character_id: c.character_id,
               name: c.name || c.display_name || c.character_id,
               display_name: c.display_name || c.name,
-              avatar_url: d.avatar_url || null,
+              avatar_url: detail.avatar_url || d.avatar_url || null,
               gender: d.identity?.gender || null,
               age: d.identity?.age || null,
               is_active: c.is_active,

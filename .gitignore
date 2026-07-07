@@ -12,6 +12,8 @@
 .agents/
 .github/
 .codegraph
+AGENTS.md
+
 # =========================
 # Python cache
 # =========================

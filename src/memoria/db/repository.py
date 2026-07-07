@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS character_card (
     -- 元信息（便于查询和展示）
     name            TEXT,
     display_name    TEXT,
+    avatar_url      TEXT,               -- 头像（base64 data URL 或网络 URL）
     
     created_at      TEXT,
     updated_at      TEXT,
@@ -367,11 +368,20 @@ CREATE INDEX IF NOT EXISTS idx_relationship_lookup
 ON character_relationship(character_id_a, character_id_b);
 """
 
+def _migrate(conn):
+    """数据库迁移：为已有数据库添加新列"""
+    try:
+        conn.execute("ALTER TABLE character_card ADD COLUMN avatar_url TEXT")
+    except Exception:
+        pass  # 列已存在，跳过
+
+
 def init_db():
     """初始化数据库结构"""
     with get_conn() as conn:
         conn.executescript(SCHEMA)
-        
+        _migrate(conn)
+
 
 # =========================
 # runtime_state（角色状态）
@@ -954,7 +964,8 @@ def save_character_card_to_db(
     version: str = "1.0.0",
     name: str = None,
     display_name: str = None,
-    source: str = "db"
+    source: str = "db",
+    avatar_url: str = None
 ) -> bool:
     """
     保存或更新角色卡到数据库
@@ -975,17 +986,18 @@ def save_character_card_to_db(
             conn.execute(
                 """
                 INSERT INTO character_card
-                (character_id, card_data, version, name, display_name, created_at, updated_at, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (character_id, card_data, version, name, display_name, avatar_url, created_at, updated_at, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(character_id)
                 DO UPDATE SET
                     card_data=excluded.card_data,
                     version=excluded.version,
                     name=excluded.name,
                     display_name=excluded.display_name,
+                    avatar_url=excluded.avatar_url,
                     updated_at=excluded.updated_at
                 """,
-                (character_id, card_data_json, version, name, display_name, _now(), _now(), source),
+                (character_id, card_data_json, version, name, display_name, avatar_url, _now(), _now(), source),
             )
         logger.info(f"角色卡已保存到数据库: {character_id}")
         return True
@@ -1020,6 +1032,22 @@ def get_character_card_from_db(character_id: str, include_inactive: bool = False
             ).fetchone()
     
     return _row_to_dict(row)
+
+
+
+def update_character_avatar(character_id: str, avatar_url: str | None) -> bool:
+    """更新角色头像 URL"""
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE character_card SET avatar_url = ?, updated_at = ? WHERE character_id = ?",
+                (avatar_url, _now(), character_id),
+            )
+        logger.info(f"头像已更新: character_id={character_id}")
+        return True
+    except Exception as e:
+        logger.error(f"更新头像失败: {e}")
+        return False
 
 def list_character_cards_from_db(only_active: bool = True) -> list[dict]:
     """

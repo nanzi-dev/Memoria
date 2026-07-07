@@ -203,7 +203,8 @@ class CharacterCard(BaseModel):
     
     character_id: str = Field(..., description="角色唯一ID")   # 角色唯一ID
     version: str = "1.0.0"                                      # 角色卡版本号
-    
+    avatar_url: str | None = Field(default=None, description="角色头像（base64 data URL 或网络 URL）")
+
     meta: Meta = Field(..., description="角色基础元信息")       # 角色基础元信息
     identity: Identity = Field(..., description="角色身份信息")   # 角色身份
     personality: Personality = Field(..., description="角色性格结构")   # 角色性格结构

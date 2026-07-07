@@ -39,67 +39,47 @@ const FRONT_UV_RECT = { x: 0, y: 0, w: 0.5, h: 0.755 };
 const BACK_UV_RECT = { x: 0.5, y: 0, w: 0.5, h: 0.757 };
 
 // Generate front face texture: avatar + name + gender on cream-white card
-function createFrontFace({ avatarUrl, name, gender }) {
-  const W = 512, H = 512;
-  const canvas = document.createElement('canvas');
+function createFrontFace({ avatarUrl, name, gender, loadedImg }) {
+  var W = 512, H = 512;
+  var canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext('2d');
+  var ctx = canvas.getContext('2d');
 
-  ctx.fillStyle = '#F2EDE4'; ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = '#2D2A35'; ctx.fillRect(0, 0, W, 6);
-  ctx.fillStyle = '#2D2A35'; ctx.fillRect(0, H - 6, W, 6);
-  ctx.strokeStyle = 'rgba(45,42,53,0.2)'; ctx.lineWidth = 1;
-  ctx.roundRect(8, 8, W - 16, H - 16, 6); ctx.stroke();
+  ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, W, H);
 
-  const avatarSize = 160, avatarX = (W - avatarSize) / 2, avatarY = 24;
-  ctx.fillStyle = '#E8E3DA'; ctx.roundRect(avatarX, avatarY, avatarSize, avatarSize, 8); ctx.fill();
-  ctx.strokeStyle = '#C5BFB2'; ctx.lineWidth = 1; ctx.stroke();
-  ctx.fillStyle = '#C5BFB2'; ctx.font = 'bold 48px sans-serif';
+  var cx = W / 2;
+  ctx.fillStyle = '#1A1A1A';
+  ctx.font = 'bold 36px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'top';
+  ctx.fillText(name || 'UNNAMED', cx, 140);
+
+  ctx.strokeStyle = '#E5E5E5'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(50, 188); ctx.lineTo(W - 50, 188); ctx.stroke();
+
+  var avatarSize = 156, avatarX = cx - avatarSize / 2, avatarY = 210;
+  ctx.fillStyle = '#FAFAFA'; ctx.roundRect(avatarX, avatarY, avatarSize, avatarSize, 8); ctx.fill();
+  ctx.strokeStyle = '#E0E0E0'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.fillStyle = '#D0D0D0'; ctx.font = 'bold 44px sans-serif';
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('?', avatarX + avatarSize / 2, avatarY + avatarSize / 2);
+  ctx.fillText('?', cx, avatarY + avatarSize / 2);
 
-  if (avatarUrl) {
-    const img = new Image(); img.crossOrigin = 'anonymous'; img.src = avatarUrl;
-    img.onerror = () => {};
-    img.onload = () => {
-      ctx.clearRect(avatarX + 2, avatarY + 2, avatarSize - 4, avatarSize - 4);
-      ctx.save(); ctx.roundRect(avatarX, avatarY, avatarSize, avatarSize, 8); ctx.clip();
-      const s = Math.max(avatarSize / img.width, avatarSize / img.height);
-      ctx.drawImage(img, avatarX + (avatarSize - img.width * s) / 2, avatarY + (avatarSize - img.height * s) / 2, img.width * s, img.height * s);
-      ctx.restore();
-    };
+  if (loadedImg && loadedImg.complete && loadedImg.naturalWidth > 0) {
+    ctx.clearRect(avatarX + 2, avatarY + 2, avatarSize - 4, avatarSize - 4);
+    ctx.save(); ctx.roundRect(avatarX, avatarY, avatarSize, avatarSize, 8); ctx.clip();
+    var s = Math.max(avatarSize / loadedImg.width, avatarSize / loadedImg.height);
+    ctx.drawImage(loadedImg, avatarX + (avatarSize - loadedImg.width * s) / 2, avatarY + (avatarSize - loadedImg.height * s) / 2, loadedImg.width * s, loadedImg.height * s);
+    ctx.restore();
   }
 
-  const nameY = avatarY + avatarSize + 30;
-  ctx.fillStyle = '#1E1B24'; ctx.font = 'bold 40px "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-  ctx.fillText(name || 'UNNAMED', W / 2, nameY);
-
-  if (gender) {
-    const gText = String(gender), genderY = nameY + 48;
-    ctx.font = 'bold 20px "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif';
-    const tw = ctx.measureText(gText).width, tagW = tw + 40, tagH = 34, tagX = W / 2 - tagW / 2;
-    ctx.fillStyle = 'rgba(45,42,53,0.08)'; ctx.roundRect(tagX, genderY, tagW, tagH, 16); ctx.fill();
-    ctx.strokeStyle = 'rgba(45,42,53,0.3)'; ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.fillStyle = '#4A4458'; ctx.font = 'bold 18px "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif';
-    ctx.fillText(gText, W / 2, genderY + 7);
-  }
-
-  const divY = 430;
-  ctx.strokeStyle = 'rgba(45,42,53,0.15)'; ctx.lineWidth = 0.5;
-  ctx.beginPath(); ctx.moveTo(60, divY); ctx.lineTo(W - 60, divY); ctx.stroke();
-  // Memoria Logo - larger, prominent
-  ctx.fillStyle = '#3D3A45';
-  ctx.font = 'bold 18px "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('Memoria', W / 2, divY + 22);
-  ctx.fillStyle = '#8A8495';
-  ctx.font = '10px "JetBrains Mono", monospace';
-  ctx.fillText('CHARACTER ARCHIVE', W / 2, divY + 42);
+  var brandY = avatarY + avatarSize + 90;
+  ctx.fillStyle = '#451717'; ctx.font = '13px sans-serif';
+  ctx.textAlign = 'center'; ctx.fillText('MEMORIA', cx, brandY);
+  ctx.font = '11px sans-serif';
+  ctx.fillStyle = '#451717'; ctx.fillText('Where memories become stories.', cx, brandY + 20);
 
   return canvas.toDataURL('image/png');
 }
-
 function createBackFace() {
   const W = 512, H = 512;
   const canvas = document.createElement('canvas');
@@ -293,7 +273,21 @@ function Band({
 
 export default function Lanyard({ characterInfo = {}, className = '', style = {} }) {
   const { avatarUrl, name, gender } = characterInfo;
-  const frontImage = useMemo(() => createFrontFace({ avatarUrl, name, gender }), [avatarUrl, name, gender]);
+  var _a = useState(null), loadedImg = _a[0], setLoadedImg = _a[1];
+
+  useEffect(function() {
+    setLoadedImg(null);
+    if (!avatarUrl) return;
+    var img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = function() { setLoadedImg(img); };
+    img.onerror = function() { setLoadedImg(null); };
+    img.src = avatarUrl;
+  }, [avatarUrl]);
+
+  var frontImage = useMemo(function() {
+    return createFrontFace({ avatarUrl: avatarUrl, name: name, gender: gender, loadedImg: loadedImg });
+  }, [name, gender, loadedImg]);
   const backImage = useMemo(() => createBackFace(), []);
 
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);

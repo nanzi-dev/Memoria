@@ -42,7 +42,7 @@ export function AddCharacterBadge({ onClick }) {
     <div
       className="group relative cursor-pointer transition-all duration-300 hover:scale-105 border-2 border-dashed border-cyber-green/20 hover:border-cyber-green/50 flex items-center justify-center bg-[#0d0d14]"
       style={{ width: 260, height: 380, pointerEvents: 'auto' }}
-      onDoubleClick={handleClick}
+      onClick={handleClick}
     >
       {/* 网格背景 */}
       <div

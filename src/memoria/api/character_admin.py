@@ -7,11 +7,14 @@
 3. 角色卡的启用/禁用管理
 """
 
+import base64
+import requests
 import json
 import logging
+import mimetypes
 from pathlib import Path
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from memoria.core import character_loader
 from memoria.core.character_schema import CharacterCard
@@ -50,6 +53,7 @@ class CharacterCardDetail(BaseModel):
     version: str | None = None
     name: str | None = None
     display_name: str | None = None
+    avatar_url: str | None = None
     is_active: int = 1
     source: str = "db"
     created_at: str | None = None
@@ -111,6 +115,7 @@ def get_character_detail(character_id: str):
             version=db_card.get("version"),
             name=db_card.get("name"),
             display_name=db_card.get("display_name"),
+            avatar_url=db_card.get("avatar_url"),
             is_active=db_card.get("is_active", 1),
             source=db_card.get("source", "db"),
             created_at=db_card.get("created_at"),
@@ -149,13 +154,15 @@ def create_character(req: CharacterCardCreateRequest):
         
         # 保存到数据库
         card_json = json.dumps(req.character_data, ensure_ascii=False, indent=2)
+        avatar_url = _process_avatar_url(card.avatar_url)
         success = repository.save_character_card_to_db(
             character_id=card.character_id,
             card_data_json=card_json,
             version=card.version,
             name=card.meta.name,
             display_name=card.meta.display_name,
-            source="db"
+            source="db",
+            avatar_url=avatar_url
         )
         
         if not success:
@@ -210,13 +217,15 @@ def update_character(character_id: str, req: CharacterCardUpdateRequest):
         
         # 更新到数据库
         card_json = json.dumps(req.character_data, ensure_ascii=False, indent=2)
+        avatar_url = _process_avatar_url(card.avatar_url)
         success = repository.save_character_card_to_db(
             character_id=card.character_id,
             card_data_json=card_json,
             version=card.version,
             name=card.meta.name,
             display_name=card.meta.display_name,
-            source=existing.get("source", "db")  # 保持原来的 source
+            source=existing.get("source", "db"),
+            avatar_url=avatar_url
         )
         
         if not success:
@@ -375,3 +384,159 @@ def import_character_from_file(req: ImportFromFileRequest):
     except Exception as e:
         logger.error(f"导入角色卡失败: {e}")
         raise HTTPException(status_code=400, detail=f"导入角色卡失败: {str(e)}")
+
+# =========================
+# 头像管理
+# =========================
+MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2MB
+ALLOWED_MIME_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+
+def _process_avatar_url(avatar_url: str | None) -> str | None:
+    """如果是网络 URL，服务端下载并转为 data URL"""
+    if not avatar_url or avatar_url.startswith("data:"):
+        return avatar_url
+    if avatar_url.startswith("http://") or avatar_url.startswith("https://"):
+        try:
+            import requests as _r
+            resp = _r.get(avatar_url, timeout=10, headers={"User-Agent": "Memoria/1.0"})
+            resp.raise_for_status()
+            ct = resp.headers.get("Content-Type", "image/png")
+            if not ct.startswith("image/"):
+                logger.warning(f"URL 不是图片: {ct}")
+                return avatar_url
+            if len(resp.content) > MAX_AVATAR_SIZE:
+                logger.warning(f"图片过大: {len(resp.content)}")
+                return avatar_url
+            b64 = base64.b64encode(resp.content).decode("ascii")
+            return f"data:{ct};base64,{b64}"
+        except Exception as e:
+            logger.warning(f"下载头像 URL 失败，保留原始 URL: {e}")
+            return avatar_url
+    return avatar_url
+
+
+
+class AvatarUrlRequest(BaseModel):
+    """通过 URL 设置头像"""
+    url: str = Field(..., description="头像图片的 URL 地址")
+
+
+@router.get("/admin/characters/{character_id}/avatar", response_model=dict)
+def get_character_avatar(character_id: str):
+    """
+    获取角色头像
+    
+    Returns:
+        dict: {"avatar_url": "..."} — base64 data URL 或网络 URL，无头像时 avatar_url 为 None
+    """
+    try:
+        db_card = repository.get_character_card_from_db(character_id, include_inactive=True)
+        if not db_card:
+            raise HTTPException(status_code=404, detail=f"角色卡 '{character_id}' 不存在")
+        
+        return {"character_id": character_id, "avatar_url": db_card.get("avatar_url")}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取头像失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取头像失败: {str(e)}")
+
+
+@router.post("/admin/characters/{character_id}/avatar/upload", response_model=OperationResponse)
+async def upload_character_avatar(character_id: str, file: UploadFile = File(...)):
+    """
+    从本地文件上传头像（转换为 base64 data URL 存入数据库）
+    
+    - 支持 PNG / JPEG / GIF / WebP
+    - 最大 2MB
+    """
+    try:
+        # 检查角色是否存在
+        db_card = repository.get_character_card_from_db(character_id, include_inactive=True)
+        if not db_card:
+            raise HTTPException(status_code=404, detail=f"角色卡 '{character_id}' 不存在")
+        
+        # 校验文件大小
+        contents = await file.read()
+        if len(contents) > MAX_AVATAR_SIZE:
+            raise HTTPException(status_code=400,
+                detail=f"文件过大，最大允许 {MAX_AVATAR_SIZE // (1024*1024)} MB")
+        
+        # 校验 MIME 类型
+        mime_type = file.content_type or mimetypes.guess_type(file.filename)[0]
+        if mime_type not in ALLOWED_MIME_TYPES:
+            raise HTTPException(status_code=400,
+                detail=f"不支持的图片格式: {mime_type}，支持: {', '.join(sorted(ALLOWED_MIME_TYPES))}")
+        
+        # 转换为 base64 data URL
+        b64 = base64.b64encode(contents).decode("ascii")
+        data_url = f"data:{mime_type};base64,{b64}"
+        
+        # 更新数据库
+        repository.update_character_avatar(character_id, data_url)
+        
+        logger.info(f"头像已上传: character_id={character_id}, mime={mime_type}, size={len(contents)}")
+        
+        return OperationResponse(
+            success=True,
+            message=f"头像上传成功 ({len(contents)} bytes)",
+            character_id=character_id
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"头像上传失败: {e}")
+        raise HTTPException(status_code=500, detail=f"头像上传失败: {str(e)}")
+
+
+@router.post("/admin/characters/{character_id}/avatar/url", response_model=OperationResponse)
+def set_character_avatar_url(character_id: str, req: AvatarUrlRequest):
+    """
+    通过网络 URL 设置头像 — 服务端下载并转为 data URL 存储，避免前端 CORS 问题
+    """
+    try:
+        db_card = repository.get_character_card_from_db(character_id, include_inactive=True)
+        if not db_card:
+            raise HTTPException(status_code=404, detail=f"角色卡 '{character_id}' 不存在")
+        
+        url = req.url.strip()
+        if not url:
+            repository.update_character_avatar(character_id, None)
+            return OperationResponse(
+                success=True, message="头像已清除", character_id=character_id
+            )
+        
+        # 服务端下载图片，转为 data URL
+        import requests as _requests
+        try:
+            resp = _requests.get(url, timeout=10, headers={"User-Agent": "Memoria/1.0"})
+            resp.raise_for_status()
+        except Exception as fetch_err:
+            raise HTTPException(status_code=400, detail=f"无法获取图片: {str(fetch_err)}")
+        
+        content_type = resp.headers.get("Content-Type", "image/png")
+        if not content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail=f"URL 返回的不是图片: {content_type}")
+        
+        if len(resp.content) > MAX_AVATAR_SIZE:
+            raise HTTPException(status_code=400,
+                detail=f"图片过大，最大允许 {MAX_AVATAR_SIZE // (1024*1024)} MB")
+        
+        b64 = base64.b64encode(resp.content).decode("ascii")
+        data_url = f"data:{content_type};base64,{b64}"
+        
+        repository.update_character_avatar(character_id, data_url)
+        logger.info(f"头像 URL 已下载并存储: character_id={character_id}, size={len(resp.content)}")
+        
+        return OperationResponse(
+            success=True, message="头像已下载并存储", character_id=character_id
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"设置头像 URL 失败: {e}")
+        raise HTTPException(status_code=500, detail=f"设置头像 URL 失败: {str(e)}")
+

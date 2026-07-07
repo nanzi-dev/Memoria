@@ -47,12 +47,6 @@ def _validate_config():
 
 
 # =========================
-# 路径定义
-# =========================
-PACKAGE_DIR = Path(__file__).parent
-STATIC_DIR = PACKAGE_DIR / "static"
-
-# =========================
 # 速率限制（per-player 简单实现）
 # =========================
 _request_counts: dict[str, list[float]] = {}
@@ -171,11 +165,3 @@ app.include_router(character_admin_router, prefix="/api/v1")
 app.include_router(event_admin_router, prefix="/api/v1")
 app.include_router(relationship_router, prefix="/api/v1")
 
-
-# =========================
-# 静态资源挂载
-# =========================
-if STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-else:
-    logger.warning("静态资源目录不存在: %s", STATIC_DIR)
