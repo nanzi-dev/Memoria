@@ -19,7 +19,7 @@ export default function CharacterBadge({ character, onClick }) {
   return (
     <div
       className="group relative cursor-pointer transition-all duration-300 hover:z-10"
-      style={{ width: 260, height: 380, pointerEvents: 'auto' }}
+      style={{ width: 320, height: 460, pointerEvents: 'auto' }}
       onDoubleClick={handleClick}
     >
       {/* 3D 卡片 */}
@@ -41,7 +41,7 @@ export function AddCharacterBadge({ onClick }) {
   return (
     <div
       className="group relative cursor-pointer transition-all duration-300 hover:scale-105 border-2 border-dashed border-cyber-green/20 hover:border-cyber-green/50 flex items-center justify-center bg-[#0d0d14]"
-      style={{ width: 260, height: 380, pointerEvents: 'auto' }}
+      style={{ width: 320, height: 460, pointerEvents: 'auto' }}
       onClick={handleClick}
     >
       {/* 网格背景 */}
