@@ -115,7 +115,7 @@ def get_character_detail(character_id: str):
             version=db_card.get("version"),
             name=db_card.get("name"),
             display_name=db_card.get("display_name"),
-            avatar_url=db_card.get("avatar_url"),
+            avatar_url=_process_avatar_url(db_card.get("avatar_url")),
             is_active=db_card.get("is_active", 1),
             source=db_card.get("source", "db"),
             created_at=db_card.get("created_at"),

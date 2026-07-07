@@ -110,9 +110,18 @@ export default function Home() {
           </GlitchText>
         </div>
 
-        <p className="text-cyber-green/50 font-mono text-xs mb-10 tracking-[0.3em] uppercase">
+        <p className="text-cyber-green/50 font-mono text-xs mb-6 tracking-[0.3em] uppercase">
           Character Archive
         </p>
+
+        <div className="flex items-center gap-4 mb-10" style={{ pointerEvents: 'auto' }}>
+          <a href="/events" className="text-xs font-mono text-cyber-green/40 hover:text-cyber-green/80 border border-cyber-green/20 rounded px-3 py-1 transition-colors">
+            事件管理
+          </a>
+          <a href="/graph" className="text-xs font-mono text-cyber-green/40 hover:text-cyber-green/80 border border-cyber-green/20 rounded px-3 py-1 transition-colors">
+            关系图谱
+          </a>
+        </div>
 
         {loading && (
           <div className="flex items-center gap-3 text-cyber-green/50">
