@@ -20,7 +20,7 @@
 }
 
 /* ═══ Disabled Card ═══ */
-.card-disabled {
+.card-disabled > .lanyard-wrapper {
   filter: grayscale(0.85) brightness(0.55);
 }
 
