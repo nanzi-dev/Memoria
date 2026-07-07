@@ -11,7 +11,7 @@
 .codex/
 .agents/
 .github/
-
+.codegraph
 # =========================
 # Python cache
 # =========================
