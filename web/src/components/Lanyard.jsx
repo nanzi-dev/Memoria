@@ -38,45 +38,98 @@ const BLANK_PIXEL =
 const FRONT_UV_RECT = { x: 0, y: 0, w: 0.5, h: 0.755 };
 const BACK_UV_RECT = { x: 0.5, y: 0, w: 0.5, h: 0.757 };
 
-// Generate front face texture: avatar + name + gender on cream-white card
+// Generate front face texture: name + avatar + tagline on white card
 function createFrontFace({ avatarUrl, name, gender, loadedImg }) {
   var W = 512, H = 512;
   var canvas = document.createElement('canvas');
   canvas.width = W; canvas.height = H;
   var ctx = canvas.getContext('2d');
 
+  // White background
   ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, W, H);
 
-  var cx = W / 2;
+  // Subtle decorative top stripe
+  ctx.fillStyle = '#2D2A35'; ctx.fillRect(0, 0, W, 6);
+
+  var padding = 120;
+  // UV rect starts ~12.5% into the canvas; push content further down
+  var nameY = 110;
+  var underlineY = nameY + 52;
+
+  // ── Name: large, bold, left-aligned ──
+  var nameText = name || 'UNNAMED';
   ctx.fillStyle = '#1A1A1A';
-  ctx.font = 'bold 36px sans-serif';
-  ctx.textAlign = 'right';
+  ctx.font = 'bold 44px "ZCOOL XiaoWei", serif';
+  ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.fillText(name || 'UNNAMED', cx, 140);
+  ctx.fillText(nameText, padding, nameY);
 
-  ctx.strokeStyle = '#E5E5E5'; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(50, 188); ctx.lineTo(W - 50, 188); ctx.stroke();
+  // Name underline
+  var nameWidth = ctx.measureText(nameText).width;
+  ctx.strokeStyle = '#2D2A35'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(padding, underlineY);
+  ctx.lineTo(padding + nameWidth, underlineY);
+  ctx.stroke();
 
-  var avatarSize = 156, avatarX = cx - avatarSize / 2, avatarY = 210;
-  ctx.fillStyle = '#FAFAFA'; ctx.roundRect(avatarX, avatarY, avatarSize, avatarSize, 8); ctx.fill();
-  ctx.strokeStyle = '#E0E0E0'; ctx.lineWidth = 1.5; ctx.stroke();
-  ctx.fillStyle = '#D0D0D0'; ctx.font = 'bold 44px sans-serif';
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillText('?', cx, avatarY + avatarSize / 2);
+  // ── Avatar: large, centered, rounded, with border ──
+  var avatarSize = 180;
+  var avatarX = (W - avatarSize) / 2;
+  var avatarY = underlineY + 36;
+  var avatarRadius = 12;
 
+  // Shadow behind avatar
+  ctx.shadowColor = 'rgba(0,0,0,0.10)';
+  ctx.shadowBlur = 16;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 4;
+  ctx.fillStyle = '#FFFFFF';
+  ctx.roundRect(avatarX, avatarY, avatarSize, avatarSize, avatarRadius);
+  ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
+  ctx.shadowOffsetY = 0;
+
+  // Avatar border
+  ctx.strokeStyle = '#D5D5D5'; ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Placeholder or image
   if (loadedImg && loadedImg.complete && loadedImg.naturalWidth > 0) {
-    ctx.clearRect(avatarX + 2, avatarY + 2, avatarSize - 4, avatarSize - 4);
-    ctx.save(); ctx.roundRect(avatarX, avatarY, avatarSize, avatarSize, 8); ctx.clip();
+    ctx.save();
+    ctx.roundRect(avatarX, avatarY, avatarSize, avatarSize, avatarRadius);
+    ctx.clip();
     var s = Math.max(avatarSize / loadedImg.width, avatarSize / loadedImg.height);
-    ctx.drawImage(loadedImg, avatarX + (avatarSize - loadedImg.width * s) / 2, avatarY + (avatarSize - loadedImg.height * s) / 2, loadedImg.width * s, loadedImg.height * s);
+    var dw = loadedImg.width * s;
+    var dh = loadedImg.height * s;
+    ctx.drawImage(loadedImg,
+      avatarX + (avatarSize - dw) / 2,
+      avatarY + (avatarSize - dh) / 2,
+      dw, dh);
     ctx.restore();
+  } else {
+    // Placeholder icon
+    ctx.fillStyle = '#D0D0D0';
+    ctx.font = '56px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('?', avatarX + avatarSize / 2, avatarY + avatarSize / 2);
   }
 
-  var brandY = avatarY + avatarSize + 90;
-  ctx.fillStyle = '#451717'; ctx.font = '13px sans-serif';
-  ctx.textAlign = 'center'; ctx.fillText('MEMORIA', cx, brandY);
-  ctx.font = '11px sans-serif';
-  ctx.fillStyle = '#451717'; ctx.fillText('Where memories become stories.', cx, brandY + 20);
+  // ── Bottom: tagline ──
+  var bottomY = avatarY + avatarSize + 60;
+  ctx.fillStyle = '#451717';
+  ctx.font = 'bold 14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('MEMORIA', W / 2, bottomY);
+
+  ctx.fillStyle = '#8A8495';
+  ctx.font = '12px sans-serif';
+  ctx.fillText('Where memories become stories.', W / 2, bottomY + 22);
+
+  // Subtle decorative bottom stripe
+  ctx.fillStyle = '#2D2A35';
+  ctx.fillRect(0, H - 6, W, 6);
 
   return canvas.toDataURL('image/png');
 }
