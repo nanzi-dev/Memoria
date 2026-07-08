@@ -63,17 +63,7 @@ export default function CharacterEditor() {
         const active = detail.is_active === undefined ? true : (detail.is_active === 1 || detail.is_active === true);
         setIsActive(active);
       } catch (e) {
-        console.warn('Failed to load from backend, trying localStorage:', e.message);
-        const stored = localStorage.getItem('memoria-characters');
-        if (stored) {
-          const chars = JSON.parse(stored);
-          const found = chars.find(c => c.character_id === characterId);
-          if (found) {
-            setFormData(found);
-            const active = found.is_active === undefined ? true : (found.is_active === 1 || found.is_active === true);
-            setIsActive(active);
-          }
-        }
+        console.error('Failed to load character:', e.message);
       } finally {
         setLoading(false);
       }
@@ -117,18 +107,9 @@ export default function CharacterEditor() {
           await characterAdmin.create(data);
         }
       } catch (apiErr) {
-        console.warn('Backend save failed, using localStorage:', apiErr.message);
-        // Fallback to localStorage
-        const stored = localStorage.getItem('memoria-characters');
-        const chars = stored ? JSON.parse(stored) : [];
-        if (characterId) {
-          const idx = chars.findIndex(c => c.character_id === characterId);
-          if (idx >= 0) chars[idx] = data;
-          else chars.push(data);
-        } else {
-          chars.push(data);
-        }
-        localStorage.setItem('memoria-characters', JSON.stringify(chars));
+        setSaveMessage(`Error: ${apiErr.message}`);
+        setSaving(false);
+        return;
       }
 
       setSaveMessage('Saved successfully!');
@@ -164,12 +145,8 @@ export default function CharacterEditor() {
     (async () => {
       try {
         await characterAdmin.delete(characterId, true); // permanent delete
-      } catch {
-        const stored = localStorage.getItem('memoria-characters');
-        if (stored) {
-          const chars = JSON.parse(stored).filter(c => c.character_id !== characterId);
-          localStorage.setItem('memoria-characters', JSON.stringify(chars));
-        }
+      } catch (e) {
+        console.error('Delete failed:', e.message);
       }
       navigate('/');
     })();

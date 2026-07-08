@@ -5,10 +5,10 @@ import { Send, ArrowLeft, Heart, Zap, AlertTriangle, Loader2, User, X, Plus, Set
 
 const PLAYER_ID = (() => {
   const key = 'memoria-player-id';
-  let id = localStorage.getItem(key);
+  let id = sessionStorage.getItem(key);
   if (!id) {
     id = 'player-' + Math.random().toString(36).slice(2, 8);
-    localStorage.setItem(key, id);
+    sessionStorage.setItem(key, id);
   }
   return id;
 })();

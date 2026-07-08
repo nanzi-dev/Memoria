@@ -51,21 +51,9 @@ export default function Home() {
         enriched.sort((a, b) => (b.is_active ? 1 : 0) - (a.is_active ? 1 : 0)); // is_active: 1/0 or true/false
         setCharacters(enriched);
       } catch (apiErr) {
-        console.warn('后端不可用，使用 localStorage 回退:', apiErr.message);
-        const stored = localStorage.getItem('memoria-characters');
-        if (stored) {
-          const raw = JSON.parse(stored);
-          setCharacters(raw.map(c => ({
-            character_id: c.character_id,
-            name: c.meta?.name || c.name || c.character_id,
-            display_name: c.meta?.display_name || c.display_name || c.name,
-            avatar_url: c.avatar_url || null,
-            gender: c.identity?.gender || null,
-            age: c.identity?.age || null,
-          })));
-        } else {
-          setCharacters([]);
-        }
+        console.error('后端不可用:', apiErr.message);
+        setError('无法连接到后端服务');
+        setCharacters([]);
       }
     } catch (e) {
       setError(e.message);
