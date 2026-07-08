@@ -187,8 +187,18 @@ export default function StepIdentity({ formData, updateField }) {
   function handleUrlSubmit() {
     const url = urlInput.trim();
     if (!url) return;
-    updateField('avatar_url', url);
+    // 用 Image 对象测试 URL 是否可加载
     setImgError(false);
+    const img = new Image();
+    img.onload = () => {
+      updateField('avatar_url', url);
+      setImgError(false);
+    };
+    img.onerror = () => {
+      alert('头像 URL 不可用，请检查链接是否有效');
+      setImgError(true);
+    };
+    img.src = url;
     setUrlInput('');
   }
 
