@@ -1,10 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { useUser } from '../context/UserContext';
 import { multiDialogue, characterAdmin } from '../api/memoria';
 import { Send, ArrowLeft, Users, Loader2, User, X, Plus, Settings, MessageSquare, Radio, ShieldAlert } from 'lucide-react';
-
-const PLAYER_ID = 'player-' + Math.random().toString(36).slice(2, 8);
-const PLAYER_NAME = '旅行者';
 
 const STRATEGIES = [
   { value: 'hybrid', label: '智能混合' },
@@ -15,6 +13,17 @@ const STRATEGIES = [
 
 export default function MultiRoom() {
   const navigate = useNavigate();
+  const { user } = useUser();
+  const PLAYER_ID = user?.user_id || (() => {
+    const key = 'memoria-player-id';
+    let id = sessionStorage.getItem(key);
+    if (!id) {
+      id = 'player-' + Math.random().toString(36).slice(2, 8);
+      sessionStorage.setItem(key, id);
+    }
+    return id;
+  })();
+  const PLAYER_NAME = user?.username || '旅行者';
   const [allChars, setAllChars] = useState([]);
   const [participants, setParticipants] = useState([]);
   const [sessionId, setSessionId] = useState(null);

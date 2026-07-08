@@ -4,7 +4,6 @@ import { gsap } from 'gsap';
 import './PillNav.css';
 
 const PillNav = ({
-  logoAlt = 'Memoria',
   items,
   className = '',
   ease = 'power3.easeOut',
@@ -21,13 +20,10 @@ const PillNav = ({
   const circleRefs = useRef([]);
   const tlRefs = useRef([]);
   const activeTweenRefs = useRef([]);
-  const logoTweenRef = useRef(null);
   const hamburgerRef = useRef(null);
   const mobileMenuRef = useRef(null);
   const navItemsRef = useRef(null);
-  const logoRef = useRef(null);
 
-  // Hardcoded "M" logo instead of image
   useEffect(() => {
     const layout = () => {
       circleRefs.current.forEach(circle => {
@@ -89,13 +85,8 @@ const PillNav = ({
       gsap.set(menu, { visibility: 'hidden', opacity: 0, scaleY: 1 });
     }
 
-    if (initialLoadAnimation) {
-      const logo = logoRef.current;
+  if (initialLoadAnimation) {
       const navItems = navItemsRef.current;
-      if (logo) {
-        gsap.set(logo, { scale: 0 });
-        gsap.to(logo, { scale: 1, duration: 0.6, ease });
-      }
       if (navItems) {
         gsap.set(navItems, { width: 0, overflow: 'hidden' });
         gsap.to(navItems, { width: 'auto', duration: 0.6, ease });
@@ -117,14 +108,6 @@ const PillNav = ({
     if (!tl) return;
     activeTweenRefs.current[i]?.kill();
     activeTweenRefs.current[i] = tl.tweenTo(0, { duration: 0.2, ease, overwrite: 'auto' });
-  };
-
-  const handleLogoEnter = () => {
-    const logo = logoRef.current;
-    if (!logo) return;
-    logoTweenRef.current?.kill();
-    gsap.set(logo, { rotate: 0 });
-    logoTweenRef.current = gsap.to(logo, { rotate: 360, duration: 0.2, ease, overwrite: 'auto' });
   };
 
   const toggleMobileMenu = () => {
@@ -172,16 +155,6 @@ const PillNav = ({
   return (
     <div className="pill-nav-container">
       <nav className={`pill-nav ${className}`} aria-label="Primary" style={cssVars}>
-        <Link
-          className="pill-logo"
-          to="/"
-          aria-label="Home"
-          onMouseEnter={handleLogoEnter}
-          ref={el => { logoRef.current = el; }}
-        >
-          <span className="logo-text">M</span>
-        </Link>
-
         <div className="pill-nav-items desktop-only" ref={navItemsRef}>
           <ul className="pill-list" role="menubar">
             {items.map((item, i) => (

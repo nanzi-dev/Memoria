@@ -95,6 +95,19 @@ def get_conn():
 # =========================
 SCHEMA = """
 -- =========================
+-- 用户表
+-- =========================
+CREATE TABLE IF NOT EXISTS users (
+    user_id         TEXT PRIMARY KEY,      -- usr_xxxxxxxx 格式
+    username        TEXT NOT NULL UNIQUE,
+    password_hash   TEXT NOT NULL,         -- sha256 hash
+    gender          TEXT DEFAULT 'unknown', -- male/female/unknown
+    avatar_url      TEXT,                  -- base64 data URL
+    created_at      TEXT,
+    updated_at      TEXT
+);
+
+-- =========================
 -- 角色卡存储
 -- =========================
 CREATE TABLE IF NOT EXISTS character_card (
@@ -1780,3 +1793,59 @@ def activate_participant_in_session(session_id: str, character_id: str) -> bool:
     except Exception as e:
         logger.error(f"激活参与者失败: {e}")
         return False
+
+
+# =========================
+# 用户管理
+# =========================
+def create_user(user_id: str, username: str, password_hash: str, gender: str = "unknown"):
+    """创建新用户"""
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO users (user_id, username, password_hash, gender, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (user_id, username, password_hash, gender, _now(), _now()),
+        )
+
+
+def get_user_by_username(username: str) -> dict | None:
+    """根据用户名查找用户"""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE username = ?", (username,)
+        ).fetchone()
+        return _row_to_dict(row)
+
+
+def get_user_by_id(user_id: str) -> dict | None:
+    """根据 user_id 查找用户"""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE user_id = ?", (user_id,)
+        ).fetchone()
+        return _row_to_dict(row)
+
+
+def update_user_profile(user_id: str, username: str = None, gender: str = None, avatar_url: str = None):
+    """更新用户资料"""
+    fields = []
+    params = []
+    if username is not None:
+        fields.append("username = ?")
+        params.append(username)
+    if gender is not None:
+        fields.append("gender = ?")
+        params.append(gender)
+    if avatar_url is not None:
+        fields.append("avatar_url = ?")
+        params.append(avatar_url)
+    if not fields:
+        return
+    fields.append("updated_at = ?")
+    params.append(_now())
+    params.append(user_id)
+    with get_conn() as conn:
+        conn.execute(
+            f"UPDATE users SET {', '.join(fields)} WHERE user_id = ?",
+            params,
+        )

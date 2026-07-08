@@ -1,17 +1,23 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useUser } from '../context/UserContext';
+import LoginModal from '../components/LoginModal';
+import UserSettingsModal from '../components/UserSettingsModal';
 import FaultyTerminal from '../components/FaultyTerminal';
 import PillNav from '../components/PillNav';
 import GlitchText from '../components/GlitchText';
 import CharacterBadge, { AddCharacterBadge } from '../components/CharacterBadge';
 import { characterAdmin } from '../api/memoria';
-import { Loader2 } from 'lucide-react';
+import { Loader2, User } from 'lucide-react';
 
 export default function Home() {
   const [characters, setCharacters] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
+  const { user } = useUser();
+  const [showLogin, setShowLogin] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => { loadCharacters(); }, []);
 
@@ -99,15 +105,31 @@ export default function Home() {
           Character Archive
         </p>
         <div className="pointer-events-auto pill-nav-inline mb-10 px-6 py-2.5 rounded-full border border-cyber-green/20 bg-[#0d0d14]/60 backdrop-blur-md shadow-[0_0_20px_rgba(167,239,158,0.06),0_0_40px_rgba(167,239,158,0.03)]">
-          <PillNav
-            items={[
+          <div className="flex items-center gap-1">
+            {/* User entry button — replaces the M logo's role as auth entry */}
+            <button
+              onClick={() => user ? setShowSettings(true) : setShowLogin(true)}
+              className="w-[36px] h-[36px] rounded-full bg-[#0b0b0c] flex items-center justify-center flex-shrink-0 border border-cyber-green/15 hover:border-cyber-green/40 transition-colors overflow-hidden"
+              title={user ? `${user.username}的设置` : '登录 / 注册'}
+            >
+              {user?.avatar_url ? (
+                <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
+              ) : user ? (
+                <span className="text-cyber-green/60 text-[10px] font-bold">{user.username?.charAt(0)?.toUpperCase() || 'U'}</span>
+              ) : (
+                <User size={14} className="text-cyber-green/40" />
+              )}
+            </button>
+            <PillNav
+              items={[
               { label: "对话", href: "/chat" },
               { label: "事件", href: "/events" },
               { label: "图谱", href: "/graph" },
             ]}
             hoveredPillTextColor="#A7EF9E"
-            pillTextColor="#A7EF9E"
-          />
+              pillTextColor="#A7EF9E"
+            />
+          </div>
         </div>
 
 
@@ -142,6 +164,10 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {/* Modals */}
+      {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
+      {showSettings && <UserSettingsModal onClose={() => setShowSettings(false)} />}
     </div>
   );
 }

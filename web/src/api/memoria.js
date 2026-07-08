@@ -5,6 +5,11 @@ const API_BASE = '/api/v1';
 
 async function request(url, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...options.headers };
+  const token = localStorage.getItem('memoria-token');
+  if (token) {
+    const sep = url.includes('?') ? '&' : '?';
+    url = `${url}${sep}token=${encodeURIComponent(token)}`;
+  }
   const resp = await fetch(`${API_BASE}${url}`, { ...options, headers });
   if (!resp.ok) {
     const errBody = await resp.json().catch(() => ({}));
@@ -12,6 +17,54 @@ async function request(url, options = {}) {
   }
   return resp.json();
 }
+
+// ═══════════════════════════════════════════════
+// User API
+// ═══════════════════════════════════════════════
+export const userApi = {
+  register(username, password, gender = 'unknown') {
+    return request('/user/register', {
+      method: 'POST',
+      body: JSON.stringify({ username, password, gender }),
+    });
+  },
+  login(username, password) {
+    return request('/user/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    });
+  },
+  getMe() {
+    return request('/user/me');
+  },
+  updateProfile(username, gender) {
+    return request('/user/profile', {
+      method: 'PUT',
+      body: JSON.stringify({ username, gender }),
+    });
+  },
+  async uploadAvatar(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    const token = localStorage.getItem('memoria-token');
+    const sep = '?';
+    const resp = await fetch(`${API_BASE}/user/avatar/upload${token ? `?token=${encodeURIComponent(token)}` : ''}`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    return resp.json();
+  },
+  setAvatarUrl(url) {
+    return request('/user/avatar/url', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    });
+  },
+};
 
 export const characterAdmin = {
   list(onlyActive = false) {

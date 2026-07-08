@@ -1,10 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useUser } from '../context/UserContext';
 import { dialogue, characterAdmin } from '../api/memoria';
 import { Send, ArrowLeft, Heart, Zap, AlertTriangle, Loader2, User, X } from 'lucide-react';
-
-const PLAYER_ID = 'player-' + Math.random().toString(36).slice(2, 8);
-const PLAYER_NAME = '旅行者';
 
 const MOOD_LABELS = {
   happy: '😊 开心',
@@ -19,6 +17,17 @@ const MOOD_LABELS = {
 export default function SingleChat() {
   const { characterId } = useParams();
   const navigate = useNavigate();
+  const { user } = useUser();
+  const PLAYER_ID = user?.user_id || (() => {
+    const key = 'memoria-player-id';
+    let id = sessionStorage.getItem(key);
+    if (!id) {
+      id = 'player-' + Math.random().toString(36).slice(2, 8);
+      sessionStorage.setItem(key, id);
+    }
+    return id;
+  })();
+  const PLAYER_NAME = user?.username || '旅行者';
   const [character, setCharacter] = useState(null);
   const [sessionId, setSessionId] = useState(null);
   const [messages, setMessages] = useState([]);

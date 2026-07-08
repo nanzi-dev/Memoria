@@ -1,19 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useUser } from '../context/UserContext';
 import { dialogue, multiDialogue, characterAdmin } from '../api/memoria';
 import { Send, ArrowLeft, Heart, Zap, AlertTriangle, Loader2, User, X, Plus, Settings, Users, Radio, MessageSquare } from 'lucide-react';
-
-const PLAYER_ID = (() => {
-  const key = 'memoria-player-id';
-  let id = sessionStorage.getItem(key);
-  if (!id) {
-    id = 'player-' + Math.random().toString(36).slice(2, 8);
-    sessionStorage.setItem(key, id);
-  }
-  return id;
-})();
-
-const PLAYER_NAME = '旅行者';
 
 const MOOD_LABELS = {
   happy: '😊 开心',
@@ -35,9 +24,22 @@ const STRATEGIES = [
 export default function ChatRoom() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { user } = useUser();
 
   const characterIdParam = searchParams.get('character');
   const mode = characterIdParam ? 'single' : 'multi';
+
+  // Derive player identity from logged-in user; fall back to session-stored ID
+  const PLAYER_ID = user?.user_id || (() => {
+    const key = 'memoria-player-id';
+    let id = sessionStorage.getItem(key);
+    if (!id) {
+      id = 'player-' + Math.random().toString(36).slice(2, 8);
+      sessionStorage.setItem(key, id);
+    }
+    return id;
+  })();
+  const PLAYER_NAME = user?.username || '旅行者';
 
   const [character, setCharacter] = useState(null);
   const [singleSessionId, setSingleSessionId] = useState(null);
