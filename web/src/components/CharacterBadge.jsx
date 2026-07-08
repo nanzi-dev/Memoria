@@ -17,13 +17,15 @@ export default function CharacterBadge({ character, onClick, isActive = true }) 
   };
 
   return (
-    <div
-      className={`group relative cursor-pointer transition-all duration-300 hover:z-10 ${!isActive ? 'card-disabled' : ''}`}
-      style={{ width: 320, height: 460, pointerEvents: 'auto' }}
-      onDoubleClick={handleClick}
-    >
-      <Lanyard characterInfo={characterInfo} />
-      <div className="absolute inset-0 rounded-xl ring-1 ring-cyber-green/0 group-hover:ring-cyber-green/30 transition-all duration-500 pointer-events-none" />
+    <div className="relative group" style={{ width: 320, height: 460, pointerEvents: 'auto' }}>
+      <div
+        className={`relative cursor-pointer transition-all duration-300 hover:z-10 ${!isActive ? 'card-disabled' : ''}`}
+        style={{ width: 320, height: 460, pointerEvents: 'auto' }}
+        onDoubleClick={handleClick}
+      >
+        <Lanyard characterInfo={characterInfo} />
+        <div className="absolute inset-0 rounded-xl ring-1 ring-cyber-green/0 group-hover:ring-cyber-green/30 transition-all duration-500 pointer-events-none" />
+      </div>
     </div>
   );
 }
@@ -39,7 +41,7 @@ export function AddCharacterBadge({ onClick }) {
     <div
       className="group relative cursor-pointer transition-all duration-300 hover:scale-105 border-2 border-dashed border-cyber-green/20 hover:border-cyber-green/50 flex items-center justify-center bg-[#0d0d14]"
       style={{ width: 320, height: 460, pointerEvents: 'auto' }}
-      onClick={handleClick}
+      onDoubleClick={handleClick}
     >
       <div
         className="absolute inset-0 opacity-[0.04]"

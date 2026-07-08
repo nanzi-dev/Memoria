@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import FaultyTerminal from '../components/FaultyTerminal';
+import PillNav from '../components/PillNav';
 import GlitchText from '../components/GlitchText';
 import CharacterBadge, { AddCharacterBadge } from '../components/CharacterBadge';
 import { characterAdmin } from '../api/memoria';
@@ -73,9 +74,6 @@ export default function Home() {
     }
   }
 
-  function handleBadgeClick(character) {
-    navigate(`/editor/${character.character_id}`);
-  }
 
   return (
     <div className="relative min-h-screen bg-cyber-bg overflow-hidden">
@@ -103,25 +101,27 @@ export default function Home() {
       </div>
 
       {/* 内容 */}
-      <div className="relative z-10 flex flex-col items-center min-h-screen px-4 py-10" style={{ pointerEvents: 'none' }}>
-        <div className="mt-6 mb-3">
+      <div className="relative z-10 flex flex-col items-center min-h-screen px-4 py-10 pointer-events-none">
+        <div className="mt-6 mb-2 pointer-events-auto">
           <GlitchText speed={1} enableShadows enableOnHover={false} className="home-title">
             Memoria
           </GlitchText>
         </div>
-
-        <p className="text-cyber-green/50 font-mono text-xs mb-6 tracking-[0.3em] uppercase">
+        <p className="text-cyber-green/40 font-mono text-[11px] mb-8 tracking-[0.4em] uppercase pointer-events-none select-none">
           Character Archive
         </p>
-
-        <div className="flex items-center gap-4 mb-10" style={{ pointerEvents: 'auto' }}>
-          <a href="/events" className="text-xs font-mono text-cyber-green/40 hover:text-cyber-green/80 border border-cyber-green/20 rounded px-3 py-1 transition-colors">
-            事件管理
-          </a>
-          <a href="/graph" className="text-xs font-mono text-cyber-green/40 hover:text-cyber-green/80 border border-cyber-green/20 rounded px-3 py-1 transition-colors">
-            关系图谱
-          </a>
+        <div className="pointer-events-auto pill-nav-inline mb-10 px-6 py-2.5 rounded-full border border-cyber-green/20 bg-[#0d0d14]/60 backdrop-blur-md shadow-[0_0_20px_rgba(167,239,158,0.06),0_0_40px_rgba(167,239,158,0.03)]">
+          <PillNav
+            items={[
+              { label: "对话", href: "/chat" },
+              { label: "事件", href: "/events" },
+              { label: "图谱", href: "/graph" },
+            ]}
+            hoveredPillTextColor="#A7EF9E"
+            pillTextColor="#A7EF9E"
+          />
         </div>
+
 
         {loading && (
           <div className="flex items-center gap-3 text-cyber-green/50">
@@ -135,12 +135,12 @@ export default function Home() {
         )}
 
         {!loading && (
-          <div className="flex flex-wrap justify-center gap-8 max-w-5xl">
+          <div className="flex flex-wrap justify-center gap-8 max-w-5xl pointer-events-auto">
             {characters.map((char) => (
               <CharacterBadge
                 key={char.character_id}
                 character={char}
-                onClick={handleBadgeClick}
+    
                 isActive={!!char.is_active}
               />
             ))}
@@ -149,7 +149,7 @@ export default function Home() {
         )}
 
         {!loading && characters.length === 0 && (
-          <div className="text-cyber-green/30 font-mono text-sm mt-8">
+          <div className="text-[#A7EF9E] font-mono text-sm mt-8 drop-shadow-[0_0_8px_#A7EF9E]">
             还没有角色，点击 + 卡片开始创建
           </div>
         )}

@@ -64,7 +64,6 @@ export default function StepSpeechStyle({ formData, updateField }) {
         >
           <option value="zh-CN">中文 (zh-CN)</option>
           <option value="en-US">English (en-US)</option>
-          <option value="ja-JP">日本語 (ja-JP)</option>
         </select>
       </div>
 

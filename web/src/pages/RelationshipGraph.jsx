@@ -534,8 +534,7 @@ export default function RelationshipGraph() {
           {toast}
         </div>
       )}
-
-      {showAddModal && (
+{showAddModal && (
         <AddRelationModal characters={characters} onAdd={handleAdd} onClose={() => setShowAddModal(false)} adding={saving} />
       )}
       {editEdge && (

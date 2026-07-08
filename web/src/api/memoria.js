@@ -144,3 +144,125 @@ export const relationshipAdmin = {
     return request(`/relationships/${charIdA}/${charIdB}`, { method: 'DELETE' });
   },
 };
+
+// ═══════════════════════════════════════════════
+// Dialogue API
+// ═══════════════════════════════════════════════
+export const dialogue = {
+  /** 获取可用角色列表 */
+  listCharacters() {
+    return request('/characters');
+  },
+  /** 开始单角色对话会话 */
+  startSession(characterId, playerId, playerName = '旅行者') {
+    return request('/dialogue/session/start', {
+      method: 'POST',
+      body: JSON.stringify({ character_id: characterId, player_id: playerId, player_name: playerName }),
+    });
+  },
+  /** 发送消息并获取回复 */
+  sendMessage(sessionId, playerMessage) {
+    return request('/dialogue/turn', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId, player_message: playerMessage }),
+    });
+  },
+  /** 结束会话 */
+  endSession(sessionId) {
+    return request('/dialogue/session/end', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+  },
+  /** 获取会话历史 */
+  getHistory(characterId, playerId, offset = 0, limit = 20) {
+    return request(`/dialogue/history?character_id=${characterId}&player_id=${playerId}&offset=${offset}&limit=${limit}`);
+  },
+  /** 获取会话列表 */
+  listSessions(characterId, playerId) {
+    return request(`/dialogue/sessions?character_id=${characterId}&player_id=${playerId}`);
+  },
+};
+
+// ═══════════════════════════════════════════════
+// Multi-Dialogue API
+// ═══════════════════════════════════════════════
+export const multiDialogue = {
+  /** 开始多角色群聊 */
+  startSession(playerId, playerName, characterIds, strategyType = 'hybrid', speakFrequencies = null) {
+    return request('/multi-dialogue/session/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        player_id: playerId,
+        player_name: playerName,
+        character_ids: characterIds,
+        strategy_type: strategyType,
+        speak_frequencies: speakFrequencies,
+      }),
+    });
+  },
+  /** 发送消息（单角色回复模式） */
+  sendMessage(sessionId, playerMessage, strategyType = 'hybrid') {
+    return request('/multi-dialogue/turn', {
+      method: 'POST',
+      body: JSON.stringify({
+        session_id: sessionId,
+        player_message: playerMessage,
+        strategy_type: strategyType,
+        discussion_mode: false,
+      }),
+    });
+  },
+  /** 讨论模式发送消息 */
+  discussMessage(sessionId, playerMessage, maxResponses = 3, strategyType = 'hybrid') {
+    return request('/multi-dialogue/turn', {
+      method: 'POST',
+      body: JSON.stringify({
+        session_id: sessionId,
+        player_message: playerMessage,
+        strategy_type: strategyType,
+        discussion_mode: true,
+        max_responses: maxResponses,
+      }),
+    });
+  },
+  /** 结束会话 */
+  endSession(sessionId) {
+    return request('/dialogue/session/end', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+  },
+  /** 获取多角色会话信息 */
+  getSessionInfo(sessionId) {
+    return request(`/multi-dialogue/session/${sessionId}`);
+  },
+  /** 触发角色互动 */
+  triggerInteraction(sessionId, triggerCharacterId = null) {
+    return request('/multi-dialogue/interaction/trigger', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId, trigger_character_id: triggerCharacterId }),
+    });
+  },
+  /** 添加参与者 */
+  addParticipant(sessionId, characterId, speakFrequency = 1.0) {
+    return request('/multi-dialogue/participant/add', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId, character_id: characterId, speak_frequency: speakFrequency }),
+    });
+  },
+  /** 移除参与者 */
+  removeParticipant(sessionId, characterId) {
+    return request('/multi-dialogue/participant/remove', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId, character_id: characterId }),
+    });
+  },
+  /** 更新参与者配置 */
+  updateParticipant(sessionId, characterId, data) {
+    return request('/multi-dialogue/participant/update', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId, character_id: characterId, ...data }),
+    });
+  },
+};

@@ -42,3 +42,14 @@
   pointer-events: none;
   z-index: 10;
 }
+
+/* ═══ Home page: PillNav inline (below title, not fixed) ═══ */
+.pill-nav-inline .pill-nav-container {
+  position: relative;
+  top: auto;
+  left: auto;
+  transform: none;
+}
+.pill-nav-inline .pill-nav-items {
+  background: transparent;
+}
