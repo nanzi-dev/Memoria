@@ -81,6 +81,10 @@ def get_conn():
     
     # WAL 模式（推荐用于并发读写）
     conn.execute("PRAGMA journal_mode=WAL;")
+    try:
+        conn.execute("ALTER TABLE session ADD COLUMN group_name TEXT")
+    except Exception:
+        pass
     
     try:
         yield conn
@@ -246,6 +250,7 @@ CREATE TABLE IF NOT EXISTS session (
     created_at      TEXT,
     ended_at        TEXT,           -- 会话结束时间
     status          TEXT DEFAULT 'active',  -- active / ended
+    group_name      TEXT,           -- 多角色群聊名称
     
     -- 多角色会话标识
     is_multi_character INTEGER DEFAULT 0  -- 0=单角色, 1=多角色群聊
@@ -392,6 +397,10 @@ def _migrate(conn):
         pass  # 列已存在，跳过
     try:
         conn.execute("ALTER TABLE session_summary ADD COLUMN summary_status TEXT DEFAULT 'completed'")
+    except Exception:
+        pass  # 列已存在，跳过
+    try:
+        conn.execute("ALTER TABLE session ADD COLUMN group_name TEXT")
     except Exception:
         pass  # 列已存在，跳过
 
@@ -658,7 +667,7 @@ def get_latest_active_session(player_id: str, character_id: str | None = None) -
                         LIMIT 1
                     ) AS last_message_at
                 FROM session s
-                WHERE s.player_id = ? AND s.character_id = ? AND s.status = 'active'
+                WHERE s.player_id = ? AND s.character_id = ? AND s.status = 'active' AND s.is_multi_character = 0
                 ORDER BY COALESCE(last_message_at, s.created_at) DESC
                 LIMIT 1
                 """,
@@ -749,6 +758,7 @@ def get_sessions_by_player_and_character(character_id: str, player_id: str) -> l
                 s.created_at,
                 s.ended_at,
                 s.status,
+                s.group_name,
                 s.is_multi_character,
                 c.name,
                 c.display_name,
@@ -774,7 +784,7 @@ def get_sessions_by_player_and_character(character_id: str, player_id: str) -> l
                 ) AS message_count
             FROM session s
             LEFT JOIN character_card c ON c.character_id = s.character_id
-            WHERE s.character_id = ? AND s.player_id = ?
+            WHERE s.character_id = ? AND s.player_id = ? AND s.is_multi_character = 0
             ORDER BY COALESCE(last_message_at, s.created_at) DESC
             """,
             (character_id, player_id),
@@ -795,6 +805,7 @@ def get_all_player_sessions(player_id: str) -> list[dict]:
                 s.created_at,
                 s.ended_at,
                 s.status,
+                s.group_name,
                 s.is_multi_character,
                 c.name,
                 c.display_name,
@@ -904,6 +915,7 @@ def get_messages_by_player_and_character(
             WHERE
                 s.character_id = ?
                 AND s.player_id = ?
+                AND s.is_multi_character = 0
                 {exclude_clause}
             ORDER BY
                 m.id DESC
@@ -1610,7 +1622,8 @@ def create_multi_character_session(
     player_id: str,
     player_name: str,
     character_ids: list[str],
-    speak_frequencies: dict[str, float] = None
+    speak_frequencies: dict[str, float] = None,
+    group_name: str | None = None
 ) -> bool:
     """
     创建多角色群聊会话
@@ -1634,13 +1647,14 @@ def create_multi_character_session(
     try:
         with get_conn() as conn:
             # 创建会话（使用第一个角色作为主角色）
+            clean_group_name = (group_name or "").strip() or None
             conn.execute(
                 """
                 INSERT INTO session
-                (session_id, character_id, player_id, player_name, created_at, status, is_multi_character)
-                VALUES (?, ?, ?, ?, ?, 'active', 1)
+                (session_id, character_id, player_id, player_name, created_at, status, group_name, is_multi_character)
+                VALUES (?, ?, ?, ?, ?, 'active', ?, 1)
                 """,
-                (session_id, character_ids[0], player_id, player_name, _now()),
+                (session_id, character_ids[0], player_id, player_name, _now(), clean_group_name),
             )
             
             # 添加参与者

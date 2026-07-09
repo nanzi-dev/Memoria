@@ -279,12 +279,13 @@ export const dialogue = {
 // ═══════════════════════════════════════════════
 export const multiDialogue = {
   /** 开始多角色群聊 */
-  startSession(playerId, playerName, characterIds, strategyType = 'hybrid', speakFrequencies = null) {
+  startSession(playerId, playerName, characterIds, strategyType = 'hybrid', speakFrequencies = null, groupName = null) {
     return request('/multi-dialogue/session/start', {
       method: 'POST',
       body: JSON.stringify({
         player_id: playerId,
         player_name: playerName,
+        group_name: groupName,
         character_ids: characterIds,
         strategy_type: strategyType,
         speak_frequencies: speakFrequencies,

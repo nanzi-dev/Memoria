@@ -33,6 +33,7 @@ export default function MultiRoom() {
   const [discussionMode, setDiscussionMode] = useState(false);
   const [maxResponses, setMaxResponses] = useState(3);
   const [strategy, setStrategy] = useState('hybrid');
+  const [groupName, setGroupName] = useState('');
   const [phase, setPhase] = useState('setup'); // setup | chat
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -94,12 +95,17 @@ export default function MultiRoom() {
       setError('至少需要选择2个角色');
       return;
     }
+    const cleanGroupName = groupName.trim();
+    if (!cleanGroupName) {
+      setError('请输入群聊名称');
+      return;
+    }
     setError(null);
     setLoading(true);
     try {
       const freqs = {};
       participants.forEach(p => { freqs[p.character_id] = p.frequency; });
-      const res = await multiDialogue.startSession(PLAYER_ID, PLAYER_NAME, participants.map(p => p.character_id), strategy, freqs);
+      const res = await multiDialogue.startSession(PLAYER_ID, PLAYER_NAME, participants.map(p => p.character_id), strategy, freqs, cleanGroupName);
       setSessionId(res.session_id);
       setPhase('chat');
       if (res.opening?.dialogue) {
@@ -206,6 +212,20 @@ export default function MultiRoom() {
               <button onClick={() => setError(null)} className="ml-2 underline">关闭</button>
             </div>
           )}
+
+          {/* Group name */}
+          <div>
+            <label htmlFor="multi-group-name" className="text-[10px] text-cyber-green/50 uppercase tracking-wider mb-2 block">群聊名称</label>
+            <input
+              id="multi-group-name"
+              type="text"
+              value={groupName}
+              onChange={e => setGroupName(e.target.value)}
+              maxLength={40}
+              placeholder="输入唯一群名"
+              className="w-full bg-[#0d0d14] border border-cyber-green/15 rounded-lg px-3 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/20 focus:outline-none focus:border-cyber-green/40 transition-colors"
+            />
+          </div>
 
           {/* Strategy selector */}
           <div>
@@ -320,7 +340,7 @@ export default function MultiRoom() {
           {/* Start button */}
           <button
             onClick={startSession}
-            disabled={participants.length < 2 || loading}
+            disabled={participants.length < 2 || !groupName.trim() || loading}
             className="w-full py-2.5 bg-cyber-green/10 hover:bg-cyber-green/20 border border-cyber-green/20 rounded-lg text-sm font-bold text-cyber-green disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
             {loading ? <Loader2 className="animate-spin" size={16} /> : <Users size={16} />}
@@ -340,7 +360,7 @@ export default function MultiRoom() {
           <ArrowLeft size={18} />
         </button>
         <div className="flex-1 flex items-center gap-2 min-w-0">
-          <span className="text-xs font-bold text-cyber-green truncate">群聊</span>
+          <span className="text-xs font-bold text-cyber-green truncate">{groupName || '群聊'}</span>
           <span className="text-[10px] text-cyber-green/30">{participants.length}人</span>
         </div>
         <button

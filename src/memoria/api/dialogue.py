@@ -96,6 +96,7 @@ class SessionInfo(BaseModel):
     created_at: str | None = None
     ended_at: str | None = None
     status: str
+    group_name: str | None = None
     is_multi_character: bool = False
     last_message: str | None = None
     last_message_at: str | None = None

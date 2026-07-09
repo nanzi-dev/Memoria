@@ -124,6 +124,43 @@ class TestMultiSession:
         assert repository.add_participant_to_session(sid,"c3",0.7)
         assert repository.remove_participant_from_session(sid,"c3")
 
+    def test_group_name_visible_in_player_sessions(self):
+        sid = str(uuid.uuid4())
+        player_id = f"pg_{uuid.uuid4().hex[:8]}"
+        assert repository.create_multi_character_session(
+            sid,
+            player_id,
+            "Player",
+            ["gc1", "gc2"],
+            group_name="旅团作战室",
+        )
+        sessions = repository.get_all_player_sessions(player_id)
+        group = next(s for s in sessions if s["session_id"] == sid)
+        assert group["group_name"] == "旅团作战室"
+        assert group["is_multi_character"]
+
+    def test_single_character_history_excludes_group_messages(self):
+        character_id = f"mixc_{uuid.uuid4().hex[:8]}"
+        player_id = f"mixp_{uuid.uuid4().hex[:8]}"
+        single_sid = str(uuid.uuid4())
+        group_sid = str(uuid.uuid4())
+
+        repository.create_session(single_sid, character_id, player_id, "Player")
+        repository.append_short_term_message(single_sid, "user", "单聊消息")
+        assert repository.create_multi_character_session(
+            group_sid,
+            player_id,
+            "Player",
+            [character_id, f"mixc2_{uuid.uuid4().hex[:8]}"],
+            group_name="不会混入单聊的群",
+        )
+        repository.append_multi_character_message(group_sid, "user", "群聊消息")
+
+        messages, _ = repository.get_messages_by_player_and_character(character_id, player_id, limit=20)
+        contents = [m["content"] for m in messages]
+        assert "单聊消息" in contents
+        assert "群聊消息" not in contents
+
 class TestDedup:
     def test_long_term_dedup(self):
         i1 = repository.save_long_term_fact("dC","dP","测试记忆去重功能",5)

@@ -29,6 +29,7 @@ class StartMultiSessionRequest(BaseModel):
     """开始多角色会话请求"""
     player_id: str = Field(..., description="玩家ID")
     player_name: str = Field(..., description="玩家名称")
+    group_name: Optional[str] = Field(None, description="群聊名称")
     character_ids: list[str] = Field(..., min_items=2, description="参与角色ID列表（至少2个）")
     speak_frequencies: Optional[dict[str, float]] = Field(
         None, 
@@ -44,6 +45,7 @@ class StartMultiSessionResponse(BaseModel):
     """开始多角色会话响应"""
     session_id: str
     strategy_type: str
+    group_name: Optional[str] = None
     opening: dict = Field(..., description="开场白信息")
 
 
@@ -127,6 +129,7 @@ class MultiSessionInfo(BaseModel):
     session_id: str
     player_id: str
     player_name: str
+    group_name: Optional[str] = None
     created_at: str
     status: str
     participants: list[SessionParticipant]
@@ -173,12 +176,14 @@ async def start_multi_session(request: StartMultiSessionRequest):
             player_name=request.player_name,
             character_ids=request.character_ids,
             speak_frequencies=request.speak_frequencies,
-            strategy_type=request.strategy_type
+            strategy_type=request.strategy_type,
+            group_name=request.group_name,
         )
         
         return StartMultiSessionResponse(
             session_id=result["session_id"],
             strategy_type=result["strategy_type"],
+            group_name=result.get("group_name"),
             opening=result["opening"]
         )
     
@@ -322,6 +327,7 @@ async def get_multi_session_info(session_id: str):
             session_id=session["session_id"],
             player_id=session["player_id"],
             player_name=session["player_name"],
+            group_name=session.get("group_name"),
             created_at=session["created_at"],
             status=session["status"],
             participants=[SessionParticipant(**p) for p in participants]
@@ -368,6 +374,7 @@ async def get_multi_dialogue_history(
             session_info={
                 "session_id": session["session_id"],
                 "player_name": session["player_name"],
+                "group_name": session.get("group_name"),
                 "created_at": session["created_at"],
                 "status": session["status"],
                 "participants": participants

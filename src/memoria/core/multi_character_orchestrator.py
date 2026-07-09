@@ -654,7 +654,8 @@ def start_multi_character_session(
     player_name: str,
     character_ids: list[str],
     speak_frequencies: dict[str, float] = None,
-    strategy_type: str = "hybrid"
+    strategy_type: str = "hybrid",
+    group_name: str | None = None,
 ) -> dict:
     """
     创建并启动多角色会话
@@ -677,7 +678,8 @@ def start_multi_character_session(
         player_id=player_id,
         player_name=player_name,
         character_ids=character_ids,
-        speak_frequencies=speak_frequencies
+        speak_frequencies=speak_frequencies,
+        group_name=group_name,
     )
     
     if not success:
@@ -692,7 +694,8 @@ def start_multi_character_session(
     return {
         "session_id": session_id,
         "opening": opening_result,
-        "strategy_type": strategy_type
+        "strategy_type": strategy_type,
+        "group_name": group_name,
     }
 
 

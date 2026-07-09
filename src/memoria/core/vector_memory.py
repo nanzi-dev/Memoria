@@ -27,6 +27,15 @@ logger = logging.getLogger(__name__)
 # 抑制 ChromaDB 遥测错误日志
 logging.getLogger('chromadb.telemetry').setLevel(logging.CRITICAL)
 
+CUDA_ERROR_MARKERS = (
+    "cuda",
+    "cublas",
+    "cudnn",
+    "device-side assert",
+    "unspecified launch failure",
+    "torch_use_cuda_dsa",
+)
+
 
 class VectorMemoryStore:
     """向量记忆存储管理类"""
@@ -56,6 +65,8 @@ class VectorMemoryStore:
             
             # 初始化嵌入模型（轻量级，适合本地部署）
             self.embedding_model = SentenceTransformer(configs.embedding_model)
+            self.embedding_device = str(getattr(self.embedding_model, "device", "auto"))
+            self.embedding_disabled = False
             
             logger.info(f"向量数据库初始化成功，路径：{configs.vector_db_path}")
             
@@ -71,6 +82,54 @@ class VectorMemoryStore:
         """解析向量 ID"""
         parts = vector_id.split("::")
         return parts[0], parts[1], int(parts[2])
+
+    def _is_cuda_error(self, error: Exception) -> bool:
+        """判断异常是否来自 CUDA / GPU 运行时。"""
+        message = str(error).lower()
+        return any(marker in message for marker in CUDA_ERROR_MARKERS)
+
+    def _is_cpu_embedding(self) -> bool:
+        """当前嵌入模型是否已经在 CPU 上运行。"""
+        return self.embedding_device.lower().startswith("cpu")
+
+    def _recover_embedding_model_to_cpu(self) -> bool:
+        """CUDA 失败后重建 CPU 嵌入模型，避免后续请求持续失败。"""
+        if self._is_cpu_embedding():
+            return True
+
+        try:
+            from sentence_transformers import SentenceTransformer
+
+            logger.warning("嵌入模型 CUDA 运行失败，切换到 CPU 后重试")
+            self.embedding_model = SentenceTransformer(configs.embedding_model, device="cpu")
+            self.embedding_device = "cpu"
+            self.embedding_disabled = False
+            return True
+        except Exception as e:
+            self.embedding_disabled = True
+            logger.error(f"嵌入模型切换到 CPU 失败，已暂时禁用向量记忆: {e}")
+            return False
+
+    def _encode_text(self, text: str) -> list[float]:
+        """生成文本向量；CUDA 崩溃时降级到 CPU 并重试一次。"""
+        if self.embedding_disabled:
+            raise RuntimeError("嵌入模型不可用，向量记忆已暂时禁用")
+
+        try:
+            return self.embedding_model.encode(text).tolist()
+        except Exception as e:
+            if not self._is_cuda_error(e) or self._is_cpu_embedding():
+                raise
+
+            if not self._recover_embedding_model_to_cpu():
+                raise
+
+            try:
+                return self.embedding_model.encode(text).tolist()
+            except Exception as retry_error:
+                self.embedding_disabled = True
+                logger.error(f"嵌入模型 CPU 重试失败，已暂时禁用向量记忆: {retry_error}")
+                raise retry_error from e
     
     def add_memory(
         self,
@@ -94,10 +153,14 @@ class VectorMemoryStore:
             bool: 是否添加成功
         """
         try:
+            if self.embedding_disabled:
+                logger.debug("嵌入模型不可用，跳过向量记忆写入")
+                return False
+
             vector_id = self._generate_id(character_id, player_id, fact_id)
             
             # 生成文本嵌入向量
-            embedding = self.embedding_model.encode(fact_text).tolist()
+            embedding = self._encode_text(fact_text)
             
             # 存储到 ChromaDB
             self.collection.add(
@@ -139,11 +202,15 @@ class VectorMemoryStore:
             List[dict]: 相关记忆列表，每个元素包含 fact_id, fact_text, similarity, importance
         """
         try:
+            if self.embedding_disabled:
+                logger.debug("嵌入模型不可用，跳过向量检索")
+                return []
+
             if top_k is None:
                 top_k = configs.vector_search_top_k
             
             # 生成查询向量
-            query_embedding = self.embedding_model.encode(query_text).tolist()
+            query_embedding = self._encode_text(query_text)
             
             # 在 ChromaDB 中搜索
             results = self.collection.query(
