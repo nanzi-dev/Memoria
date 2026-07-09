@@ -874,7 +874,10 @@ def get_messages_by_player_and_character(
     exclude_session_id: str | None = None,
 ):
     """
-    跨多个 Session 分页获取消息（按时间正序返回）
+    跨多个 Session 分页获取消息。
+
+    offset=0 返回最新一页，但结果按时间正序排列，方便聊天窗口直接显示；
+    offset 增大时返回更早的消息，用于上滑加载历史。
     """
 
     with get_conn() as conn:
@@ -903,7 +906,7 @@ def get_messages_by_player_and_character(
                 AND s.player_id = ?
                 {exclude_clause}
             ORDER BY
-                m.created_at ASC
+                m.id DESC
             LIMIT ?
             OFFSET ?
             """,
@@ -913,7 +916,7 @@ def get_messages_by_player_and_character(
     has_more = len(rows) > limit
 
     return (
-        [dict(r) for r in rows[:limit]],
+        [dict(r) for r in reversed(rows[:limit])],
         has_more,
     )
 

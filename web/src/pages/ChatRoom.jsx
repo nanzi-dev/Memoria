@@ -49,6 +49,8 @@ const STRATEGIES = [
 
 ];
 
+const IDLE_SESSION_END_MS = 5 * 60 * 1000;
+
 
 
 // ═══════════════════════════════════════════════
@@ -77,7 +79,58 @@ function normalizeDialogueMessage(message) {
     content: message.content,
     action: message.action || '',
     affinity_delta: message.affinity_delta || 0,
+    created_at: message.created_at,
+    message_id: message.message_id || message.id,
   };
+}
+
+function normalizeGroupMessage(message, knownParticipants = []) {
+  const charId = message.charId || message.character_id || message.speaker_id || '';
+  const participant = charId
+    ? knownParticipants.find(p => p.character_id === charId || p.charId === charId)
+    : null;
+  const role = message.role || (charId ? 'assistant' : 'user');
+  const charName = message.charName || message.character_name || participant?.name || participant?.display_name || '';
+
+  return {
+    role,
+    charId: charId || undefined,
+    charName: role === 'assistant' ? (charName || charId || '未知') : undefined,
+    content: message.content ?? message.dialogue ?? message.message ?? '',
+    action: message.action || '',
+    affinity_delta: message.affinity_delta || 0,
+    created_at: message.created_at,
+    message_id: message.message_id || message.id,
+  };
+}
+
+function formatChatTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const now = new Date();
+  if (date.toDateString() === now.toDateString()) {
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  }
+  return date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function sortMessagesChronologically(messages) {
+  return [...messages].sort((a, b) => {
+    const timeA = a.created_at ? new Date(a.created_at).getTime() : NaN;
+    const timeB = b.created_at ? new Date(b.created_at).getTime() : NaN;
+    const hasTimeA = !Number.isNaN(timeA);
+    const hasTimeB = !Number.isNaN(timeB);
+
+    if (hasTimeA && hasTimeB && timeA !== timeB) return timeA - timeB;
+    if (hasTimeA !== hasTimeB) return hasTimeA ? -1 : 1;
+
+    const idA = Number(a.message_id);
+    const idB = Number(b.message_id);
+    if (!Number.isNaN(idA) && !Number.isNaN(idB) && idA !== idB) return idA - idB;
+
+    return 0;
+  });
 }
 
 
@@ -177,6 +230,8 @@ export default function ChatRoom() {
 
   const [multiSessionId, setMultiSessionId] = useState(null);
 
+  const [multiSessionStatus, setMultiSessionStatus] = useState('active');
+
   const [discussionMode, setDiscussionMode] = useState(false);
 
   const [maxResponses, setMaxResponses] = useState(3);
@@ -198,6 +253,98 @@ export default function ChatRoom() {
   const bottomRef = useRef(null);
 
   const inputRef = useRef(null);
+
+  const activeSessionRef = useRef(null);
+
+  const idleEndTimersRef = useRef(new Map());
+
+  const skipAutoScrollRef = useRef(false);
+
+
+
+  function clearIdleSessionEnd(sessionId = null) {
+
+    if (sessionId) {
+
+      const timer = idleEndTimersRef.current.get(sessionId);
+
+      if (timer) clearTimeout(timer);
+
+      idleEndTimersRef.current.delete(sessionId);
+
+      return;
+
+    }
+
+    idleEndTimersRef.current.forEach(timer => clearTimeout(timer));
+
+    idleEndTimersRef.current.clear();
+
+  }
+
+
+
+  function scheduleIdleSessionEnd(sessionId) {
+
+    if (!sessionId) return;
+
+    clearIdleSessionEnd(sessionId);
+
+    const timer = setTimeout(() => {
+
+      dialogue.endSession(sessionId)
+
+        .catch(() => {})
+
+        .finally(() => {
+
+          if (activeSessionRef.current === sessionId) activeSessionRef.current = null;
+
+          idleEndTimersRef.current.delete(sessionId);
+
+          loadSessions();
+
+        });
+
+    }, IDLE_SESSION_END_MS);
+
+    idleEndTimersRef.current.set(sessionId, timer);
+
+  }
+
+
+
+  function closeTrackedSessionsOnUnload() {
+
+    idleEndTimersRef.current.forEach(timer => clearTimeout(timer));
+
+    const sessionIds = Array.from(new Set([activeSessionRef.current, ...idleEndTimersRef.current.keys()].filter(Boolean)));
+
+    sessionIds.forEach(sessionId => dialogue.endSessionOnUnload(sessionId));
+
+    activeSessionRef.current = null;
+
+    idleEndTimersRef.current.clear();
+
+  }
+
+
+
+  useEffect(() => {
+
+    const handlePageHide = () => closeTrackedSessionsOnUnload();
+
+    window.addEventListener('pagehide', handlePageHide);
+
+    return () => {
+
+      window.removeEventListener('pagehide', handlePageHide);
+
+      closeTrackedSessionsOnUnload();
+
+    };
+
+  }, []);
 
 
 
@@ -311,6 +458,7 @@ export default function ChatRoom() {
           items.push({
             type: 'group',
             session_id: s.session_id,
+            status: s.status,
             created_at: s.created_at,
             ended_at: s.ended_at,
             last_message_at: getActivityTime(s),
@@ -370,7 +518,19 @@ export default function ChatRoom() {
 
   // ── Auto-scroll ──
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  useEffect(() => {
+
+    if (skipAutoScrollRef.current) {
+
+      skipAutoScrollRef.current = false;
+
+      return;
+
+    }
+
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+
+  }, [messages]);
 
   useEffect(() => { if (view === 'single' || view === 'group') inputRef.current?.focus(); }, [view]);
 
@@ -394,13 +554,19 @@ export default function ChatRoom() {
 
   function goToList() {
 
+    const sessionToIdle = singleSessionId || multiSessionId || activeSessionRef.current;
+
     setMessages([]); setCharacter(null); setSingleSessionId(null);
 
     setMultiSessionId(null); setParticipants([]); setAffinity(0); setTrust(0);
 
     setMood('neutral'); setEvents([]); setView('list'); setError(null);
 
+    setMultiSessionStatus('active');
+
     setHistoryOffset(0); setHasMoreHistory(true); setLoadingHistory(false);
+
+    scheduleIdleSessionEnd(sessionToIdle);
 
     loadSessions();
 
@@ -441,26 +607,23 @@ export default function ChatRoom() {
       const session = await dialogue.startSession(char.character_id, PLAYER_ID, PLAYER_NAME);
 
       setSingleSessionId(session.session_id);
+      activeSessionRef.current = session.session_id;
+      clearIdleSessionEnd(session.session_id);
       let nextHistoryOffset = 0;
       let nextHasMoreHistory = true;
 
-      if (session.recovered && session.messages?.length) {
-
-        setMessages(session.messages.map(normalizeDialogueMessage));
-
+      const hist = await dialogue.getHistory(char.character_id, PLAYER_ID, 0, 20);
+      if (hist?.messages?.length) {
+        setMessages(sortMessagesChronologically(hist.messages.map(normalizeDialogueMessage)));
+        setIsRecovered(session.recovered || hist.messages.length > 0);
+        nextHistoryOffset = hist.messages.length;
+        nextHasMoreHistory = hist.has_more;
+      } else if (session.recovered && session.messages?.length) {
+        setMessages(sortMessagesChronologically(session.messages.map(normalizeDialogueMessage)));
         setIsRecovered(true);
-
-      } else {
-        const hist = await dialogue.getHistory(char.character_id, PLAYER_ID, 0, 20, session.session_id);
-        if (hist?.messages?.length) {
-          setMessages(hist.messages.map(normalizeDialogueMessage));
-          setIsRecovered(true);
-          nextHistoryOffset = hist.messages.length;
-          nextHasMoreHistory = hist.has_more;
-        } else if (session.opening_line) {
-          setMessages([{ role: 'assistant', content: session.opening_line, action: session.action || '' }]);
-        }
-
+        nextHistoryOffset = session.messages.length;
+      } else if (session.opening_line) {
+        setMessages([{ role: 'assistant', content: session.opening_line, action: session.action || '' }]);
       }
 
       setAffinity(session.current_affinity || 0);
@@ -491,14 +654,16 @@ export default function ChatRoom() {
 
       try {
 
-        const hist = await dialogue.getHistory(character.character_id, PLAYER_ID, historyOffset, 20, singleSessionId);
+        const hist = await dialogue.getHistory(character.character_id, PLAYER_ID, historyOffset, 20);
         if (hist?.messages && hist.messages.length > 0) {
 
-          setMessages(prev => [...hist.messages.map(normalizeDialogueMessage), ...prev]);
+          skipAutoScrollRef.current = true;
+
+          setMessages(prev => [...sortMessagesChronologically(hist.messages.map(normalizeDialogueMessage)), ...prev]);
 
           setHistoryOffset(historyOffset + hist.messages.length);
 
-          setHasMoreHistory(hist.messages.length >= 20);
+          setHasMoreHistory(hist.has_more);
 
         } else {
 
@@ -520,7 +685,12 @@ export default function ChatRoom() {
 
         if (hist?.messages && hist.messages.length > 0) {
 
-          setMessages(prev => [...hist.messages, ...prev]);
+          skipAutoScrollRef.current = true;
+
+          setMessages(prev => [
+            ...sortMessagesChronologically(hist.messages.map(msg => normalizeGroupMessage(msg, [...participants, ...allChars]))),
+            ...prev,
+          ]);
 
           setHasMoreHistory(false); // group history loads all at once
 
@@ -536,7 +706,7 @@ export default function ChatRoom() {
 
     }
 
-  }, [historyOffset, PLAYER_ID, view, character, singleSessionId, multiSessionId, loadingHistory, hasMoreHistory]);
+  }, [historyOffset, PLAYER_ID, view, character, multiSessionId, loadingHistory, hasMoreHistory, participants, allChars]);
 
   const loadMoreRef = useRef(loadMoreHistory);
   useEffect(() => { loadMoreRef.current = loadMoreHistory; }, [loadMoreHistory]);
@@ -582,12 +752,15 @@ export default function ChatRoom() {
       const res = await multiDialogue.startSession(PLAYER_ID, PLAYER_NAME, participants.map(p => p.character_id), strategy, freqs);
 
       setMultiSessionId(res.session_id);
+      setMultiSessionStatus('active');
+      activeSessionRef.current = res.session_id;
+      clearIdleSessionEnd(res.session_id);
 
       if (res.opening?.dialogue) {
-
-        setMessages([{ role: 'assistant', charId: res.opening.character_id, charName: res.opening.character_name || '未知', content: res.opening.dialogue, action: res.opening.action || '' }]);
-
+        setMessages(sortMessagesChronologically([normalizeGroupMessage(res.opening, [...participants, ...allChars])]));
       }
+
+      setHasMoreHistory(false);
 
       setView('group');
 
@@ -605,6 +778,8 @@ export default function ChatRoom() {
 
     if (!text || sending || sendingMulti) return;
 
+    setError(null);
+
     setInput(''); setSending(true); setSendingMulti(true);
 
     setMessages(prev => [...prev, { role: 'user', content: text }]);
@@ -616,6 +791,8 @@ export default function ChatRoom() {
         const res = await dialogue.sendMessage(singleSessionId, text);
 
         setMessages(prev => [...prev, { role: 'assistant', content: res.dialogue, action: res.action || '', affinity_delta: res.affinity_delta || 0 }]);
+
+        setHistoryOffset(prev => prev + 2);
 
         setAffinity(res.current_affinity ?? affinity); setMood(res.current_mood || 'neutral');
 
@@ -636,24 +813,52 @@ export default function ChatRoom() {
       } else if (view === 'group') {
 
         let res;
+        let targetSessionId = multiSessionId;
+
+        const startReplacementGroupSession = async () => {
+          const freqs = {};
+          participants.forEach(p => { freqs[p.character_id] = p.frequency || 1.0; });
+          const replacement = await multiDialogue.startSession(
+            PLAYER_ID,
+            PLAYER_NAME,
+            participants.map(p => p.character_id),
+            strategy,
+            freqs
+          );
+          targetSessionId = replacement.session_id;
+          setMultiSessionId(replacement.session_id);
+          setMultiSessionStatus('active');
+          activeSessionRef.current = replacement.session_id;
+          clearIdleSessionEnd(replacement.session_id);
+          return replacement.session_id;
+        };
+
+        const sendGroupTurn = (sessionId) => discussionMode
+          ? multiDialogue.discussMessage(sessionId, text, maxResponses, strategy)
+          : multiDialogue.sendMessage(sessionId, text, strategy);
+
+        if (multiSessionStatus !== 'active') {
+          targetSessionId = await startReplacementGroupSession();
+        }
+
+        try {
+          res = await sendGroupTurn(targetSessionId);
+        } catch (err) {
+          if (!String(err.message || '').includes('会话已结束')) throw err;
+          targetSessionId = await startReplacementGroupSession();
+          res = await sendGroupTurn(targetSessionId);
+        }
 
         if (discussionMode) {
 
-          res = await multiDialogue.discussMessage(multiSessionId, text, maxResponses, strategy);
-
-          setMessages(prev => [...prev, ...res.responses.map(r => ({
-
-            role: 'assistant', charId: r.character_id, charName: r.character_name || '未知',
-
-            content: r.dialogue, action: r.action || '', affinity_delta: r.affinity_delta || 0,
-
-          }))]);
+          setMessages(prev => [
+            ...prev,
+            ...res.responses.map(r => normalizeGroupMessage(r, [...participants, ...allChars])),
+          ]);
 
         } else {
 
-          res = await multiDialogue.sendMessage(multiSessionId, text, strategy);
-
-          setMessages(prev => [...prev, { role: 'assistant', charId: res.character_id, charName: res.character_name || '未知', content: res.dialogue, action: res.action || '', affinity_delta: res.affinity_delta || 0 }]);
+          setMessages(prev => [...prev, normalizeGroupMessage(res, [...participants, ...allChars])]);
 
         }
 
@@ -663,7 +868,7 @@ export default function ChatRoom() {
 
     finally { setSending(false); setSendingMulti(false); }
 
-  }, [input, sending, sendingMulti, view, singleSessionId, multiSessionId, discussionMode, maxResponses, strategy, affinity]);
+  }, [input, sending, sendingMulti, view, singleSessionId, multiSessionId, multiSessionStatus, discussionMode, maxResponses, strategy, affinity, participants, allChars, PLAYER_ID, PLAYER_NAME]);
 
 
 
@@ -812,20 +1017,31 @@ export default function ChatRoom() {
                   return name.toLowerCase().includes(searchQuery.toLowerCase()) || msg.toLowerCase().includes(searchQuery.toLowerCase());
                 }).map((item, i) => {
                   const displayTime = item.last_message_at || item.ended_at || item.created_at;
-                  const timeStr = displayTime ? new Date(displayTime).toLocaleDateString('zh-CN', { month:'short', day:'numeric' }) : '';
+                  const timeStr = formatChatTime(displayTime);
                   if (item.type === 'group') {
                     const groupParts = item.participants || [];
                     return (
                       <div key={item.session_id || i} onClick={async () => {
+                        clearIdleSessionEnd(item.session_id);
+                        setMessages([]);
                         setMultiSessionId(item.session_id);
+                        setMultiSessionStatus(item.status || 'active');
+                        setHasMoreHistory(false);
+                        activeSessionRef.current = item.session_id;
                         setView('group');
+                        let loadedParticipants = groupParts.map(p => ({ ...p, frequency: p.frequency || 1.0 }));
                         try {
                           const info = await multiDialogue.getSessionInfo(item.session_id);
-                          setParticipants(info.participants?.map(p => ({ character_id: p.character_id, name: p.name, avatar_url: p.avatar_url, frequency: p.speak_frequency || 1.0 })) || []);
+                          setMultiSessionStatus(info.status || item.status || 'active');
+                          loadedParticipants = info.participants?.map(p => ({ character_id: p.character_id, name: p.name, avatar_url: p.avatar_url, frequency: p.speak_frequency || 1.0 })) || loadedParticipants;
+                          setParticipants(loadedParticipants);
                         } catch {
-                          setParticipants(groupParts.map(p => ({ ...p, frequency: 1.0 })));
+                          setParticipants(loadedParticipants);
                         }
-                        try { const hist = await multiDialogue.getHistory(item.session_id); if (hist?.messages) setMessages(hist.messages); } catch {}
+                        try {
+                          const hist = await multiDialogue.getHistory(item.session_id);
+                          if (hist?.messages) setMessages(sortMessagesChronologically(hist.messages.map(msg => normalizeGroupMessage(msg, [...loadedParticipants, ...allChars]))));
+                        } catch {}
                       }} className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-all cursor-pointer group relative">
                         <div className="flex -space-x-2 shrink-0">
                           {groupParts.slice(0, 3).map((p, j) => (
@@ -1064,7 +1280,7 @@ export default function ChatRoom() {
     const trustStars = Math.min(5, Math.max(0, Math.round(trust / 20)));
 
     return (
-      <div className="min-h-screen bg-[#0b0b0c] font-mono flex flex-col">
+      <div className="h-dvh max-h-dvh bg-[#0b0b0c] font-mono flex flex-col overflow-hidden">
 
         {/* ═══ Top bar: 融合型 — 返回+名字+状态徽章 ═══ */}
         <header className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-[#0d0d14]/80 backdrop-blur-md shrink-0">
@@ -1170,7 +1386,7 @@ export default function ChatRoom() {
         )}
 
         {/* ═══ 消息气泡区 ═══ */}
-        <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3"
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-3"
           onScroll={(e) => { if (e.target.scrollTop < 60 && !loadingHistory && hasMoreHistory) loadMoreHistory(); }}>
 
           {loadingHistory && (
@@ -1361,7 +1577,7 @@ export default function ChatRoom() {
 
     return (
 
-      <div className="min-h-screen bg-[#0b0b0c] font-mono">
+      <div className="h-dvh max-h-dvh bg-[#0b0b0c] font-mono flex flex-col overflow-hidden">
 
         {/* Top bar */}
 
@@ -1419,11 +1635,11 @@ export default function ChatRoom() {
 
         {/* Two-panel body */}
 
-        <div className="flex h-[calc(100vh-57px)]">
+        <div className="flex flex-1 min-h-0">
 
           {/* Left: Member Panel */}
 
-          <aside className="hidden lg:flex w-[280px] flex-col border-r border-white/5 bg-[#0d0d14]/60 backdrop-blur-md overflow-y-auto shrink-0">
+          <aside className="hidden lg:flex w-[280px] min-h-0 flex-col border-r border-white/5 bg-[#0d0d14]/60 backdrop-blur-md overflow-y-auto shrink-0">
 
             <div className="p-4 space-y-3">
 
@@ -1489,13 +1705,13 @@ export default function ChatRoom() {
 
     return (
 
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 min-h-0 flex flex-col min-w-0">
 
         {/* Mobile: compact character info */}
 
         {mode === 'single' && (
 
-          <div className="lg:hidden flex items-center gap-2 px-4 py-2 border-b border-white/5 bg-[#0d0d14]/40">
+          <div className="lg:hidden flex items-center gap-2 px-4 py-2 border-b border-white/5 bg-[#0d0d14]/40 shrink-0">
 
             <div className={`w-7 h-7 rounded-full overflow-hidden border-2 ${MOOD_BORDER[mood]} shrink-0`}>
 
@@ -1531,7 +1747,7 @@ export default function ChatRoom() {
 
         {/* Messages */}
 
-        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3" onScroll={(e) => {
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3" onScroll={(e) => {
 
           if (e.target.scrollTop < 60 && !loadingHistory && hasMoreHistory) loadMoreHistory();
 
@@ -1549,12 +1765,6 @@ export default function ChatRoom() {
 
           )}
 
-          {/* 滚动到顶部自动加载历史记录 */}
-          {loadingHistory && (
-            <div className="flex justify-center py-2">
-              <Loader2 className="animate-spin text-cyber-green/25" size={16} />
-            </div>
-          )}
           {error && (
 
             <div className="text-center text-red-400/50 text-xs p-2 bg-red-500/5 rounded-lg border border-red-500/10">
@@ -1759,7 +1969,7 @@ export default function ChatRoom() {
 
               disabled={sending || sendingMulti}
 
-              className="flex-1 bg-[#0b0b0c] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-zinc-300 placeholder:text-cyber-green/10 resize-none focus:outline-none focus:border-cyber-green/30 transition-colors disabled:opacity-40"
+              className="flex-1 bg-[#0b0b0c] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-zinc-300 placeholder:text-cyber-green/10 resize-none focus:outline-none focus:border-cyber-green/30 transition-colors disabled:opacity-40 min-h-[42px] max-h-[96px]"
 
             />
 

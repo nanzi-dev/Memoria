@@ -261,3 +261,23 @@ class TestSessionListFields:
 
         assert has_more is False
         assert messages[0]["message_id"] == msg_id
+
+    def test_cross_session_history_pages_from_latest_messages(self):
+        cid = f"hist_{uuid.uuid4().hex[:8]}"
+        player_id = f"player_{uuid.uuid4().hex[:8]}"
+        sid1 = str(uuid.uuid4())
+        sid2 = str(uuid.uuid4())
+        repository.create_session(sid1, cid, player_id, "Tester")
+        repository.append_short_term_message(sid1, "user", "old-1")
+        repository.append_short_term_message(sid1, "assistant", "old-2")
+        repository.create_session(sid2, cid, player_id, "Tester")
+        repository.append_short_term_message(sid2, "user", "new-1")
+        repository.append_short_term_message(sid2, "assistant", "new-2")
+
+        latest, has_more = repository.get_messages_by_player_and_character(cid, player_id, offset=0, limit=2)
+        older, older_has_more = repository.get_messages_by_player_and_character(cid, player_id, offset=2, limit=2)
+
+        assert [m["content"] for m in latest] == ["new-1", "new-2"]
+        assert has_more is True
+        assert [m["content"] for m in older] == ["old-1", "old-2"]
+        assert older_has_more is False

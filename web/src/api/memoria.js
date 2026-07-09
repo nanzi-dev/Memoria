@@ -233,6 +233,23 @@ export const dialogue = {
       body: JSON.stringify({ session_id: sessionId }),
     });
   },
+  endSessionOnUnload(sessionId) {
+    if (!sessionId) return;
+    const body = JSON.stringify({ session_id: sessionId });
+    const url = `${API_BASE}/dialogue/session/end`;
+    if (navigator.sendBeacon) {
+      const blob = new Blob([body], { type: 'application/json' });
+      navigator.sendBeacon(url, blob);
+      return;
+    }
+    fetch(url, {
+      method: 'POST',
+      body,
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      keepalive: true,
+    }).catch(() => {});
+  },
   latestSession(playerId, characterId = null) {
     const params = `player_id=${playerId}` + (characterId ? `&character_id=${characterId}` : '');
     return request(`/dialogue/session/latest?${params}`);

@@ -20,7 +20,27 @@ function normalizeDialogueMessage(message) {
     content: message.content,
     action: message.action || '',
     affinity_delta: message.affinity_delta || 0,
+    created_at: message.created_at,
+    message_id: message.message_id || message.id,
   };
+}
+
+function sortMessagesChronologically(messages) {
+  return [...messages].sort((a, b) => {
+    const timeA = a.created_at ? new Date(a.created_at).getTime() : NaN;
+    const timeB = b.created_at ? new Date(b.created_at).getTime() : NaN;
+    const hasTimeA = !Number.isNaN(timeA);
+    const hasTimeB = !Number.isNaN(timeB);
+
+    if (hasTimeA && hasTimeB && timeA !== timeB) return timeA - timeB;
+    if (hasTimeA !== hasTimeB) return hasTimeA ? -1 : 1;
+
+    const idA = Number(a.message_id);
+    const idB = Number(b.message_id);
+    if (!Number.isNaN(idA) && !Number.isNaN(idB) && idA !== idB) return idA - idB;
+
+    return 0;
+  });
 }
 
 export default function SingleChat() {
@@ -48,12 +68,31 @@ export default function SingleChat() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showEvents, setShowEvents] = useState(false);
+  const [historyOffset, setHistoryOffset] = useState(0);
+  const [hasMoreHistory, setHasMoreHistory] = useState(true);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
+  const sessionRef = useRef(null);
+  const skipAutoScrollRef = useRef(false);
+
+  useEffect(() => {
+    const closeSession = () => {
+      if (sessionRef.current) dialogue.endSessionOnUnload(sessionRef.current);
+      sessionRef.current = null;
+    };
+    window.addEventListener('pagehide', closeSession);
+    return () => {
+      window.removeEventListener('pagehide', closeSession);
+      closeSession();
+    };
+  }, []);
 
   useEffect(() => {
     if (!characterId) return;
     setLoading(true);
+    setHistoryOffset(0);
+    setHasMoreHistory(true);
     (async () => {
       try {
         const detail = await characterAdmin.get(characterId);
@@ -68,15 +107,17 @@ export default function SingleChat() {
 
         const session = await dialogue.startSession(characterId, PLAYER_ID, PLAYER_NAME);
         setSessionId(session.session_id);
-        if (session.recovered && session.messages?.length) {
-          setMessages(session.messages.map(normalizeDialogueMessage));
-        } else {
-          const hist = await dialogue.getHistory(characterId, PLAYER_ID, 0, 20, session.session_id);
-          if (hist?.messages?.length) {
-            setMessages(hist.messages.map(normalizeDialogueMessage));
-          } else if (session.opening_line) {
-            setMessages([{ role: 'assistant', content: session.opening_line, action: session.action || '' }]);
-          }
+        sessionRef.current = session.session_id;
+        const hist = await dialogue.getHistory(characterId, PLAYER_ID, 0, 20);
+        if (hist?.messages?.length) {
+          setMessages(sortMessagesChronologically(hist.messages.map(normalizeDialogueMessage)));
+          setHistoryOffset(hist.messages.length);
+          setHasMoreHistory(hist.has_more);
+        } else if (session.recovered && session.messages?.length) {
+          setMessages(sortMessagesChronologically(session.messages.map(normalizeDialogueMessage)));
+          setHistoryOffset(session.messages.length);
+        } else if (session.opening_line) {
+          setMessages([{ role: 'assistant', content: session.opening_line, action: session.action || '' }]);
         }
         setAffinity(session.current_affinity || 0);
       } catch (e) {
@@ -88,6 +129,10 @@ export default function SingleChat() {
   }, [characterId]);
 
   useEffect(() => {
+    if (skipAutoScrollRef.current) {
+      skipAutoScrollRef.current = false;
+      return;
+    }
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
@@ -111,6 +156,7 @@ export default function SingleChat() {
         affinity_delta: res.affinity_delta || 0,
       };
       setMessages(prev => [...prev, botMsg]);
+      setHistoryOffset(prev => prev + 2);
       setAffinity(res.current_affinity ?? affinity);
       setMood(res.current_mood || 'neutral');
       if (res.triggered_events?.length) {
@@ -136,9 +182,29 @@ export default function SingleChat() {
     }
   };
 
+  const loadMoreHistory = useCallback(async () => {
+    if (loadingHistory || !hasMoreHistory || !characterId) return;
+    setLoadingHistory(true);
+    try {
+      const hist = await dialogue.getHistory(characterId, PLAYER_ID, historyOffset, 20);
+      if (hist?.messages?.length) {
+        skipAutoScrollRef.current = true;
+        setMessages(prev => [...sortMessagesChronologically(hist.messages.map(normalizeDialogueMessage)), ...prev]);
+        setHistoryOffset(prev => prev + hist.messages.length);
+        setHasMoreHistory(hist.has_more);
+      } else {
+        setHasMoreHistory(false);
+      }
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, [characterId, PLAYER_ID, historyOffset, hasMoreHistory, loadingHistory]);
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0b0b0c] flex items-center justify-center">
+      <div className="h-dvh max-h-dvh bg-[#0b0b0c] flex items-center justify-center overflow-hidden">
         <div className="flex items-center gap-3 text-cyber-green/50">
           <Loader2 className="animate-spin" size={24} />
           <span className="font-mono text-sm">正在连接角色...</span>
@@ -148,7 +214,7 @@ export default function SingleChat() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0b0b0c] flex flex-col font-mono">
+    <div className="h-dvh max-h-dvh bg-[#0b0b0c] flex flex-col font-mono overflow-hidden">
       <header className="flex items-center gap-4 px-6 py-3 border-b border-cyber-green/10 bg-[#0d0d14]/80 backdrop-blur shrink-0">
         <button
           onClick={() => navigate('/')}
@@ -196,7 +262,7 @@ export default function SingleChat() {
 
       {/* Event notification panel */}
       {showEvents && events.length > 0 && (
-        <div className="mx-6 mt-2 p-3 border border-amber-500/20 bg-amber-500/5 rounded-lg">
+        <div className="mx-6 mt-2 p-3 border border-amber-500/20 bg-amber-500/5 rounded-lg shrink-0">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-bold text-amber-400/80">事件通知</span>
             <button onClick={() => { setShowEvents(false); setEvents([]); }} className="text-amber-400/40 hover:text-amber-400">
@@ -214,7 +280,15 @@ export default function SingleChat() {
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+      <div
+        className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-4"
+        onScroll={(e) => { if (e.target.scrollTop < 60 && !loadingHistory && hasMoreHistory) loadMoreHistory(); }}
+      >
+        {loadingHistory && (
+          <div className="flex justify-center py-2">
+            <Loader2 className="animate-spin text-cyber-green/30" size={16} />
+          </div>
+        )}
         {error && (
           <div className="text-center text-red-400/60 text-xs mb-4 p-2 bg-red-500/5 rounded border border-red-500/10">
             错误: {error}
@@ -293,7 +367,7 @@ export default function SingleChat() {
             rows={1}
             placeholder="输入消息..."
             disabled={sending}
-            className="flex-1 bg-[#0d0d14] border border-cyber-green/15 rounded-lg px-3 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/20 resize-none focus:outline-none focus:border-cyber-green/40 transition-colors disabled:opacity-50"
+            className="flex-1 bg-[#0d0d14] border border-cyber-green/15 rounded-lg px-3 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/20 resize-none focus:outline-none focus:border-cyber-green/40 transition-colors disabled:opacity-50 min-h-[38px] max-h-[96px]"
           />
           <button
             onClick={sendMessage}
