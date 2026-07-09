@@ -65,3 +65,21 @@ class TestCharacterInteraction:
         orch = MultiCharacterOrchestrator(sid)
         selected = orch._select_character_for_interaction()
         assert selected in ["x","y","z"]
+
+class TestSessionLifecycle:
+    """P0-1: Session 状态检查 — 结束后不能继续对话"""
+
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        import uuid
+        from memoria.db import repository
+        self.sid = str(uuid.uuid4())
+        repository.create_session(self.sid, "lcC", "lcP", "Tester")
+        repository.end_session(self.sid)
+
+    def test_run_dialogue_turn_raises_on_ended(self):
+        """已结束的 session 调用 run_dialogue_turn 应抛出 ValueError"""
+        import pytest
+        from memoria.core.orchestrator import run_dialogue_turn
+        with pytest.raises(ValueError, match="会话已经结束"):
+            run_dialogue_turn(self.sid, "你好")

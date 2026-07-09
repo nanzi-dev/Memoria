@@ -73,6 +73,7 @@ def get_conn():
     """
     conn = sqlite3.connect(
         configs.database_path,
+        timeout=30,
         check_same_thread = False # 避免多线程问题
     )
     
@@ -303,11 +304,13 @@ CREATE TABLE IF NOT EXISTS session_summary (
 
     summary_text    TEXT NOT NULL,  -- 会话摘要内容
     message_count   INTEGER,        -- 摘要涵盖的消息数
+    summary_status  TEXT DEFAULT 'completed',  -- pending/generating/completed/failed
     
     created_at      TEXT,
 
     FOREIGN KEY (session_id) REFERENCES session(session_id)
 );
+
 
 -- =========================
 -- 索引优化
@@ -385,6 +388,10 @@ def _migrate(conn):
     """数据库迁移：为已有数据库添加新列"""
     try:
         conn.execute("ALTER TABLE character_card ADD COLUMN avatar_url TEXT")
+    except Exception:
+        pass  # 列已存在，跳过
+    try:
+        conn.execute("ALTER TABLE session_summary ADD COLUMN summary_status TEXT DEFAULT 'completed'")
     except Exception:
         pass  # 列已存在，跳过
 
@@ -635,12 +642,44 @@ def end_session(session_id: str):
         )
 
 
+def get_latest_active_session(player_id: str, character_id: str | None = None) -> dict | None:
+    """获取玩家最近的 active session（用于断线恢复）"""
+    with get_conn() as conn:
+        if character_id:
+            row = conn.execute(
+                """
+                SELECT * FROM session
+                WHERE player_id = ? AND character_id = ? AND status = 'active'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (player_id, character_id),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT * FROM session
+                WHERE player_id = ? AND status = 'active'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (player_id,),
+            ).fetchone()
+    return _row_to_dict(row)
+
+
 # =========================
 # short term memory（对话历史）
 # =========================
-def append_short_term_message(session_id: str, role: str, content: str):
+def append_short_term_message(session_id: str, role: str, content: str) -> int:
+    """
+    追加短期对话消息。
+
+    Returns:
+        int: 新消息的 id
+    """
     with get_conn() as conn:
-        conn.execute(
+        cursor = conn.execute(
             """
             INSERT INTO short_term_message
             (session_id, role, content, created_at)
@@ -648,6 +687,7 @@ def append_short_term_message(session_id: str, role: str, content: str):
             """,
             (session_id, role, content, _now()),
         )
+        return cursor.lastrowid
         
 def get_short_term_history(session_id: str, limit_turns: int) -> list[dict]:
     """
@@ -843,10 +883,12 @@ def save_session_summary(
     character_id: str,
     player_id: str,
     summary_text: str,
-    message_count: int
+    message_count: int,
+    summary_status: str = "completed"
 ):
     """
     保存会话摘要。同一 session+character+player 只保留一条。
+    summary_status: pending / generating / completed / failed
     """
     with get_conn() as conn:
         existing = conn.execute(
@@ -855,15 +897,15 @@ def save_session_summary(
         ).fetchone()
         if existing:
             conn.execute(
-                "UPDATE session_summary SET summary_text=?, message_count=?, created_at=? WHERE id=?",
-                (summary_text, message_count, _now(), existing["id"]),
+                "UPDATE session_summary SET summary_text=?, message_count=?, summary_status=?, created_at=? WHERE id=?",
+                (summary_text, message_count, summary_status, _now(), existing["id"]),
             )
         else:
             conn.execute(
                 """INSERT INTO session_summary
-                   (session_id, character_id, player_id, summary_text, message_count, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (session_id, character_id, player_id, summary_text, message_count, _now()),
+                   (session_id, character_id, player_id, summary_text, message_count, summary_status, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (session_id, character_id, player_id, summary_text, message_count, summary_status, _now()),
             )
         
 def get_session_summary(session_id: str) -> dict | None:

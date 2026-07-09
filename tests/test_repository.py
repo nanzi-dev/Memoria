@@ -145,3 +145,84 @@ class TestDedup:
         g1 = repository.save_group_memory("dg1","全体集结出发",["x"],0.5)
         g2 = repository.save_group_memory("dg1","全体集结出发了",["x"],0.8)
         assert g2 == g1
+
+
+# ═══════════════════════════════════════════════
+# 新增测试 — 代码审查修复验证
+# ═══════════════════════════════════════════════
+
+class TestMessageId:
+    """P2-10: append_short_term_message 返回消息 ID"""
+
+    def test_append_returns_message_id(self):
+        sid = str(uuid.uuid4())
+        repository.create_session(sid, "miC", "miP", "Tester")
+        msg_id = repository.append_short_term_message(sid, "user", "你好")
+        assert isinstance(msg_id, int)
+        assert msg_id > 0
+
+    def test_message_id_increases(self):
+        sid = str(uuid.uuid4())
+        repository.create_session(sid, "mi2C", "mi2P", "Tester")
+        id1 = repository.append_short_term_message(sid, "user", "你好")
+        id2 = repository.append_short_term_message(sid, "assistant", "你好呀")
+        assert id2 > id1
+
+
+class TestSummaryStatus:
+    """P0-2: session_summary 包含 summary_status 字段"""
+
+    def test_save_with_status(self):
+        sid = str(uuid.uuid4())
+        repository.save_session_summary(sid, "ssC", "ssP", "测试摘要", 10, summary_status="generating")
+        s = repository.get_session_summary(sid)
+        assert s is not None
+        assert s.get("summary_status") == "generating"
+
+    def test_default_status_is_completed(self):
+        sid = str(uuid.uuid4())
+        repository.save_session_summary(sid, "dsC", "dsP", "默认状态", 5)
+        s = repository.get_session_summary(sid)
+        assert s is not None
+        assert s.get("summary_status") == "completed"
+
+    def test_status_transition(self):
+        sid = str(uuid.uuid4())
+        repository.save_session_summary(sid, "stC", "stP", "", 3, summary_status="generating")
+        repository.save_session_summary(sid, "stC", "stP", "最终摘要", 3, summary_status="completed")
+        s = repository.get_session_summary(sid)
+        assert s is not None
+        assert s.get("summary_status") == "completed"
+        assert "最终摘要" in s["summary_text"]
+
+
+class TestLatestActiveSession:
+    """P2-11: get_latest_active_session 断线恢复查询"""
+
+    def test_returns_none_when_no_active(self):
+        result = repository.get_latest_active_session(player_id="noone")
+        assert result is None
+
+    def test_returns_active_session(self):
+        sid = str(uuid.uuid4())
+        repository.create_session(sid, "lsC", "lsP", "Tester")
+        result = repository.get_latest_active_session(player_id="lsP")
+        assert result is not None
+        assert result["session_id"] == sid
+        assert result["status"] == "active"
+
+    def test_ended_session_not_returned(self):
+        sid = str(uuid.uuid4())
+        repository.create_session(sid, "esC", "esP", "Tester")
+        repository.end_session(sid)
+        result = repository.get_latest_active_session(player_id="esP")
+        assert result is None
+
+    def test_character_filter(self):
+        sid1 = str(uuid.uuid4())
+        sid2 = str(uuid.uuid4())
+        repository.create_session(sid1, "cfA", "cfP", "Tester")
+        repository.create_session(sid2, "cfB", "cfP", "Tester")
+        result = repository.get_latest_active_session(player_id="cfP", character_id="cfA")
+        assert result is not None
+        assert result["character_id"] == "cfA"

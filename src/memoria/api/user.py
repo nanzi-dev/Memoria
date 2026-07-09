@@ -8,7 +8,7 @@ import mimetypes
 import secrets
 import re
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Header
 from pydantic import BaseModel, Field
 
 from memoria.db import repository
@@ -31,6 +31,14 @@ def _gen_user_id() -> str:
     """生成 usr_<8字符> 格式的用户 ID"""
     return "usr_" + secrets.token_hex(4)
 
+
+def _get_token_from_request(authorization: str | None = None, token: str | None = None) -> str:
+    """从 Authorization header 或 query param 提取 token"""
+    if authorization and authorization.startswith("Bearer "):
+        return authorization[7:]
+    if token:
+        return token
+    raise HTTPException(401, "未提供认证信息")
 def _validate_username(username: str) -> str:
     """校验用户名格式"""
     if not username or len(username) < 2 or len(username) > 20:
@@ -148,7 +156,8 @@ def login(req: LoginRequest):
 # 获取当前用户信息
 # =========================
 @router.get("/user/me", response_model=UserResponse)
-def get_me(token: str):
+def get_me(token: str | None = None, authorization: str | None = Header(None)):
+    token = _get_token_from_request(authorization, token)
     uid = get_current_user_id(token)
     if not uid:
         raise HTTPException(401, "未登录或 token 已过期")
@@ -167,7 +176,8 @@ def get_me(token: str):
 # 更新资料
 # =========================
 @router.put("/user/profile", response_model=UserResponse)
-def update_profile(req: UpdateProfileRequest, token: str):
+def update_profile(req: UpdateProfileRequest, token: str | None = None, authorization: str | None = Header(None)):
+    token = _get_token_from_request(authorization, token)
     uid = get_current_user_id(token)
     if not uid:
         raise HTTPException(401, "未登录")
@@ -192,7 +202,8 @@ def update_profile(req: UpdateProfileRequest, token: str):
 # 头像上传
 # =========================
 @router.post("/user/avatar/upload", response_model=OperationResponse)
-async def upload_avatar(token: str, file: UploadFile = File(...)):
+async def upload_avatar(token: str | None = None, file: UploadFile = File(...), authorization: str | None = Header(None)):
+    token = _get_token_from_request(authorization, token)
     uid = get_current_user_id(token)
     if not uid:
         raise HTTPException(401, "未登录")
@@ -216,7 +227,8 @@ async def upload_avatar(token: str, file: UploadFile = File(...)):
 
 
 @router.post("/user/avatar/url", response_model=OperationResponse)
-def set_avatar_url(req: SetAvatarUrlRequest, token: str):
+def set_avatar_url(req: SetAvatarUrlRequest, token: str | None = None, authorization: str | None = Header(None)):
+    token = _get_token_from_request(authorization, token)
     uid = get_current_user_id(token)
     if not uid:
         raise HTTPException(401, "未登录")

@@ -130,11 +130,12 @@ export default function ChatRoom() {
 
   // ── History loading ──
 
-  const [historyOffset, setHistoryOffset] = useState(-20);
+  const [historyOffset, setHistoryOffset] = useState(0);
 
   const [hasMoreHistory, setHasMoreHistory] = useState(true);
 
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [isRecovered, setIsRecovered] = useState(false);
 
 
 
@@ -378,7 +379,7 @@ export default function ChatRoom() {
 
     setMood('neutral'); setEvents([]); setView('list'); setError(null);
 
-    setHistoryOffset(-20); setHasMoreHistory(true); setLoadingHistory(false);
+    setHistoryOffset(0); setHasMoreHistory(true); setLoadingHistory(false);
 
     loadSessions(); // reload chat list
 
@@ -426,7 +427,7 @@ export default function ChatRoom() {
 
       setAffinity(session.current_affinity || 0);
 
-      setHistoryOffset(-20); setHasMoreHistory(true);
+      setHistoryOffset(0); setHasMoreHistory(true);
 
       setView('single');
 
@@ -452,10 +453,7 @@ export default function ChatRoom() {
 
       try {
 
-        const newOffset = historyOffset + 20;
-
-        const hist = await dialogue.getHistory(character.character_id, PLAYER_ID, newOffset, 20, singleSessionId);
-
+        const hist = await dialogue.getHistory(character.character_id, PLAYER_ID, historyOffset, 20, singleSessionId);
         if (hist?.messages && hist.messages.length > 0) {
 
           setMessages(prev => [...hist.messages.map(m => ({
@@ -464,7 +462,7 @@ export default function ChatRoom() {
 
           })), ...prev]);
 
-          setHistoryOffset(newOffset);
+          setHistoryOffset(historyOffset + hist.messages.length);
 
           setHasMoreHistory(hist.messages.length >= 20);
 

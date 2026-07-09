@@ -71,6 +71,8 @@ class MultiCharacterOrchestrator:
         
         if not self.session.get("is_multi_character"):
             raise ValueError(f"会话 {session_id} 不是多角色会话")
+        if self.session.get("status") == "ended":
+            raise ValueError("会话已经结束")
         
         self.player_id = self.session["player_id"]
         self.player_name = self.session["player_name"]

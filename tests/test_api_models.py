@@ -79,3 +79,71 @@ class TestMultiDialogueAPI:
         from memoria.api.multi_dialogue import AddParticipantRequest
         r = AddParticipantRequest(session_id="s",character_id="c",speak_frequency=1.5)
         assert r.speak_frequency == 1.5
+
+class TestCodeReviewFixesAPI:
+    """P0-2/P2-10: 新增 API 模型验证"""
+
+    def test_dialogue_turn_response_with_message_ids(self):
+        from memoria.api.dialogue import DialogueTurnResponse
+        r = DialogueTurnResponse(
+            dialogue="你好",
+            action="smile",
+            affinity_delta=1,
+            current_affinity=50,
+            current_mood="neutral",
+            user_message_id=101,
+            assistant_message_id=102
+        )
+        assert r.user_message_id == 101
+        assert r.assistant_message_id == 102
+
+    def test_dialogue_turn_response_message_ids_optional(self):
+        from memoria.api.dialogue import DialogueTurnResponse
+        r = DialogueTurnResponse(
+            dialogue="你好",
+            action="smile",
+            affinity_delta=1,
+            current_affinity=50,
+            current_mood="neutral"
+        )
+        assert r.user_message_id is None
+        assert r.assistant_message_id is None
+
+    def test_session_start_response_with_message_id(self):
+        from memoria.api.dialogue import SessionStartResponse
+        r = SessionStartResponse(
+            session_id="test-sid",
+            opening_line="欢迎",
+            action="wave",
+            current_affinity=20,
+            assistant_message_id=99
+        )
+        assert r.assistant_message_id == 99
+
+    def test_history_message_with_message_id(self):
+        from memoria.api.dialogue import HistoryMessage
+        m = HistoryMessage(role="user", content="你好", message_id=42)
+        assert m.message_id == 42
+
+    def test_session_recovery_response(self):
+        from memoria.api.dialogue import SessionRecoveryResponse, HistoryMessage
+        r = SessionRecoveryResponse(
+            found=True,
+            session_id="sid-1",
+            character_id="char-1",
+            character={"character_id": "char-1", "display_name": "测试角色"},
+            messages=[
+                HistoryMessage(role="assistant", content="欢迎回来", message_id=1)
+            ]
+        )
+        assert r.found is True
+        assert r.session_id == "sid-1"
+        assert r.character["display_name"] == "测试角色"
+        assert len(r.messages) == 1
+
+    def test_session_recovery_not_found(self):
+        from memoria.api.dialogue import SessionRecoveryResponse
+        r = SessionRecoveryResponse(found=False)
+        assert r.found is False
+        assert r.session_id is None
+        assert r.messages == []

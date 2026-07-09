@@ -97,13 +97,14 @@ def start_session(character_id: str, player_id: str, player_name: str) -> dict:
     
     dialogue = _safety_check(result.get("dialogue", ""))
     
-    repository.append_short_term_message(session_id, "assistant", dialogue)
+    assistant_msg_id = repository.append_short_term_message(session_id, "assistant", dialogue)
     
     return{
         "session_id": session_id,
         "opening_line": dialogue,
         "action": result.get("action", card.action_vocabulary.default_action),
         "current_affinity": runtime_state.get("affection_level", 0),
+        "assistant_message_id": assistant_msg_id,
     }
     
 
@@ -116,6 +117,8 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
     session = repository.get_session(session_id)
     if not session:
         raise ValueError(f"会话不存在: {session_id}")
+    if session.get("status") == "ended":
+        raise ValueError("会话已经结束")
     
     character_id = session["character_id"]
     player_id = session["player_id"]
@@ -217,31 +220,10 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
         mood_after = runtime_state.get("current_mood", "neutral")
         
     # =========================
-    # 状态持久化
-    # =========================
-    repository.save_runtime_state(
-        character_id,
-        player_id,
-        new_affinity,
-        new_trust,
-        mood_after,
-    )
-    
-    repository.append_short_term_message(session_id, "user", player_message)
-    repository.append_short_term_message(session_id, "assistant", dialogue)
-    
-    # =========================
-    # 长期记忆写入
+    # 暂缓持久化——先执行事件，成功后统一写入，避免事件失败时数据不一致
     # =========================
     memory_fact = result.get("memory_worth_keeping")
-    
-    if memory_fact and str(memory_fact).strip().lower() not in ("none", "null", ""):
-        repository.save_long_term_fact(
-            character_id,
-            player_id,
-            str(memory_fact).strip()
-        )
-    
+
     # =========================
     # 事件系统检测和执行
     # =========================
@@ -344,15 +326,24 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
                 logger.error(f"执行事件失败: {event.event_id}, 错误: {e}")
         
         # 更新最终状态
-        if triggered_events:
-            repository.save_runtime_state(
+        repository.save_runtime_state(
+            character_id,
+            player_id,
+            new_affinity,
+            new_trust,
+            mood_after
+        )
+
+        user_msg_id = repository.append_short_term_message(session_id, "user", player_message)
+        assistant_msg_id = repository.append_short_term_message(session_id, "assistant", dialogue)
+
+        if memory_fact and str(memory_fact).strip().lower() not in ("none", "null", ""):
+            repository.save_long_term_fact(
                 character_id,
                 player_id,
-                new_affinity,
-                new_trust,
-                mood_after
+                str(memory_fact).strip()
             )
-    
+
     except Exception as e:
         logger.error(f"事件系统处理失败: {e}", exc_info=True)
         
@@ -367,4 +358,6 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
         "current_mood": mood_after,
         "triggered_events": triggered_events_info,
         "event_notification": event_notification,
+        "user_message_id": user_msg_id,
+        "assistant_message_id": assistant_msg_id,
     }

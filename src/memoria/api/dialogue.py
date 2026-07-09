@@ -38,6 +38,7 @@ class SessionStartResponse(BaseModel):
     opening_line: str
     action: str
     current_affinity: int
+    assistant_message_id: int | None = None
 
 
 class DialogueTurnResponse(BaseModel):
@@ -48,6 +49,8 @@ class DialogueTurnResponse(BaseModel):
     current_mood: str
     triggered_events: list[dict] = []
     event_notification: str | None = None
+    user_message_id: int | None = None
+    assistant_message_id: int | None = None
 
 class SessionEndRequest(BaseModel):
     session_id: str
@@ -90,6 +93,7 @@ class HistoryMessage(BaseModel):
     role: str
     content: str
     created_at: str | None = None
+    message_id: int | None = None
 
 
 class HistoryResponse(BaseModel):
@@ -98,7 +102,19 @@ class HistoryResponse(BaseModel):
     current_affinity: int
     current_mood: str
     
-    
+
+# =========================
+# Session recovery（断线恢复）
+# =========================
+class SessionRecoveryResponse(BaseModel):
+    """恢复最近 active session 的响应"""
+    found: bool = False
+    session_id: str | None = None
+    character_id: str | None = None
+    character: dict | None = None  # 角色摘要信息
+    messages: list[HistoryMessage] = []
+
+
 # =========================
 # Characters
 # =========================
@@ -211,6 +227,7 @@ def get_history(character_id: str, player_id: str, offset: int = 0, limit: int =
                 role=m["role"],
                 content=m["content"],
                 created_at=m.get("created_at"),
+                message_id=m.get("id"),
             )
             for m in messages
         ],
@@ -243,15 +260,29 @@ def session_end(req: SessionEndRequest):
     # 获取完整对话历史
     history = repository.get_short_term_history(req.session_id, limit_turns=1000)
     
+    # 标记摘要状态为 generating
+    if len(history) > 0:
+        repository.save_session_summary(
+            session_id=req.session_id,
+            character_id=session["character_id"],
+            player_id=session["player_id"],
+            summary_text="",
+            message_count=len(history),
+            summary_status="generating"
+        )
+    
     # 生成摘要
     summary_text = None
+    summary_status = "failed"
     if len(history) > 0:
         try:
             summary_text = summarize_session(history)
+            if summary_text:
+                summary_status = "completed"
         except Exception as e:
             print(f"[ERROR] summarize_session failed: {e}")
     
-    # 保存摘要
+    # 更新摘要
     if summary_text:
         try:
             repository.save_session_summary(
@@ -259,12 +290,13 @@ def session_end(req: SessionEndRequest):
                 character_id=session["character_id"],
                 player_id=session["player_id"],
                 summary_text=summary_text,
-                message_count=len(history)
+                message_count=len(history),
+                summary_status=summary_status
             )
         except Exception as e:
             print(f"[ERROR] Failed to save summary: {e}")
     
-    # 标记会话结束
+    # 标记会话结束（无论摘要成功与否）
     repository.end_session(req.session_id)
     
     return SessionEndResponse(

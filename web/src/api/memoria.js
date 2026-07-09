@@ -7,8 +7,7 @@ async function request(url, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...options.headers };
   const token = localStorage.getItem('memoria-token');
   if (token) {
-    const sep = url.includes('?') ? '&' : '?';
-    url = `${url}${sep}token=${encodeURIComponent(token)}`;
+    headers['Authorization'] = `Bearer ${token}`;
   }
   const resp = await fetch(`${API_BASE}${url}`, { ...options, headers });
   if (!resp.ok) {
@@ -46,10 +45,12 @@ export const userApi = {
   async uploadAvatar(file) {
     const formData = new FormData();
     formData.append('file', file);
+    const headers = {};
     const token = localStorage.getItem('memoria-token');
-    const sep = '?';
-    const resp = await fetch(`${API_BASE}/user/avatar/upload${token ? `?token=${encodeURIComponent(token)}` : ''}`, {
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const resp = await fetch(`${API_BASE}/user/avatar/upload`, {
       method: 'POST',
+      headers,
       body: formData,
     });
     if (!resp.ok) {
@@ -227,6 +228,10 @@ export const dialogue = {
       body: JSON.stringify({ session_id: sessionId }),
     });
   },
+  latestSession(playerId, characterId = null) {
+    const params = `player_id=${playerId}` + (characterId ? `&character_id=${characterId}` : '');
+    return request(`/dialogue/session/latest?${params}`);
+  },
   /** 获取会话历史 */
   getHistory(characterId, playerId, offset = 0, limit = 20, excludeSessionId = null) {
     let url = `/dialogue/history?character_id=${characterId}&player_id=${playerId}&offset=${offset}&limit=${limit}`;
@@ -291,6 +296,10 @@ export const multiDialogue = {
       method: 'POST',
       body: JSON.stringify({ session_id: sessionId }),
     });
+  },
+  latestSession(playerId, characterId = null) {
+    const params = `player_id=${playerId}` + (characterId ? `&character_id=${characterId}` : '');
+    return request(`/dialogue/session/latest?${params}`);
   },
   /** 获取多角色会话信息 */
   getSessionInfo(sessionId) {
