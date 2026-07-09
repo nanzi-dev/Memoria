@@ -226,3 +226,38 @@ class TestLatestActiveSession:
         result = repository.get_latest_active_session(player_id="cfP", character_id="cfA")
         assert result is not None
         assert result["character_id"] == "cfA"
+
+
+class TestSessionListFields:
+    def test_player_sessions_include_display_fields_and_last_message_time(self):
+        cid = f"sl_{uuid.uuid4().hex[:8]}"
+        sid = str(uuid.uuid4())
+        card = json.dumps({"character_id": cid, "meta": {"name": "列表角色", "display_name": "列表"}})
+        assert repository.save_character_card_to_db(
+            cid,
+            card,
+            name="列表角色",
+            display_name="列表",
+            avatar_url="https://example.test/avatar.png",
+        )
+        repository.create_session(sid, cid, "slP", "Tester")
+        repository.append_short_term_message(sid, "assistant", "最后一句")
+
+        sessions = repository.get_all_player_sessions("slP")
+        session = next(s for s in sessions if s["session_id"] == sid)
+
+        assert session["name"] == "列表角色"
+        assert session["display_name"] == "列表"
+        assert session["avatar_url"] == "https://example.test/avatar.png"
+        assert session["last_message"] == "最后一句"
+        assert session["last_message_at"] is not None
+
+    def test_paginated_messages_include_message_id(self):
+        sid = str(uuid.uuid4())
+        repository.create_session(sid, "pmC", "pmP", "Tester")
+        msg_id = repository.append_short_term_message(sid, "user", "带 ID 的消息")
+
+        messages, has_more = repository.get_messages_paginated(sid, offset=0, limit=20)
+
+        assert has_more is False
+        assert messages[0]["message_id"] == msg_id

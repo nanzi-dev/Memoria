@@ -83,3 +83,60 @@ class TestSessionLifecycle:
         from memoria.core.orchestrator import run_dialogue_turn
         with pytest.raises(ValueError, match="会话已经结束"):
             run_dialogue_turn(self.sid, "你好")
+
+
+class TestDialogueTurn:
+    def test_event_system_failure_keeps_message_ids_defined(self, monkeypatch):
+        """事件系统失败时不应因 message_id 未赋值导致二次崩溃"""
+        from types import SimpleNamespace
+        from memoria.core import orchestrator
+
+        card = SimpleNamespace(
+            action_vocabulary=SimpleNamespace(
+                default_action="idle",
+                greeting_actions=[],
+                farewell_actions=[],
+                agreement_actions=[],
+                disagreement_actions=[],
+                emotional_reactions=[],
+            ),
+            runtime_state_schema=SimpleNamespace(
+                current_mood=SimpleNamespace(emotions=["neutral", "happy"])
+            ),
+        )
+
+        monkeypatch.setattr(orchestrator.repository, "get_session", lambda session_id: {
+            "session_id": session_id,
+            "character_id": "char",
+            "player_id": "player",
+            "player_name": "Tester",
+            "created_at": None,
+            "status": "active",
+        })
+        monkeypatch.setattr(orchestrator.character_loader, "load_character_card", lambda character_id: card)
+        monkeypatch.setattr(orchestrator.repository, "get_runtime_state", lambda *args, **kwargs: {
+            "affection_level": 0,
+            "trust_level": 0,
+            "current_mood": "neutral",
+        })
+        monkeypatch.setattr(orchestrator.repository, "get_short_term_history", lambda *args, **kwargs: [])
+        monkeypatch.setattr(orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: [])
+        monkeypatch.setattr(orchestrator.prompt_builder, "build_system_prompt", lambda *args, **kwargs: "prompt")
+        monkeypatch.setattr(orchestrator.llm_client, "call_role_turn", lambda *args, **kwargs: {
+            "dialogue": "你好",
+            "action": "idle",
+            "affinity_delta": 0,
+            "trust_delta": 0,
+            "mood_after": "neutral",
+        })
+
+        def fail_list_event_definitions(*args, **kwargs):
+            raise RuntimeError("event storage unavailable")
+
+        monkeypatch.setattr(orchestrator.repository, "list_event_definitions", fail_list_event_definitions)
+
+        result = orchestrator.run_dialogue_turn("sid", "你好")
+
+        assert result["dialogue"] == "你好"
+        assert result["user_message_id"] is None
+        assert result["assistant_message_id"] is None

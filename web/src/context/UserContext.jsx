@@ -10,17 +10,26 @@ export function useUser() {
 export function UserProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(() => localStorage.getItem('memoria-token'));
-  const [loading, setLoading] = useState(!!token);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!token) { setLoading(false); return; }
-    userApi.getMe().then(u => { setUser(u); setLoading(false); }).catch(() => {
-      localStorage.removeItem('memoria-token');
-      setToken(null);
-      setUser(null);
-      setLoading(false);
-    });
-  }, [token]);
+    let cancelled = false;
+    userApi.getMe()
+      .then(u => {
+        if (cancelled) return;
+        setUser(u);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        localStorage.removeItem('memoria-token');
+        setToken(null);
+        setUser(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const login = useCallback(async (username, password) => {
     const res = await userApi.login(username, password);
@@ -42,15 +51,15 @@ export function UserProvider({ children }) {
     localStorage.removeItem('memoria-token');
     setToken(null);
     setUser(null);
+    userApi.logout().catch(() => {});
   }, []);
 
   const refresh = useCallback(async () => {
-    if (!token) return;
     try {
       const u = await userApi.getMe();
       setUser(u);
     } catch {}
-  }, [token]);
+  }, []);
 
   return (
     <UserContext.Provider value={{ user, token, loading, login, register, logout, refresh }}>

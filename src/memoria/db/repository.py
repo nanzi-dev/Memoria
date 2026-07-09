@@ -648,9 +648,18 @@ def get_latest_active_session(player_id: str, character_id: str | None = None) -
         if character_id:
             row = conn.execute(
                 """
-                SELECT * FROM session
-                WHERE player_id = ? AND character_id = ? AND status = 'active'
-                ORDER BY created_at DESC
+                SELECT
+                    s.*,
+                    (
+                        SELECT created_at
+                        FROM short_term_message
+                        WHERE session_id = s.session_id
+                        ORDER BY id DESC
+                        LIMIT 1
+                    ) AS last_message_at
+                FROM session s
+                WHERE s.player_id = ? AND s.character_id = ? AND s.status = 'active'
+                ORDER BY COALESCE(last_message_at, s.created_at) DESC
                 LIMIT 1
                 """,
                 (player_id, character_id),
@@ -658,9 +667,18 @@ def get_latest_active_session(player_id: str, character_id: str | None = None) -
         else:
             row = conn.execute(
                 """
-                SELECT * FROM session
-                WHERE player_id = ? AND status = 'active'
-                ORDER BY created_at DESC
+                SELECT
+                    s.*,
+                    (
+                        SELECT created_at
+                        FROM short_term_message
+                        WHERE session_id = s.session_id
+                        ORDER BY id DESC
+                        LIMIT 1
+                    ) AS last_message_at
+                FROM session s
+                WHERE s.player_id = ? AND s.status = 'active'
+                ORDER BY COALESCE(last_message_at, s.created_at) DESC
                 LIMIT 1
                 """,
                 (player_id,),
@@ -731,6 +749,10 @@ def get_sessions_by_player_and_character(character_id: str, player_id: str) -> l
                 s.created_at,
                 s.ended_at,
                 s.status,
+                s.is_multi_character,
+                c.name,
+                c.display_name,
+                c.avatar_url,
                 (
                     SELECT content
                     FROM short_term_message
@@ -739,13 +761,21 @@ def get_sessions_by_player_and_character(character_id: str, player_id: str) -> l
                     LIMIT 1
                 ) AS last_message,
                 (
+                    SELECT created_at
+                    FROM short_term_message
+                    WHERE session_id = s.session_id
+                    ORDER BY id DESC
+                    LIMIT 1
+                ) AS last_message_at,
+                (
                     SELECT COUNT(*)
                     FROM short_term_message
                     WHERE session_id = s.session_id
                 ) AS message_count
             FROM session s
+            LEFT JOIN character_card c ON c.character_id = s.character_id
             WHERE s.character_id = ? AND s.player_id = ?
-            ORDER BY s.created_at DESC
+            ORDER BY COALESCE(last_message_at, s.created_at) DESC
             """,
             (character_id, player_id),
         ).fetchall()
@@ -766,6 +796,9 @@ def get_all_player_sessions(player_id: str) -> list[dict]:
                 s.ended_at,
                 s.status,
                 s.is_multi_character,
+                c.name,
+                c.display_name,
+                c.avatar_url,
                 (
                     SELECT content
                     FROM short_term_message
@@ -774,13 +807,21 @@ def get_all_player_sessions(player_id: str) -> list[dict]:
                     LIMIT 1
                 ) AS last_message,
                 (
+                    SELECT created_at
+                    FROM short_term_message
+                    WHERE session_id = s.session_id
+                    ORDER BY id DESC
+                    LIMIT 1
+                ) AS last_message_at,
+                (
                     SELECT COUNT(*)
                     FROM short_term_message
                     WHERE session_id = s.session_id
                 ) AS message_count
             FROM session s
+            LEFT JOIN character_card c ON c.character_id = s.character_id
             WHERE s.player_id = ?
-            ORDER BY s.created_at DESC
+            ORDER BY COALESCE(last_message_at, s.created_at) DESC
             """,
             (player_id,),
         ).fetchall()
@@ -808,7 +849,7 @@ def get_messages_paginated(session_id: str, offset: int, limit: int) -> tuple[li
         # 倒序查询（最新的在前）
         rows = conn.execute(
             """
-            SELECT role, content, created_at
+            SELECT id AS message_id, role, content, created_at
             FROM short_term_message
             WHERE session_id = ?
             ORDER BY id DESC
@@ -849,6 +890,7 @@ def get_messages_by_player_and_character(
         rows = conn.execute(
             f"""
             SELECT
+                m.id AS message_id,
                 m.role,
                 m.content,
                 m.created_at,

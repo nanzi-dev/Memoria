@@ -8,7 +8,7 @@ import mimetypes
 import secrets
 import re
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Header
+from fastapi import APIRouter, HTTPException, UploadFile, File, Header, Response, Cookie
 from pydantic import BaseModel, Field
 
 from memoria.db import repository
@@ -20,6 +20,8 @@ _tokens: dict[str, str] = {}  # token -> user_id
 
 ALLOWED_MIME_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2MB
+AUTH_COOKIE_NAME = "memoria-token"
+AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 天
 
 def _hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
@@ -32,13 +34,34 @@ def _gen_user_id() -> str:
     return "usr_" + secrets.token_hex(4)
 
 
-def _get_token_from_request(authorization: str | None = None, token: str | None = None) -> str:
-    """从 Authorization header 或 query param 提取 token"""
+def _set_auth_cookie(response: Response, token: str) -> None:
+    """写入登录态 Cookie。"""
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        max_age=AUTH_COOKIE_MAX_AGE,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        path="/",
+    )
+
+
+def _get_token_from_request(
+    authorization: str | None = None,
+    token: str | None = None,
+    cookie_token: str | None = None,
+) -> str:
+    """从 Authorization header、query param 或 Cookie 提取 token"""
     if authorization and authorization.startswith("Bearer "):
         return authorization[7:]
     if token:
         return token
+    if cookie_token:
+        return cookie_token
     raise HTTPException(401, "未提供认证信息")
+
+
 def _validate_username(username: str) -> str:
     """校验用户名格式"""
     if not username or len(username) < 2 or len(username) > 20:
@@ -113,7 +136,7 @@ class OperationResponse(BaseModel):
 # 注册
 # =========================
 @router.post("/user/register", response_model=AuthResponse)
-def register(req: RegisterRequest):
+def register(req: RegisterRequest, response: Response):
     _validate_username(req.username)
     _validate_password(req.password)
     if repository.get_user_by_username(req.username):
@@ -127,6 +150,7 @@ def register(req: RegisterRequest):
     repository.create_user(uid, req.username, _hash_password(req.password), req.gender)
     token = _gen_token()
     _tokens[token] = uid
+    _set_auth_cookie(response, token)
     user = repository.get_user_by_id(uid)
     return AuthResponse(token=token, user=UserResponse(
         user_id=uid, username=req.username, gender=req.gender
@@ -137,13 +161,14 @@ def register(req: RegisterRequest):
 # 登录
 # =========================
 @router.post("/user/login", response_model=AuthResponse)
-def login(req: LoginRequest):
+def login(req: LoginRequest, response: Response):
     user = repository.get_user_by_username(req.username)
     if not user or user["password_hash"] != _hash_password(req.password):
         raise HTTPException(401, "用户名或密码错误")
 
     token = _gen_token()
     _tokens[token] = user["user_id"]
+    _set_auth_cookie(response, token)
     return AuthResponse(token=token, user=UserResponse(
         user_id=user["user_id"],
         username=user["username"],
@@ -153,11 +178,34 @@ def login(req: LoginRequest):
 
 
 # =========================
+# 退出登录
+# =========================
+@router.post("/user/logout", response_model=OperationResponse)
+def logout(
+    response: Response,
+    token: str | None = None,
+    authorization: str | None = Header(None),
+    cookie_token: str | None = Cookie(None, alias=AUTH_COOKIE_NAME),
+):
+    try:
+        auth_token = _get_token_from_request(authorization, token, cookie_token)
+        _tokens.pop(auth_token, None)
+    except HTTPException:
+        pass
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/")
+    return OperationResponse(success=True, message="已退出登录")
+
+
+# =========================
 # 获取当前用户信息
 # =========================
 @router.get("/user/me", response_model=UserResponse)
-def get_me(token: str | None = None, authorization: str | None = Header(None)):
-    token = _get_token_from_request(authorization, token)
+def get_me(
+    token: str | None = None,
+    authorization: str | None = Header(None),
+    cookie_token: str | None = Cookie(None, alias=AUTH_COOKIE_NAME),
+):
+    token = _get_token_from_request(authorization, token, cookie_token)
     uid = get_current_user_id(token)
     if not uid:
         raise HTTPException(401, "未登录或 token 已过期")
@@ -176,8 +224,13 @@ def get_me(token: str | None = None, authorization: str | None = Header(None)):
 # 更新资料
 # =========================
 @router.put("/user/profile", response_model=UserResponse)
-def update_profile(req: UpdateProfileRequest, token: str | None = None, authorization: str | None = Header(None)):
-    token = _get_token_from_request(authorization, token)
+def update_profile(
+    req: UpdateProfileRequest,
+    token: str | None = None,
+    authorization: str | None = Header(None),
+    cookie_token: str | None = Cookie(None, alias=AUTH_COOKIE_NAME),
+):
+    token = _get_token_from_request(authorization, token, cookie_token)
     uid = get_current_user_id(token)
     if not uid:
         raise HTTPException(401, "未登录")
@@ -202,8 +255,13 @@ def update_profile(req: UpdateProfileRequest, token: str | None = None, authoriz
 # 头像上传
 # =========================
 @router.post("/user/avatar/upload", response_model=OperationResponse)
-async def upload_avatar(token: str | None = None, file: UploadFile = File(...), authorization: str | None = Header(None)):
-    token = _get_token_from_request(authorization, token)
+async def upload_avatar(
+    token: str | None = None,
+    file: UploadFile = File(...),
+    authorization: str | None = Header(None),
+    cookie_token: str | None = Cookie(None, alias=AUTH_COOKIE_NAME),
+):
+    token = _get_token_from_request(authorization, token, cookie_token)
     uid = get_current_user_id(token)
     if not uid:
         raise HTTPException(401, "未登录")
@@ -227,8 +285,13 @@ async def upload_avatar(token: str | None = None, file: UploadFile = File(...), 
 
 
 @router.post("/user/avatar/url", response_model=OperationResponse)
-def set_avatar_url(req: SetAvatarUrlRequest, token: str | None = None, authorization: str | None = Header(None)):
-    token = _get_token_from_request(authorization, token)
+def set_avatar_url(
+    req: SetAvatarUrlRequest,
+    token: str | None = None,
+    authorization: str | None = Header(None),
+    cookie_token: str | None = Cookie(None, alias=AUTH_COOKIE_NAME),
+):
+    token = _get_token_from_request(authorization, token, cookie_token)
     uid = get_current_user_id(token)
     if not uid:
         raise HTTPException(401, "未登录")

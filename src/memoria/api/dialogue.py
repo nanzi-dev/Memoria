@@ -7,8 +7,11 @@ API 路由层
 3. 返回标准 DTO
 """
 
+from datetime import datetime, timedelta, timezone
+import uuid
+
 from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 
 from memoria.core import character_loader, orchestrator
 from memoria.core.memory_extractor import summarize_session
@@ -33,12 +36,21 @@ class DialogueTurnRequest(BaseModel):
 # =========================
 # 响应模型
 # =========================
+class HistoryMessage(BaseModel):
+    role: str
+    content: str
+    created_at: str | None = None
+    message_id: int | None = None
+
+
 class SessionStartResponse(BaseModel):
     session_id: str
     opening_line: str
     action: str
     current_affinity: int
     assistant_message_id: int | None = None
+    recovered: bool = False
+    messages: list[HistoryMessage] = []
 
 
 class DialogueTurnResponse(BaseModel):
@@ -86,14 +98,11 @@ class SessionInfo(BaseModel):
     status: str
     is_multi_character: bool = False
     last_message: str | None = None
+    last_message_at: str | None = None
     message_count: int = 0
-
-
-class HistoryMessage(BaseModel):
-    role: str
-    content: str
-    created_at: str | None = None
-    message_id: int | None = None
+    name: str | None = None
+    display_name: str | None = None
+    avatar_url: str | None = None
 
 
 class HistoryResponse(BaseModel):
@@ -113,6 +122,145 @@ class SessionRecoveryResponse(BaseModel):
     character_id: str | None = None
     character: dict | None = None  # 角色摘要信息
     messages: list[HistoryMessage] = []
+
+
+IDLE_SESSION_TIMEOUT = timedelta(minutes=5)
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _session_activity_at(session: dict) -> datetime | None:
+    return _parse_iso_datetime(session.get("last_message_at") or session.get("created_at"))
+
+
+def _messages_for_session(session_id: str, limit: int = 100) -> list[HistoryMessage]:
+    messages, _ = repository.get_messages_paginated(session_id, offset=0, limit=limit)
+    return [HistoryMessage(**m) for m in messages]
+
+
+def _current_character_state(character_id: str, player_id: str) -> tuple[int, str]:
+    current_affinity = 0
+    current_mood = "neutral"
+    try:
+        card = character_loader.load_character_card(character_id)
+        runtime_state = repository.get_runtime_state(character_id, player_id, card)
+        current_affinity = runtime_state.get("affection_level", 0)
+        current_mood = runtime_state.get("current_mood", "neutral")
+    except Exception:
+        pass
+    return current_affinity, current_mood
+
+
+def _start_empty_session(character_id: str, player_id: str, player_name: str) -> SessionStartResponse:
+    """创建会话但不阻塞等待开场白生成。"""
+    card = character_loader.load_character_card(character_id)
+    runtime_state = repository.get_runtime_state(character_id, player_id, card)
+    session_id = str(uuid.uuid4())
+    repository.create_session(session_id, character_id, player_id, player_name)
+    return SessionStartResponse(
+        session_id=session_id,
+        opening_line="",
+        action="",
+        current_affinity=runtime_state.get("affection_level", 0),
+        assistant_message_id=None,
+        recovered=False,
+        messages=[],
+    )
+
+
+def _generate_session_summary(session_id: str) -> None:
+    """后台生成会话摘要，避免阻塞聊天启动/关闭请求。"""
+    session = repository.get_session(session_id)
+    if not session:
+        return
+
+    history = repository.get_short_term_history(session_id, limit_turns=1000)
+    if len(history) == 0:
+        return
+
+    summary_text = None
+    summary_status = "failed"
+    try:
+        summary_text = summarize_session(history)
+        if summary_text:
+            summary_status = "completed"
+    except Exception as e:
+        print(f"[ERROR] summarize_session failed: {e}")
+
+    try:
+        repository.save_session_summary(
+            session_id=session_id,
+            character_id=session["character_id"],
+            player_id=session["player_id"],
+            summary_text=summary_text or "",
+            message_count=len(history),
+            summary_status=summary_status
+        )
+    except Exception as e:
+        print(f"[ERROR] Failed to save summary: {e}")
+
+
+def _end_session(session_id: str, background_tasks: BackgroundTasks | None = None) -> SessionEndResponse:
+    """快速结束会话，并把摘要生成交给后台任务。"""
+    session = repository.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    if session.get("status") == "ended":
+        existing_summary = repository.get_session_summary(session_id)
+        return SessionEndResponse(
+            session_id=session_id,
+            summary=existing_summary.get("summary_text") if existing_summary else None,
+            message_count=existing_summary.get("message_count", 0) if existing_summary else 0
+        )
+
+    history = repository.get_short_term_history(session_id, limit_turns=1000)
+
+    if len(history) > 0:
+        repository.save_session_summary(
+            session_id=session_id,
+            character_id=session["character_id"],
+            player_id=session["player_id"],
+            summary_text="",
+            message_count=len(history),
+            summary_status="generating"
+        )
+
+    repository.end_session(session_id)
+
+    if len(history) > 0 and background_tasks is not None:
+        background_tasks.add_task(_generate_session_summary, session_id)
+
+    return SessionEndResponse(
+        session_id=session_id,
+        summary=None,
+        message_count=len(history)
+    )
+
+
+def _close_idle_sessions(player_id: str, background_tasks: BackgroundTasks | None = None) -> None:
+    """懒清理：进入列表/恢复前关闭 5 分钟未活跃的 active session。"""
+    now = datetime.now(timezone.utc)
+    for session in repository.get_all_player_sessions(player_id):
+        if session.get("status") != "active":
+            continue
+        activity_at = _session_activity_at(session)
+        if activity_at is None:
+            continue
+        if activity_at.tzinfo is None:
+            activity_at = activity_at.replace(tzinfo=timezone.utc)
+        if now - activity_at >= IDLE_SESSION_TIMEOUT:
+            try:
+                _end_session(session["session_id"], background_tasks)
+            except Exception as e:
+                print(f"[ERROR] Failed to close idle session {session.get('session_id')}: {e}")
 
 
 # =========================
@@ -142,14 +290,23 @@ def list_characters():
 # Session start
 # =========================
 @router.post("/dialogue/session/start", response_model=SessionStartResponse)
-def session_start(req: SessionStartRequest):
+def session_start(req: SessionStartRequest, background_tasks: BackgroundTasks):
     try:
-        result = orchestrator.start_session(
-            req.character_id,
-            req.player_id,
-            req.player_name
-        )
-        return SessionStartResponse(**result)
+        _close_idle_sessions(req.player_id, background_tasks)
+        active_session = repository.get_latest_active_session(req.player_id, req.character_id)
+        if active_session:
+            current_affinity, _ = _current_character_state(req.character_id, req.player_id)
+            return SessionStartResponse(
+                session_id=active_session["session_id"],
+                opening_line="",
+                action="",
+                current_affinity=current_affinity,
+                assistant_message_id=None,
+                recovered=True,
+                messages=_messages_for_session(active_session["session_id"]),
+            )
+
+        return _start_empty_session(req.character_id, req.player_id, req.player_name)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -185,10 +342,30 @@ def get_sessions(character_id: str, player_id: str):
 
 
 @router.get("/dialogue/sessions/player", response_model=list[SessionInfo])
-def get_player_sessions(player_id: str):
+def get_player_sessions(player_id: str, background_tasks: BackgroundTasks):
     """获取玩家所有会话（单聊 + 群聊）"""
+    _close_idle_sessions(player_id, background_tasks)
     sessions = repository.get_all_player_sessions(player_id)
     return [SessionInfo(**s) for s in sessions]
+
+
+# =========================
+# Session recovery
+# =========================
+@router.get("/dialogue/session/latest", response_model=SessionRecoveryResponse)
+def latest_session(background_tasks: BackgroundTasks, player_id: str, character_id: str | None = None):
+    """恢复最近 active session。"""
+    _close_idle_sessions(player_id, background_tasks)
+    session = repository.get_latest_active_session(player_id, character_id)
+    if not session:
+        return SessionRecoveryResponse(found=False)
+
+    return SessionRecoveryResponse(
+        found=True,
+        session_id=session["session_id"],
+        character_id=session["character_id"],
+        messages=_messages_for_session(session["session_id"]),
+    )
 
 
 # =========================
@@ -207,19 +384,7 @@ def get_history(character_id: str, player_id: str, offset: int = 0, limit: int =
     )
 
     # 尝试加载角色卡片（可能不存在于磁盘）
-    current_affinity = 0
-    current_mood = "neutral"
-    try:
-        card = character_loader.load_character_card(character_id)
-        runtime_state = repository.get_runtime_state(
-            character_id,
-            player_id,
-            card,
-        )
-        current_affinity = runtime_state.get("affection_level", 0)
-        current_mood = runtime_state.get("current_mood", "neutral")
-    except Exception:
-        pass  # 角色卡片不存在时使用默认值
+    current_affinity, current_mood = _current_character_state(character_id, player_id)
 
     return HistoryResponse(
         messages=[
@@ -227,7 +392,7 @@ def get_history(character_id: str, player_id: str, offset: int = 0, limit: int =
                 role=m["role"],
                 content=m["content"],
                 created_at=m.get("created_at"),
-                message_id=m.get("id"),
+                message_id=m.get("message_id"),
             )
             for m in messages
         ],
@@ -240,70 +405,9 @@ def get_history(character_id: str, player_id: str, offset: int = 0, limit: int =
 # Session end
 # =========================
 @router.post("/dialogue/session/end", response_model=SessionEndResponse)
-def session_end(req: SessionEndRequest):
+def session_end(req: SessionEndRequest, background_tasks: BackgroundTasks):
     """结束会话并生成摘要"""
-    
-    session = repository.get_session(req.session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="会话不存在")
-    
-    # 检查会话是否已经结束
-    if session.get("status") == "ended":
-        # 获取已有的摘要
-        existing_summary = repository.get_session_summary(req.session_id)
-        return SessionEndResponse(
-            session_id=req.session_id,
-            summary=existing_summary.get("summary_text") if existing_summary else None,
-            message_count=existing_summary.get("message_count", 0) if existing_summary else 0
-        )
-    
-    # 获取完整对话历史
-    history = repository.get_short_term_history(req.session_id, limit_turns=1000)
-    
-    # 标记摘要状态为 generating
-    if len(history) > 0:
-        repository.save_session_summary(
-            session_id=req.session_id,
-            character_id=session["character_id"],
-            player_id=session["player_id"],
-            summary_text="",
-            message_count=len(history),
-            summary_status="generating"
-        )
-    
-    # 生成摘要
-    summary_text = None
-    summary_status = "failed"
-    if len(history) > 0:
-        try:
-            summary_text = summarize_session(history)
-            if summary_text:
-                summary_status = "completed"
-        except Exception as e:
-            print(f"[ERROR] summarize_session failed: {e}")
-    
-    # 更新摘要
-    if summary_text:
-        try:
-            repository.save_session_summary(
-                session_id=req.session_id,
-                character_id=session["character_id"],
-                player_id=session["player_id"],
-                summary_text=summary_text,
-                message_count=len(history),
-                summary_status=summary_status
-            )
-        except Exception as e:
-            print(f"[ERROR] Failed to save summary: {e}")
-    
-    # 标记会话结束（无论摘要成功与否）
-    repository.end_session(req.session_id)
-    
-    return SessionEndResponse(
-        session_id=req.session_id,
-        summary=summary_text,
-        message_count=len(history)
-    )
+    return _end_session(req.session_id, background_tasks)
 
 
 # =========================

@@ -229,6 +229,8 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
     # =========================
     triggered_events_info = []
     event_notification = None
+    user_msg_id = None
+    assistant_msg_id = None
     
     try:
         # 构建事件上下文

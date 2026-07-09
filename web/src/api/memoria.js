@@ -9,7 +9,7 @@ async function request(url, options = {}) {
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
-  const resp = await fetch(`${API_BASE}${url}`, { ...options, headers });
+  const resp = await fetch(`${API_BASE}${url}`, { ...options, credentials: 'include', headers });
   if (!resp.ok) {
     const errBody = await resp.json().catch(() => ({}));
     throw new Error(errBody.detail || `HTTP ${resp.status}`);
@@ -36,6 +36,9 @@ export const userApi = {
   getMe() {
     return request('/user/me');
   },
+  logout() {
+    return request('/user/logout', { method: 'POST' });
+  },
   updateProfile(username, gender) {
     return request('/user/profile', {
       method: 'PUT',
@@ -51,6 +54,7 @@ export const userApi = {
     const resp = await fetch(`${API_BASE}/user/avatar/upload`, {
       method: 'POST',
       headers,
+      credentials: 'include',
       body: formData,
     });
     if (!resp.ok) {
@@ -103,6 +107,7 @@ export const characterAdmin = {
     formData.append('file', file);
     const resp = await fetch(`${API_BASE}/admin/characters/${characterId}/avatar/upload`, {
       method: 'POST',
+      credentials: 'include',
       body: formData,
     });
     if (!resp.ok) {
@@ -245,6 +250,10 @@ export const dialogue = {
   /** 获取玩家所有会话（单聊 + 群聊） */
   listPlayerSessions(playerId) {
     return request(`/dialogue/sessions/player?player_id=${playerId}`);
+  },
+  /** 获取角色对玩家的长期记忆 */
+  getLongTermFacts(characterId, playerId, limit = 10) {
+    return request(`/dialogue/memory?character_id=${characterId}&player_id=${playerId}&limit=${limit}`);
   },
 };
 

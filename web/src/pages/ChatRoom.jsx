@@ -37,6 +37,7 @@ const MOOD_EMOJI = { happy: '😊', neutral: '😐', sad: '😢', angry: '😠',
 const MOOD_BORDER = { happy: 'border-emerald-400/60', neutral: 'border-slate-500/40', sad: 'border-blue-400/60', angry: 'border-red-400/60', surprised: 'border-yellow-400/60', fearful: 'border-purple-400/60', disgusted: 'border-orange-400/60' };
 
 const MOOD_GLOW = { happy: 'shadow-[0_0_12px_rgba(52,211,153,0.3)]', neutral: '', sad: 'shadow-[0_0_12px_rgba(96,165,250,0.3)]', angry: 'shadow-[0_0_12px_rgba(248,113,113,0.3)]' };
+const MOOD_BUBBLE = { happy: 'bg-emerald-950 border-emerald-400/20 text-zinc-200', neutral: 'bg-white/[0.03] border-white/[0.06] text-zinc-300', sad: 'bg-blue-950 border-blue-400/20 text-zinc-200', angry: 'bg-red-950 border-red-400/20 text-zinc-200', surprised: 'bg-yellow-950 border-yellow-400/20 text-zinc-200', fearful: 'bg-purple-950 border-purple-400/20 text-zinc-200', disgusted: 'bg-orange-950 border-orange-400/20 text-zinc-200' };
 
 
 
@@ -136,6 +137,12 @@ export default function ChatRoom() {
 
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [isRecovered, setIsRecovered] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
+  const [tone, setTone] = useState('default');
+  const [showTopics, setShowTopics] = useState(false);
+  const [showMemory, setShowMemory] = useState(false);
+  const [memoryFacts, setMemoryFacts] = useState([]);
+  const [topicHints, setTopicHints] = useState([]);
 
 
 
@@ -267,15 +274,17 @@ export default function ChatRoom() {
   async function loadSessions(charsOverride) {
 
     const chars = charsOverride || allChars;
+    const getActivityTime = (item) => item.last_message_at || item.ended_at || item.created_at || '';
 
     try {
 
       const sessions = await dialogue.listPlayerSessions(PLAYER_ID);
+      const sortedSessions = [...sessions].sort((a, b) => new Date(getActivityTime(b) || 0) - new Date(getActivityTime(a) || 0));
 
       const items = [];
       const seenSingleChars = new Set();
 
-      for (const s of sessions) {
+      for (const s of sortedSessions) {
 
         if (s.is_multi_character) {
 
@@ -294,6 +303,8 @@ export default function ChatRoom() {
             type: 'group',
             session_id: s.session_id,
             created_at: s.created_at,
+            ended_at: s.ended_at,
+            last_message_at: getActivityTime(s),
             last_message: s.last_message,
             message_count: s.message_count,
             participants: groupParticipants,
@@ -323,9 +334,13 @@ export default function ChatRoom() {
 
             created_at: s.created_at,
 
-            name: cached?.name || s.character_id,
+            ended_at: s.ended_at,
 
-            avatar_url: cached?.avatar_url || null,
+            last_message_at: getActivityTime(s),
+
+            name: cached?.name || s.name || s.display_name || s.character_id,
+
+            avatar_url: cached?.avatar_url || s.avatar_url || null,
 
             core_identity: cached?.core_identity || '',
 
@@ -335,6 +350,7 @@ export default function ChatRoom() {
 
       }
 
+      items.sort((a, b) => new Date(getActivityTime(b) || 0) - new Date(getActivityTime(a) || 0));
       setChatItems(items);
 
     } catch {}
@@ -369,9 +385,11 @@ export default function ChatRoom() {
 
   const goToList = useCallback(() => {
 
-    if (singleSessionId) dialogue.endSession(singleSessionId).catch(() => {});
+    const ending = [];
 
-    if (multiSessionId) multiDialogue.endSession(multiSessionId).catch(() => {});
+    if (singleSessionId) ending.push(dialogue.endSession(singleSessionId).catch(() => {}));
+
+    if (multiSessionId) ending.push(multiDialogue.endSession(multiSessionId).catch(() => {}));
 
     setMessages([]); setCharacter(null); setSingleSessionId(null);
 
@@ -381,7 +399,7 @@ export default function ChatRoom() {
 
     setHistoryOffset(0); setHasMoreHistory(true); setLoadingHistory(false);
 
-    loadSessions(); // reload chat list
+    Promise.allSettled(ending).finally(() => loadSessions());
 
   }, [singleSessionId, multiSessionId]);
 
@@ -394,6 +412,8 @@ export default function ChatRoom() {
     setView('single-loading');
 
     setCharacter(char);
+    setMessages([]);
+    setIsRecovered(false);
 
     try {
 
@@ -419,7 +439,18 @@ export default function ChatRoom() {
 
       setSingleSessionId(session.session_id);
 
-      if (session.opening_line) {
+      if (session.recovered && session.messages?.length) {
+
+        setMessages(session.messages.map(m => ({
+          role: m.role,
+          content: m.content,
+          action: m.action || '',
+          affinity_delta: m.affinity_delta || 0,
+        })));
+
+        setIsRecovered(true);
+
+      } else if (session.opening_line) {
 
         setMessages([{ role: 'assistant', content: session.opening_line, action: session.action || '' }]);
 
@@ -742,7 +773,8 @@ export default function ChatRoom() {
                   const msg = item.last_message || '';
                   return name.toLowerCase().includes(searchQuery.toLowerCase()) || msg.toLowerCase().includes(searchQuery.toLowerCase());
                 }).map((item, i) => {
-                  const timeStr = item.created_at ? new Date(item.created_at).toLocaleDateString('zh-CN', { month:'short', day:'numeric' }) : '';
+                  const displayTime = item.last_message_at || item.ended_at || item.created_at;
+                  const timeStr = displayTime ? new Date(displayTime).toLocaleDateString('zh-CN', { month:'short', day:'numeric' }) : '';
                   if (item.type === 'group') {
                     const groupParts = item.participants || [];
                     return (
@@ -983,256 +1015,346 @@ export default function ChatRoom() {
 
   // ═══════════════════════════════════════════════
 
+
+  // ── Tools: topic hints ──
+  const loadTopicHints = useCallback(async () => {
+    if (!character) return;
+    // Generate hints from character background + tags
+    const base = character.identity?.core_identity_summary || '';
+    const tags = (character.traits || character.status_labels || []).slice(0, 3);
+    const hints = [
+      `聊聊关于${tags[0] || '你的故事'}的事`,
+      `问问他${base ? '关于' + base : '最近的经历'}`,
+      `了解他的过去`,
+    ];
+    setTopicHints(hints);
+    setShowTopics(prev => !prev);
+  }, [character]);
+
+  // ── Tools: memory review ──
+  const loadMemoryFacts = useCallback(async () => {
+    if (!character) return;
+    try {
+      const facts = await dialogue.getLongTermFacts(character.character_id, PLAYER_ID, 10);
+      setMemoryFacts(facts?.facts || facts || []);
+    } catch (e) {
+      setMemoryFacts([]);
+    }
+    setShowMemory(prev => !prev);
+  }, [character, PLAYER_ID]);
+
+  // ── Tone switch ──
+  const cycleTone = () => {
+    const tones = ['default', 'formal', 'casual', 'intimate'];
+    const idx = tones.indexOf(tone);
+    setTone(tones[(idx + 1) % tones.length]);
+  };
+  const TONE_LABELS = { default: '默认', formal: '正式', casual: '随意', intimate: '亲密' };
+
   function renderSingleChat() {
 
     const moodEmoji = MOOD_EMOJI[mood] || '😐';
-
     const moodBorder = MOOD_BORDER[mood] || 'border-slate-500/40';
-
     const moodGlow = MOOD_GLOW[mood] || '';
-
+    const moodBubble = MOOD_BUBBLE[mood] || MOOD_BUBBLE.neutral;
     const affinityPct = Math.round((affinity + 100) / 2);
-
-
+    const affinityColor = affinity > 30 ? 'text-red-400' : affinity < -30 ? 'text-blue-400' : 'text-cyber-green/40';
+    const trustStars = Math.min(5, Math.max(0, Math.round(trust / 20)));
 
     return (
+      <div className="min-h-screen bg-[#0b0b0c] font-mono flex flex-col">
 
-      <div className="min-h-screen bg-[#0b0b0c] font-mono">
+        {/* ═══ Top bar: 融合型 — 返回+名字+状态徽章 ═══ */}
+        <header className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-[#0d0d14]/80 backdrop-blur-md shrink-0">
+          <button onClick={goToList} className="text-cyber-green/30 hover:text-cyber-green/50 p-1 shrink-0">
+            <ArrowLeft size={18} />
+          </button>
 
-        {/* Top bar */}
-
-        <header className="flex items-center gap-3 px-4 py-2.5 border-b border-white/5 bg-[#0d0d14]/80 backdrop-blur-md shrink-0">
-
-          <button onClick={goToList} className="text-cyber-green/30 hover:text-cyber-green/50 p-1"><ArrowLeft size={18} /></button>
-
-          <div className={`w-8 h-8 rounded-full overflow-hidden border-2 shrink-0 ${moodBorder} ${moodGlow} transition-all duration-500`}>
-
-            {character?.avatar_url ? <img src={character.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-xs font-bold">{character?.name?.charAt(0)}</div>}
-
+          {/* 角色头像小圆圈 — 点击展开详情 */}
+          <div
+            onClick={() => setShowDetail(!showDetail)}
+            className={`w-8 h-8 rounded-full overflow-hidden border-2 shrink-0 cursor-pointer ${moodBorder} ${moodGlow} transition-all duration-500`}
+          >
+            {character?.avatar_url
+              ? <img src={character.avatar_url} alt="" className="w-full h-full object-cover" />
+              : <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-xs font-bold">{character?.name?.charAt(0)}</div>}
           </div>
 
-          <div className="flex-1 min-w-0">
-
-            <h1 className="text-xs font-bold text-zinc-300 truncate">{character?.name}</h1>
-
-            <div className="flex items-center gap-1.5 text-[13px] text-cyber-green/30">
-
-              <span className="w-1.5 h-1.5 rounded-full bg-cyber-green/50 animate-pulse" />
-
-              {sending ? '正在思考...' : '在线'}
-
+          {/* 角色名 + 状态徽章行 — 点击展开详情 */}
+          <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setShowDetail(!showDetail)}>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xs font-bold text-zinc-300 truncate">{character?.name}</h1>
+              {sending && <span className="w-1.5 h-1.5 rounded-full bg-cyber-green/50 animate-pulse shrink-0" />}
             </div>
-
+            {/* 第二行：好感度 | 情绪 | 信任星级 */}
+            <div className="flex items-center gap-2 text-[12px] mt-0.5">
+              <span className={`flex items-center gap-0.5 ${affinityColor}`}>
+                <Heart size={10} fill={affinity > 30 ? 'currentColor' : 'none'} />
+                {affinity}
+              </span>
+              <span className="text-zinc-500">|</span>
+              <span className="flex items-center gap-0.5 text-zinc-400">
+                <span className="text-sm leading-none">{moodEmoji}</span>
+                {MOOD_LABELS[mood]}
+              </span>
+              <span className="text-zinc-500">|</span>
+              <span className="flex items-center gap-0.5 text-amber-400/60">
+                {[...Array(5)].map((_, i) => (
+                  <span key={i} className={i < trustStars ? 'text-amber-400' : 'text-zinc-600'}>★</span>
+                ))}
+              </span>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
-
-            <div className="hidden sm:flex items-center gap-1" title="好感度">
-
-              <Heart size={12} className={affinity>30 ? 'text-red-400' : affinity<-30 ? 'text-blue-400' : 'text-cyber-green/20'} />
-
-              <span className="text-[12px] text-cyber-green/40">{affinity}</span>
-
-            </div>
-
-            <div className="hidden sm:flex items-center gap-1" title="情绪">
-
-              <span className="text-sm">{moodEmoji}</span>
-
-              <span className="text-[12px] text-cyber-green/40">{MOOD_LABELS[mood]}</span>
-
-            </div>
-
-            {events.length > 0 && (
-
-              <button onClick={() => setEvents([])} className="relative" title="事件通知">
-
-                <AlertTriangle size={12} className="text-amber-400/70" />
-
-                <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full text-[13px] flex items-center justify-center text-white font-bold">{events.length}</span>
-
-              </button>
-
-            )}
-
-          </div>
-
+          {/* 事件通知 */}
+          {events.length > 0 && (
+            <button onClick={() => setEvents([])} className="relative shrink-0" title="事件通知">
+              <AlertTriangle size={14} className="text-amber-400/70" />
+              <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 rounded-full text-[13px] flex items-center justify-center text-white font-bold">{events.length}</span>
+            </button>
+          )}
         </header>
 
-
-
-        {/* Two-panel body */}
-
-        <div className="flex h-[calc(100vh-57px)]">
-
-          {/* Left: Character Panel (desktop) */}
-
-          <aside className="hidden lg:flex w-[300px] flex-col border-r border-white/5 bg-[#0d0d14]/60 backdrop-blur-md overflow-y-auto shrink-0">
-
-            <div className="p-5 space-y-5">
-
-              {/* Avatar */}
-
-              <div className="flex flex-col items-center gap-3">
-
-                <div className={`w-20 h-20 rounded-full overflow-hidden border-2 ${moodBorder} ${moodGlow} transition-all duration-500`}>
-
-                  {character?.avatar_url ? <img src={character.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/20"><User size={32} /></div>}
-
-                </div>
-
-                <div>
-
-                  <h2 className="text-sm font-bold text-zinc-200 text-center">{character?.name}</h2>
-
-                  {character?.identity?.core_identity_summary && (
-
-                    <p className="text-[12px] text-cyber-green/30 text-center mt-0.5">{character.identity.core_identity_summary}</p>
-
-                  )}
-
-                </div>
-
-                {/* Status tags */}
-
-                {character?.status_labels?.length > 0 && (
-
-                  <div className="flex flex-wrap gap-1 justify-center">
-
-                    {character.status_labels.slice(0, 3).map((t,i) => <span key={i} className="text-[13px] px-2 py-0.5 rounded-full bg-cyber-green/5 border border-cyber-green/10 text-cyber-green/40">{t}</span>)}
-
-                  </div>
-
+        {/* ═══ 状态详情下拉面板 ═══ */}
+        {showDetail && (
+          <div className="bg-[#0d0d14]/95 border-b border-white/5 backdrop-blur-md px-4 py-3 space-y-3 shrink-0">
+            {/* 头像+名字+简介 */}
+            <div className="flex items-center gap-3">
+              <div className={`w-14 h-14 rounded-full overflow-hidden border-2 ${moodBorder} ${moodGlow}`}>
+                {character?.avatar_url
+                  ? <img src={character.avatar_url} alt="" className="w-full h-full object-cover" />
+                  : <div className="w-full h-full flex items-center justify-center text-cyber-green/20"><User size={24} /></div>}
+              </div>
+              <div className="flex-1">
+                <h2 className="text-sm font-bold text-zinc-200">{character?.name}</h2>
+                {character?.identity?.core_identity_summary && (
+                  <p className="text-[12px] text-zinc-500">{character.identity.core_identity_summary}</p>
                 )}
-
               </div>
-
-
-
-              {/* RPG Stats */}
-
-              <div className="space-y-4 bg-[#0b0b0c]/60 rounded-xl p-4 border border-white/5">
-
-                <h3 className="text-[13px] text-cyber-green/30 uppercase tracking-[0.2em] flex items-center gap-1.5">
-
-                  <Activity size={10} />角色状态
-
-                </h3>
-
-
-
-                {/* Affinity */}
-
-                <div>
-
-                  <div className="flex items-center justify-between mb-1">
-
-                    <span className="text-[12px] text-cyber-green/40 flex items-center gap-1"><Heart size={12} />好感度</span>
-
-                    <span className="text-[12px] text-cyber-green/60">{affinity}</span>
-
-                  </div>
-
-                  <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-
-                    <div className="h-full bg-gradient-to-r from-cyber-green/30 to-cyber-green/60 rounded-full transition-all duration-700" style={{ width: `${affinityPct}%` }} />
-
-                  </div>
-
-                  <div className="flex justify-between text-[12px] text-cyber-green/15 mt-0.5"><span>-100</span><span>0</span><span>+100</span></div>
-
-                </div>
-
-
-
-                {/* Trust */}
-
-                <div>
-
-                  <div className="flex items-center justify-between mb-1">
-
-                    <span className="text-[12px] text-cyber-green/40 flex items-center gap-1"><TrendingUp size={10} />信任度</span>
-
-                    <span className="text-[12px] text-cyber-green/60 flex items-center gap-1">{trust}</span>
-
-                  </div>
-
-                  <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-
-                    <div className="h-full bg-gradient-to-r from-blue-400/30 to-blue-400/60 rounded-full transition-all duration-700" style={{ width: `${trust}%` }} />
-
-                  </div>
-
-                </div>
-
-
-
-                {/* Mood */}
-
-                <div className="flex items-center justify-between">
-
-                  <span className="text-[12px] text-cyber-green/40 flex items-center gap-1"><Zap size={12} />当前情绪</span>
-
-                  <span className="text-[12px] text-cyber-green/60 flex items-center gap-1">
-
-                    <span className="text-base">{moodEmoji}</span>
-
-                    {MOOD_LABELS[mood]}
-
-                  </span>
-
-                </div>
-
-              </div>
-
-
-
-              {/* Events */}
-
-              {events.length > 0 && (
-
-                <div className="bg-amber-500/[0.03] border border-amber-500/10 rounded-xl p-4">
-
-                  <h3 className="text-[13px] text-amber-400/40 uppercase tracking-[0.2em] mb-2 flex items-center gap-1.5"><AlertTriangle size={10} />事件通知</h3>
-
-                  <div className="space-y-1.5 max-h-32 overflow-y-auto">
-
-                    {events.map(e => <div key={e.id} className="text-[12px] text-amber-300/50">{e.event_name || e.name || '事件'} — {e.description || ''}</div>)}
-
-                  </div>
-
-                  <button onClick={()=>setEvents([])} className="text-[13px] text-amber-400/30 hover:text-amber-400/60 mt-2">清除全部</button>
-
-                </div>
-
-              )}
-
+              <button onClick={() => setShowDetail(false)} className="text-cyber-green/20 hover:text-cyber-green/40"><X size={16} /></button>
             </div>
 
-          </aside>
+            {/* 标签 */}
+            {character?.status_labels?.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {character.status_labels.slice(0, 4).map((t, i) => (
+                  <span key={i} className="text-[13px] px-2 py-0.5 rounded-full bg-cyber-green/5 border border-cyber-green/10 text-cyber-green/40">{t}</span>
+                ))}
+              </div>
+            )}
 
+            {/* RPG 状态条 */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <div className="flex justify-between text-[12px] mb-0.5"><span className="text-cyber-green/40">好感度</span><span className={affinityColor}>{affinity}</span></div>
+                <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-red-400/30 to-red-400/60 rounded-full transition-all duration-700" style={{ width: `${affinityPct}%` }} />
+                </div>
+              </div>
+              <div>
+                <div className="flex justify-between text-[12px] mb-0.5"><span className="text-cyber-green/40">信任度</span><span className="text-amber-400/60">{trust}</span></div>
+                <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-amber-400/30 to-amber-400/60 rounded-full transition-all duration-700" style={{ width: `${trust}%` }} />
+                </div>
+              </div>
+            </div>
 
+            {/* 情绪 */}
+            <div className="flex items-center gap-2 text-[12px] text-cyber-green/40">
+              <span className="text-base">{moodEmoji}</span>
+              <span>当前情绪: {MOOD_LABELS[mood]}</span>
+            </div>
+          </div>
+        )}
 
-          {/* Right: Chat area */}
+        {/* ═══ 消息气泡区 ═══ */}
+        <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3"
+          onScroll={(e) => { if (e.target.scrollTop < 60 && !loadingHistory && hasMoreHistory) loadMoreHistory(); }}>
 
-          {renderChatArea('single')}
+          {loadingHistory && (
+            <div className="flex justify-center py-2"><Loader2 className="animate-spin text-cyber-green/25" size={16} /></div>
+          )}
 
+          {error && (
+            <div className="text-center text-red-400/50 text-xs p-2 bg-red-500/5 rounded-lg border border-red-500/10">
+              {error}<button onClick={() => setError(null)} className="ml-2 underline">关闭</button>
+            </div>
+          )}
+
+          {messages.map((msg, i) => {
+            const isUser = msg.role === 'user';
+            const charInfo = msg.charId ? getCharById(msg.charId) : null;
+            return (
+              <div key={msg.message_id || i} className={`flex gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
+                {/* 头像 */}
+                <div className={`w-8 h-8 rounded-full overflow-hidden border-2 shrink-0 mt-0.5 ${
+                  isUser ? 'border-cyber-green/10 bg-cyber-green/[0.03]' : moodBorder
+                }`}>
+                  {isUser ? (
+                    user?.avatar_url
+                      ? <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
+                      : <div className="w-full h-full flex items-center justify-center text-cyber-green/40 text-[13px] font-bold">{user?.username?.charAt(0)?.toUpperCase() || <User size={14} className="text-cyber-green/30" />}</div>
+                  ) : charInfo?.avatar_url || character?.avatar_url ? (
+                    <img src={charInfo?.avatar_url || character?.avatar_url} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-purple-800/10 text-purple-300/30 text-[13px] font-bold">
+                      {charInfo?.name?.charAt(0) || character?.name?.charAt(0) || '?'}
+                    </div>
+                  )}
+                </div>
+
+                {/* 气泡内容 */}
+                <div className={`max-w-[75%] ${isUser ? 'items-end' : 'items-start'}`}>
+                  {/* 角色名 + action 标签 */}
+                  {!isUser && (
+                    <div className="flex items-center gap-1.5 mb-0.5 ml-1">
+                      <span className="text-[12px] text-zinc-500">{msg.charName || character?.name}</span>
+                      {msg.action && (
+                        <span className="text-[12px] px-1.5 py-px rounded border border-cyber-green/10 text-cyber-green/25 bg-cyber-green/[0.02]">
+                          {msg.action}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* 气泡 — 角色消息用情绪颜色 */}
+                  <div className={`px-3 py-2 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words border backdrop-blur-sm ${
+                    isUser
+                      ? 'bg-cyber-green/10 border-cyber-green/15 rounded-br-sm text-cyber-green/85'
+                      : `${moodBubble} border rounded-bl-sm`
+                  }`}>
+                    {msg.content}
+                  </div>
+
+                  {/* 好感变化 */}
+                  {msg.affinity_delta !== 0 && msg.affinity_delta != null && (
+                    <div className={`text-[12px] mt-0.5 ml-1 ${msg.affinity_delta > 0 ? 'text-red-400/40' : 'text-blue-400/40'}`}>
+                      好感 {msg.affinity_delta > 0 ? '+' : ''}{msg.affinity_delta}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* 思考中动画 */}
+          {sending && (
+            <div className="flex gap-2">
+              <div className={`w-8 h-8 rounded-full overflow-hidden border-2 ${moodBorder} bg-purple-500/[0.02] flex items-center justify-center shrink-0 mt-0.5 relative`}>
+                <Loader2 className="animate-spin text-cyber-green/25" size={14} />
+                <ScanLine />
+              </div>
+              <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl rounded-bl-sm px-4 py-2.5 relative">
+                <div className="flex items-center gap-1.5">
+                  <Cpu size={12} className="text-cyber-green/25 animate-pulse" />
+                  <span className="text-[13px] text-cyber-green/25">思考中...</span>
+                  <span className="flex gap-1 ml-1">
+                    <span className="w-1 h-1 bg-cyber-green/30 rounded-full animate-bounce" />
+                    <span className="w-1 h-1 bg-cyber-green/30 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
+                    <span className="w-1 h-1 bg-cyber-green/30 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
+                  </span>
+                </div>
+                <ScanLine />
+              </div>
+            </div>
+          )}
+
+          <div ref={bottomRef} />
         </div>
 
-      </div>
+        {/* ═══ 话题提示面板 ═══ */}
+        {showTopics && (
+          <div className="px-4 py-2 border-t border-white/5 bg-[#0d0d14]/80 backdrop-blur-md shrink-0">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[12px] text-cyber-green/30">💡 话题建议</span>
+              <button onClick={() => setShowTopics(false)} className="text-cyber-green/20 hover:text-cyber-green/40"><X size={14} /></button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {topicHints.map((hint, i) => (
+                <button key={i} onClick={() => { setInput(hint); setShowTopics(false); inputRef.current?.focus(); }}
+                  className="text-[12px] px-2.5 py-1 rounded-full bg-cyber-green/[0.04] border border-cyber-green/10 text-cyber-green/40 hover:bg-cyber-green/[0.08] hover:text-cyber-green/60 transition-colors">
+                  {hint}
+                </button>
+              ))}
+              {topicHints.length === 0 && (
+                <p className="text-[12px] text-cyber-green/15">基于角色背景生成中...</p>
+              )}
+            </div>
+          </div>
+        )}
 
+        {/* ═══ 记忆面板 ═══ */}
+        {showMemory && (
+          <div className="px-4 py-2 border-t border-white/5 bg-[#0d0d14]/80 backdrop-blur-md shrink-0 max-h-32 overflow-y-auto">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[12px] text-purple-400/40">📋 {character?.name}记得...</span>
+              <button onClick={() => setShowMemory(false)} className="text-cyber-green/20 hover:text-cyber-green/40"><X size={14} /></button>
+            </div>
+            <div className="space-y-1">
+              {memoryFacts.length === 0 ? (
+                <p className="text-[12px] text-cyber-green/15">暂无记忆（需要几轮对话后才有记录）</p>
+              ) : (
+                memoryFacts.slice(0, 5).map((f, i) => (
+                  <div key={i} className="text-[12px] text-purple-300/30 pl-2 border-l border-purple-500/10">
+                    {typeof f === 'string' ? f : f.fact_text || f.content || JSON.stringify(f)}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ═══ 底部输入栏 — 功能型 ═══ */}
+        <div className="px-3 py-2 border-t border-white/5 bg-[#0d0d14]/60 backdrop-blur-md shrink-0">
+          <div className="flex items-end gap-1.5">
+            {/* 工具按钮组 */}
+            <div className="flex gap-0.5 shrink-0 pb-0.5">
+              <button onClick={loadTopicHints}
+                className={`p-2 rounded-lg transition-colors ${showTopics ? 'bg-cyber-green/10 text-cyber-green' : 'text-cyber-green/20 hover:text-cyber-green/40 hover:bg-white/[0.02]'}`}
+                title="话题提示">
+                <Search size={15} />
+              </button>
+              <button onClick={loadMemoryFacts}
+                className={`p-2 rounded-lg transition-colors ${showMemory ? 'bg-purple-500/10 text-purple-400' : 'text-cyber-green/20 hover:text-cyber-green/40 hover:bg-white/[0.02]'}`}
+                title="角色记忆">
+                <MessageSquare size={15} />
+              </button>
+              <button onClick={cycleTone}
+                className={`p-2 rounded-lg transition-colors ${tone !== 'default' ? 'bg-amber-500/10 text-amber-400' : 'text-cyber-green/20 hover:text-cyber-green/40 hover:bg-white/[0.02]'}`}
+                title={`语气: ${TONE_LABELS[tone]}`}>
+                <Radio size={15} />
+              </button>
+            </div>
+
+            {/* 输入框 */}
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              rows={1}
+              placeholder={tone !== 'default' ? `[${TONE_LABELS[tone]}] 输入消息...` : '输入消息...'}
+              disabled={sending || sendingMulti}
+              className="flex-1 bg-[#0b0b0c] border border-white/10 rounded-xl px-3 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/10 resize-none focus:outline-none focus:border-cyber-green/30 transition-colors disabled:opacity-40 min-h-[36px] max-h-[100px]"
+            />
+
+            {/* 发送按钮 */}
+            <button
+              onClick={sendMessage}
+              disabled={!input.trim() || sending || sendingMulti}
+              className="px-3 py-2 bg-cyber-green/10 hover:bg-cyber-green/[0.18] active:scale-95 border border-cyber-green/20 rounded-xl text-cyber-green disabled:opacity-20 disabled:cursor-not-allowed disabled:active:scale-100 transition-all shrink-0"
+            >
+              <Send size={16} />
+            </button>
+          </div>
+          {tone !== 'default' && (
+            <div className="text-[12px] text-amber-400/30 mt-1 text-center">当前语气: {TONE_LABELS[tone]}</div>
+          )}
+        </div>
+      </div>
     );
 
   }
-
-
-
-  // ═══════════════════════════════════════════════
-
-  // Group Chat Render
-
-  // ═══════════════════════════════════════════════
-
   function renderGroupChat() {
 
     return (

@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, Check, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Check, ChevronLeft, ChevronRight, Upload, Download } from 'lucide-react';
 import { characterAdmin } from '../api/memoria';
 import StepIdentity from '../components/editor/StepIdentity';
 import StepPersonality from '../components/editor/StepPersonality';
@@ -32,9 +32,50 @@ const DEFAULT_DATA = {
   safety_constraints: { topics_to_avoid: [], out_of_character_handling: '' },
 };
 
+function mergeCharacterData(importedData) {
+  const merged = JSON.parse(JSON.stringify(DEFAULT_DATA));
+  for (const [key, value] of Object.entries(importedData)) {
+    const baseValue = merged[key];
+    if (
+      value &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      baseValue &&
+      typeof baseValue === 'object' &&
+      !Array.isArray(baseValue)
+    ) {
+      merged[key] = { ...baseValue, ...value };
+    } else {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+function normalizeImportedCharacter(rawData) {
+  const data = rawData?.character_data || rawData?.card_data || rawData;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('Invalid character card JSON');
+  }
+  return data;
+}
+
+function characterIdFromFilename(filename) {
+  const baseName = filename.replace(/\.[^.]+$/, '');
+  const slug = baseName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  return slug ? `npc_${slug}` : 'npc_imported_character';
+}
+
+function exportFilename(data) {
+  const rawName = data.character_id || data.meta?.name || data.meta?.display_name || 'character_card';
+  const slug = rawName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_\u4e00-\u9fff-]/g, '');
+  return `${slug || 'character_card'}.json`;
+}
+
 export default function CharacterEditor() {
   const { characterId } = useParams();
   const navigate = useNavigate();
+  const fileInputRef = useRef(null);
   const [currentStep, setCurrentStep] = useState(0);
   const [formData, setFormData] = useState(DEFAULT_DATA);
   const [saving, setSaving] = useState(false);
@@ -123,6 +164,42 @@ export default function CharacterEditor() {
     }
   }
 
+  async function handleImportFile(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      const importedData = normalizeImportedCharacter(parsed);
+      const data = mergeCharacterData(importedData);
+      if (characterId) {
+        data.character_id = characterId;
+      } else if (!data.character_id) {
+        data.character_id = characterIdFromFilename(file.name);
+      }
+      setFormData(data);
+      setIsActive(true);
+      setCurrentStep(0);
+      setSaveMessage('Imported character JSON. Review and save.');
+    } catch (e) {
+      setSaveMessage(`Error: ${e.message}`);
+    } finally {
+      event.target.value = '';
+    }
+  }
+
+  function handleExportFile() {
+    const json = JSON.stringify(formData, null, 2);
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = exportFilename(formData);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
   async function handleToggleActive() {
     if (!characterId) return;
     const action = isActive ? '禁用' : '启用';
@@ -178,6 +255,32 @@ export default function CharacterEditor() {
             {characterId ? 'EDIT CHARACTER' : 'NEW CHARACTER'}
           </h1>
           <div className="flex items-center gap-2">
+            {characterId ? (
+              <button
+                onClick={handleExportFile}
+                className="flex items-center gap-1 px-3 py-1 text-xs font-mono text-cyber-green/70 hover:text-cyber-green border border-cyber-green/20 hover:border-cyber-green/40 rounded transition-colors"
+              >
+                <Download size={14} />
+                <span className="hidden sm:inline">Export JSON</span>
+              </button>
+            ) : (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".json,application/json"
+                  onChange={handleImportFile}
+                  className="hidden"
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center gap-1 px-3 py-1 text-xs font-mono text-cyber-green/70 hover:text-cyber-green border border-cyber-green/20 hover:border-cyber-green/40 rounded transition-colors"
+                >
+                  <Upload size={14} />
+                  <span className="hidden sm:inline">Import JSON</span>
+                </button>
+              </>
+            )}
             {characterId && (
               <>
                 <button

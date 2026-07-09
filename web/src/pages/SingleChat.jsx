@@ -61,7 +61,14 @@ export default function SingleChat() {
         const session = await dialogue.startSession(characterId, PLAYER_ID, PLAYER_NAME);
         sid = session.session_id;
         setSessionId(sid);
-        if (session.opening_line) {
+        if (session.recovered && session.messages?.length) {
+          setMessages(session.messages.map(m => ({
+            role: m.role,
+            content: m.content,
+            action: m.action || '',
+            affinity_delta: m.affinity_delta || 0,
+          })));
+        } else if (session.opening_line) {
           setMessages([{ role: 'assistant', content: session.opening_line, action: session.action || '' }]);
         }
         setAffinity(session.current_affinity || 0);
