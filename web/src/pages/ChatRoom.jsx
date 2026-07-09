@@ -71,6 +71,15 @@ function ScanLine() {
 
 }
 
+function normalizeDialogueMessage(message) {
+  return {
+    role: message.role,
+    content: message.content,
+    action: message.action || '',
+    affinity_delta: message.affinity_delta || 0,
+  };
+}
+
 
 
 // ═══════════════════════════════════════════════
@@ -383,13 +392,7 @@ export default function ChatRoom() {
 
   // ── Navigation helpers ──
 
-  const goToList = useCallback(() => {
-
-    const ending = [];
-
-    if (singleSessionId) ending.push(dialogue.endSession(singleSessionId).catch(() => {}));
-
-    if (multiSessionId) ending.push(multiDialogue.endSession(multiSessionId).catch(() => {}));
+  function goToList() {
 
     setMessages([]); setCharacter(null); setSingleSessionId(null);
 
@@ -399,9 +402,9 @@ export default function ChatRoom() {
 
     setHistoryOffset(0); setHasMoreHistory(true); setLoadingHistory(false);
 
-    Promise.allSettled(ending).finally(() => loadSessions());
+    loadSessions();
 
-  }, [singleSessionId, multiSessionId]);
+  }
 
 
 
@@ -438,27 +441,31 @@ export default function ChatRoom() {
       const session = await dialogue.startSession(char.character_id, PLAYER_ID, PLAYER_NAME);
 
       setSingleSessionId(session.session_id);
+      let nextHistoryOffset = 0;
+      let nextHasMoreHistory = true;
 
       if (session.recovered && session.messages?.length) {
 
-        setMessages(session.messages.map(m => ({
-          role: m.role,
-          content: m.content,
-          action: m.action || '',
-          affinity_delta: m.affinity_delta || 0,
-        })));
+        setMessages(session.messages.map(normalizeDialogueMessage));
 
         setIsRecovered(true);
 
-      } else if (session.opening_line) {
-
-        setMessages([{ role: 'assistant', content: session.opening_line, action: session.action || '' }]);
+      } else {
+        const hist = await dialogue.getHistory(char.character_id, PLAYER_ID, 0, 20, session.session_id);
+        if (hist?.messages?.length) {
+          setMessages(hist.messages.map(normalizeDialogueMessage));
+          setIsRecovered(true);
+          nextHistoryOffset = hist.messages.length;
+          nextHasMoreHistory = hist.has_more;
+        } else if (session.opening_line) {
+          setMessages([{ role: 'assistant', content: session.opening_line, action: session.action || '' }]);
+        }
 
       }
 
       setAffinity(session.current_affinity || 0);
 
-      setHistoryOffset(0); setHasMoreHistory(true);
+      setHistoryOffset(nextHistoryOffset); setHasMoreHistory(nextHasMoreHistory);
 
       setView('single');
 
@@ -487,11 +494,7 @@ export default function ChatRoom() {
         const hist = await dialogue.getHistory(character.character_id, PLAYER_ID, historyOffset, 20, singleSessionId);
         if (hist?.messages && hist.messages.length > 0) {
 
-          setMessages(prev => [...hist.messages.map(m => ({
-
-            role: m.role, content: m.content, action: m.action || '', affinity_delta: m.affinity_delta || 0,
-
-          })), ...prev]);
+          setMessages(prev => [...hist.messages.map(normalizeDialogueMessage), ...prev]);
 
           setHistoryOffset(historyOffset + hist.messages.length);
 
@@ -678,6 +681,41 @@ export default function ChatRoom() {
 
   const inactiveChars = filteredChars.filter(c => !c.is_active);
 
+
+  // ── Tools: topic hints ──
+  const loadTopicHints = useCallback(async () => {
+    if (!character) return;
+    // Generate hints from character background + tags
+    const base = character.identity?.core_identity_summary || '';
+    const tags = (character.traits || character.status_labels || []).slice(0, 3);
+    const hints = [
+      `聊聊关于${tags[0] || '你的故事'}的事`,
+      `问问他${base ? '关于' + base : '最近的经历'}`,
+      `了解他的过去`,
+    ];
+    setTopicHints(hints);
+    setShowTopics(prev => !prev);
+  }, [character]);
+
+  // ── Tools: memory review ──
+  const loadMemoryFacts = useCallback(async () => {
+    if (!character) return;
+    try {
+      const facts = await dialogue.getLongTermFacts(character.character_id, PLAYER_ID, 10);
+      setMemoryFacts(facts?.facts || facts || []);
+    } catch (e) {
+      setMemoryFacts([]);
+    }
+    setShowMemory(prev => !prev);
+  }, [character, PLAYER_ID]);
+
+  // ── Tone switch ──
+  const cycleTone = () => {
+    const tones = ['default', 'formal', 'casual', 'intimate'];
+    const idx = tones.indexOf(tone);
+    setTone(tones[(idx + 1) % tones.length]);
+  };
+  const TONE_LABELS = { default: '默认', formal: '正式', casual: '随意', intimate: '亲密' };
 
 
   // ═══════════════════════════════════════════════
@@ -1014,42 +1052,6 @@ export default function ChatRoom() {
   // Single Chat Render
 
   // ═══════════════════════════════════════════════
-
-
-  // ── Tools: topic hints ──
-  const loadTopicHints = useCallback(async () => {
-    if (!character) return;
-    // Generate hints from character background + tags
-    const base = character.identity?.core_identity_summary || '';
-    const tags = (character.traits || character.status_labels || []).slice(0, 3);
-    const hints = [
-      `聊聊关于${tags[0] || '你的故事'}的事`,
-      `问问他${base ? '关于' + base : '最近的经历'}`,
-      `了解他的过去`,
-    ];
-    setTopicHints(hints);
-    setShowTopics(prev => !prev);
-  }, [character]);
-
-  // ── Tools: memory review ──
-  const loadMemoryFacts = useCallback(async () => {
-    if (!character) return;
-    try {
-      const facts = await dialogue.getLongTermFacts(character.character_id, PLAYER_ID, 10);
-      setMemoryFacts(facts?.facts || facts || []);
-    } catch (e) {
-      setMemoryFacts([]);
-    }
-    setShowMemory(prev => !prev);
-  }, [character, PLAYER_ID]);
-
-  // ── Tone switch ──
-  const cycleTone = () => {
-    const tones = ['default', 'formal', 'casual', 'intimate'];
-    const idx = tones.indexOf(tone);
-    setTone(tones[(idx + 1) % tones.length]);
-  };
-  const TONE_LABELS = { default: '默认', formal: '正式', casual: '随意', intimate: '亲密' };
 
   function renderSingleChat() {
 

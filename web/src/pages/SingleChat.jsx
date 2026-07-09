@@ -14,6 +14,15 @@ const MOOD_LABELS = {
   disgusted: '😖 厌恶',
 };
 
+function normalizeDialogueMessage(message) {
+  return {
+    role: message.role,
+    content: message.content,
+    action: message.action || '',
+    affinity_delta: message.affinity_delta || 0,
+  };
+}
+
 export default function SingleChat() {
   const { characterId } = useParams();
   const navigate = useNavigate();
@@ -45,7 +54,6 @@ export default function SingleChat() {
   useEffect(() => {
     if (!characterId) return;
     setLoading(true);
-    let sid = null;
     (async () => {
       try {
         const detail = await characterAdmin.get(characterId);
@@ -59,17 +67,16 @@ export default function SingleChat() {
         });
 
         const session = await dialogue.startSession(characterId, PLAYER_ID, PLAYER_NAME);
-        sid = session.session_id;
-        setSessionId(sid);
+        setSessionId(session.session_id);
         if (session.recovered && session.messages?.length) {
-          setMessages(session.messages.map(m => ({
-            role: m.role,
-            content: m.content,
-            action: m.action || '',
-            affinity_delta: m.affinity_delta || 0,
-          })));
-        } else if (session.opening_line) {
-          setMessages([{ role: 'assistant', content: session.opening_line, action: session.action || '' }]);
+          setMessages(session.messages.map(normalizeDialogueMessage));
+        } else {
+          const hist = await dialogue.getHistory(characterId, PLAYER_ID, 0, 20, session.session_id);
+          if (hist?.messages?.length) {
+            setMessages(hist.messages.map(normalizeDialogueMessage));
+          } else if (session.opening_line) {
+            setMessages([{ role: 'assistant', content: session.opening_line, action: session.action || '' }]);
+          }
         }
         setAffinity(session.current_affinity || 0);
       } catch (e) {
@@ -78,9 +85,6 @@ export default function SingleChat() {
         setLoading(false);
       }
     })();
-    return () => {
-      if (sid) dialogue.endSession(sid).catch(() => {});
-    };
   }, [characterId]);
 
   useEffect(() => {
