@@ -26,10 +26,12 @@ export default function Home() {
       setLoading(true);
       try {
         const list = await characterAdmin.list(false);
-        // 串行获取详情，避免并发触发 429
+        // 串行获取详情，间隔 100ms 避免 429
         const enriched = [];
-        for (const c of list) {
+        for (let i = 0; i < list.length; i++) {
+          const c = list[i];
           try {
+            if (i > 0) await new Promise(r => setTimeout(r, 100));
             const detail = await characterAdmin.get(c.character_id);
             const d = detail.card_data || {};
             enriched.push({

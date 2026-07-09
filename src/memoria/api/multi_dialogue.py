@@ -113,12 +113,13 @@ class SessionParticipant(BaseModel):
     """会话参与者信息"""
     character_id: str
     name: str
-    display_name: Optional[str]
+    display_name: Optional[str] = None
+    avatar_url: Optional[str] = None
     join_order: int
     speak_frequency: float
     is_active: bool
     message_count: int
-    last_spoke_at: Optional[str]
+    last_spoke_at: Optional[str] = None
 
 
 class MultiSessionInfo(BaseModel):

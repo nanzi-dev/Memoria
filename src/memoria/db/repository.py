@@ -747,9 +747,6 @@ def get_all_player_sessions(player_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-    return [dict(r) for r in rows]
-
-
 # =========================
 # 分页消息
 # =========================
@@ -793,14 +790,24 @@ def get_messages_by_player_and_character(
     player_id: str,
     offset: int = 0,
     limit: int = 20,
+    exclude_session_id: str | None = None,
 ):
     """
-    跨多个 Session 分页获取消息
+    跨多个 Session 分页获取消息（按时间正序返回）
     """
 
     with get_conn() as conn:
+        exclude_clause = ""
+        params: list = [character_id, player_id]
+
+        if exclude_session_id:
+            exclude_clause = "AND s.session_id != ?"
+            params.append(exclude_session_id)
+
+        params.extend([limit + 1, offset])
+
         rows = conn.execute(
-            """
+            f"""
             SELECT
                 m.role,
                 m.content,
@@ -812,17 +819,13 @@ def get_messages_by_player_and_character(
             WHERE
                 s.character_id = ?
                 AND s.player_id = ?
+                {exclude_clause}
             ORDER BY
-                m.created_at DESC
+                m.created_at ASC
             LIMIT ?
             OFFSET ?
             """,
-            (
-                character_id,
-                player_id,
-                limit + 1,
-                offset,
-            ),
+            params,
         ).fetchall()
 
     has_more = len(rows) > limit
@@ -1586,7 +1589,7 @@ def get_session_participants(session_id: str, only_active: bool = True) -> list[
     """
     with get_conn() as conn:
         query = """
-            SELECT p.*, c.name, c.display_name
+            SELECT p.*, c.name, c.display_name, c.avatar_url
             FROM multi_session_participant p
             LEFT JOIN character_card c ON p.character_id = c.character_id
             WHERE p.session_id = ?

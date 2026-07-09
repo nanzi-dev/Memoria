@@ -81,6 +81,7 @@ class SessionInfo(BaseModel):
     created_at: str | None = None
     ended_at: str | None = None
     status: str
+    is_multi_character: bool = False
     last_message: str | None = None
     message_count: int = 0
 
@@ -178,23 +179,31 @@ def get_player_sessions(player_id: str):
 # History
 # =========================
 @router.get("/dialogue/history", response_model=HistoryResponse)
-def get_history(character_id: str, player_id: str, offset: int = 0, limit: int = 20):
-    """分页获取跨会话历史消息"""
+def get_history(character_id: str, player_id: str, offset: int = 0, limit: int = 20, exclude_session_id: str | None = None):
+    """分页获取跨会话历史消息（排除指定会话）"""
 
     messages, has_more = repository.get_messages_by_player_and_character(
         character_id=character_id,
         player_id=player_id,
         offset=offset,
         limit=limit,
+        exclude_session_id=exclude_session_id,
     )
 
-    card = character_loader.load_character_card(character_id)
-
-    runtime_state = repository.get_runtime_state(
-        character_id,
-        player_id,
-        card,
-    )
+    # 尝试加载角色卡片（可能不存在于磁盘）
+    current_affinity = 0
+    current_mood = "neutral"
+    try:
+        card = character_loader.load_character_card(character_id)
+        runtime_state = repository.get_runtime_state(
+            character_id,
+            player_id,
+            card,
+        )
+        current_affinity = runtime_state.get("affection_level", 0)
+        current_mood = runtime_state.get("current_mood", "neutral")
+    except Exception:
+        pass  # 角色卡片不存在时使用默认值
 
     return HistoryResponse(
         messages=[
@@ -206,8 +215,8 @@ def get_history(character_id: str, player_id: str, offset: int = 0, limit: int =
             for m in messages
         ],
         has_more=has_more,
-        current_affinity=runtime_state.get("affection_level", 0),
-        current_mood=runtime_state.get("current_mood", "neutral"),
+        current_affinity=current_affinity,
+        current_mood=current_mood,
     )
 
 # =========================

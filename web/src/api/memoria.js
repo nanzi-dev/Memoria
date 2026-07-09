@@ -228,8 +228,10 @@ export const dialogue = {
     });
   },
   /** 获取会话历史 */
-  getHistory(characterId, playerId, offset = 0, limit = 20) {
-    return request(`/dialogue/history?character_id=${characterId}&player_id=${playerId}&offset=${offset}&limit=${limit}`);
+  getHistory(characterId, playerId, offset = 0, limit = 20, excludeSessionId = null) {
+    let url = `/dialogue/history?character_id=${characterId}&player_id=${playerId}&offset=${offset}&limit=${limit}`;
+    if (excludeSessionId) url += `&exclude_session_id=${encodeURIComponent(excludeSessionId)}`;
+    return request(url);
   },
   /** 获取会话列表 */
   listSessions(characterId, playerId) {

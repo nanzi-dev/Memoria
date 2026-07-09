@@ -130,7 +130,7 @@ export default function ChatRoom() {
 
   // ── History loading ──
 
-  const [historyOffset, setHistoryOffset] = useState(0);
+  const [historyOffset, setHistoryOffset] = useState(-20);
 
   const [hasMoreHistory, setHasMoreHistory] = useState(true);
 
@@ -184,7 +184,7 @@ export default function ChatRoom() {
 
 
 
-  // ── Load all characters on mount ──
+  // ── Load all characters on mount, then load sessions ──
 
   useEffect(() => {
 
@@ -192,13 +192,18 @@ export default function ChatRoom() {
 
       // Load all characters for contacts + group setup
 
+      let chars = [];
+
       try {
 
         const list = await characterAdmin.list(false);
 
         const enriched = [];
 
-        for (const c of list) {
+        for (let i = 0; i < list.length; i++) {
+          const c = list[i];
+
+          if (i > 0) await new Promise(r => setTimeout(r, 300));
 
           try {
 
@@ -240,13 +245,17 @@ export default function ChatRoom() {
 
         enriched.sort((a, b) => (b.is_active ? 1 : 0) - (a.is_active ? 1 : 0));
 
+        chars = enriched;
+
         setAllChars(enriched);
 
       } catch (e) { setError(e.message); }
 
-    })();
+      // Load sessions after characters are loaded (so we can resolve names/avatars from cache)
 
-    loadSessions();
+      loadSessions(chars);
+
+    })();
 
   }, []);
 
@@ -254,55 +263,72 @@ export default function ChatRoom() {
 
   // ── Load player sessions for chat list ──
 
-  async function loadSessions() {
+  async function loadSessions(charsOverride) {
+
+    const chars = charsOverride || allChars;
 
     try {
 
       const sessions = await dialogue.listPlayerSessions(PLAYER_ID);
 
       const items = [];
+      const seenSingleChars = new Set();
 
       for (const s of sessions) {
 
         if (s.is_multi_character) {
 
-          items.push({ type: 'group', session_id: s.session_id, created_at: s.created_at, last_message: s.last_message, message_count: s.message_count });
+          // Fetch group chat participants for proper display
+          let groupParticipants = [];
+          try {
+            const info = await multiDialogue.getSessionInfo(s.session_id);
+            groupParticipants = (info.participants || []).map(p => ({
+              character_id: p.character_id,
+              name: p.name || p.character_id,
+              avatar_url: p.avatar_url || null,
+            }));
+          } catch {}
+
+          items.push({
+            type: 'group',
+            session_id: s.session_id,
+            created_at: s.created_at,
+            last_message: s.last_message,
+            message_count: s.message_count,
+            participants: groupParticipants,
+            group_name: groupParticipants.map(p => p.name).join('、') || '群聊',
+          });
 
         } else {
 
-          try {
+          // Deduplicate: only keep the most recent session per character
+          if (seenSingleChars.has(s.character_id)) continue;
+          seenSingleChars.add(s.character_id);
 
-            const detail = await characterAdmin.get(s.character_id);
+          // Use cached character data to avoid repeated API calls
+          const cached = chars.find(c => c.character_id === s.character_id);
 
-            const cd = detail.card_data || {};
+          items.push({
 
-            items.push({
+            type: 'single',
 
-              type: 'single',
+            session_id: s.session_id,
 
-              session_id: s.session_id,
+            character_id: s.character_id,
 
-              character_id: s.character_id,
+            last_message: s.last_message,
 
-              last_message: s.last_message,
+            message_count: s.message_count,
 
-              message_count: s.message_count,
+            created_at: s.created_at,
 
-              created_at: s.created_at,
+            name: cached?.name || s.character_id,
 
-              name: cd.meta?.name || cd.identity?.display_name || s.character_id,
+            avatar_url: cached?.avatar_url || null,
 
-              avatar_url: detail.avatar_url || cd.avatar_url || null,
+            core_identity: cached?.core_identity || '',
 
-              core_identity: cd.identity?.core_identity_summary || '',
-
-            });
-
-          } catch {
-
-            items.push({ type: 'single', session_id: s.session_id, character_id: s.character_id, last_message: s.last_message, message_count: s.message_count, created_at: s.created_at, name: s.character_id, avatar_url: null });
-
-          }
+          });
 
         }
 
@@ -352,7 +378,7 @@ export default function ChatRoom() {
 
     setMood('neutral'); setEvents([]); setView('list'); setError(null);
 
-    setHistoryOffset(0); setHasMoreHistory(true); setLoadingHistory(false);
+    setHistoryOffset(-20); setHasMoreHistory(true); setLoadingHistory(false);
 
     loadSessions(); // reload chat list
 
@@ -400,7 +426,7 @@ export default function ChatRoom() {
 
       setAffinity(session.current_affinity || 0);
 
-      setHistoryOffset(0); setHasMoreHistory(true);
+      setHistoryOffset(-20); setHasMoreHistory(true);
 
       setView('single');
 
@@ -428,7 +454,7 @@ export default function ChatRoom() {
 
         const newOffset = historyOffset + 20;
 
-        const hist = await dialogue.getHistory(character.character_id, PLAYER_ID, newOffset, 20);
+        const hist = await dialogue.getHistory(character.character_id, PLAYER_ID, newOffset, 20, singleSessionId);
 
         if (hist?.messages && hist.messages.length > 0) {
 
@@ -448,11 +474,37 @@ export default function ChatRoom() {
 
         }
 
-      } catch {} finally { setLoadingHistory(false); }
+      } catch (err) {
+        console.error('[loadMoreHistory] single failed:', err);
+      } finally { setLoadingHistory(false); }
+
+    } else if (view === 'group' && multiSessionId) {
+
+      setLoadingHistory(true);
+
+      try {
+
+        const hist = await multiDialogue.getHistory(multiSessionId, 50);
+
+        if (hist?.messages && hist.messages.length > 0) {
+
+          setMessages(prev => [...hist.messages, ...prev]);
+
+          setHasMoreHistory(false); // group history loads all at once
+
+        } else {
+
+          setHasMoreHistory(false);
+
+        }
+
+      } catch (err) {
+        console.error('[loadMoreHistory] group failed:', err);
+      } finally { setLoadingHistory(false); }
 
     }
 
-  }, [historyOffset, PLAYER_ID, view, character]);
+  }, [historyOffset, PLAYER_ID, view, character, singleSessionId, multiSessionId, loadingHistory, hasMoreHistory]);
 
   const loadMoreRef = useRef(loadMoreHistory);
   useEffect(() => { loadMoreRef.current = loadMoreHistory; }, [loadMoreHistory]);
@@ -694,22 +746,32 @@ export default function ChatRoom() {
                 }).map((item, i) => {
                   const timeStr = item.created_at ? new Date(item.created_at).toLocaleDateString('zh-CN', { month:'short', day:'numeric' }) : '';
                   if (item.type === 'group') {
+                    const groupParts = item.participants || [];
                     return (
                       <div key={item.session_id || i} onClick={async () => {
                         setMultiSessionId(item.session_id);
                         setView('group');
-                        try { const info = await multiDialogue.getSessionInfo(item.session_id); setParticipants(info.participants?.map(p => ({ character_id: p.character_id, name: p.name, avatar_url: p.avatar_url, frequency: p.speak_frequency || 1.0 })) || []); } catch {}
+                        try {
+                          const info = await multiDialogue.getSessionInfo(item.session_id);
+                          setParticipants(info.participants?.map(p => ({ character_id: p.character_id, name: p.name, avatar_url: p.avatar_url, frequency: p.speak_frequency || 1.0 })) || []);
+                        } catch {
+                          setParticipants(groupParts.map(p => ({ ...p, frequency: 1.0 })));
+                        }
                         try { const hist = await multiDialogue.getHistory(item.session_id); if (hist?.messages) setMessages(hist.messages); } catch {}
                       }} className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-all cursor-pointer group relative">
                         <div className="flex -space-x-2 shrink-0">
-                          {[0,1,2].map(j => (
-                            <div key={j} className="w-10 h-10 rounded-full overflow-hidden border-2 border-[#0d0d14] bg-[#0b0b0c] ring-1 ring-cyber-green/10">
-                              <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-[11px] font-bold">{j===0?'群':j===1?'聊':'?'}</div>
+                          {groupParts.slice(0, 3).map((p, j) => (
+                            <div key={p.character_id || j} className="w-10 h-10 rounded-full overflow-hidden border-2 border-[#0d0d14] bg-[#0b0b0c] ring-1 ring-cyber-green/10">
+                              {p.avatar_url ? (
+                                <img src={p.avatar_url} alt="" className="w-full h-full object-cover" />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-[11px] font-bold">{p.name?.charAt(0) || '?'}</div>
+                              )}
                             </div>
                           ))}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5"><span className="text-sm text-zinc-300 font-medium truncate">群聊</span></div>
+                          <div className="flex items-center gap-1.5"><span className="text-sm text-zinc-300 font-medium truncate">{item.group_name || '群聊'}</span></div>
                           <div className="text-[11px] text-cyber-green/20 truncate mt-0.5">{item.last_message || '点击进入群聊'}</div>
                         </div>
                         <div className="flex flex-col items-end gap-1 shrink-0"><span className="text-[11px] text-cyber-green/15">{timeStr}</span></div>
@@ -1365,12 +1427,12 @@ export default function ChatRoom() {
 
           )}
 
-          {hasMoreHistory && !loadingHistory && (
-
-            <div className="text-center text-[10px] text-cyber-green/12 py-1">上滑加载更多</div>
-
+          {/* 滚动到顶部自动加载历史记录 */}
+          {loadingHistory && (
+            <div className="flex justify-center py-2">
+              <Loader2 className="animate-spin text-cyber-green/25" size={16} />
+            </div>
           )}
-
           {error && (
 
             <div className="text-center text-red-400/50 text-xs p-2 bg-red-500/5 rounded-lg border border-red-500/10">
