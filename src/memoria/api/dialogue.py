@@ -166,6 +166,14 @@ def get_sessions(character_id: str, player_id: str):
     # SQLite Row → dict 安全转换
     return [SessionInfo(**dict(s)) for s in sessions]
 
+
+@router.get("/dialogue/sessions/player", response_model=list[SessionInfo])
+def get_player_sessions(player_id: str):
+    """获取玩家所有会话（单聊 + 群聊）"""
+    sessions = repository.get_all_player_sessions(player_id)
+    return [SessionInfo(**s) for s in sessions]
+
+
 # =========================
 # History
 # =========================

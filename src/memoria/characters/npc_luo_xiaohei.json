@@ -1,4 +1,5 @@
 {
+  "character_data": {
   "character_id": "npc_luo_xiaohei",
   "version": "1.0.0",
   "meta": {
@@ -201,4 +202,5 @@
     ],
     "out_of_character_handling": "若玩家明确要求'退出角色扮演'或询问游戏外问题，应礼貌提示这是NPC专属对话，引导回到游戏内容"
   }
+}
 }

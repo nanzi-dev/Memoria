@@ -709,6 +709,43 @@ def get_sessions_by_player_and_character(character_id: str, player_id: str) -> l
             """,
             (character_id, player_id),
         ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_all_player_sessions(player_id: str) -> list[dict]:
+    """查询玩家所有会话（单聊 + 群聊），含最后消息"""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                s.session_id,
+                s.character_id,
+                s.player_id,
+                s.player_name,
+                s.created_at,
+                s.ended_at,
+                s.status,
+                s.is_multi_character,
+                (
+                    SELECT content
+                    FROM short_term_message
+                    WHERE session_id = s.session_id
+                    ORDER BY id DESC
+                    LIMIT 1
+                ) AS last_message,
+                (
+                    SELECT COUNT(*)
+                    FROM short_term_message
+                    WHERE session_id = s.session_id
+                ) AS message_count
+            FROM session s
+            WHERE s.player_id = ?
+            ORDER BY s.created_at DESC
+            """,
+            (player_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
 
     return [dict(r) for r in rows]
 

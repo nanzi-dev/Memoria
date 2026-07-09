@@ -235,6 +235,10 @@ export const dialogue = {
   listSessions(characterId, playerId) {
     return request(`/dialogue/sessions?character_id=${characterId}&player_id=${playerId}`);
   },
+  /** 获取玩家所有会话（单聊 + 群聊） */
+  listPlayerSessions(playerId) {
+    return request(`/dialogue/sessions/player?player_id=${playerId}`);
+  },
 };
 
 // ═══════════════════════════════════════════════
@@ -296,6 +300,10 @@ export const multiDialogue = {
       method: 'POST',
       body: JSON.stringify({ session_id: sessionId, trigger_character_id: triggerCharacterId }),
     });
+  },
+  /** 获取多角色对话历史 */
+  getHistory(sessionId, limit = 50) {
+    return request(`/multi-dialogue/history/${sessionId}?limit=${limit}`);
   },
   /** 添加参与者 */
   addParticipant(sessionId, characterId, speakFrequency = 1.0) {
