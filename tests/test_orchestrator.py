@@ -66,6 +66,45 @@ class TestCharacterInteraction:
         selected = orch._select_character_for_interaction()
         assert selected in ["x","y","z"]
 
+    def test_decide_group_response_count_uses_discussion_pressure(self, monkeypatch):
+        from types import SimpleNamespace
+        from memoria.core import multi_character_orchestrator
+
+        orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
+            multi_character_orchestrator.MultiCharacterOrchestrator
+        )
+        orch.participants = [{"character_id": "a"}, {"character_id": "b"}, {"character_id": "c"}]
+        orch.character_cards = {
+            "a": SimpleNamespace(meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])),
+            "b": SimpleNamespace(meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])),
+            "c": SimpleNamespace(meta=SimpleNamespace(name="丙", display_name="丙", aliases=[])),
+        }
+        orch._load_all_relationships = lambda: {
+            "a_b": {"affinity": 85, "relationship_type": "宿敌"},
+            "b_c": {"affinity": 60, "relationship_type": "盟友"},
+        }
+        monkeypatch.setattr(multi_character_orchestrator.random, "uniform", lambda a, b: a + 0.2)
+
+        count = orch._decide_group_response_count("大家马上商量一个调查计划，线索很危险，怎么办？", 3)
+
+        assert count >= 2
+
+    def test_decide_group_response_count_single_mention(self):
+        from types import SimpleNamespace
+        from memoria.core import multi_character_orchestrator
+
+        orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
+            multi_character_orchestrator.MultiCharacterOrchestrator
+        )
+        orch.participants = [{"character_id": "a"}, {"character_id": "b"}, {"character_id": "c"}]
+        orch.character_cards = {
+            "a": SimpleNamespace(meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])),
+            "b": SimpleNamespace(meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])),
+            "c": SimpleNamespace(meta=SimpleNamespace(name="丙", display_name="丙", aliases=[])),
+        }
+
+        assert orch._decide_group_response_count("乙，你怎么看？", 3) == 1
+
 
 class TestMultiCharacterGroupMemory:
     def test_load_memory_context_includes_group_memories(self, monkeypatch):

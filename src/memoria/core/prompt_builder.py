@@ -309,8 +309,11 @@ def build_multi_character_system_prompt(
             if relationship:
                 rel_type = relationship.get("relationship_type", "")
                 rel_desc = relationship.get("description", "")
+                rel_affinity = relationship.get("affinity", None)
                 if rel_type:
-                    char_desc += f" - {rel_type}"
+                    char_desc += f" - 关系：{rel_type}"
+                if rel_affinity is not None:
+                    char_desc += f"（亲密度 {rel_affinity}/100）"
                 if rel_desc:
                     char_desc += f": {rel_desc}"
         

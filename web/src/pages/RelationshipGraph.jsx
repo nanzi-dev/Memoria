@@ -29,7 +29,14 @@ const GRAPH_RAYS_PROPS = {
   opacity: 1,
 };
 
-const RELATION_TYPES = [
+const RELATION_TYPE_STORAGE_KEY = 'memoria.relationshipTypes';
+const RELATION_TYPE_COLORS = [
+  '#A7EF9E', '#EF4444', '#F59E0B', '#F97316', '#7C3AED',
+  '#F472B6', '#94A3B8', '#38BDF8', '#22C55E', '#EAB308',
+  '#FB7185', '#A78BFA',
+];
+
+const DEFAULT_RELATION_TYPES = [
   { value: 'friend', label: '朋友', color: '#A7EF9E' },
   { value: 'enemy', label: '敌人', color: '#EF4444' },
   { value: 'family', label: '家人', color: '#F59E0B' },
@@ -39,9 +46,55 @@ const RELATION_TYPES = [
   { value: 'neutral', label: '中立', color: '#94A3B8' },
 ];
 
-const RELATION_COLORS = Object.fromEntries(RELATION_TYPES.map(t => [t.value, t.color]));
-function getRelationColor(type) { return RELATION_COLORS[type] || '#94A3B8'; }
-function getRelationLabel(type) { return RELATION_TYPES.find(t => t.value === type)?.label || type; }
+function hashRelationType(value = '') {
+  return Array.from(String(value)).reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+}
+
+function relationTypeColor(value = '') {
+  return RELATION_TYPE_COLORS[hashRelationType(value) % RELATION_TYPE_COLORS.length] || '#94A3B8';
+}
+
+function normalizeRelationTypeName(value) {
+  return String(value || '').trim();
+}
+
+function sanitizeMarkerId(type) {
+  return `arrow-${String(type || 'relation').replace(/[^a-zA-Z0-9_-]/g, '_')}-${hashRelationType(type)}`;
+}
+
+function loadRelationTypes() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RELATION_TYPE_STORAGE_KEY) || 'null');
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item) => ({
+          value: normalizeRelationTypeName(item.value || item.label),
+          label: normalizeRelationTypeName(item.label || item.value),
+          color: item.color || relationTypeColor(item.value || item.label),
+        }))
+        .filter(item => item.value && item.label);
+    }
+  } catch (e) {}
+  return DEFAULT_RELATION_TYPES;
+}
+
+function mergeRelationTypes(baseTypes, edges = []) {
+  const map = new Map();
+  baseTypes.forEach((type) => {
+    if (type?.value) map.set(type.value, type);
+  });
+  edges.forEach((edge) => {
+    const value = normalizeRelationTypeName(edge.relationship_type);
+    if (value && !map.has(value)) {
+      map.set(value, { value, label: value, color: relationTypeColor(value) });
+    }
+  });
+  return Array.from(map.values());
+}
+
+function getRelationColor(type, relationTypes) {
+  return relationTypes.find(t => t.value === type)?.color || relationTypeColor(type);
+}
 
 const NODE_R = 36;
 
@@ -58,17 +111,100 @@ function getLinkHoverWidth(edge) {
   return getLinkWidth(edge) + 1.4;
 }
 
+function RelationTypePicker({
+  value,
+  onChange,
+  relationTypes,
+  usedTypeValues,
+  onAddType,
+  onRemoveType,
+}) {
+  const [newType, setNewType] = useState('');
+
+  const handleAdd = () => {
+    const label = normalizeRelationTypeName(newType);
+    if (!label) return;
+    const nextType = onAddType(label);
+    onChange(nextType.value);
+    setNewType('');
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-1.5">
+        {relationTypes.map(rt => {
+          const isUsed = usedTypeValues.has(rt.value);
+          return (
+            <button key={rt.value} type="button"
+              onClick={() => onChange(rt.value)}
+              className="group inline-flex min-h-[30px] items-center gap-1 rounded-lg border px-2.5 py-1.5 text-[10px] font-mono transition-all active:scale-[0.98]"
+              style={{
+                backgroundColor: value === rt.value ? rt.color + '22' : 'transparent',
+                borderColor: rt.color,
+                color: value === rt.value ? rt.color : 'rgba(255,255,255,0.4)',
+              }}
+            >
+              <span>{rt.label}</span>
+              <span
+                role="button"
+                tabIndex={-1}
+                title={isUsed ? '已有关系正在使用，先修改或删除对应关系' : '删除类型'}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (isUsed) return;
+                  const next = relationTypes.find(item => item.value !== rt.value)?.value || '';
+                  if (value === rt.value) onChange(next);
+                  onRemoveType(rt.value);
+                }}
+                className={`rounded-full p-0.5 transition-colors ${isUsed ? 'cursor-not-allowed opacity-25' : 'opacity-35 group-hover:opacity-90 hover:bg-white/10'}`}
+              >
+                <X size={10} />
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={newType}
+          onChange={e => setNewType(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              handleAdd();
+            }
+          }}
+          placeholder="新增类型，如：同门、债主、守护者"
+          className="min-w-0 flex-1 rounded-lg border border-cyber-green/20 bg-cyber-bg px-3 py-2 text-xs font-mono text-cyber-green placeholder:text-cyber-green/20 transition-all focus:border-cyber-green/50 focus:outline-none focus:ring-2 focus:ring-cyber-green/10"
+        />
+        <button
+          type="button"
+          onClick={handleAdd}
+          className="inline-flex min-h-[36px] items-center gap-1 rounded-lg border border-cyber-green/25 bg-cyber-green/10 px-3 text-xs font-bold text-cyber-green transition-all hover:bg-cyber-green/20 active:scale-[0.98]"
+        >
+          <Plus size={13} /> 新增
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── 添加关系弹窗 ──
-function AddRelationModal({ characters, onAdd, onClose, adding }) {
+function AddRelationModal({ characters, relationTypes, usedTypeValues, onAddType, onRemoveType, onAdd, onClose, adding }) {
   const [charA, setCharA] = useState('');
   const [charB, setCharB] = useState('');
-  const [type, setType] = useState('friend');
+  const [type, setType] = useState(relationTypes[0]?.value || '');
   const [affinity, setAffinity] = useState(50);
   const [desc, setDesc] = useState('');
 
+  useEffect(() => {
+    if (!type && relationTypes[0]?.value) setType(relationTypes[0].value);
+  }, [relationTypes, type]);
+
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!charA || !charB || charA === charB) return;
+    if (!charA || !charB || charA === charB || !type) return;
     onAdd({ character_id_a: charA, character_id_b: charB, relationship_type: type, affinity, description: desc || null });
   };
 
@@ -122,21 +258,14 @@ function AddRelationModal({ characters, onAdd, onClose, adding }) {
           </div>
           <div>
             <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">关系类型</label>
-            <div className="flex flex-wrap gap-1.5">
-              {RELATION_TYPES.map(rt => (
-                <button key={rt.value} type="button"
-                  onClick={() => setType(rt.value)}
-                  className="px-2.5 py-1.5 rounded-lg text-[10px] font-mono border transition-all active:scale-[0.98]"
-                  style={{
-                    backgroundColor: type === rt.value ? rt.color + '22' : 'transparent',
-                    borderColor: rt.color,
-                    color: type === rt.value ? rt.color : 'rgba(255,255,255,0.4)',
-                  }}
-                >
-                  {rt.label}
-                </button>
-              ))}
-            </div>
+            <RelationTypePicker
+              value={type}
+              onChange={setType}
+              relationTypes={relationTypes}
+              usedTypeValues={usedTypeValues}
+              onAddType={onAddType}
+              onRemoveType={onRemoveType}
+            />
           </div>
           <div>
             <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">
@@ -152,7 +281,7 @@ function AddRelationModal({ characters, onAdd, onClose, adding }) {
               placeholder="如：青梅竹马、宿敌..."
               className="w-full bg-cyber-bg border border-cyber-green/20 rounded-lg px-3 py-2.5 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none focus:ring-2 focus:ring-cyber-green/10 placeholder:text-cyber-green/20 transition-all" />
           </div>
-          <button type="submit" disabled={adding || !charA || !charB || charA === charB}
+          <button type="submit" disabled={adding || !charA || !charB || charA === charB || !type}
             className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-cyber-green/30 bg-cyber-green/10 py-2.5 text-sm font-bold text-cyber-green transition-all hover:bg-cyber-green/20 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-30 disabled:active:scale-100">
             {adding ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
             {adding ? '创建中...' : '创建关系'}
@@ -165,7 +294,7 @@ function AddRelationModal({ characters, onAdd, onClose, adding }) {
 }
 
 // ── 编辑/删除关系弹窗 ──
-function EditRelationModal({ edge, onUpdate, onDelete, onClose, saving }) {
+function EditRelationModal({ edge, relationTypes, usedTypeValues, onAddType, onRemoveType, onUpdate, onDelete, onClose, saving }) {
   const [type, setType] = useState(edge.relationship_type);
   const [affinity, setAffinity] = useState(edge.affinity);
   const [desc, setDesc] = useState(edge.description || '');
@@ -204,21 +333,14 @@ function EditRelationModal({ edge, onUpdate, onDelete, onClose, saving }) {
           </p>
           <div>
             <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">关系类型</label>
-            <div className="flex flex-wrap gap-1.5">
-              {RELATION_TYPES.map(rt => (
-                <button key={rt.value} type="button"
-                  onClick={() => setType(rt.value)}
-                  className="px-2.5 py-1.5 rounded-lg text-[10px] font-mono border transition-all active:scale-[0.98]"
-                  style={{
-                    backgroundColor: type === rt.value ? rt.color + '22' : 'transparent',
-                    borderColor: rt.color,
-                    color: type === rt.value ? rt.color : 'rgba(255,255,255,0.4)',
-                  }}
-                >
-                  {rt.label}
-                </button>
-              ))}
-            </div>
+            <RelationTypePicker
+              value={type}
+              onChange={setType}
+              relationTypes={relationTypes}
+              usedTypeValues={usedTypeValues}
+              onAddType={onAddType}
+              onRemoveType={onRemoveType}
+            />
           </div>
           <div>
             <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">
@@ -235,7 +357,7 @@ function EditRelationModal({ edge, onUpdate, onDelete, onClose, saving }) {
           </div>
           <div className="flex gap-3">
             <button onClick={() => onUpdate(edge, { relationship_type: type, affinity, description: desc || null })}
-              disabled={saving}
+              disabled={saving || !type}
               className="min-h-[42px] flex-1 rounded-lg border border-cyber-green/30 bg-cyber-green/10 py-2 text-sm font-bold text-cyber-green transition-all hover:bg-cyber-green/20 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-30 disabled:active:scale-100">
               {saving ? '保存中...' : '保存修改'}
             </button>
@@ -264,11 +386,16 @@ export default function RelationshipGraph() {
   const [error, setError] = useState(null);
   const [network, setNetwork] = useState({ nodes: [], edges: [] });
   const [characters, setCharacters] = useState([]);
+  const [relationTypes, setRelationTypes] = useState(loadRelationTypes);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editEdge, setEditEdge] = useState(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
+
+  useEffect(() => {
+    localStorage.setItem(RELATION_TYPE_STORAGE_KEY, JSON.stringify(relationTypes));
+  }, [relationTypes]);
 
   const loadData = useCallback(async () => {
     try {
@@ -293,6 +420,7 @@ export default function RelationshipGraph() {
       }));
       setCharacters(Object.values(map));
       setNetwork({ nodes: enrichedNodes, edges: netData.edges });
+      setRelationTypes(prev => mergeRelationTypes(prev, netData.edges));
     } catch (e) {
       setError(e.message);
     } finally { setLoading(false); }
@@ -315,11 +443,15 @@ export default function RelationshipGraph() {
     const defs = svg.append('defs');
 
     // 箭头标记
-    RELATION_TYPES.forEach(rt => {
-      defs.append('marker').attr('id', 'arrow-' + rt.value)
+    const markerTypes = Array.from(new Set([
+      ...relationTypes.map(rt => rt.value),
+      ...network.edges.map(edge => edge.relationship_type),
+    ])).filter(Boolean);
+    markerTypes.forEach(type => {
+      defs.append('marker').attr('id', sanitizeMarkerId(type))
         .attr('viewBox', '0 -5 10 10').attr('refX', 30).attr('refY', 0).attr('orient', 'auto')
         .attr('markerWidth', 5).attr('markerHeight', 5)
-        .append('path').attr('d', 'M 0,-4 L 8,0 L 0,4').attr('fill', rt.color).attr('opacity', 0.82);
+        .append('path').attr('d', 'M 0,-4 L 8,0 L 0,4').attr('fill', getRelationColor(type, relationTypes)).attr('opacity', 0.82);
     });
 
     // 发光滤镜
@@ -364,17 +496,17 @@ export default function RelationshipGraph() {
     const linkGroup = g.append('g').attr('class', 'links');
     const linkBase = linkGroup.append('g').attr('class', 'link-base').selectAll('path').data(links).join('path')
       .attr('fill', 'none')
-      .attr('stroke', d => getRelationColor(d.relationship_type))
+      .attr('stroke', d => getRelationColor(d.relationship_type, relationTypes))
       .attr('stroke-opacity', 0.48)
       .attr('stroke-width', getLinkWidth)
       .attr('stroke-linecap', 'round')
       .attr('stroke-linejoin', 'round')
-      .attr('marker-end', d => `url(#arrow-${d.relationship_type})`)
+      .attr('marker-end', d => `url(#${sanitizeMarkerId(d.relationship_type)})`)
       .attr('pointer-events', 'none');
 
     const linkFlow = linkGroup.append('g').attr('class', 'link-flow').selectAll('path').data(links).join('path')
       .attr('fill', 'none')
-      .attr('stroke', d => getRelationColor(d.relationship_type))
+      .attr('stroke', d => getRelationColor(d.relationship_type, relationTypes))
       .attr('stroke-opacity', 0.72)
       .attr('stroke-width', d => Math.max(1, getLinkWidth(d) * 0.42))
       .attr('stroke-linecap', 'round')
@@ -407,18 +539,6 @@ export default function RelationshipGraph() {
 
     animateFlow();
 
-    // 边标签
-    const edgeLabelGroup = g.append('g').attr('class', 'edge-labels');
-    const edgeLabelBg = edgeLabelGroup.selectAll('rect').data(links).join('rect')
-      .attr('fill', CYBER_DARK).attr('rx', 3).attr('opacity', 0)
-      .attr('pointer-events', 'none');
-    const edgeLabelText = edgeLabelGroup.selectAll('text').data(links).join('text')
-      .text(d => getRelationLabel(d.relationship_type))
-      .attr('font-family', 'JetBrains Mono, monospace').attr('font-size', '9px')
-      .attr('fill', d => getRelationColor(d.relationship_type))
-      .attr('text-anchor', 'middle').attr('dy', '-6').attr('opacity', 0)
-      .attr('pointer-events', 'none');
-
     // 边交互
     linkHit.on('mouseenter', function(event, d) {
       linkBase
@@ -427,15 +547,11 @@ export default function RelationshipGraph() {
       linkFlow
         .attr('stroke-opacity', l => l === d ? 0.95 : 0.04)
         .attr('stroke-width', l => l === d ? Math.max(1.6, getLinkHoverWidth(l) * 0.48) : Math.max(1, getLinkWidth(l) * 0.32));
-      edgeLabelBg.attr('opacity', l => l === d ? 0.9 : 0);
-      edgeLabelText.attr('opacity', l => l === d ? 1 : 0);
     }).on('mouseleave', function() {
       linkBase.attr('stroke-opacity', 0.48).attr('stroke-width', getLinkWidth);
       linkFlow
         .attr('stroke-opacity', 0.72)
         .attr('stroke-width', d => Math.max(1, getLinkWidth(d) * 0.42));
-      edgeLabelBg.attr('opacity', 0);
-      edgeLabelText.attr('opacity', 0);
     }).on('click', (event, d) => {
       event.stopPropagation();
       setEditEdge(d);
@@ -541,15 +657,6 @@ export default function RelationshipGraph() {
       linkBase.attr('d', getEdgePath);
       linkFlow.attr('d', getEdgePath);
       linkHit.attr('d', getEdgePath);
-      edgeLabelBg.each(function(d) {
-        const mx = (d.source.x + d.target.x) / 2;
-        const my = (d.source.y + d.target.y) / 2;
-        const label = getRelationLabel(d.relationship_type);
-        const w = label.length * 7 + 8;
-        d3.select(this).attr('x', mx - w/2).attr('y', my - 14).attr('width', w).attr('height', 16);
-      });
-      edgeLabelText.attr('x', d => (d.source.x + d.target.x) / 2)
-        .attr('y', d => (d.source.y + d.target.y) / 2);
       node.attr('transform', d => `translate(${d.x},${d.y})`);
     });
 
@@ -569,7 +676,7 @@ export default function RelationshipGraph() {
       linkFlow.interrupt();
       simulation.stop();
     };
-  }, [network, navigate]);
+  }, [network, navigate, relationTypes]);
 
   // ── 操作 ──
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
@@ -616,6 +723,26 @@ export default function RelationshipGraph() {
     finally { setSaving(false); }
   };
 
+  const handleAddRelationType = (label) => {
+    const cleanLabel = normalizeRelationTypeName(label);
+    const existing = relationTypes.find(
+      type => type.value === cleanLabel || type.label === cleanLabel
+    );
+    if (existing) return existing;
+
+    const nextType = {
+      value: cleanLabel,
+      label: cleanLabel,
+      color: relationTypeColor(cleanLabel),
+    };
+    setRelationTypes(types => [...types, nextType]);
+    return nextType;
+  };
+
+  const handleRemoveRelationType = (value) => {
+    setRelationTypes(types => types.filter(type => type.value !== value));
+  };
+
   const zoomIn = () => {
     const svg = d3.select(svgRef.current);
     svg.transition().duration(300).call(zoomRef.current.scaleBy, 1.4);
@@ -631,6 +758,7 @@ export default function RelationshipGraph() {
 
   // ── Render ──
   const modalOpen = showAddModal || !!editEdge;
+  const usedTypeValues = new Set(network.edges.map(edge => edge.relationship_type).filter(Boolean));
 
   return (
     <div className="min-h-screen memoria-page flex flex-col select-none">
@@ -643,11 +771,30 @@ export default function RelationshipGraph() {
         </div>,
         document.body
       )}
-{showAddModal && (
-        <AddRelationModal characters={characters} onAdd={handleAdd} onClose={() => setShowAddModal(false)} adding={saving} />
+      {showAddModal && (
+        <AddRelationModal
+          characters={characters}
+          relationTypes={relationTypes}
+          usedTypeValues={usedTypeValues}
+          onAddType={handleAddRelationType}
+          onRemoveType={handleRemoveRelationType}
+          onAdd={handleAdd}
+          onClose={() => setShowAddModal(false)}
+          adding={saving}
+        />
       )}
       {editEdge && (
-        <EditRelationModal edge={editEdge} onUpdate={handleUpdate} onDelete={handleDelete} onClose={() => setEditEdge(null)} saving={saving} />
+        <EditRelationModal
+          edge={editEdge}
+          relationTypes={relationTypes}
+          usedTypeValues={usedTypeValues}
+          onAddType={handleAddRelationType}
+          onRemoveType={handleRemoveRelationType}
+          onUpdate={handleUpdate}
+          onDelete={handleDelete}
+          onClose={() => setEditEdge(null)}
+          saving={saving}
+        />
       )}
 
       {/* Header */}
@@ -725,7 +872,7 @@ export default function RelationshipGraph() {
             </div>
             <div className="absolute bottom-6 left-6 z-10 animate-fade-up">
               <div className="memoria-glass rounded-lg px-3 py-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px]">
-                {RELATION_TYPES.map(rt => (
+                {relationTypes.map(rt => (
                   <div key={rt.value} className="flex items-center gap-1.5">
                     <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: rt.color }} />
                     <span className="text-cyber-green/50">{rt.label}</span>

@@ -153,7 +153,7 @@ class MultiCharacterOrchestrator:
 
 
     def _decide_group_response_count(self, player_message: str, max_responses: int | None = None) -> int:
-        """按普通群聊节奏决定本轮实际接话人数。"""
+        """按群聊语境决定本轮实际接话人数。"""
         participant_count = len(self.participants)
         if participant_count <= 1:
             return participant_count
@@ -169,11 +169,8 @@ class MultiCharacterOrchestrator:
         if not text:
             return 1
 
-        mentioned = 0
-        for card in self.character_cards.values():
-            names = [card.meta.name, card.meta.display_name] + list(getattr(card.meta, "aliases", []) or [])
-            if any(name and name in text for name in names):
-                mentioned += 1
+        mentioned_ids = self._find_mentioned_character_ids(text)
+        mentioned = len(mentioned_ids)
 
         if mentioned == 1:
             return 1
@@ -184,17 +181,42 @@ class MultiCharacterOrchestrator:
             "大家", "你们", "各位", "都", "一起", "商量", "讨论", "投票", "选择",
             "怎么办", "怎么看", "意见", "想法", "谁", "有没有", "要不要", "为什么",
         )
+        high_stakes_cues = (
+            "危险", "紧急", "马上", "立刻", "救", "逃", "战斗", "计划", "决定",
+            "分工", "调查", "线索", "真相", "冲突", "怀疑", "背叛", "秘密",
+        )
         short_ack = text in {"好", "好的", "嗯", "哦", "行", "可以", "知道了", "明白", "没事"}
         is_question = any(mark in text for mark in ("?", "？", "吗", "呢"))
 
         if short_ack:
             weights = [(1, 0.9), (2, 0.1)]
-        elif any(cue in text for cue in broad_cues):
-            weights = [(1, 0.2), (2, 0.5), (3, 0.25), (4, 0.05)]
-        elif is_question:
-            weights = [(1, 0.55), (2, 0.35), (3, 0.1)]
         else:
-            weights = [(1, 0.7), (2, 0.25), (3, 0.05)]
+            conversation_pressure = 0.0
+            if any(cue in text for cue in broad_cues):
+                conversation_pressure += 1.6
+            if is_question:
+                conversation_pressure += 0.8
+            if any(cue in text for cue in high_stakes_cues):
+                conversation_pressure += 0.9
+            if len(text) >= 36:
+                conversation_pressure += 0.5
+            if len(text) >= 80:
+                conversation_pressure += 0.5
+
+            relation_pressure = self._relationship_pressure_for_group()
+            if relation_pressure >= 70:
+                conversation_pressure += 0.8
+            elif relation_pressure >= 40:
+                conversation_pressure += 0.35
+
+            if conversation_pressure >= 2.6:
+                weights = [(1, 0.12), (2, 0.42), (3, 0.34), (4, 0.12)]
+            elif conversation_pressure >= 1.4:
+                weights = [(1, 0.35), (2, 0.45), (3, 0.17), (4, 0.03)]
+            elif conversation_pressure >= 0.8:
+                weights = [(1, 0.58), (2, 0.33), (3, 0.09)]
+            else:
+                weights = [(1, 0.78), (2, 0.18), (3, 0.04)]
 
         available = [(count, weight) for count, weight in weights if count <= cap]
         total = sum(weight for _, weight in available)
@@ -205,6 +227,34 @@ class MultiCharacterOrchestrator:
             if pick <= upto:
                 return count
         return available[-1][0]
+
+
+    def _find_mentioned_character_ids(self, text: str) -> set[str]:
+        """找出玩家消息中直接提到的角色。"""
+        mentioned = set()
+        for char_id, card in self.character_cards.items():
+            meta = getattr(card, "meta", None)
+            if not meta:
+                continue
+            names = [
+                getattr(meta, "name", None),
+                getattr(meta, "display_name", None),
+            ]
+            names.extend(getattr(meta, "aliases", []) or [])
+            if any(name and str(name) in text for name in names):
+                mentioned.add(char_id)
+        return mentioned
+
+
+    def _relationship_pressure_for_group(self) -> float:
+        """估算当前群聊关系张力，越高越适合多人接话。"""
+        relationships = self._load_all_relationships()
+        if not relationships:
+            return 0.0
+        values = []
+        for rel in relationships.values():
+            values.append(abs(_safe_float(rel.get("affinity", 0))))
+        return sum(values) / len(values) if values else 0.0
     
     
     def _generate_group_discussion(self, player_message: str, max_responses: int = 3) -> list[dict]:

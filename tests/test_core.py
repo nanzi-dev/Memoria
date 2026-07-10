@@ -431,6 +431,30 @@ class TestSpeakingStrategies:
         speaker = strategy.select_speaker(participants, cards, context)
         assert speaker == "char_a"
 
+    def test_smart_strategy_custom_relationship_type(self):
+        """测试自定义关系类型通过亲密度影响发言选择"""
+        from memoria.core.speaking_strategy import SmartSelectionStrategy
+        strategy = SmartSelectionStrategy(balance_factor=1.0)
+        participants = self._make_participants()[1:]
+        cards = self._make_mock_cards()
+
+        import random
+        random.seed(42)
+
+        context = {
+            "last_speaker_id": "char_a",
+            "player_message": "你们怎么看？",
+            "character_relationships": {
+                "char_a_char_b": {
+                    "relationship_type": "宿命盟友",
+                    "affinity": 95,
+                    "description": "长期并肩作战",
+                }
+            },
+        }
+        speaker = strategy.select_speaker(participants, cards, context)
+        assert speaker == "char_b"
+
     def test_hybrid_strategy_strong_mention(self):
         """测试混合策略的强提及"""
         from memoria.core.speaking_strategy import HybridStrategy

@@ -22,7 +22,7 @@ class RelationshipCreateRequest(BaseModel):
     """创建关系请求"""
     character_id_a: str = Field(..., description="角色 A ID")
     character_id_b: str = Field(..., description="角色 B ID")
-    relationship_type: str = Field(..., description="关系类型（friend, enemy, family, rival, mentor, etc.）")
+    relationship_type: str = Field(..., description="关系类型，支持自定义文本")
     affinity: float = Field(default=0.0, ge=-100, le=100, description="关系亲密度（-100 ~ 100）")
     description: str | None = Field(None, description="关系描述")
 

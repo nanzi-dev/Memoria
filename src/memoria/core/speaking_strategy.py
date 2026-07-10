@@ -17,6 +17,83 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """安全转换为 float。"""
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _relationship_between(character_relationships: dict, char_a: str, char_b: str) -> dict | None:
+    """按双向关系查找角色关系。"""
+    rel_key = f"{char_a}_{char_b}"
+    rel_key_rev = f"{char_b}_{char_a}"
+    return character_relationships.get(rel_key) or character_relationships.get(rel_key_rev)
+
+
+def _relationship_turn_score(relationship: dict | None) -> float:
+    """
+    根据关系强度和文本语义计算接话倾向。
+
+    关系类型允许用户自定义，因此亲密度是主信号；类型和描述只作为语义提示。
+    """
+    if not relationship:
+        return 0.0
+
+    affinity = max(-100.0, min(100.0, _safe_float(relationship.get("affinity", 0))))
+    magnitude = abs(affinity) / 100.0
+
+    if affinity >= 25:
+        score = 10.0 + magnitude * 16.0
+    elif affinity <= -25:
+        score = 12.0 + magnitude * 18.0
+    else:
+        score = 4.0 + magnitude * 8.0
+
+    rel_text = " ".join(
+        str(relationship.get(key) or "")
+        for key in ("relationship_type", "description")
+    ).lower()
+
+    close_cues = (
+        "friend", "family", "lover", "love", "ally", "partner", "companion",
+        "朋友", "好友", "挚友", "家人", "亲人", "恋", "爱", "伴侣", "同伴", "盟友",
+    )
+    conflict_cues = (
+        "enemy", "rival", "opponent", "competitor", "hostile",
+        "敌", "仇", "宿敌", "对手", "竞争", "冲突", "死敌",
+    )
+    guidance_cues = (
+        "mentor", "teacher", "student", "master", "apprentice",
+        "导师", "老师", "师父", "师徒", "学生", "弟子", "同门",
+    )
+
+    if any(cue in rel_text for cue in close_cues):
+        score += 7.0
+    if any(cue in rel_text for cue in conflict_cues):
+        score += 9.0
+    if any(cue in rel_text for cue in guidance_cues):
+        score += 5.0
+
+    return score
+
+
+def _names_for_card(card: Any) -> list[str]:
+    """收集角色可被提及的名字。"""
+    if not card:
+        return []
+    meta = getattr(card, "meta", None)
+    if not meta:
+        return []
+    names = [
+        getattr(meta, "name", None),
+        getattr(meta, "display_name", None),
+    ]
+    names.extend(getattr(meta, "aliases", []) or [])
+    return [str(name) for name in names if name]
+
+
 # =========================
 # 发言策略基类
 # =========================
@@ -194,52 +271,53 @@ class SmartSelectionStrategy(SpeakingStrategy):
             
             # 1. 关键词匹配（玩家提到角色）
             if player_message:
-                name = card.meta.name
-                display_name = card.meta.display_name
-                aliases = getattr(card.meta, "aliases", [])
-                all_names = [name, display_name] + aliases
-                
-                if any(n and n in player_message for n in all_names):
+                if any(n in player_message for n in _names_for_card(card)):
                     score += 50.0
                     logger.debug(f"[智能策略] {char_id} 被提及，+50")
             
             # 2. 角色关系（与最后发言者的关系）
             if last_speaker_id and last_speaker_id != char_id:
-                rel_key = f"{last_speaker_id}_{char_id}"
-                rel_key_rev = f"{char_id}_{last_speaker_id}"
-                
-                relationship = character_relationships.get(rel_key) or character_relationships.get(rel_key_rev)
-                
-                if relationship:
-                    rel_type = relationship.get("relationship_type", "")
-                    affinity = relationship.get("affinity", 0)
-                    
-                    # 关系亲密度影响
-                    if rel_type in ["friend", "family", "lover"]:
-                        score += 15.0 + (affinity / 100.0) * 10.0
-                        logger.debug(f"[智能策略] {char_id} 与 {last_speaker_id} 关系亲密，+{15.0 + (affinity / 100.0) * 10.0:.1f}")
-                    elif rel_type in ["rival", "enemy"]:
-                        score += 20.0  # 对手更可能互怼
-                        logger.debug(f"[智能策略] {char_id} 与 {last_speaker_id} 是对手，+20")
+                relationship = _relationship_between(character_relationships, last_speaker_id, char_id)
+                relation_score = _relationship_turn_score(relationship)
+                if relation_score:
+                    score += relation_score
+                    logger.debug(f"[智能策略] {char_id} 与 {last_speaker_id} 关系接话权重，+{relation_score:.1f}")
             
-            # 3. 发言频率配置
+            # 3. 前文提及：其他角色刚刚点名时更容易接话
+            previous_responses = context.get("previous_responses") or []
+            if previous_responses:
+                recent_text = "\n".join(str(r.get("dialogue", "")) for r in previous_responses[-2:])
+                if recent_text and any(n in recent_text for n in _names_for_card(card)):
+                    score += 28.0
+                    logger.debug(f"[智能策略] {char_id} 被上一轮角色提及，+28")
+                for response in previous_responses[-2:]:
+                    prev_id = response.get("character_id")
+                    if prev_id and prev_id != char_id:
+                        relation_score = _relationship_turn_score(
+                            _relationship_between(character_relationships, prev_id, char_id)
+                        ) * 0.35
+                        if relation_score:
+                            score += relation_score
+                            logger.debug(f"[智能策略] {char_id} 与前序发言者 {prev_id} 关系延续，+{relation_score:.1f}")
+            
+            # 4. 发言频率配置
             frequency = p.get("speak_frequency", 1.0)
             score += frequency * 15.0
             logger.debug(f"[智能策略] {char_id} 频率权重 {frequency}，+{frequency * 15.0:.1f}")
             
-            # 4. 发言均衡性（发言少的角色优先）
+            # 5. 发言均衡性（发言少的角色优先）
             message_count = p.get("message_count", 0)
             balance_score = max(0, (10 - message_count) * self.balance_factor)
             score += balance_score
             logger.debug(f"[智能策略] {char_id} 发言次数 {message_count}，均衡分 +{balance_score:.1f}")
             
-            # 5. 避免连续发言
+            # 6. 避免连续发言
             if char_id == last_speaker_id:
                 score -= 30.0
                 logger.debug(f"[智能策略] {char_id} 刚发言过，-30")
             
-            # 6. 随机因子（增加不可预测性）
-            random_bonus = random.uniform(0, 12)
+            # 7. 随机因子（增加不可预测性）
+            random_bonus = random.uniform(0, 8)
             score += random_bonus
             
             candidates.append((char_id, score))
@@ -375,11 +453,8 @@ class HybridStrategy(SpeakingStrategy):
             if not card:
                 continue
             
-            name = card.meta.name
-            display_name = card.meta.display_name
-            
             # 完整名字匹配
-            if player_message and (name in player_message or display_name in player_message):
+            if player_message and any(name in player_message for name in _names_for_card(card)):
                 logger.info(f"[混合策略] 强提及触发 {char_id}")
                 return char_id
         
