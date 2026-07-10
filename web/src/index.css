@@ -16,7 +16,8 @@
   }
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: #0b0b0c; }
-  ::-webkit-scrollbar-thumb { background: #7C3AED; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb { background: rgba(167, 239, 158, 0.58); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(167, 239, 158, 0.82); }
 }
 
 /* ═══ Disabled Card ═══ */

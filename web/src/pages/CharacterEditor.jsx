@@ -83,6 +83,13 @@ export default function CharacterEditor() {
   const [saveMessage, setSaveMessage] = useState('');
   const [isActive, setIsActive] = useState(true);
 
+  useEffect(() => {
+    const previousRestoration = window.history.scrollRestoration;
+    window.history.scrollRestoration = 'manual';
+    window.scrollTo(0, 0);
+    return () => { window.history.scrollRestoration = previousRestoration; };
+  }, []);
+
   // Load existing character data
   useEffect(() => {
     if (!characterId) return;

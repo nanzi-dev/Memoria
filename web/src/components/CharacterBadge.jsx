@@ -54,7 +54,7 @@ export function AddCharacterBadge({ onClick }) {
     <div
       className="group relative cursor-pointer transition-all duration-300 hover:scale-[1.03] hover:-translate-y-1 border-2 border-dashed border-cyber-green/20 hover:border-cyber-green/50 flex items-center justify-center bg-[#0d0d14] animate-fade-up"
       style={{ width: 320, height: 460, pointerEvents: 'auto' }}
-      onDoubleClick={handleClick}
+      onClick={handleClick}
     >
       <div
         className="absolute inset-0 opacity-[0.04]"

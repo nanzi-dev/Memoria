@@ -10,3 +10,35 @@
   transform-origin: center;
   overflow: hidden;
 }
+
+.lanyard-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  pointer-events: none;
+}
+
+.lanyard-fallback-band {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  width: 28px;
+  height: 190px;
+  transform: translateX(-50%) rotate(-4deg);
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(167, 239, 158, 0.22), rgba(255, 255, 255, 0.62), rgba(167, 239, 158, 0.16));
+  box-shadow: 0 0 18px rgba(167, 239, 158, 0.08);
+}
+
+.lanyard-fallback-card {
+  width: 190px;
+  height: 268px;
+  object-fit: cover;
+  border-radius: 12px;
+  transform: translateY(56px) rotate(3deg);
+  box-shadow: 0 24px 46px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(167, 239, 158, 0.12);
+  background: #f7f5ef;
+}

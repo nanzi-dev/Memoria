@@ -326,7 +326,7 @@ export default function Lanyard({ characterInfo = {}, className = '', style = {}
   const { avatarUrl, name, gender } = characterInfo;
   const wrapperRef = useRef(null);
   var _a = useState(null), loadedImg = _a[0], setLoadedImg = _a[1];
-  const [isNearViewport, setIsNearViewport] = useState(true);
+  const [isNearViewport, setIsNearViewport] = useState(false);
 
   useEffect(function() {
     setLoadedImg(null);
@@ -356,7 +356,7 @@ export default function Lanyard({ characterInfo = {}, className = '', style = {}
 
     const observer = new IntersectionObserver(
       ([entry]) => setIsNearViewport(entry.isIntersecting),
-      { rootMargin: '900px 0px' }
+      { rootMargin: '320px 0px' }
     );
     observer.observe(node);
     return () => observer.disconnect();
@@ -364,20 +364,28 @@ export default function Lanyard({ characterInfo = {}, className = '', style = {}
 
   return (
     <div ref={wrapperRef} className={`lanyard-wrapper rounded-[28px] ${className}`} style={{ width: "100%", height: "100%", overflow: "hidden", ...style }}>
-      <Canvas camera={{ position: [0, 0, 13], fov: 22 }} dpr={[1, isMobile ? 1.5 : 2]}
-        frameloop={isNearViewport ? 'always' : 'never'}
-        gl={{ alpha: true, antialias: true }} onCreated={({ gl }) => gl.setClearColor(new THREE.Color(0x000000), 0)}>
-        <ambientLight intensity={Math.PI} />
-        <Physics gravity={[0, -40, 0]} timeStep={isMobile ? 1 / 30 : 1 / 60}>
-          <Band isMobile={isMobile} frontImage={frontImage} backImage={backImage} imageFit="cover" />
-        </Physics>
-        <Environment blur={0.75}>
-          <Lightformer intensity={2} color="#A7EF9E" position={[0, -1, 5]} rotation={[0, 0, Math.PI / 3]} scale={[100, 0.1, 1]} />
-          <Lightformer intensity={3} color="#A7EF9E" position={[-1, -1, 1]} rotation={[0, 0, Math.PI / 3]} scale={[100, 0.1, 1]} />
-          <Lightformer intensity={3} color="#A7EF9E" position={[1, 1, 1]} rotation={[0, 0, Math.PI / 3]} scale={[100, 0.1, 1]} />
-          <Lightformer intensity={10} color="#A7EF9E" position={[-10, 0, 14]} rotation={[0, Math.PI / 2, Math.PI / 3]} scale={[100, 10, 1]} />
-        </Environment>
-      </Canvas>
+      {!isNearViewport && (
+        <div className="lanyard-fallback" aria-hidden="true">
+          <div className="lanyard-fallback-band" />
+          <img src={frontImage} alt="" className="lanyard-fallback-card" draggable="false" />
+        </div>
+      )}
+      {isNearViewport && (
+        <Canvas camera={{ position: [0, 0, 13], fov: 22 }} dpr={[1, isMobile ? 1.5 : 2]}
+          frameloop="always"
+          gl={{ alpha: true, antialias: true }} onCreated={({ gl }) => gl.setClearColor(new THREE.Color(0x000000), 0)}>
+          <ambientLight intensity={Math.PI} />
+          <Physics gravity={[0, -40, 0]} timeStep={isMobile ? 1 / 30 : 1 / 60}>
+            <Band isMobile={isMobile} frontImage={frontImage} backImage={backImage} imageFit="cover" />
+          </Physics>
+          <Environment blur={0.75}>
+            <Lightformer intensity={2} color="#A7EF9E" position={[0, -1, 5]} rotation={[0, 0, Math.PI / 3]} scale={[100, 0.1, 1]} />
+            <Lightformer intensity={3} color="#A7EF9E" position={[-1, -1, 1]} rotation={[0, 0, Math.PI / 3]} scale={[100, 0.1, 1]} />
+            <Lightformer intensity={3} color="#A7EF9E" position={[1, 1, 1]} rotation={[0, 0, Math.PI / 3]} scale={[100, 0.1, 1]} />
+            <Lightformer intensity={10} color="#A7EF9E" position={[-10, 0, 14]} rotation={[0, Math.PI / 2, Math.PI / 3]} scale={[100, 10, 1]} />
+          </Environment>
+        </Canvas>
+      )}
     </div>
   );
 }
