@@ -6,6 +6,8 @@ import { useUser } from '../context/UserContext';
 
 import { dialogue, multiDialogue, characterAdmin } from '../api/memoria';
 
+import SideRays from '../components/SideRays';
+
 import {
 
   Send, ArrowLeft, Heart, Zap, AlertTriangle, Loader2, User, X, Plus, Users,
@@ -42,6 +44,31 @@ const MOOD_BUBBLE = { happy: 'bg-emerald-950 border-emerald-400/20 text-zinc-200
 
 
 const IDLE_SESSION_END_MS = 5 * 60 * 1000;
+
+const CHAT_RAYS_PROPS = {
+  speed: 2.1,
+  rayColor1: '#F8D36B',
+  rayColor2: '#9DD8FF',
+  intensity: 2.6,
+  spread: 2.15,
+  origin: 'top-right',
+  tilt: -4,
+  saturation: 1.35,
+  blend: 0.68,
+  falloff: 1.45,
+  opacity: 0.82,
+};
+
+function ChatBackdrop({ origin = 'top-right', tilt = -4 }) {
+  return (
+    <SideRays
+      {...CHAT_RAYS_PROPS}
+      origin={origin}
+      tilt={tilt}
+      className="side-rays-chat"
+    />
+  );
+}
 
 
 
@@ -986,6 +1013,7 @@ export default function ChatRoom() {
   if (view === 'list') {
     return (
       <div className="min-h-screen memoria-page flex flex-col font-mono">
+        <ChatBackdrop />
         <header className="memoria-glass flex items-center gap-3 px-4 py-2.5 border-x-0 border-t-0 shrink-0">
           <button onClick={() => navigate('/')} className="text-cyber-green/30 hover:text-cyber-green/70 hover:bg-cyber-green/5 rounded-lg p-2 transition-all"><ArrowLeft size={18} /></button>
           <div className="flex items-center gap-2">
@@ -1138,6 +1166,7 @@ export default function ChatRoom() {
     return (
 
       <div className="min-h-screen memoria-page flex flex-col font-mono">
+        <ChatBackdrop origin="bottom-left" tilt={8} />
 
         <header className="memoria-glass flex items-center gap-4 px-6 py-3 border-x-0 border-t-0 shrink-0">
 
@@ -1278,6 +1307,7 @@ export default function ChatRoom() {
 
     return (
       <div className="h-dvh max-h-dvh memoria-page font-mono flex flex-col overflow-hidden">
+        <ChatBackdrop />
 
         {/* ═══ Top bar: 融合型 — 返回+名字+状态徽章 ═══ */}
         <header className="memoria-glass flex items-center gap-2 px-3 py-2 border-x-0 border-t-0 shrink-0">
@@ -1511,6 +1541,7 @@ export default function ChatRoom() {
     return (
 
       <div className="h-dvh max-h-dvh memoria-page font-mono flex flex-col overflow-hidden">
+        <ChatBackdrop origin="bottom-right" tilt={6} />
 
         {/* Top bar */}
 
