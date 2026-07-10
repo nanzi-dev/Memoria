@@ -37,6 +37,8 @@ const BLANK_PIXEL =
 
 const FRONT_UV_RECT = { x: 0, y: 0, w: 0.5, h: 0.755 };
 const BACK_UV_RECT = { x: 0.5, y: 0, w: 0.5, h: 0.757 };
+const CARD_FACE_BG = '#F7F5EF';
+const CARD_FACE_BORDER = '#CFC9B8';
 
 // Generate front face texture: name + avatar + tagline on white card
 function createFrontFace({ avatarUrl, name, gender, loadedImg }) {
@@ -45,11 +47,9 @@ function createFrontFace({ avatarUrl, name, gender, loadedImg }) {
   canvas.width = W; canvas.height = H;
   var ctx = canvas.getContext('2d');
 
-  // White background
-  ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, W, H);
-
-  // Subtle decorative top stripe
-  ctx.fillStyle = '#2D2A35'; ctx.fillRect(0, 0, W, 6);
+  ctx.fillStyle = CARD_FACE_BG; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = CARD_FACE_BORDER; ctx.lineWidth = 3;
+  ctx.strokeRect(1.5, 1.5, W - 3, H - 3);
 
   var padding = 120;
   // UV rect starts ~12.5% into the canvas; push content further down
@@ -83,7 +83,7 @@ function createFrontFace({ avatarUrl, name, gender, loadedImg }) {
   ctx.shadowBlur = 16;
   ctx.shadowOffsetX = 0;
   ctx.shadowOffsetY = 4;
-  ctx.fillStyle = '#FFFFFF';
+  ctx.fillStyle = CARD_FACE_BG;
   ctx.roundRect(avatarX, avatarY, avatarSize, avatarSize, avatarRadius);
   ctx.fill();
   ctx.shadowColor = 'transparent';
@@ -127,10 +127,6 @@ function createFrontFace({ avatarUrl, name, gender, loadedImg }) {
   ctx.font = '12px sans-serif';
   ctx.fillText('Where memories become stories.', W / 2, bottomY + 22);
 
-  // Subtle decorative bottom stripe
-  ctx.fillStyle = '#2D2A35';
-  ctx.fillRect(0, H - 6, W, 6);
-
   return canvas.toDataURL('image/png');
 }
 function createBackFace() {
@@ -139,11 +135,11 @@ function createBackFace() {
   canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
 
-  ctx.fillStyle = '#F2EDE4'; ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = '#2D2A35'; ctx.fillRect(0, 0, W, 6);
-  ctx.fillStyle = '#2D2A35'; ctx.fillRect(0, H - 6, W, 6);
+  ctx.fillStyle = CARD_FACE_BG; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = CARD_FACE_BORDER; ctx.lineWidth = 3;
+  ctx.strokeRect(1.5, 1.5, W - 3, H - 3);
   ctx.strokeStyle = 'rgba(45,42,53,0.2)'; ctx.lineWidth = 1;
-  ctx.roundRect(8, 8, W - 16, H - 16, 6); ctx.stroke();
+  ctx.roundRect(18, 18, W - 36, H - 36, 6); ctx.stroke();
 
   const cx = W / 2, cy = H / 2 - 10, d = 60;
   ctx.strokeStyle = 'rgba(100,95,110,0.25)'; ctx.lineWidth = 1;
@@ -188,6 +184,8 @@ function Band({
       const scale = pick(rw / img.width, rh / img.height);
       const dw = img.width * scale, dh = img.height * scale;
       ctx.save(); ctx.beginPath(); ctx.rect(rx, ry, rw, rh); ctx.clip();
+      ctx.fillStyle = CARD_FACE_BG;
+      ctx.fillRect(rx, ry, rw, rh);
       ctx.drawImage(img, rx + (rw - dw) / 2, ry + (rh - dh) / 2, dw, dh);
       ctx.restore();
     };
