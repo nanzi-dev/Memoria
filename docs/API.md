@@ -413,7 +413,9 @@ GET /api/v1/admin/events?character_id=&only_active=true
     "last_triggered_at": "2026-06-28T10:12:00Z",
     "created_at": "2026-06-01T00:00:00Z",
     "updated_at": "2026-06-20T12:00:00Z",
-    "trigger_type": "state"
+    "trigger_type": "state",
+    "schedule": null,
+    "template_id": null
   }
 ]
 ```
@@ -441,6 +443,8 @@ GET /api/v1/admin/events/{event_id}
   "updated_at": "2026-06-20T12:00:00Z",
 
   "trigger_type": "state",
+  "schedule": "*/30 * * * *",
+  "template_id": "tpl_story_keyword_node",
 
   "trigger_condition": {
     "trigger_type": "state",
@@ -452,9 +456,19 @@ GET /api/v1/admin/events/{event_id}
 
   "effects": [
     {
-      "effect_type": "dialogue",
+      "effect_type": "trigger_dialogue",
       "dialogue_text": "你在做什么呀？",
       "dialogue_action": "curious_talk"
+    },
+    {
+      "effect_type": "trigger_event",
+      "next_event_id": "evt_follow_up"
+    },
+    {
+      "effect_type": "npc_proactive_dialogue",
+      "target_session_id": "multi-session-id",
+      "proactive_character_id": "npc_luo_xiaohei",
+      "proactive_prompt": "围绕刚触发的剧情主动说一句话"
     }
   ]
 }
@@ -490,7 +504,9 @@ Content-Type: application/json
   ],
 
   "priority": 1,
-  "is_active": true
+  "is_active": true,
+  "schedule": null,
+  "template_id": "tpl_story_keyword_node"
 }
 ```
 
@@ -642,6 +658,117 @@ DELETE /api/v1/admin/events/{event_id}/history?character_id=&player_id=
   "message": "触发记录已清除",
   "event_id": "evt_npc_luo_xiaohei_idle"
 }
+```
+
+---
+
+### 10. 获取事件模板库
+
+```http
+GET /api/v1/admin/event-templates?category=relationship
+```
+
+内置模板包括好感度里程碑、信任度里程碑和关键剧情节点。服务启动时会自动初始化模板库。
+
+**响应示例：**
+```json
+[
+  {
+    "template_id": "tpl_affinity_milestone",
+    "template_name": "好感度里程碑",
+    "category": "relationship",
+    "description": "当玩家与 NPC 的好感度达到指定阈值时通知玩家并记录记忆。",
+    "trigger_config": {"trigger_type": "affinity_threshold", "threshold": 50},
+    "effects_config": [
+      {"effect_type": "notify_player", "notification_message": "关系出现了新的变化。"}
+    ],
+    "metadata": {"threshold_editable": true}
+  }
+]
+```
+
+---
+
+### 11. 注册时间驱动事件
+
+```http
+POST /api/v1/admin/events/schedules
+Content-Type: application/json
+
+{
+  "event_id": "evt_daily_check",
+  "character_id": "npc_luo_xiaohei",
+  "player_id": "player_001",
+  "schedule": "*/30 * * * *"
+}
+```
+
+`schedule` 使用 5 字段 cron 表达式：`minute hour day month weekday`，支持 `*`、`*/N`、逗号列表和范围。
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "message": "事件调度已注册",
+  "event_id": "evt_daily_check"
+}
+```
+
+---
+
+### 12. 手动执行到期时间事件
+
+```http
+POST /api/v1/admin/events/schedules/run-due?limit=50
+```
+
+用于后台任务或调试入口。会检查已注册且到期的调度事件，执行事件效果和事件链，并更新下一次执行时间。
+
+**响应示例：**
+```json
+{
+  "success": true,
+  "triggered_count": 1,
+  "triggered_events": [
+    {
+      "event_id": "evt_daily_check",
+      "event_name": "每日检查",
+      "effects": ["notify_player: 通知已发送"],
+      "chained_events": [],
+      "proactive_dialogues": []
+    }
+  ]
+}
+```
+
+---
+
+### 13. 查询事件上下文
+
+```http
+GET /api/v1/admin/event-context?character_id=&player_id=&status=&limit=100
+```
+
+返回事件链、分支和定时事件执行后保存的跨会话进度。
+
+**响应示例：**
+```json
+[
+  {
+    "event_id": "evt_story_01",
+    "character_id": "npc_luo_xiaohei",
+    "player_id": "player_001",
+    "context_data": {
+      "event_name": "第一条线索",
+      "state_changes": {},
+      "chained_events": ["evt_story_02"]
+    },
+    "status": "completed",
+    "progress": 1.0,
+    "last_session_id": "session-id",
+    "updated_at": "2026-07-10T14:30:00Z"
+  }
+]
 ```
 
 ---

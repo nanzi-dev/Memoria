@@ -51,6 +51,29 @@ class TestEventAdminAPI:
         # Toggle uses query param, no separate model needed
         pass
 
+    def test_deep_event_effect_fields(self):
+        from memoria.api.event_admin import EventEffectDTO, ScheduleRegisterRequest
+        effect = EventEffectDTO(
+            effect_type="npc_proactive_dialogue",
+            proactive_character_id="npc_a",
+            proactive_prompt="主动推进剧情",
+            next_event_id="evt_next",
+        )
+        assert effect.proactive_character_id == "npc_a"
+        assert effect.next_event_id == "evt_next"
+
+        req = ScheduleRegisterRequest(
+            event_id="evt_schedule",
+            character_id="npc_a",
+            player_id="usr_a",
+            schedule="*/10 * * * *",
+        )
+        assert req.schedule == "*/10 * * * *"
+
+        from memoria.api.event_admin import TriggerConditionDTO
+        condition = TriggerConditionDTO(trigger_type="time_based", schedule="0 9 * * 0")
+        assert condition.schedule == "0 9 * * 0"
+
 class TestRelationshipAPI:
     def test_create_relationship(self):
         from memoria.api.relationship import RelationshipCreateRequest as CreateRelationshipRequest

@@ -326,7 +326,9 @@ function Band({
 
 export default function Lanyard({ characterInfo = {}, className = '', style = {} }) {
   const { avatarUrl, name, gender } = characterInfo;
+  const wrapperRef = useRef(null);
   var _a = useState(null), loadedImg = _a[0], setLoadedImg = _a[1];
+  const [isNearViewport, setIsNearViewport] = useState(true);
 
   useEffect(function() {
     setLoadedImg(null);
@@ -350,9 +352,22 @@ export default function Lanyard({ characterInfo = {}, className = '', style = {}
     return () => window.removeEventListener('resize', h);
   }, []);
 
+  useEffect(() => {
+    const node = wrapperRef.current;
+    if (!node || !('IntersectionObserver' in window)) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsNearViewport(entry.isIntersecting),
+      { rootMargin: '900px 0px' }
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <div className={`lanyard-wrapper ${className}`} style={{ width: "100%", height: "100%", overflow: "hidden", ...style }}>
+    <div ref={wrapperRef} className={`lanyard-wrapper rounded-[28px] ${className}`} style={{ width: "100%", height: "100%", overflow: "hidden", ...style }}>
       <Canvas camera={{ position: [0, 0, 13], fov: 22 }} dpr={[1, isMobile ? 1.5 : 2]}
+        frameloop={isNearViewport ? 'always' : 'never'}
         gl={{ alpha: true, antialias: true }} onCreated={({ gl }) => gl.setClearColor(new THREE.Color(0x000000), 0)}>
         <ambientLight intensity={Math.PI} />
         <Physics gravity={[0, -40, 0]} timeStep={isMobile ? 1 / 30 : 1 / 60}>

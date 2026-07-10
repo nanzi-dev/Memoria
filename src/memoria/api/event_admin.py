@@ -21,6 +21,7 @@ from memoria.core.event_schema import (
     TriggerType,
     EffectType,
 )
+from memoria.core import event_runtime
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ class TriggerConditionDTO(BaseModel):
     match_mode: Optional[str] = "any"
     count: Optional[int] = None
     duration_minutes: Optional[int] = None
+    schedule: Optional[str] = None
     mood: Optional[str] = None
     sub_conditions: Optional[list["TriggerConditionDTO"]] = None
     logic_operator: Optional[str] = "and"
@@ -65,6 +67,11 @@ class EventEffectDTO(BaseModel):
     quest_id: Optional[str] = None
     target_character_id: Optional[str] = None
     relationship_change: Optional[dict] = None
+    next_event_id: Optional[str] = None
+    branch_conditions: Optional[list[dict]] = None
+    target_session_id: Optional[str] = None
+    proactive_character_id: Optional[str] = None
+    proactive_prompt: Optional[str] = None
 
 
 class EventCreateRequest(BaseModel):
@@ -76,6 +83,8 @@ class EventCreateRequest(BaseModel):
     effects: list[EventEffectDTO] = Field(default_factory=list)
     priority: int = 0
     is_active: bool = True
+    schedule: Optional[str] = None
+    template_id: Optional[str] = None
 
 
 class EventUpdateRequest(BaseModel):
@@ -85,6 +94,8 @@ class EventUpdateRequest(BaseModel):
     effects: Optional[list[EventEffectDTO]] = None
     priority: Optional[int] = None
     is_active: Optional[bool] = None
+    schedule: Optional[str] = None
+    template_id: Optional[str] = None
 
 
 class EventListItem(BaseModel):
@@ -100,6 +111,8 @@ class EventListItem(BaseModel):
     updated_at: Optional[str] = None
     # 触发类型摘要，方便前端展示
     trigger_type: Optional[str] = None
+    schedule: Optional[str] = None
+    template_id: Optional[str] = None
 
 
 class EventDetail(EventListItem):
@@ -121,6 +134,40 @@ class OperationResponse(BaseModel):
     success: bool
     message: str
     event_id: Optional[str] = None
+
+
+class EventTemplateItem(BaseModel):
+    template_id: str
+    template_name: str
+    category: Optional[str] = None
+    description: Optional[str] = None
+    trigger_config: dict
+    effects_config: list[dict]
+    metadata: Optional[dict] = None
+
+
+class ScheduleRegisterRequest(BaseModel):
+    event_id: str
+    character_id: str
+    player_id: str
+    schedule: str
+
+
+class ScheduleRunResponse(BaseModel):
+    success: bool
+    triggered_count: int
+    triggered_events: list[dict]
+
+
+class EventContextStateItem(BaseModel):
+    event_id: str
+    character_id: str
+    player_id: str
+    context_data: dict
+    status: str
+    progress: float
+    last_session_id: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 # =========================
@@ -163,6 +210,8 @@ def list_events(
                 created_at=r.get("created_at"),
                 updated_at=r.get("updated_at"),
                 trigger_type=trigger_type,
+                schedule=r.get("schedule"),
+                template_id=r.get("template_id"),
             ))
         return result
     except Exception as e:
@@ -200,6 +249,8 @@ def get_event(event_id: str):
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
         trigger_type=trigger_type,
+        schedule=row.get("schedule"),
+        template_id=row.get("template_id"),
         trigger_condition=trigger_cfg,
         effects=effects_cfg,
     )
@@ -247,6 +298,8 @@ def create_event(req: EventCreateRequest):
         description=req.description,
         priority=req.priority,
         is_active=req.is_active,
+        schedule=req.schedule,
+        template_id=req.template_id,
     )
 
     if not success:
@@ -277,6 +330,8 @@ def update_event(event_id: str, req: EventUpdateRequest):
     description = req.description if req.description is not None else existing.get("description")
     priority = req.priority if req.priority is not None else existing.get("priority", 0)
     is_active = req.is_active if req.is_active is not None else bool(existing.get("is_active", 1))
+    schedule = req.schedule if req.schedule is not None else existing.get("schedule")
+    template_id = req.template_id if req.template_id is not None else existing.get("template_id")
 
     if req.trigger_condition is not None:
         try:
@@ -308,6 +363,8 @@ def update_event(event_id: str, req: EventUpdateRequest):
         description=description,
         priority=priority,
         is_active=is_active,
+        schedule=schedule,
+        template_id=template_id,
     )
 
     if not success:
@@ -367,6 +424,8 @@ def toggle_event(event_id: str, active: bool):
         description=existing.get("description"),
         priority=existing.get("priority", 0),
         is_active=active,
+        schedule=existing.get("schedule"),
+        template_id=existing.get("template_id"),
     )
 
     if not success:
@@ -438,3 +497,113 @@ def reset_trigger_history(
         message=f"已清除 {count} 条触发记录",
         event_id=event_id,
     )
+
+
+# =========================
+# 事件深度集成：模板 / 调度 / 上下文
+# =========================
+
+@router.get("/admin/event-templates", response_model=list[EventTemplateItem])
+def list_event_templates(category: Optional[str] = None):
+    """列出内置和已保存的事件模板。"""
+    event_runtime.ensure_default_event_templates()
+    rows = repository.list_event_templates(category=category)
+    result = []
+    for row in rows:
+        try:
+            trigger_config = json.loads(row["trigger_config"])
+            effects_config = json.loads(row["effects_config"])
+            metadata = json.loads(row["metadata"]) if row.get("metadata") else None
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"解析事件模板失败: {e}")
+        result.append(EventTemplateItem(
+            template_id=row["template_id"],
+            template_name=row["template_name"],
+            category=row.get("category"),
+            description=row.get("description"),
+            trigger_config=trigger_config,
+            effects_config=effects_config,
+            metadata=metadata,
+        ))
+    return result
+
+
+@router.post("/admin/events/schedules", response_model=OperationResponse)
+def register_event_schedule(req: ScheduleRegisterRequest):
+    """注册一个时间驱动事件调度。schedule 使用 5 字段 cron 表达式。"""
+    existing = repository.get_event_definition(req.event_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"事件 '{req.event_id}' 不存在")
+
+    try:
+        event_runtime.register_time_event_schedule(
+            event_id=req.event_id,
+            character_id=req.character_id,
+            player_id=req.player_id,
+            schedule=req.schedule,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"注册调度失败: {e}")
+
+    return OperationResponse(
+        success=True,
+        message="事件调度已注册",
+        event_id=req.event_id,
+    )
+
+
+@router.post("/admin/events/schedules/run-due", response_model=ScheduleRunResponse)
+def run_due_event_schedules(limit: int = 50):
+    """手动检查并执行到期的时间驱动事件。"""
+    try:
+        results = event_runtime.run_due_time_events(limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"执行调度失败: {e}")
+
+    return ScheduleRunResponse(
+        success=True,
+        triggered_count=len(results),
+        triggered_events=[
+            {
+                "event_id": r.event_id,
+                "event_name": r.event_name,
+                "effects": r.effects_applied,
+                "chained_events": r.chained_events,
+                "proactive_dialogues": r.proactive_dialogues,
+            }
+            for r in results
+        ],
+    )
+
+
+@router.get("/admin/event-context", response_model=list[EventContextStateItem])
+def list_event_context_states(
+    character_id: Optional[str] = None,
+    player_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 100,
+):
+    """查询跨会话持久化的事件上下文。"""
+    rows = repository.list_event_context_states(
+        character_id=character_id,
+        player_id=player_id,
+        status=status,
+        limit=limit,
+    )
+    result = []
+    for row in rows:
+        try:
+            context_data = json.loads(row["context_data"])
+        except Exception:
+            context_data = {}
+        result.append(EventContextStateItem(
+            event_id=row["event_id"],
+            character_id=row["character_id"],
+            player_id=row["player_id"],
+            context_data=context_data,
+            status=row.get("status") or "active",
+            progress=float(row.get("progress") or 0.0),
+            last_session_id=row.get("last_session_id"),
+            updated_at=row.get("updated_at"),
+        ))
+    return result

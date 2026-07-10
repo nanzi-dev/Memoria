@@ -119,6 +119,7 @@ class TriggerInteractionRequest(BaseModel):
         None,
         description="触发角色ID，留空则自动选择"
     )
+    prompt: Optional[str] = Field(None, description="主动发言提示")
 
 
 class EndMultiSessionRequest(BaseModel):
@@ -444,7 +445,8 @@ async def trigger_interaction(
         # 触发互动
         orchestrator = MultiCharacterOrchestrator(request.session_id)
         result = orchestrator.trigger_character_interaction(
-            trigger_character_id=request.trigger_character_id
+            trigger_character_id=request.trigger_character_id,
+            prompt=request.prompt,
         )
         
         return result

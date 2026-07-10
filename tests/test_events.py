@@ -179,3 +179,132 @@ class TestEventDetectorMore:
         tc_lt = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=60,comparison="lt")
         triggered_lt = det.check_events(ctx,[EventDefinition(event_id="lt",event_name="T",trigger_condition=tc_lt,effects=[],is_active=True)])
         assert len(triggered_lt)==1
+
+
+class TestEventDeepIntegration:
+    def _context(self):
+        from memoria.core.event_schema import EventContext
+        return EventContext(
+            character_id="chain_c",
+            player_id="chain_p",
+            session_id="chain_s",
+            current_affinity=70,
+            current_trust=80,
+            current_mood="neutral",
+            player_message="线索出现了",
+            dialogue_count=1,
+            total_dialogue_count=1,
+            session_duration_minutes=1,
+        )
+
+    def test_execute_event_chain_persists_context(self):
+        import uuid
+        from memoria.core import event_runtime
+        from memoria.core.event_schema import (
+            EffectType,
+            EventDefinition,
+            EventEffect,
+            TriggerCondition,
+            TriggerType,
+        )
+        suffix = uuid.uuid4().hex[:8]
+        first_id = f"chain_first_{suffix}"
+        second_id = f"chain_second_{suffix}"
+
+        first = EventDefinition(
+            event_id=first_id,
+            event_name="第一段",
+            trigger_condition=TriggerCondition(trigger_type=TriggerType.KEYWORD_MATCH, keywords=["线索"]),
+            effects=[EventEffect(effect_type=EffectType.TRIGGER_EVENT, next_event_id=second_id)],
+        )
+        second = EventDefinition(
+            event_id=second_id,
+            event_name="第二段",
+            trigger_condition=TriggerCondition(trigger_type=TriggerType.KEYWORD_MATCH, keywords=["不会出现"]),
+            effects=[EventEffect(effect_type=EffectType.NOTIFY_PLAYER, notification_message="链式事件完成")],
+        )
+
+        results = event_runtime.detect_and_execute_events(self._context(), [first, second])
+        assert [r.event_id for r in results] == [first_id, second_id]
+
+        from memoria.db import repository
+        state = repository.get_event_context_state(second_id, "chain_c", "chain_p")
+        assert state is not None
+        assert state["status"] == "completed"
+
+    def test_branch_event_selects_matching_branch(self):
+        from memoria.core.event_executor import EventExecutor
+        from memoria.core.event_schema import EventEffect, EffectType, TriggerType
+
+        effect = EventEffect(
+            effect_type=EffectType.BRANCH_EVENT,
+            branch_conditions=[
+                {"event_id": "low", "condition": {"trigger_type": "trust_threshold", "threshold": 10, "comparison": "lt"}},
+                {"event_id": "high", "condition": {"trigger_type": "trust_threshold", "threshold": 50, "comparison": "gte"}},
+            ],
+        )
+        from memoria.core.event_schema import EventTriggerResult
+        result = EventTriggerResult(event_id="branch", event_name="分支", triggered=True)
+        EventExecutor()._branch_next_event(effect, self._context(), result)
+        assert result.chained_events == ["high"]
+
+    def test_cron_helpers_and_due_schedule(self, monkeypatch):
+        from datetime import datetime, timezone
+        from memoria.core import event_runtime
+        from memoria.core.event_schema import EventDefinition, TriggerCondition, TriggerType
+
+        now = datetime(2026, 7, 10, 14, 30, tzinfo=timezone.utc)
+        assert event_runtime.cron_matches("*/5 * * * *", now)
+        assert not event_runtime.cron_matches("*/7 * * * *", now)
+        assert event_runtime.next_cron_run("*/15 * * * *", now).minute == 45
+        sunday = datetime(2026, 7, 12, 9, 0, tzinfo=timezone.utc)
+        monday = datetime(2026, 7, 13, 9, 0, tzinfo=timezone.utc)
+        assert event_runtime.cron_matches("0 9 * * 0", sunday)
+        assert event_runtime.cron_matches("0 9 * * 7", sunday)
+        assert not event_runtime.cron_matches("0 9 * * 0", monday)
+
+        event = EventDefinition(
+            event_id="sched_evt",
+            event_name="定时事件",
+            trigger_condition=TriggerCondition(trigger_type=TriggerType.TIME_BASED, schedule="*/5 * * * *"),
+            effects=[],
+        )
+        monkeypatch.setattr(event_runtime.repository, "list_due_event_schedules", lambda now_iso, limit=50: [{
+            "event_id": "sched_evt",
+            "character_id": "sched_c",
+            "player_id": "sched_p",
+            "schedule": "*/5 * * * *",
+        }])
+        monkeypatch.setattr(event_runtime.repository, "get_event_definition", lambda event_id: {
+            "event_id": event.event_id,
+            "event_name": event.event_name,
+            "description": None,
+            "character_id": None,
+            "trigger_config": event.trigger_condition.model_dump_json(),
+            "effects_config": "[]",
+            "priority": 0,
+            "is_active": 1,
+            "created_at": None,
+            "updated_at": None,
+            "trigger_count": 0,
+            "last_triggered_at": None,
+            "schedule": "*/5 * * * *",
+            "template_id": None,
+        })
+        saved = []
+        monkeypatch.setattr(event_runtime.repository, "save_event_schedule_state", lambda **kw: saved.append(kw) or True)
+        results = event_runtime.run_due_time_events(now=now)
+        assert len(results) == 1
+        assert results[0].event_id == "sched_evt"
+        assert saved[-1]["last_run_at"] == now.isoformat()
+
+    def test_default_templates_are_created(self):
+        from memoria.core import event_runtime
+        from memoria.db import repository
+
+        count = event_runtime.ensure_default_event_templates()
+        templates = repository.list_event_templates()
+        ids = {t["template_id"] for t in templates}
+        assert count >= 3
+        assert "tpl_affinity_milestone" in ids
+        assert "tpl_story_keyword_node" in ids

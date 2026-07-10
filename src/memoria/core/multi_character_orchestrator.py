@@ -269,7 +269,7 @@ class MultiCharacterOrchestrator:
         return responses
     
     
-    def trigger_character_interaction(self, trigger_character_id: str = None) -> dict:
+    def trigger_character_interaction(self, trigger_character_id: str = None, prompt: str = None) -> dict:
         """
         触发角色间互动（角色主动发言）
         
@@ -283,7 +283,7 @@ class MultiCharacterOrchestrator:
             trigger_character_id = self._select_character_for_interaction()
         
         # 生成角色间互动对话
-        result = self._generate_character_interaction(trigger_character_id)
+        result = self._generate_character_interaction(trigger_character_id, prompt=prompt)
         
         return result
     
@@ -588,7 +588,7 @@ class MultiCharacterOrchestrator:
         }
     
     
-    def _generate_character_interaction(self, trigger_character_id: str) -> dict:
+    def _generate_character_interaction(self, trigger_character_id: str, prompt: str = None) -> dict:
         """
         生成角色间互动（角色主动发言）
         
@@ -638,7 +638,7 @@ class MultiCharacterOrchestrator:
         messages = self._format_history_for_llm(history, trigger_character_id)
         
         # 添加互动提示
-        interaction_prompt = "（现在可以主动说些什么，或者对其他角色的发言做出反应）"
+        interaction_prompt = prompt or "（现在可以主动说些什么，或者对其他角色的发言做出反应）"
         messages.append({"role": "user", "content": interaction_prompt})
         
         # 调用 LLM

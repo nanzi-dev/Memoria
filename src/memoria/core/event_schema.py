@@ -49,6 +49,7 @@ class TriggerCondition(BaseModel):
     
     # 时间条件
     duration_minutes: Optional[int] = None         # 会话时长（分钟）
+    schedule: Optional[str] = None                 # cron 式调度表达式（简化为 5 字段 cron）
     
     # 情绪条件
     mood: Optional[str] = None                     # 目标情绪
@@ -75,6 +76,9 @@ class EffectType(str, Enum):
     GRANT_ITEM = "grant_item"                      # 给予物品（扩展功能）
     START_QUEST = "start_quest"                    # 开启任务（扩展功能）
     MODIFY_RELATIONSHIP = "modify_relationship"    # 修改与其他角色的关系
+    TRIGGER_EVENT = "trigger_event"                # 触发另一个事件（事件链）
+    BRANCH_EVENT = "branch_event"                  # 按上下文分支触发事件
+    NPC_PROACTIVE_DIALOGUE = "npc_proactive_dialogue"  # NPC 主动发言（多角色编排器）
 
 
 # =========================
@@ -113,6 +117,15 @@ class EventEffect(BaseModel):
     target_character_id: Optional[str] = None      # 目标角色 ID
     relationship_change: Optional[dict[str, Any]] = None  # 关系变化
 
+    # 事件链 / 分支
+    next_event_id: Optional[str] = None            # 后续事件 ID
+    branch_conditions: Optional[list[dict[str, Any]]] = None  # [{"condition": TriggerCondition, "event_id": "..."}]
+
+    # NPC 主动对话
+    target_session_id: Optional[str] = None        # 目标多角色会话；为空时使用当前 session
+    proactive_character_id: Optional[str] = None   # 指定主动发言 NPC；为空时自动选择
+    proactive_prompt: Optional[str] = None         # 发言提示，默认由多角色编排器生成
+
 
 # =========================
 # 事件定义
@@ -146,6 +159,10 @@ class EventDefinition(BaseModel):
     trigger_count: int = Field(default=0, description="已触发次数")
     last_triggered_at: Optional[str] = None
 
+    # 深度集成元数据
+    schedule: Optional[str] = None                 # 时间驱动事件的 cron 式调度
+    template_id: Optional[str] = None              # 来源模板 ID
+
 
 # =========================
 # 事件触发结果
@@ -159,6 +176,8 @@ class EventTriggerResult(BaseModel):
     notification: Optional[str] = None             # 需要显示给玩家的通知
     dialogue_override: Optional[str] = None        # 覆盖的对话内容
     state_changes: dict[str, Any] = Field(default_factory=dict)  # 状态变化
+    chained_events: list[str] = Field(default_factory=list)      # 被链式触发的事件 ID
+    proactive_dialogues: list[dict[str, Any]] = Field(default_factory=list)  # NPC 主动发言结果
 
 
 # =========================
@@ -189,6 +208,11 @@ class EventContext(BaseModel):
     
     # 其他角色关系
     character_relationships: dict[str, dict] = Field(default_factory=dict)
+
+    # 持久化上下文 / 调度信息
+    event_data: dict[str, Any] = Field(default_factory=dict)
+    last_event_id: Optional[str] = None
+    active_multi_session_id: Optional[str] = None
 
 
 # 更新前向引用

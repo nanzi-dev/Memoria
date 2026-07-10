@@ -132,7 +132,6 @@ export default function Home() {
               <CharacterBadge
                 key={char.character_id}
                 character={char}
-    
                 isActive={!!char.is_active}
               />
             ))}

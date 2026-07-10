@@ -110,6 +110,21 @@ class EventExecutor:
         elif effect_type == EffectType.MODIFY_RELATIONSHIP:
             self._modify_relationship(effect, context, result)
             result.effects_applied.append(f"{effect_name}: 关系已修改")
+
+        # 事件链
+        elif effect_type == EffectType.TRIGGER_EVENT:
+            self._trigger_next_event(effect, result)
+            result.effects_applied.append(f"{effect_name}: 已加入事件链")
+
+        # 分支事件链
+        elif effect_type == EffectType.BRANCH_EVENT:
+            self._branch_next_event(effect, context, result)
+            result.effects_applied.append(f"{effect_name}: 已评估分支")
+
+        # NPC 主动对话
+        elif effect_type == EffectType.NPC_PROACTIVE_DIALOGUE:
+            self._trigger_npc_proactive_dialogue(effect, context, result)
+            result.effects_applied.append(f"{effect_name}: NPC 主动对话已触发")
         
         # 其他效果类型（扩展功能）
         elif effect_type in [EffectType.GRANT_ITEM, EffectType.START_QUEST]:
@@ -229,6 +244,65 @@ class EventExecutor:
                 affinity_delta
             )
             logger.info(f"角色关系已修改: {context.character_id} <-> {target_char_id}, 亲密度变化: {affinity_delta}")
+
+    def _trigger_next_event(self, effect: EventEffect, result: EventTriggerResult):
+        """记录事件链中的下一个事件。"""
+        if effect.next_event_id:
+            result.chained_events.append(effect.next_event_id)
+
+    def _branch_next_event(
+        self,
+        effect: EventEffect,
+        context: EventContext,
+        result: EventTriggerResult
+    ):
+        """按上下文条件选择分支事件。"""
+        if not effect.branch_conditions:
+            return
+
+        from memoria.core.event_detector import EventDetector
+        detector = EventDetector()
+
+        for branch in effect.branch_conditions:
+            event_id = branch.get("event_id")
+            condition_data = branch.get("condition")
+            if not event_id or not condition_data:
+                continue
+            try:
+                from memoria.core.event_schema import TriggerCondition
+                condition = TriggerCondition.model_validate(condition_data)
+                if detector._check_trigger_condition(condition, context):
+                    result.chained_events.append(event_id)
+                    return
+            except Exception as e:
+                logger.warning(f"事件分支条件无效: {e}")
+
+    def _trigger_npc_proactive_dialogue(
+        self,
+        effect: EventEffect,
+        context: EventContext,
+        result: EventTriggerResult
+    ):
+        """通过多角色编排器让 NPC 主动发言。"""
+        target_session_id = effect.target_session_id or context.active_multi_session_id or context.session_id
+        if not target_session_id:
+            return
+
+        try:
+            session = repository.get_session(target_session_id)
+            if not session or not session.get("is_multi_character") or session.get("status") == "ended":
+                logger.info(f"跳过 NPC 主动对话，目标不是可用群聊: {target_session_id}")
+                return
+
+            from memoria.core.multi_character_orchestrator import MultiCharacterOrchestrator
+            orchestrator = MultiCharacterOrchestrator(target_session_id)
+            dialogue = orchestrator.trigger_character_interaction(
+                trigger_character_id=effect.proactive_character_id,
+                prompt=effect.proactive_prompt,
+            )
+            result.proactive_dialogues.append(dialogue)
+        except Exception as e:
+            logger.error(f"触发 NPC 主动对话失败: {e}", exc_info=True)
     
     def _log_trigger(
         self,

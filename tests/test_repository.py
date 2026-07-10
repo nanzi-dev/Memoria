@@ -97,6 +97,52 @@ class TestEventDefinition:
         assert repository.delete_trigger_history(eid,"tc","tp") >= 1
         assert repository.delete_event_definition(eid)
 
+
+class TestEventDeepIntegrationRepository:
+    def test_context_schedule_template_crud(self):
+        eid = f"evctx_{uuid.uuid4().hex[:8]}"
+        cid = f"ctxc_{uuid.uuid4().hex[:8]}"
+        pid = f"ctxp_{uuid.uuid4().hex[:8]}"
+        tid = f"tpl_{uuid.uuid4().hex[:8]}"
+
+        assert repository.save_event_context_state(
+            event_id=eid,
+            character_id=cid,
+            player_id=pid,
+            context_data='{"stage": 1}',
+            progress=0.5,
+            last_session_id="sess-1",
+        )
+        state = repository.get_event_context_state(eid, cid, pid)
+        assert state is not None
+        assert state["progress"] == 0.5
+
+        states = repository.list_event_context_states(character_id=cid, player_id=pid)
+        assert any(s["event_id"] == eid for s in states)
+
+        assert repository.save_event_schedule_state(
+            event_id=eid,
+            character_id=cid,
+            player_id=pid,
+            schedule="*/5 * * * *",
+            next_run_at="2026-07-10T14:30:00+00:00",
+        )
+        due = repository.list_due_event_schedules("2026-07-10T14:31:00+00:00")
+        assert any(row["event_id"] == eid for row in due)
+
+        assert repository.save_event_template(
+            template_id=tid,
+            template_name="测试模板",
+            category="test",
+            description="desc",
+            trigger_config='{"trigger_type":"keyword_match","keywords":["a"]}',
+            effects_config="[]",
+            metadata='{"x":1}',
+        )
+        template = repository.get_event_template(tid)
+        assert template["template_name"] == "测试模板"
+        assert any(t["template_id"] == tid for t in repository.list_event_templates(category="test"))
+
 class TestRelationship:
     def test_crud(self):
         assert repository.save_character_relationship("rA","rB","friend",50.0,"friends")

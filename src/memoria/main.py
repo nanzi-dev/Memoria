@@ -22,6 +22,7 @@ from memoria.api.multi_dialogue import router as multi_dialogue_router
 from memoria.api.user import router as user_router
 from memoria.db.repository import init_db
 from memoria.core.config import configs
+from memoria.core.event_runtime import ensure_default_event_templates
 
 # =========================
 # 结构化日志配置
@@ -82,6 +83,7 @@ async def lifespan(app: FastAPI):
     
     try:
         init_db()
+        ensure_default_event_templates()
         logger.info("数据库初始化成功")
     except Exception as e:
         logger.error("数据库初始化失败: %s", e, exc_info=True)

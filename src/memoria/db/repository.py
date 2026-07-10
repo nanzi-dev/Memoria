@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 import logging
 import sqlite3
 
-from memoria.api.event_admin import OperationResponse
 from memoria.core.config import configs
 import re
 from difflib import SequenceMatcher
@@ -81,6 +80,7 @@ def get_conn():
     
     # WAL 模式（推荐用于并发读写）
     conn.execute("PRAGMA journal_mode=WAL;")
+    _migrate(conn)
     try:
         conn.execute("ALTER TABLE session ADD COLUMN group_name TEXT")
     except Exception:
@@ -178,6 +178,62 @@ CREATE TABLE IF NOT EXISTS event_trigger_log (
     effects_applied  TEXT,              -- 效果列表 JSON
     
     FOREIGN KEY (event_id) REFERENCES event_definition(event_id)
+);
+
+-- =========================
+-- 事件上下文持久化
+-- =========================
+CREATE TABLE IF NOT EXISTS event_context_state (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    event_id        TEXT NOT NULL,
+    character_id    TEXT NOT NULL,
+    player_id       TEXT NOT NULL,
+
+    context_data    TEXT NOT NULL,
+    status          TEXT DEFAULT 'active',
+    progress        REAL DEFAULT 0.0,
+    last_session_id TEXT,
+
+    created_at      TEXT,
+    updated_at      TEXT,
+
+    UNIQUE(event_id, character_id, player_id)
+);
+
+-- =========================
+-- 时间驱动事件调度状态
+-- =========================
+CREATE TABLE IF NOT EXISTS event_schedule_state (
+    event_id        TEXT NOT NULL,
+    character_id    TEXT NOT NULL,
+    player_id       TEXT NOT NULL,
+
+    schedule        TEXT NOT NULL,
+    last_checked_at TEXT,
+    last_run_at     TEXT,
+    next_run_at     TEXT,
+    status          TEXT DEFAULT 'active',
+
+    created_at      TEXT,
+    updated_at      TEXT,
+
+    PRIMARY KEY (event_id, character_id, player_id)
+);
+
+-- =========================
+-- 事件模板库
+-- =========================
+CREATE TABLE IF NOT EXISTS event_template (
+    template_id     TEXT PRIMARY KEY,
+    template_name   TEXT NOT NULL,
+    category        TEXT,
+    description     TEXT,
+    trigger_config  TEXT NOT NULL,
+    effects_config  TEXT NOT NULL,
+    metadata        TEXT,
+    created_at      TEXT,
+    updated_at      TEXT
 );
 
 -- =========================
@@ -354,6 +410,12 @@ ON event_definition(character_id, is_active);
 CREATE INDEX IF NOT EXISTS idx_event_trigger_log
 ON event_trigger_log(event_id, character_id, player_id, triggered_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_event_context_lookup
+ON event_context_state(character_id, player_id, status, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_event_schedule_due
+ON event_schedule_state(status, next_run_at);
+
 
 -- =========================
 -- 多角色共享记忆（角色间）
@@ -391,6 +453,56 @@ ON character_relationship(character_id_a, character_id_b);
 
 def _migrate(conn):
     """数据库迁移：为已有数据库添加新列"""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS event_context_state (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id        TEXT NOT NULL,
+            character_id    TEXT NOT NULL,
+            player_id       TEXT NOT NULL,
+            context_data    TEXT NOT NULL DEFAULT '{}',
+            status          TEXT DEFAULT 'active',
+            progress        REAL DEFAULT 0.0,
+            last_session_id TEXT,
+            created_at      TEXT,
+            updated_at      TEXT,
+            UNIQUE(event_id, character_id, player_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS event_schedule_state (
+            event_id        TEXT NOT NULL,
+            character_id    TEXT NOT NULL,
+            player_id       TEXT NOT NULL,
+            schedule        TEXT NOT NULL,
+            last_checked_at TEXT,
+            last_run_at     TEXT,
+            next_run_at     TEXT,
+            status          TEXT DEFAULT 'active',
+            created_at      TEXT,
+            updated_at      TEXT,
+            PRIMARY KEY (event_id, character_id, player_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS event_template (
+            template_id     TEXT PRIMARY KEY,
+            template_name   TEXT NOT NULL,
+            category        TEXT,
+            description     TEXT,
+            trigger_config  TEXT NOT NULL,
+            effects_config  TEXT NOT NULL,
+            metadata        TEXT,
+            created_at      TEXT,
+            updated_at      TEXT
+        );
+        """
+    )
+
+    def add_column(table: str, column_sql: str) -> None:
+        try:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_sql}")
+        except Exception:
+            pass  # 列已存在，跳过
+
     try:
         conn.execute("ALTER TABLE character_card ADD COLUMN avatar_url TEXT")
     except Exception:
@@ -403,6 +515,21 @@ def _migrate(conn):
         conn.execute("ALTER TABLE session ADD COLUMN group_name TEXT")
     except Exception:
         pass  # 列已存在，跳过
+    add_column("event_definition", "schedule TEXT")
+    add_column("event_definition", "template_id TEXT")
+    add_column("event_context_state", "context_data TEXT NOT NULL DEFAULT '{}'")
+    add_column("event_context_state", "status TEXT DEFAULT 'active'")
+    add_column("event_context_state", "progress REAL DEFAULT 0.0")
+    add_column("event_context_state", "last_session_id TEXT")
+    add_column("event_context_state", "created_at TEXT")
+    add_column("event_context_state", "updated_at TEXT")
+    add_column("event_schedule_state", "schedule TEXT NOT NULL DEFAULT '* * * * *'")
+    add_column("event_schedule_state", "last_checked_at TEXT")
+    add_column("event_schedule_state", "last_run_at TEXT")
+    add_column("event_schedule_state", "next_run_at TEXT")
+    add_column("event_schedule_state", "status TEXT DEFAULT 'active'")
+    add_column("event_schedule_state", "created_at TEXT")
+    add_column("event_schedule_state", "updated_at TEXT")
 
 
 def init_db():
@@ -1366,7 +1493,9 @@ def save_event_definition(
     character_id: str = None,
     description: str = None,
     priority: int = 0,
-    is_active: bool = True
+    is_active: bool = True,
+    schedule: str = None,
+    template_id: str = None,
 ) -> bool:
     """保存事件定义"""
     try:
@@ -1375,8 +1504,8 @@ def save_event_definition(
                 """
                 INSERT INTO event_definition
                 (event_id, event_name, description, character_id, trigger_config, 
-                 effects_config, priority, is_active, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 effects_config, priority, is_active, created_at, updated_at, schedule, template_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(event_id)
                 DO UPDATE SET
                     event_name=excluded.event_name,
@@ -1386,10 +1515,12 @@ def save_event_definition(
                     effects_config=excluded.effects_config,
                     priority=excluded.priority,
                     is_active=excluded.is_active,
-                    updated_at=excluded.updated_at
+                    updated_at=excluded.updated_at,
+                    schedule=excluded.schedule,
+                    template_id=excluded.template_id
                 """,
                 (event_id, event_name, description, character_id, trigger_config,
-                 effects_config, priority, 1 if is_active else 0, _now(), _now()),
+                 effects_config, priority, 1 if is_active else 0, _now(), _now(), schedule, template_id),
             )
         return True
     except Exception as e:
@@ -1541,6 +1672,196 @@ def delete_trigger_history(
             (event_id, character_id, player_id),
         )
         return cur.rowcount
+
+
+# =========================
+# 事件系统 - 上下文 / 调度 / 模板
+# =========================
+def save_event_context_state(
+    event_id: str,
+    character_id: str,
+    player_id: str,
+    context_data: str,
+    status: str = "active",
+    progress: float = 0.0,
+    last_session_id: str = None,
+) -> bool:
+    """保存事件进度上下文，同一 event+character+player 只保留一条。"""
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO event_context_state
+                (event_id, character_id, player_id, context_data, status, progress,
+                 last_session_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(event_id, character_id, player_id)
+                DO UPDATE SET
+                    context_data=excluded.context_data,
+                    status=excluded.status,
+                    progress=excluded.progress,
+                    last_session_id=excluded.last_session_id,
+                    updated_at=excluded.updated_at
+                """,
+                (event_id, character_id, player_id, context_data, status, progress,
+                 last_session_id, _now(), _now()),
+            )
+        return True
+    except Exception as e:
+        logger.error(f"保存事件上下文失败: {e}")
+        return False
+
+
+def get_event_context_state(event_id: str, character_id: str, player_id: str) -> dict | None:
+    """获取指定事件上下文。"""
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM event_context_state
+            WHERE event_id = ? AND character_id = ? AND player_id = ?
+            """,
+            (event_id, character_id, player_id),
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def list_event_context_states(
+    character_id: str = None,
+    player_id: str = None,
+    status: str = None,
+    limit: int = 100,
+) -> list[dict]:
+    """列出事件上下文，可按角色、玩家和状态过滤。"""
+    with get_conn() as conn:
+        query = "SELECT * FROM event_context_state WHERE 1=1"
+        params = []
+        if character_id:
+            query += " AND character_id = ?"
+            params.append(character_id)
+        if player_id:
+            query += " AND player_id = ?"
+            params.append(player_id)
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY updated_at DESC LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(query, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def save_event_schedule_state(
+    event_id: str,
+    character_id: str,
+    player_id: str,
+    schedule: str,
+    next_run_at: str = None,
+    last_checked_at: str = None,
+    last_run_at: str = None,
+    status: str = "active",
+) -> bool:
+    """保存时间驱动事件的调度状态。"""
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO event_schedule_state
+                (event_id, character_id, player_id, schedule, last_checked_at,
+                 last_run_at, next_run_at, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(event_id, character_id, player_id)
+                DO UPDATE SET
+                    schedule=excluded.schedule,
+                    last_checked_at=excluded.last_checked_at,
+                    last_run_at=excluded.last_run_at,
+                    next_run_at=excluded.next_run_at,
+                    status=excluded.status,
+                    updated_at=excluded.updated_at
+                """,
+                (event_id, character_id, player_id, schedule, last_checked_at,
+                 last_run_at, next_run_at, status, _now(), _now()),
+            )
+        return True
+    except Exception as e:
+        logger.error(f"保存事件调度状态失败: {e}")
+        return False
+
+
+def list_due_event_schedules(now_iso: str, limit: int = 50) -> list[dict]:
+    """列出到期的调度事件。"""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM event_schedule_state
+            WHERE status = 'active'
+              AND next_run_at IS NOT NULL
+              AND next_run_at <= ?
+            ORDER BY next_run_at ASC
+            LIMIT ?
+            """,
+            (now_iso, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def save_event_template(
+    template_id: str,
+    template_name: str,
+    category: str,
+    description: str,
+    trigger_config: str,
+    effects_config: str,
+    metadata: str = None,
+) -> bool:
+    """保存事件模板。"""
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO event_template
+                (template_id, template_name, category, description, trigger_config,
+                 effects_config, metadata, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(template_id)
+                DO UPDATE SET
+                    template_name=excluded.template_name,
+                    category=excluded.category,
+                    description=excluded.description,
+                    trigger_config=excluded.trigger_config,
+                    effects_config=excluded.effects_config,
+                    metadata=excluded.metadata,
+                    updated_at=excluded.updated_at
+                """,
+                (template_id, template_name, category, description, trigger_config,
+                 effects_config, metadata, _now(), _now()),
+            )
+        return True
+    except Exception as e:
+        logger.error(f"保存事件模板失败: {e}")
+        return False
+
+
+def list_event_templates(category: str = None) -> list[dict]:
+    """列出事件模板。"""
+    with get_conn() as conn:
+        query = "SELECT * FROM event_template WHERE 1=1"
+        params = []
+        if category:
+            query += " AND category = ?"
+            params.append(category)
+        query += " ORDER BY category ASC, template_name ASC"
+        rows = conn.execute(query, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_event_template(template_id: str) -> dict | None:
+    """获取事件模板。"""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM event_template WHERE template_id = ?",
+            (template_id,),
+        ).fetchone()
+    return _row_to_dict(row)
     
 
 # =========================

@@ -9,16 +9,14 @@
 5. 检测和执行事件
 """
 
-import json
 import logging
 import re
 import uuid
 from datetime import datetime, timezone
 
 from memoria.core import character_loader, llm_client, prompt_builder
-from memoria.core.event_schema import EventContext, EventDefinition
-from memoria.core.event_detector import get_event_detector
-from memoria.core.event_executor import get_event_executor
+from memoria.core.event_schema import EventContext
+from memoria.core import event_runtime
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
@@ -254,79 +252,16 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
             character_relationships={}
         )
         
-        # 加载事件定义
-        event_defs_raw = repository.list_event_definitions(
-            character_id=character_id,
-            only_active=True
+        event_results = event_runtime.detect_and_execute_events(event_context)
+        dialogue, new_affinity, new_trust, mood_after, triggered_events_info, event_notification = (
+            event_runtime.apply_event_results_to_dialogue_state(
+                event_results,
+                dialogue,
+                new_affinity,
+                new_trust,
+                mood_after,
+            )
         )
-        
-        # 转换为 EventDefinition 对象
-        event_definitions = []
-        for event_raw in event_defs_raw:
-            try:
-                event_def = EventDefinition(
-                    event_id=event_raw["event_id"],
-                    event_name=event_raw["event_name"],
-                    description=event_raw.get("description"),
-                    character_id=event_raw.get("character_id"),
-                    trigger_condition=json.loads(event_raw["trigger_config"]),
-                    effects=json.loads(event_raw["effects_config"]),
-                    priority=event_raw.get("priority", 0),
-                    is_active=bool(event_raw.get("is_active", 1)),
-                    created_at=event_raw.get("created_at"),
-                    updated_at=event_raw.get("updated_at"),
-                    trigger_count=event_raw.get("trigger_count", 0),
-                    last_triggered_at=event_raw.get("last_triggered_at")
-                )
-                event_definitions.append(event_def)
-            except Exception as e:
-                logger.error(f"解析事件定义失败: {event_raw.get('event_id')}, 错误: {e}")
-        
-        # 检测事件
-        detector = get_event_detector()
-        triggered_events = detector.check_events(event_context, event_definitions)
-        
-        # 执行事件
-        executor = get_event_executor()
-        for event in triggered_events:
-            try:
-                event_result = executor.execute_event(event, event_context)
-                
-                # 应用事件效果到状态
-                if event_result.state_changes:
-                    # 应用好感度变化
-                    if "affection_level" in event_result.state_changes:
-                        new_affinity += event_result.state_changes["affection_level"]
-                        new_affinity = _clip(new_affinity, -100, 100)
-                    
-                    # 应用信任度变化
-                    if "trust_level" in event_result.state_changes:
-                        new_trust += event_result.state_changes["trust_level"]
-                        new_trust = _clip(new_trust, 0, 100)
-                    
-                    # 应用情绪变化
-                    if "current_mood" in event_result.state_changes:
-                        mood_after = event_result.state_changes["current_mood"]
-                
-                # 对话覆盖（优先级最高的事件生效）
-                if event_result.dialogue_override and not dialogue.startswith("[事件触发]"):
-                    dialogue = f"[事件触发] {event_result.dialogue_override}"
-                
-                # 玩家通知
-                if event_result.notification:
-                    event_notification = event_result.notification
-                
-                # 记录触发信息
-                triggered_events_info.append({
-                    "event_id": event.event_id,
-                    "event_name": event.event_name,
-                    "effects": event_result.effects_applied
-                })
-                
-                logger.info(f"事件已执行: {event.event_id} - {event.event_name}")
-                
-            except Exception as e:
-                logger.error(f"执行事件失败: {event.event_id}, 错误: {e}")
         
     except Exception as e:
         logger.error(f"事件系统处理失败: {e}", exc_info=True)
