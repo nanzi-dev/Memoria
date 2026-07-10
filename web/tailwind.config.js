@@ -19,7 +19,7 @@ export default {
       fontFamily: {
         mono: ['JetBrains Mono', 'monospace'],
         display: ['Orbitron', 'sans-serif'],
-        character: ['ZCOOL XiaoWei', 'Noto Serif SC', 'serif'],
+        character: ['Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', 'system-ui', 'sans-serif'],
       },
     },
   },

@@ -604,7 +604,7 @@ export default function RelationshipGraph() {
         g.append('text')
           .text((d.name || d.display_name || d.character_id).charAt(0))
           .attr('text-anchor', 'middle').attr('dy', '0.35em')
-          .attr('fill', CYBER_GREEN).attr('font-family', 'ZCOOL XiaoWei, Noto Serif SC, serif')
+          .attr('fill', CYBER_GREEN).attr('font-family', 'Noto Sans SC, Microsoft YaHei, PingFang SC, system-ui, sans-serif')
           .attr('font-size', '18px').attr('font-weight', 'bold')
           .attr('pointer-events', 'none');
       }
@@ -626,7 +626,7 @@ export default function RelationshipGraph() {
     node.append('text')
       .text(d => d.name || d.display_name || d.character_id)
       .attr('text-anchor', 'middle').attr('dy', NODE_R + 18)
-      .attr('fill', CYBER_GREEN).attr('font-family', 'ZCOOL XiaoWei, Noto Serif SC, serif')
+      .attr('fill', CYBER_GREEN).attr('font-family', 'Noto Sans SC, Microsoft YaHei, PingFang SC, system-ui, sans-serif')
       .attr('font-size', '14px').attr('font-weight', '500')
       .attr('opacity', 0.92).attr('pointer-events', 'none');
 
