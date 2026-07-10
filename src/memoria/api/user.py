@@ -98,6 +98,19 @@ def get_current_user_id(token: str) -> str | None:
     return _tokens.get(token)
 
 
+def require_current_user_id(
+    token: str | None = None,
+    authorization: str | None = Header(None),
+    cookie_token: str | None = Cookie(None, alias=AUTH_COOKIE_NAME),
+) -> str:
+    """要求请求已登录，并返回当前 user_id。"""
+    auth_token = _get_token_from_request(authorization, token, cookie_token)
+    uid = get_current_user_id(auth_token)
+    if not uid:
+        raise HTTPException(401, "未登录或 token 已过期")
+    return uid
+
+
 # =========================
 # 请求 / 响应模型
 # =========================

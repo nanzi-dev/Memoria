@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import BackgroundTasks
+from fastapi import HTTPException
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
@@ -39,6 +40,7 @@ def test_session_start_creates_session_without_llm_opening(monkeypatch):
     res = dialogue.session_start(
         dialogue.SessionStartRequest(character_id="char-1", player_id="player-1", player_name="Tester"),
         BackgroundTasks(),
+        current_user_id="player-1",
     )
 
     assert res.session_id == created["session_id"]
@@ -46,3 +48,18 @@ def test_session_start_creates_session_without_llm_opening(monkeypatch):
     assert res.opening_line == ""
     assert res.recovered is False
     assert res.messages == []
+
+
+def test_session_start_rejects_other_player(monkeypatch):
+    from memoria.api import dialogue
+
+    monkeypatch.setattr(dialogue.repository, "get_all_player_sessions", lambda player_id: [])
+
+    with pytest.raises(HTTPException) as exc_info:
+        dialogue.session_start(
+            dialogue.SessionStartRequest(character_id="char-1", player_id="player-1", player_name="Tester"),
+            BackgroundTasks(),
+            current_user_id="other-player",
+        )
+
+    assert exc_info.value.status_code == 403

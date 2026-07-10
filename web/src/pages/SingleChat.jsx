@@ -46,17 +46,9 @@ function sortMessagesChronologically(messages) {
 export default function SingleChat() {
   const { characterId } = useParams();
   const navigate = useNavigate();
-  const { user } = useUser();
-  const PLAYER_ID = user?.user_id || (() => {
-    const key = 'memoria-player-id';
-    let id = sessionStorage.getItem(key);
-    if (!id) {
-      id = 'player-' + Math.random().toString(36).slice(2, 8);
-      sessionStorage.setItem(key, id);
-    }
-    return id;
-  })();
-  const PLAYER_NAME = user?.username || '旅行者';
+  const { user, loading: userLoading } = useUser();
+  const PLAYER_ID = user?.user_id || '';
+  const PLAYER_NAME = user?.username || '';
   const [character, setCharacter] = useState(null);
   const [sessionId, setSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -89,6 +81,11 @@ export default function SingleChat() {
   }, []);
 
   useEffect(() => {
+    if (userLoading) return;
+    if (!PLAYER_ID) {
+      setLoading(false);
+      return;
+    }
     if (!characterId) return;
     setLoading(true);
     setHistoryOffset(0);
@@ -126,7 +123,7 @@ export default function SingleChat() {
         setLoading(false);
       }
     })();
-  }, [characterId]);
+  }, [userLoading, PLAYER_ID, PLAYER_NAME, characterId]);
 
   useEffect(() => {
     if (skipAutoScrollRef.current) {
@@ -142,6 +139,10 @@ export default function SingleChat() {
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
+    if (!PLAYER_ID) {
+      setError('请先登录后使用对话功能');
+      return;
+    }
     if (!text || !sessionId || sending) return;
     setInput('');
     setSending(true);
@@ -173,7 +174,7 @@ export default function SingleChat() {
     } finally {
       setSending(false);
     }
-  }, [input, sessionId, sending, affinity]);
+  }, [input, PLAYER_ID, sessionId, sending, affinity]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -183,7 +184,7 @@ export default function SingleChat() {
   };
 
   const loadMoreHistory = useCallback(async () => {
-    if (loadingHistory || !hasMoreHistory || !characterId) return;
+    if (!PLAYER_ID || loadingHistory || !hasMoreHistory || !characterId) return;
     setLoadingHistory(true);
     try {
       const hist = await dialogue.getHistory(characterId, PLAYER_ID, historyOffset, 20);
@@ -201,6 +202,35 @@ export default function SingleChat() {
       setLoadingHistory(false);
     }
   }, [characterId, PLAYER_ID, historyOffset, hasMoreHistory, loadingHistory]);
+
+  if (userLoading) {
+    return (
+      <div className="h-dvh max-h-dvh bg-[#0b0b0c] flex items-center justify-center overflow-hidden">
+        <div className="flex items-center gap-3 text-cyber-green/50">
+          <Loader2 className="animate-spin" size={24} />
+          <span className="font-mono text-sm">正在确认登录状态...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="h-dvh max-h-dvh bg-[#0b0b0c] flex flex-col font-mono overflow-hidden">
+        <header className="flex items-center gap-4 px-6 py-3 border-b border-cyber-green/10 bg-[#0d0d14]/80 backdrop-blur shrink-0">
+          <button onClick={() => navigate('/')} className="text-cyber-green/50 hover:text-cyber-green transition-colors p-1" aria-label="返回首页">
+            <ArrowLeft size={20} />
+          </button>
+          <h1 className="text-sm font-bold text-cyber-green">请先登录后使用对话功能</h1>
+        </header>
+        <div className="flex-1 flex items-center justify-center px-6 text-center">
+          <button onClick={() => navigate('/')} className="min-h-11 rounded-lg border border-cyber-green/20 bg-cyber-green/10 px-5 text-sm font-medium text-cyber-green hover:bg-cyber-green/15 transition-colors">
+            返回登录
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (

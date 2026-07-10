@@ -763,28 +763,62 @@ def get_sessions_by_player_and_character(character_id: str, player_id: str) -> l
                 c.name,
                 c.display_name,
                 c.avatar_url,
-                (
-                    SELECT content
-                    FROM short_term_message
-                    WHERE session_id = s.session_id
-                    ORDER BY id DESC
-                    LIMIT 1
-                ) AS last_message,
-                (
-                    SELECT created_at
-                    FROM short_term_message
-                    WHERE session_id = s.session_id
-                    ORDER BY id DESC
-                    LIMIT 1
-                ) AS last_message_at,
-                (
-                    SELECT COUNT(*)
-                    FROM short_term_message
-                    WHERE session_id = s.session_id
-                ) AS message_count
+                CASE
+                    WHEN COALESCE(s.is_multi_character, 0) = 1 THEN (
+                        SELECT content
+                        FROM short_term_message
+                        WHERE session_id = s.session_id
+                        ORDER BY id DESC
+                        LIMIT 1
+                    )
+                    ELSE (
+                        SELECT m.content
+                        FROM short_term_message m
+                        INNER JOIN session sm ON sm.session_id = m.session_id
+                        WHERE sm.character_id = s.character_id
+                          AND sm.player_id = s.player_id
+                          AND COALESCE(sm.is_multi_character, 0) = 0
+                        ORDER BY m.id DESC
+                        LIMIT 1
+                    )
+                END AS last_message,
+                CASE
+                    WHEN COALESCE(s.is_multi_character, 0) = 1 THEN (
+                        SELECT created_at
+                        FROM short_term_message
+                        WHERE session_id = s.session_id
+                        ORDER BY id DESC
+                        LIMIT 1
+                    )
+                    ELSE (
+                        SELECT m.created_at
+                        FROM short_term_message m
+                        INNER JOIN session sm ON sm.session_id = m.session_id
+                        WHERE sm.character_id = s.character_id
+                          AND sm.player_id = s.player_id
+                          AND COALESCE(sm.is_multi_character, 0) = 0
+                        ORDER BY m.id DESC
+                        LIMIT 1
+                    )
+                END AS last_message_at,
+                CASE
+                    WHEN COALESCE(s.is_multi_character, 0) = 1 THEN (
+                        SELECT COUNT(*)
+                        FROM short_term_message
+                        WHERE session_id = s.session_id
+                    )
+                    ELSE (
+                        SELECT COUNT(*)
+                        FROM short_term_message m
+                        INNER JOIN session sm ON sm.session_id = m.session_id
+                        WHERE sm.character_id = s.character_id
+                          AND sm.player_id = s.player_id
+                          AND COALESCE(sm.is_multi_character, 0) = 0
+                    )
+                END AS message_count
             FROM session s
             LEFT JOIN character_card c ON c.character_id = s.character_id
-            WHERE s.character_id = ? AND s.player_id = ? AND s.is_multi_character = 0
+            WHERE s.character_id = ? AND s.player_id = ? AND COALESCE(s.is_multi_character, 0) = 0
             ORDER BY COALESCE(last_message_at, s.created_at) DESC
             """,
             (character_id, player_id),
@@ -810,25 +844,59 @@ def get_all_player_sessions(player_id: str) -> list[dict]:
                 c.name,
                 c.display_name,
                 c.avatar_url,
-                (
-                    SELECT content
-                    FROM short_term_message
-                    WHERE session_id = s.session_id
-                    ORDER BY id DESC
-                    LIMIT 1
-                ) AS last_message,
-                (
-                    SELECT created_at
-                    FROM short_term_message
-                    WHERE session_id = s.session_id
-                    ORDER BY id DESC
-                    LIMIT 1
-                ) AS last_message_at,
-                (
-                    SELECT COUNT(*)
-                    FROM short_term_message
-                    WHERE session_id = s.session_id
-                ) AS message_count
+                CASE
+                    WHEN COALESCE(s.is_multi_character, 0) = 1 THEN (
+                        SELECT content
+                        FROM short_term_message
+                        WHERE session_id = s.session_id
+                        ORDER BY id DESC
+                        LIMIT 1
+                    )
+                    ELSE (
+                        SELECT m.content
+                        FROM short_term_message m
+                        INNER JOIN session sm ON sm.session_id = m.session_id
+                        WHERE sm.character_id = s.character_id
+                          AND sm.player_id = s.player_id
+                          AND COALESCE(sm.is_multi_character, 0) = 0
+                        ORDER BY m.id DESC
+                        LIMIT 1
+                    )
+                END AS last_message,
+                CASE
+                    WHEN COALESCE(s.is_multi_character, 0) = 1 THEN (
+                        SELECT created_at
+                        FROM short_term_message
+                        WHERE session_id = s.session_id
+                        ORDER BY id DESC
+                        LIMIT 1
+                    )
+                    ELSE (
+                        SELECT m.created_at
+                        FROM short_term_message m
+                        INNER JOIN session sm ON sm.session_id = m.session_id
+                        WHERE sm.character_id = s.character_id
+                          AND sm.player_id = s.player_id
+                          AND COALESCE(sm.is_multi_character, 0) = 0
+                        ORDER BY m.id DESC
+                        LIMIT 1
+                    )
+                END AS last_message_at,
+                CASE
+                    WHEN COALESCE(s.is_multi_character, 0) = 1 THEN (
+                        SELECT COUNT(*)
+                        FROM short_term_message
+                        WHERE session_id = s.session_id
+                    )
+                    ELSE (
+                        SELECT COUNT(*)
+                        FROM short_term_message m
+                        INNER JOIN session sm ON sm.session_id = m.session_id
+                        WHERE sm.character_id = s.character_id
+                          AND sm.player_id = s.player_id
+                          AND COALESCE(sm.is_multi_character, 0) = 0
+                    )
+                END AS message_count
             FROM session s
             LEFT JOIN character_card c ON c.character_id = s.character_id
             WHERE s.player_id = ?

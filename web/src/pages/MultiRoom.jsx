@@ -6,17 +6,9 @@ import { Send, ArrowLeft, Users, Loader2, User, X, Plus, Settings, MessageSquare
 
 export default function MultiRoom() {
   const navigate = useNavigate();
-  const { user } = useUser();
-  const PLAYER_ID = user?.user_id || (() => {
-    const key = 'memoria-player-id';
-    let id = sessionStorage.getItem(key);
-    if (!id) {
-      id = 'player-' + Math.random().toString(36).slice(2, 8);
-      sessionStorage.setItem(key, id);
-    }
-    return id;
-  })();
-  const PLAYER_NAME = user?.username || '旅行者';
+  const { user, loading: userLoading } = useUser();
+  const PLAYER_ID = user?.user_id || '';
+  const PLAYER_NAME = user?.username || '';
   const [allChars, setAllChars] = useState([]);
   const [participants, setParticipants] = useState([]);
   const [sessionId, setSessionId] = useState(null);
@@ -33,6 +25,10 @@ export default function MultiRoom() {
 
   // Load all characters
   useEffect(() => {
+    if (userLoading || !PLAYER_ID) {
+      setAllChars([]);
+      return;
+    }
     (async () => {
       try {
         const list = await characterAdmin.list(false);
@@ -46,7 +42,7 @@ export default function MultiRoom() {
         setError(e.message);
       }
     })();
-  }, []);
+  }, [userLoading, PLAYER_ID]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -65,6 +61,10 @@ export default function MultiRoom() {
   };
 
   const startSession = async () => {
+    if (!PLAYER_ID) {
+      setError('请先登录后使用对话功能');
+      return;
+    }
     if (participants.length < 2) {
       setError('至少需要选择2个角色');
       return;
@@ -98,6 +98,10 @@ export default function MultiRoom() {
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
+    if (!PLAYER_ID) {
+      setError('请先登录后使用对话功能');
+      return;
+    }
     if (!text || !sessionId || sending) return;
     setInput('');
     setSending(true);
@@ -120,7 +124,7 @@ export default function MultiRoom() {
     } finally {
       setSending(false);
     }
-  }, [input, sessionId, sending]);
+  }, [input, PLAYER_ID, sessionId, sending]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -130,7 +134,7 @@ export default function MultiRoom() {
   };
 
   const handleAddParticipant = async (char) => {
-    if (!sessionId) return;
+    if (!PLAYER_ID || !sessionId) return;
     try {
       await multiDialogue.addParticipant(sessionId, char.character_id);
       setParticipants(prev => [...prev, char]);
@@ -140,7 +144,7 @@ export default function MultiRoom() {
   };
 
   const handleRemoveParticipant = async (charId) => {
-    if (!sessionId) return;
+    if (!PLAYER_ID || !sessionId) return;
     try {
       await multiDialogue.removeParticipant(sessionId, charId);
       setParticipants(prev => prev.filter(p => p.character_id !== charId));
@@ -153,6 +157,35 @@ export default function MultiRoom() {
     return participants.find(p => p.character_id === id)
       || allChars.find(c => c.character_id === id);
   };
+
+  if (userLoading) {
+    return (
+      <div className="min-h-screen bg-[#0b0b0c] flex items-center justify-center font-mono">
+        <div className="flex items-center gap-3 text-cyber-green/50">
+          <Loader2 className="animate-spin" size={24} />
+          <span className="text-sm">正在确认登录状态...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-[#0b0b0c] flex flex-col font-mono">
+        <header className="flex items-center gap-4 px-6 py-3 border-b border-cyber-green/10 bg-[#0d0d14]/80">
+          <button onClick={() => navigate('/')} className="text-cyber-green/50 hover:text-cyber-green p-1" aria-label="返回首页">
+            <ArrowLeft size={20} />
+          </button>
+          <h1 className="text-sm font-bold text-cyber-green">请先登录后使用对话功能</h1>
+        </header>
+        <div className="flex-1 flex items-center justify-center px-6 text-center">
+          <button onClick={() => navigate('/')} className="min-h-11 rounded-lg border border-cyber-green/20 bg-cyber-green/10 px-5 text-sm font-medium text-cyber-green hover:bg-cyber-green/15 transition-colors">
+            返回登录
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // ── Setup phase ──
   if (phase === 'setup') {

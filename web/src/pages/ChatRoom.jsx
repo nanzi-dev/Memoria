@@ -139,7 +139,7 @@ export default function ChatRoom() {
 
   const navigate = useNavigate();
 
-  const { user } = useUser();
+  const { user, loading: userLoading } = useUser();
 
 
 
@@ -147,19 +147,9 @@ export default function ChatRoom() {
 
 
 
-  const PLAYER_ID = user?.user_id || (() => {
+  const PLAYER_ID = user?.user_id || '';
 
-    const key = 'memoria-player-id';
-
-    let id = sessionStorage.getItem(key);
-
-    if (!id) { id = 'player-' + Math.random().toString(36).slice(2, 8); sessionStorage.setItem(key, id); }
-
-    return id;
-
-  })();
-
-  const PLAYER_NAME = user?.username || '旅行者';
+  const PLAYER_NAME = user?.username || '';
 
 
 
@@ -246,6 +236,8 @@ export default function ChatRoom() {
 
   const idleEndTimersRef = useRef(new Map());
 
+  const sessionKindRef = useRef(new Map());
+
   const skipAutoScrollRef = useRef(false);
 
 
@@ -280,13 +272,19 @@ export default function ChatRoom() {
 
     const timer = setTimeout(() => {
 
-      dialogue.endSession(sessionId)
+      const endSession = sessionKindRef.current.get(sessionId) === 'group'
+        ? multiDialogue.endSession
+        : dialogue.endSession;
+
+      endSession(sessionId)
 
         .catch(() => {})
 
         .finally(() => {
 
           if (activeSessionRef.current === sessionId) activeSessionRef.current = null;
+
+          sessionKindRef.current.delete(sessionId);
 
           idleEndTimersRef.current.delete(sessionId);
 
@@ -308,9 +306,17 @@ export default function ChatRoom() {
 
     const sessionIds = Array.from(new Set([activeSessionRef.current, ...idleEndTimersRef.current.keys()].filter(Boolean)));
 
-    sessionIds.forEach(sessionId => dialogue.endSessionOnUnload(sessionId));
+    sessionIds.forEach(sessionId => {
+      if (sessionKindRef.current.get(sessionId) === 'group') {
+        multiDialogue.endSessionOnUnload(sessionId);
+      } else {
+        dialogue.endSessionOnUnload(sessionId);
+      }
+    });
 
     activeSessionRef.current = null;
+
+    sessionKindRef.current.clear();
 
     idleEndTimersRef.current.clear();
 
@@ -340,6 +346,14 @@ export default function ChatRoom() {
 
   useEffect(() => {
 
+    if (userLoading || !PLAYER_ID) {
+      setAllChars([]);
+      setChatItems([]);
+      return;
+    }
+
+    let cancelled = false;
+
     (async () => {
 
       // Load all characters for contacts + group setup
@@ -367,23 +381,30 @@ export default function ChatRoom() {
 
         chars = enriched;
 
-        setAllChars(enriched);
+        if (!cancelled) setAllChars(enriched);
 
-      } catch (e) { setError(e.message); }
+      } catch (e) { if (!cancelled) setError(e.message); }
 
       // Load sessions after characters are loaded (so we can resolve names/avatars from cache)
 
-      loadSessions(chars);
+      if (!cancelled) loadSessions(chars);
 
     })();
 
-  }, []);
+    return () => { cancelled = true; };
+
+  }, [userLoading, PLAYER_ID]);
 
 
 
   // ── Load player sessions for chat list ──
 
   async function loadSessions(charsOverride) {
+
+    if (!PLAYER_ID) {
+      setChatItems([]);
+      return;
+    }
 
     const chars = charsOverride || allChars;
     const getActivityTime = (item) => item.last_message_at || item.ended_at || item.created_at || '';
@@ -420,7 +441,7 @@ export default function ChatRoom() {
             status: s.status,
             created_at: s.created_at,
             ended_at: s.ended_at,
-            last_message_at: getActivityTime(s),
+            last_message_at: s.last_message_at,
             last_message: s.last_message,
             message_count: s.message_count,
             participants: groupParticipants,
@@ -457,7 +478,7 @@ export default function ChatRoom() {
 
             ended_at: s.ended_at,
 
-            last_message_at: getActivityTime(s),
+            last_message_at: s.last_message_at,
 
             name: cached?.name || s.name || s.display_name || s.character_id,
 
@@ -505,13 +526,13 @@ export default function ChatRoom() {
 
   useEffect(() => {
 
-    if (!characterIdParam || allChars.length === 0) return;
+    if (!PLAYER_ID || !characterIdParam || allChars.length === 0) return;
 
     const c = allChars.find(ch => ch.character_id === characterIdParam);
 
     if (c) enterSingleChat(c);
 
-  }, [characterIdParam, allChars]);
+  }, [PLAYER_ID, characterIdParam, allChars]);
 
 
 
@@ -540,6 +561,8 @@ export default function ChatRoom() {
 
 
   const enterSingleChat = useCallback(async (char) => {
+
+    if (!PLAYER_ID) { setError('请先登录后使用对话功能'); return; }
 
     setError(null);
 
@@ -573,6 +596,7 @@ export default function ChatRoom() {
 
       setSingleSessionId(session.session_id);
       activeSessionRef.current = session.session_id;
+      sessionKindRef.current.set(session.session_id, 'single');
       clearIdleSessionEnd(session.session_id);
       let nextHistoryOffset = 0;
       let nextHasMoreHistory = true;
@@ -603,7 +627,10 @@ export default function ChatRoom() {
 
 
 
-  const enterGroupSetup = useCallback(() => { setMessages([]); setParticipants([]); setGroupName(''); setView('group-setup'); }, []);
+  const enterGroupSetup = useCallback(() => {
+    if (!PLAYER_ID) { setError('请先登录后使用对话功能'); return; }
+    setMessages([]); setParticipants([]); setGroupName(''); setView('group-setup');
+  }, [PLAYER_ID]);
 
 
 
@@ -611,7 +638,7 @@ export default function ChatRoom() {
 
   const loadMoreHistory = useCallback(async () => {
 
-    if (loadingHistory || !hasMoreHistory) return;
+    if (!PLAYER_ID || loadingHistory || !hasMoreHistory) return;
 
     if (view === 'single' && character) {
 
@@ -696,6 +723,8 @@ export default function ChatRoom() {
 
   const startGroupChat = async () => {
 
+    if (!PLAYER_ID) { setError('请先登录后使用对话功能'); return; }
+
     const cleanGroupName = groupName.trim();
 
     if (!cleanGroupName) { setError('请输入群聊名称'); return; }
@@ -710,6 +739,7 @@ export default function ChatRoom() {
       setMultiSessionId(res.session_id);
       setMultiSessionStatus('active');
       activeSessionRef.current = res.session_id;
+      sessionKindRef.current.set(res.session_id, 'group');
       clearIdleSessionEnd(res.session_id);
 
       if (res.opening?.dialogue) {
@@ -731,6 +761,8 @@ export default function ChatRoom() {
   const sendMessage = useCallback(async () => {
 
     const text = input.trim();
+
+    if (!PLAYER_ID) { setError('请先登录后使用对话功能'); return; }
 
     if (!text || sending || sendingMulti) return;
 
@@ -782,6 +814,7 @@ export default function ChatRoom() {
           setMultiSessionId(replacement.session_id);
           setMultiSessionStatus('active');
           activeSessionRef.current = replacement.session_id;
+          sessionKindRef.current.set(replacement.session_id, 'group');
           clearIdleSessionEnd(replacement.session_id);
           return replacement.session_id;
         };
@@ -848,7 +881,7 @@ export default function ChatRoom() {
 
   // ── Tools: memory review ──
   const loadMemoryFacts = useCallback(async () => {
-    if (!character) return;
+    if (!PLAYER_ID || !character) return;
     try {
       const facts = await dialogue.getLongTermFacts(character.character_id, PLAYER_ID, 10);
       setMemoryFacts(facts?.facts || facts || []);
@@ -872,6 +905,80 @@ export default function ChatRoom() {
   // View: Loading
 
   // ═══════════════════════════════════════════════
+
+  if (userLoading) {
+
+    return (
+
+      <div className="min-h-screen bg-[#0b0b0c] flex items-center justify-center font-mono">
+
+        <div className="flex flex-col items-center gap-3">
+
+          <Loader2 className="animate-spin text-cyber-green/40" size={22} />
+
+          <span className="text-xs text-cyber-green/35">正在确认登录状态...</span>
+
+        </div>
+
+      </div>
+
+    );
+
+  }
+
+  if (!user) {
+
+    return (
+
+      <div className="min-h-screen bg-[#0b0b0c] flex flex-col font-mono">
+
+        <header className="flex items-center gap-3 px-4 py-2.5 border-b border-white/5 bg-[#0d0d14]/80 backdrop-blur-md shrink-0">
+
+          <button onClick={() => navigate('/')} className="text-cyber-green/30 hover:text-cyber-green/50 p-1" aria-label="返回首页"><ArrowLeft size={18} /></button>
+
+          <div className="flex items-center gap-2">
+
+            <Activity size={14} className="text-cyber-green/40" />
+
+            <span className="text-xs font-bold text-cyber-green/60 uppercase tracking-[0.15em]">Memoria</span>
+
+          </div>
+
+        </header>
+
+        <main className="flex-1 flex items-center justify-center px-6">
+
+          <div className="w-full max-w-sm text-center space-y-5">
+
+            <div className="mx-auto w-14 h-14 rounded-full border border-cyber-green/15 bg-cyber-green/[0.03] flex items-center justify-center">
+
+              <User size={22} className="text-cyber-green/35" />
+
+            </div>
+
+            <div className="space-y-2">
+
+              <h1 className="text-base font-semibold text-zinc-200">请先登录后使用对话功能</h1>
+
+              <p className="text-xs leading-6 text-cyber-green/25">登录后可以查看历史对话、开始单聊或创建群聊。</p>
+
+            </div>
+
+            <button onClick={() => navigate('/')} className="w-full min-h-11 rounded-lg border border-cyber-green/20 bg-cyber-green/10 text-sm font-medium text-cyber-green hover:bg-cyber-green/15 transition-colors">
+
+              返回登录
+
+            </button>
+
+          </div>
+
+        </main>
+
+      </div>
+
+    );
+
+  }
 
   if (view === 'single-loading') {
 
@@ -960,7 +1067,7 @@ export default function ChatRoom() {
                   const msg = item.last_message || '';
                   return name.toLowerCase().includes(searchQuery.toLowerCase()) || msg.toLowerCase().includes(searchQuery.toLowerCase());
                 }).map((item, i) => {
-                  const displayTime = item.last_message_at || item.ended_at || item.created_at;
+                  const displayTime = item.last_message_at;
                   const timeStr = formatChatTime(displayTime);
                   if (item.type === 'group') {
                     const groupParts = item.participants || [];
@@ -973,6 +1080,7 @@ export default function ChatRoom() {
                         setMultiSessionStatus(item.status || 'active');
                         setHasMoreHistory(false);
                         activeSessionRef.current = item.session_id;
+                        sessionKindRef.current.set(item.session_id, 'group');
                         setView('group');
                         let loadedParticipants = groupParts;
                         try {
@@ -1002,7 +1110,7 @@ export default function ChatRoom() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5"><span className="text-sm text-zinc-300 font-medium truncate">{item.group_name || '群聊'}</span></div>
-                          <div className="text-[11px] text-cyber-green/20 truncate mt-0.5">{item.last_message || '点击进入群聊'}</div>
+                          <div className="text-[11px] text-cyber-green/20 truncate mt-0.5">{item.last_message || '暂无消息'}</div>
                         </div>
                         <div className="flex flex-col items-end gap-1 shrink-0"><span className="text-[11px] text-cyber-green/15">{timeStr}</span></div>
                         <div className="absolute inset-0 bg-cyber-green/[0.02] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none rounded" />
@@ -1016,11 +1124,10 @@ export default function ChatRoom() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5"><span className="text-sm text-zinc-300 font-medium truncate">{item.name}</span></div>
-                        <div className="text-[11px] text-cyber-green/20 truncate mt-0.5">{item.last_message || '点击继续对话'}</div>
+                        <div className="text-[11px] text-cyber-green/20 truncate mt-0.5">{item.last_message || '暂无消息'}</div>
                       </div>
                       <div className="flex flex-col items-end gap-1 shrink-0">
                         <span className="text-[11px] text-cyber-green/15">{timeStr}</span>
-                        {item.message_count > 0 && <span className="w-5 h-5 rounded-full bg-cyber-green/10 flex items-center justify-center text-[10px] text-cyber-green/40 font-bold">{item.message_count > 99 ? '99+' : item.message_count}</span>}
                       </div>
                       <div className="absolute inset-0 bg-cyber-green/[0.02] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none rounded" />
                     </div>

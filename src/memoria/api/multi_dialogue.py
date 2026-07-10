@@ -4,7 +4,7 @@
 提供多角色群聊功能的 RESTful 接口
 """
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Optional
 import logging
@@ -15,11 +15,14 @@ from memoria.core.multi_character_orchestrator import (
     process_multi_character_turn,
     MultiCharacterOrchestrator
 )
+from memoria.api.user import require_current_user_id
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/multi-dialogue")
+
+SUMMARY_CHUNK_MESSAGE_LIMIT = 80
 
 
 # =========================
@@ -153,8 +156,84 @@ class MultiDialogueHistory(BaseModel):
     session_info: dict
 
 
+def _chunk_messages(messages: list[dict], chunk_size: int = SUMMARY_CHUNK_MESSAGE_LIMIT) -> list[list[dict]]:
+    """按消息数切分长会话，避免一次摘要超过模型上下文。"""
+    if chunk_size <= 0:
+        return [messages]
+    return [messages[i:i + chunk_size] for i in range(0, len(messages), chunk_size)]
+
+
+def _require_player_access(player_id: str, current_user_id: str) -> None:
+    if player_id != current_user_id:
+        raise HTTPException(status_code=403, detail="无权访问该玩家的群聊")
+
+
+def _get_owned_multi_session(session_id: str, current_user_id: str) -> dict:
+    session = repository.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    _require_player_access(session["player_id"], current_user_id)
+    if not session.get("is_multi_character"):
+        raise HTTPException(status_code=400, detail="该会话不是多角色会话")
+    return session
+
+
+def _generate_bounded_session_summary(
+    session_id: str,
+    messages: list[dict],
+    character_names: dict[str, str],
+    player_name: str,
+) -> str:
+    """长会话先分块摘要，再合并为最终群聊摘要。"""
+    chunks = _chunk_messages(messages)
+    if len(chunks) <= 1:
+        return multi_character_memory.generate_multi_character_summary(
+            session_id=session_id,
+            messages=messages,
+            character_names=character_names,
+            player_name=player_name,
+        ).strip()
+
+    chunk_summaries = []
+    for index, chunk in enumerate(chunks, start=1):
+        summary = multi_character_memory.generate_multi_character_summary(
+            session_id=f"{session_id}:chunk:{index}",
+            messages=chunk,
+            character_names=character_names,
+            player_name=player_name,
+        ).strip()
+        if summary:
+            chunk_summaries.append(summary)
+
+    if not chunk_summaries:
+        return ""
+
+    summary_character_id = next(iter(character_names), "summary")
+    merge_messages = [
+        {
+            "role": "assistant",
+            "character_id": summary_character_id,
+            "content": f"第{index}段摘要：{summary}",
+        }
+        for index, summary in enumerate(chunk_summaries, start=1)
+    ]
+    return multi_character_memory.generate_multi_character_summary(
+        session_id=session_id,
+        messages=merge_messages,
+        character_names=character_names,
+        player_name=player_name,
+    ).strip()
+
+
 def _save_session_summary_on_end(session_id: str, session: dict) -> None:
     """结束多角色会话时，将整场群聊统一摘要后保存。"""
+    existing_summary = repository.get_session_summary(session_id)
+    if existing_summary and existing_summary.get("summary_status") == "completed":
+        summary_text = str(existing_summary.get("summary_text") or "").strip()
+        if summary_text:
+            logger.info(f"多角色会话摘要已存在，跳过重复保存: session={session_id}")
+            return
+
     messages = repository.get_multi_character_history(session_id, limit_messages=None)
     meaningful_messages = [m for m in messages if str(m.get("content") or "").strip()]
     if not meaningful_messages:
@@ -172,15 +251,14 @@ def _save_session_summary_on_end(session_id: str, session: dict) -> None:
         for p in participants
         if p.get("character_id")
     }
-    summary = multi_character_memory.generate_multi_character_summary(
+    summary = _generate_bounded_session_summary(
         session_id=session_id,
         messages=meaningful_messages,
         character_names=character_names,
         player_name=session.get("player_name") or "玩家",
-    ).strip()
+    )
     if not summary:
-        logger.info(f"多角色会话摘要为空，跳过保存: session={session_id}")
-        return
+        raise RuntimeError("多角色会话摘要为空")
 
     multi_character_memory.save_multi_character_summary(
         session_id=session_id,
@@ -191,12 +269,40 @@ def _save_session_summary_on_end(session_id: str, session: dict) -> None:
     )
 
 
+def finish_multi_character_session(session_id: str) -> dict:
+    """结束多角色会话；如果已结束但缺摘要，会补写摘要。"""
+    session = repository.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    if not session.get("is_multi_character"):
+        raise HTTPException(status_code=400, detail="该会话不是多角色会话")
+
+    try:
+        _save_session_summary_on_end(session_id, session)
+    except Exception as e:
+        logger.error(f"结束会话时保存多角色摘要失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="保存多角色摘要失败，会话未结束") from e
+
+    if session.get("status") != "ended":
+        repository.end_session(session_id)
+
+    return {
+        "success": True,
+        "message": "多角色会话已结束" if session.get("status") != "ended" else "会话已经是结束状态",
+        "session_id": session_id,
+    }
+
+
 # =========================
 # API 端点
 # =========================
 
 @router.post("/session/start", response_model=StartMultiSessionResponse)
-async def start_multi_session(request: StartMultiSessionRequest):
+async def start_multi_session(
+    request: StartMultiSessionRequest,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """
     开始多角色群聊会话
     
@@ -211,6 +317,7 @@ async def start_multi_session(request: StartMultiSessionRequest):
     返回会话ID和第一个角色的开场白。
     """
     try:
+        _require_player_access(request.player_id, current_user_id)
         logger.info(f"开始多角色会话: player={request.player_id}, characters={request.character_ids}")
         
         # 验证角色ID
@@ -247,7 +354,10 @@ async def start_multi_session(request: StartMultiSessionRequest):
 
 
 @router.post("/turn")
-async def multi_dialogue_turn(request: MultiDialogueTurnRequest):
+async def multi_dialogue_turn(
+    request: MultiDialogueTurnRequest,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """
     处理多角色对话轮次
     
@@ -265,12 +375,7 @@ async def multi_dialogue_turn(request: MultiDialogueTurnRequest):
         logger.info(f"处理多角色对话: session={request.session_id}, discussion={request.discussion_mode}")
         
         # 验证会话
-        session = repository.get_session(request.session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        
-        if not session.get("is_multi_character"):
-            raise HTTPException(status_code=400, detail="该会话不是多角色会话")
+        session = _get_owned_multi_session(request.session_id, current_user_id)
         
         if session.get("status") != "active":
             raise HTTPException(status_code=400, detail="会话已结束")
@@ -313,7 +418,10 @@ async def multi_dialogue_turn(request: MultiDialogueTurnRequest):
 
 
 @router.post("/interaction/trigger")
-async def trigger_interaction(request: TriggerInteractionRequest):
+async def trigger_interaction(
+    request: TriggerInteractionRequest,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """
     触发角色间互动
     
@@ -331,12 +439,7 @@ async def trigger_interaction(request: TriggerInteractionRequest):
         logger.info(f"触发角色互动: session={request.session_id}")
         
         # 验证会话
-        session = repository.get_session(request.session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        
-        if not session.get("is_multi_character"):
-            raise HTTPException(status_code=400, detail="该会话不是多角色会话")
+        _get_owned_multi_session(request.session_id, current_user_id)
         
         # 触发互动
         orchestrator = MultiCharacterOrchestrator(request.session_id)
@@ -355,7 +458,10 @@ async def trigger_interaction(request: TriggerInteractionRequest):
 
 
 @router.get("/session/{session_id}", response_model=MultiSessionInfo)
-async def get_multi_session_info(session_id: str):
+async def get_multi_session_info(
+    session_id: str,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """
     获取多角色会话信息
     
@@ -363,12 +469,7 @@ async def get_multi_session_info(session_id: str):
     """
     try:
         # 获取会话
-        session = repository.get_session(session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        
-        if not session.get("is_multi_character"):
-            raise HTTPException(status_code=400, detail="该会话不是多角色会话")
+        session = _get_owned_multi_session(session_id, current_user_id)
         
         # 获取参与者
         participants = repository.get_session_participants(session_id, only_active=False)
@@ -394,7 +495,8 @@ async def get_multi_session_info(session_id: str):
 @router.get("/history/{session_id}", response_model=MultiDialogueHistory)
 async def get_multi_dialogue_history(
     session_id: str,
-    limit: int = Query(50, ge=1, le=200, description="消息数量限制")
+    limit: int = Query(50, ge=1, le=200, description="消息数量限制"),
+    current_user_id: str = Depends(require_current_user_id),
 ):
     """
     获取多角色对话历史
@@ -406,12 +508,7 @@ async def get_multi_dialogue_history(
     """
     try:
         # 验证会话
-        session = repository.get_session(session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        
-        if not session.get("is_multi_character"):
-            raise HTTPException(status_code=400, detail="该会话不是多角色会话")
+        session = _get_owned_multi_session(session_id, current_user_id)
         
         # 获取历史
         messages = repository.get_multi_character_history(session_id, limit_messages=limit)
@@ -440,7 +537,10 @@ async def get_multi_dialogue_history(
 
 
 @router.post("/participant/add")
-async def add_participant(request: AddParticipantRequest):
+async def add_participant(
+    request: AddParticipantRequest,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """
     向会话添加新参与者
     
@@ -454,12 +554,7 @@ async def add_participant(request: AddParticipantRequest):
         logger.info(f"添加参与者: session={request.session_id}, character={request.character_id}")
         
         # 验证会话
-        session = repository.get_session(request.session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        
-        if not session.get("is_multi_character"):
-            raise HTTPException(status_code=400, detail="该会话不是多角色会话")
+        session = _get_owned_multi_session(request.session_id, current_user_id)
         
         if session.get("status") != "active":
             raise HTTPException(status_code=400, detail="会话已结束，无法添加参与者")
@@ -492,6 +587,7 @@ async def remove_participant(
     request: RemoveParticipantRequest | None = Body(None),
     session_id: str | None = Query(None),
     character_id: str | None = Query(None),
+    current_user_id: str = Depends(require_current_user_id),
 ):
     """
     从会话移除参与者
@@ -510,12 +606,7 @@ async def remove_participant(
         logger.info(f"移除参与者: session={session_id}, character={character_id}")
         
         # 验证会话
-        session = repository.get_session(session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        
-        if not session.get("is_multi_character"):
-            raise HTTPException(status_code=400, detail="该会话不是多角色会话")
+        _get_owned_multi_session(session_id, current_user_id)
         
         # 检查是否至少保留2个活跃参与者
         active_participants = repository.get_session_participants(session_id, only_active=True)
@@ -548,7 +639,10 @@ async def remove_participant(
 
 
 @router.api_route("/participant/update", methods=["POST", "PUT"])
-async def update_participant(request: UpdateParticipantRequest):
+async def update_participant(
+    request: UpdateParticipantRequest,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """
     更新参与者配置
     
@@ -563,12 +657,7 @@ async def update_participant(request: UpdateParticipantRequest):
         logger.info(f"更新参与者: session={request.session_id}, character={request.character_id}")
         
         # 验证会话
-        session = repository.get_session(request.session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        
-        if not session.get("is_multi_character"):
-            raise HTTPException(status_code=400, detail="该会话不是多角色会话")
+        _get_owned_multi_session(request.session_id, current_user_id)
         
         # 更新发言频率
         if request.speak_frequency is not None:
@@ -618,6 +707,7 @@ async def update_participant(request: UpdateParticipantRequest):
 async def end_multi_session(
     request: EndMultiSessionRequest | None = Body(None),
     session_id: str | None = Query(None),
+    current_user_id: str = Depends(require_current_user_id),
 ):
     """
     结束多角色会话
@@ -632,34 +722,9 @@ async def end_multi_session(
         if not session_id:
             raise HTTPException(status_code=422, detail="session_id 为必填项")
         logger.info(f"结束多角色会话: session={session_id}")
+        _get_owned_multi_session(session_id, current_user_id)
         
-        # 验证会话
-        session = repository.get_session(session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        
-        if not session.get("is_multi_character"):
-            raise HTTPException(status_code=400, detail="该会话不是多角色会话")
-        
-        if session.get("status") == "ended":
-            return {
-                "success": True,
-                "message": "会话已经是结束状态"
-            }
-        
-        try:
-            _save_session_summary_on_end(session_id, session)
-        except Exception as e:
-            logger.warning(f"结束会话时保存多角色摘要失败: {e}", exc_info=True)
-
-        # 结束会话
-        repository.end_session(session_id)
-        
-        return {
-            "success": True,
-            "message": "多角色会话已结束",
-            "session_id": session_id
-        }
+        return finish_multi_character_session(session_id)
     
     except HTTPException:
         raise

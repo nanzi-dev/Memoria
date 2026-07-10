@@ -11,10 +11,11 @@ from datetime import datetime, timedelta, timezone
 import uuid
 
 from pydantic import BaseModel
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from memoria.core import character_loader, orchestrator
 from memoria.core.memory_extractor import summarize_session
+from memoria.api.user import require_current_user_id
 from memoria.db import repository
 
 router = APIRouter()
@@ -214,6 +215,16 @@ def _end_session(session_id: str, background_tasks: BackgroundTasks | None = Non
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
 
+    if session.get("is_multi_character"):
+        from memoria.api.multi_dialogue import finish_multi_character_session
+        result = finish_multi_character_session(session_id)
+        summary = repository.get_session_summary(session_id)
+        return SessionEndResponse(
+            session_id=result["session_id"],
+            summary=summary.get("summary_text") if summary else None,
+            message_count=summary.get("message_count", 0) if summary else 0,
+        )
+
     if session.get("status") == "ended":
         existing_summary = repository.get_session_summary(session_id)
         return SessionEndResponse(
@@ -264,6 +275,19 @@ def _close_idle_sessions(player_id: str, background_tasks: BackgroundTasks | Non
                 print(f"[ERROR] Failed to close idle session {session.get('session_id')}: {e}")
 
 
+def _require_player_access(player_id: str, current_user_id: str) -> None:
+    if player_id != current_user_id:
+        raise HTTPException(status_code=403, detail="无权访问该玩家的对话")
+
+
+def _get_owned_session(session_id: str, current_user_id: str) -> dict:
+    session = repository.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    _require_player_access(session["player_id"], current_user_id)
+    return session
+
+
 # =========================
 # Characters
 # =========================
@@ -291,8 +315,13 @@ def list_characters():
 # Session start
 # =========================
 @router.post("/dialogue/session/start", response_model=SessionStartResponse)
-def session_start(req: SessionStartRequest, background_tasks: BackgroundTasks):
+def session_start(
+    req: SessionStartRequest,
+    background_tasks: BackgroundTasks,
+    current_user_id: str = Depends(require_current_user_id),
+):
     try:
+        _require_player_access(req.player_id, current_user_id)
         _close_idle_sessions(req.player_id, background_tasks)
         active_session = repository.get_latest_active_session(req.player_id, req.character_id)
         if active_session:
@@ -315,8 +344,12 @@ def session_start(req: SessionStartRequest, background_tasks: BackgroundTasks):
 # Dialogue turn
 # =========================
 @router.post("/dialogue/turn", response_model=DialogueTurnResponse)
-def dialogue_turn(req: DialogueTurnRequest):
+def dialogue_turn(
+    req: DialogueTurnRequest,
+    current_user_id: str = Depends(require_current_user_id),
+):
     try:
+        _get_owned_session(req.session_id, current_user_id)
         result = orchestrator.run_dialogue_turn(
             req.session_id,
             req.player_message
@@ -330,8 +363,13 @@ def dialogue_turn(req: DialogueTurnRequest):
 # Session list
 # =========================
 @router.get("/dialogue/sessions", response_model=list[SessionInfo])
-def get_sessions(character_id: str, player_id: str):
+def get_sessions(
+    character_id: str,
+    player_id: str,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """获取玩家与角色的所有会话"""
+    _require_player_access(player_id, current_user_id)
 
     sessions = repository.get_sessions_by_player_and_character(
         character_id,
@@ -343,8 +381,13 @@ def get_sessions(character_id: str, player_id: str):
 
 
 @router.get("/dialogue/sessions/player", response_model=list[SessionInfo])
-def get_player_sessions(player_id: str, background_tasks: BackgroundTasks):
+def get_player_sessions(
+    player_id: str,
+    background_tasks: BackgroundTasks,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """获取玩家所有会话（单聊 + 群聊）"""
+    _require_player_access(player_id, current_user_id)
     _close_idle_sessions(player_id, background_tasks)
     sessions = repository.get_all_player_sessions(player_id)
     return [SessionInfo(**s) for s in sessions]
@@ -354,8 +397,14 @@ def get_player_sessions(player_id: str, background_tasks: BackgroundTasks):
 # Session recovery
 # =========================
 @router.get("/dialogue/session/latest", response_model=SessionRecoveryResponse)
-def latest_session(background_tasks: BackgroundTasks, player_id: str, character_id: str | None = None):
+def latest_session(
+    background_tasks: BackgroundTasks,
+    player_id: str,
+    character_id: str | None = None,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """恢复最近 active session。"""
+    _require_player_access(player_id, current_user_id)
     _close_idle_sessions(player_id, background_tasks)
     session = repository.get_latest_active_session(player_id, character_id)
     if not session:
@@ -373,8 +422,16 @@ def latest_session(background_tasks: BackgroundTasks, player_id: str, character_
 # History
 # =========================
 @router.get("/dialogue/history", response_model=HistoryResponse)
-def get_history(character_id: str, player_id: str, offset: int = 0, limit: int = 20, exclude_session_id: str | None = None):
+def get_history(
+    character_id: str,
+    player_id: str,
+    offset: int = 0,
+    limit: int = 20,
+    exclude_session_id: str | None = None,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """分页获取跨会话历史消息（排除指定会话）"""
+    _require_player_access(player_id, current_user_id)
 
     messages, has_more = repository.get_messages_by_player_and_character(
         character_id=character_id,
@@ -406,8 +463,13 @@ def get_history(character_id: str, player_id: str, offset: int = 0, limit: int =
 # Session end
 # =========================
 @router.post("/dialogue/session/end", response_model=SessionEndResponse)
-def session_end(req: SessionEndRequest, background_tasks: BackgroundTasks):
+def session_end(
+    req: SessionEndRequest,
+    background_tasks: BackgroundTasks,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """结束会话并生成摘要"""
+    _get_owned_session(req.session_id, current_user_id)
     return _end_session(req.session_id, background_tasks)
 
 
@@ -415,8 +477,14 @@ def session_end(req: SessionEndRequest, background_tasks: BackgroundTasks):
 # Session summaries
 # =========================
 @router.get("/dialogue/summaries", response_model=list[SessionSummaryInfo])
-def get_summaries(character_id: str, player_id: str, limit: int = 5):
+def get_summaries(
+    character_id: str,
+    player_id: str,
+    limit: int = 5,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """获取角色与玩家的最近会话摘要"""
+    _require_player_access(player_id, current_user_id)
     
     summaries = repository.get_recent_summaries(
         character_id=character_id,

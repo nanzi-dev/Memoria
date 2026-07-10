@@ -487,8 +487,7 @@ class MultiCharacterOrchestrator:
         runtime_state = repository.get_runtime_state(
             character_id,
             self.player_id,
-            card,
-            query_context=player_message
+            card
         )
         
         # 准备其他角色信息
@@ -511,7 +510,7 @@ class MultiCharacterOrchestrator:
             player_name=self.player_name,
             other_characters=other_characters,
             character_relationships=self._load_all_relationships(),
-            past_summaries=self._load_memory_context(character_id, player_message)
+            past_summaries=self._load_memory_context(character_id)
         )
         
         # 获取对话历史

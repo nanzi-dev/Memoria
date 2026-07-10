@@ -289,6 +289,24 @@ class TestSessionListFields:
         assert session["last_message"] == "最后一句"
         assert session["last_message_at"] is not None
 
+    def test_single_player_session_preview_uses_latest_character_message_across_sessions(self):
+        cid = f"slc_{uuid.uuid4().hex[:8]}"
+        player_id = f"slp_{uuid.uuid4().hex[:8]}"
+        old_sid = str(uuid.uuid4())
+        empty_sid = str(uuid.uuid4())
+
+        repository.create_session(old_sid, cid, player_id, "Tester")
+        repository.append_short_term_message(old_sid, "user", "旧会话用户消息")
+        repository.append_short_term_message(old_sid, "assistant", "旧会话最后一句")
+        repository.create_session(empty_sid, cid, player_id, "Tester")
+
+        sessions = repository.get_all_player_sessions(player_id)
+        empty_session = next(s for s in sessions if s["session_id"] == empty_sid)
+
+        assert empty_session["last_message"] == "旧会话最后一句"
+        assert empty_session["last_message_at"] is not None
+        assert empty_session["message_count"] == 2
+
     def test_paginated_messages_include_message_id(self):
         sid = str(uuid.uuid4())
         repository.create_session(sid, "pmC", "pmP", "Tester")
