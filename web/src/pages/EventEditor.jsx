@@ -1,8 +1,25 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, Plus, Trash2, Zap, ChevronDown, ChevronUp, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  Save,
+  Loader2,
+  Plus,
+  Trash2,
+  Zap,
+  ChevronDown,
+  ChevronUp,
+  X,
+  AlertCircle,
+  CheckCircle2,
+  Activity,
+  Settings2,
+  GitBranch,
+  Wand2,
+} from 'lucide-react';
 import { eventAdmin } from '../api/memoria';
 import { useDialog } from '../context/DialogContext';
+import SideRays from '../components/SideRays';
 
 const TRIGGER_TYPES = [
   { value: 'affinity_threshold', label: '好感度阈值' },
@@ -33,6 +50,9 @@ const EFFECT_TYPES = [
   { value: 'grant_item', label: '给予物品' },
   { value: 'start_quest', label: '开启任务' },
   { value: 'modify_relationship', label: '修改关系' },
+  { value: 'trigger_event', label: '触发事件链' },
+  { value: 'branch_event', label: '分支事件' },
+  { value: 'npc_proactive_dialogue', label: 'NPC 主动发言' },
 ];
 const EFFECT_LABELS = Object.fromEntries(EFFECT_TYPES.map(et => [et.value, et.label]));
 
@@ -53,6 +73,11 @@ const DEFAULT_EFFECT = {
   quest_id: '',
   target_character_id: '',
   relationship_change: {},
+  next_event_id: '',
+  branch_conditions_text: '',
+  target_session_id: '',
+  proactive_character_id: '',
+  proactive_prompt: '',
 };
 
 const DEFAULT_SUB_CONDITION = {
@@ -62,6 +87,151 @@ const DEFAULT_SUB_CONDITION = {
   keywords: [],
   match_mode: 'any',
 };
+
+const EDITOR_RAYS_PROPS = {
+  speed: 1.45,
+  rayColor1: '#A7EF9E',
+  rayColor2: '#96c8ff',
+  intensity: 1.75,
+  spread: 2,
+  origin: 'top-right',
+  tilt: -10,
+  saturation: 1.25,
+  blend: 0.68,
+  falloff: 1.65,
+  opacity: 0.48,
+};
+
+const DEFAULT_FORM = {
+  event_id: '',
+  event_name: '',
+  description: '',
+  character_id: '',
+  trigger_condition: { trigger_type: 'keyword_match', keywords: [], match_mode: 'any', cooldown_hours: 0 },
+  effects: [],
+  priority: 0,
+  is_active: true,
+};
+
+function makeEventId(name) {
+  const slug = String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_]/g, '')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return `evt_${slug || 'custom_event'}`;
+}
+
+function snapshotForm(form) {
+  return JSON.stringify(form);
+}
+
+function cloneDefaultForm() {
+  return {
+    ...DEFAULT_FORM,
+    trigger_condition: { ...DEFAULT_FORM.trigger_condition },
+    effects: [],
+  };
+}
+
+function sanitizeOptionalString(value) {
+  const trimmed = String(value || '').trim();
+  return trimmed || null;
+}
+
+function sanitizeEffect(effect) {
+  const { branch_conditions_text, ...rest } = effect;
+  const cleaned = { ...rest, effect_type: rest.effect_type || 'modify_state' };
+
+  for (const key of [
+    'dialogue_text',
+    'dialogue_action',
+    'memory_text',
+    'notification_message',
+    'item_id',
+    'quest_id',
+    'target_character_id',
+    'next_event_id',
+    'target_session_id',
+    'proactive_character_id',
+    'proactive_prompt',
+  ]) {
+    if (key in cleaned) cleaned[key] = sanitizeOptionalString(cleaned[key]);
+  }
+
+  if (cleaned.effect_type === 'branch_event' && branch_conditions_text) {
+    try {
+      cleaned.branch_conditions = JSON.parse(branch_conditions_text);
+    } catch (err) {
+      cleaned.branch_conditions = cleaned.branch_conditions || [];
+    }
+  }
+
+  return cleaned;
+}
+
+function sanitizeEventPayload(form) {
+  return {
+    ...form,
+    event_id: String(form.event_id || '').trim(),
+    event_name: String(form.event_name || '').trim(),
+    description: String(form.description || '').trim(),
+    character_id: sanitizeOptionalString(form.character_id),
+    priority: Number(form.priority) || 0,
+    trigger_condition: form.trigger_condition || DEFAULT_FORM.trigger_condition,
+    effects: (form.effects || []).map(sanitizeEffect),
+  };
+}
+
+function validateEventForm(form) {
+  const errors = [];
+  const condition = form.trigger_condition || {};
+  const triggerType = condition.trigger_type;
+
+  if (!String(form.event_id || '').trim()) errors.push('事件 ID 必填');
+  if (!String(form.event_name || '').trim()) errors.push('事件名称必填');
+
+  if (triggerType === 'keyword_match' && !(condition.keywords || []).length) {
+    errors.push('关键词触发需要至少 1 个关键词');
+  }
+  if ((triggerType === 'affinity_threshold' || triggerType === 'trust_threshold') && condition.threshold == null) {
+    errors.push('阈值触发需要填写阈值');
+  }
+  if (triggerType === 'dialogue_count' && !condition.count) {
+    errors.push('对话次数触发需要填写次数');
+  }
+  if (triggerType === 'time_based' && !condition.duration_minutes && !condition.schedule) {
+    errors.push('时间触发需要填写分钟数或计划表达式');
+  }
+  if (triggerType === 'composite' && !(condition.sub_conditions || []).length) {
+    errors.push('复合条件需要至少 1 个子条件');
+  }
+
+  (form.effects || []).forEach((effect, index) => {
+    const label = `效果 #${index + 1}`;
+    if (effect.effect_type === 'trigger_event' && !String(effect.next_event_id || '').trim()) {
+      errors.push(`${label} 需要填写后续事件 ID`);
+    }
+    if (effect.effect_type === 'branch_event' && effect.branch_conditions_text) {
+      try {
+        JSON.parse(effect.branch_conditions_text);
+      } catch (err) {
+        errors.push(`${label} 的分支 JSON 格式不正确`);
+      }
+    }
+    if (effect.effect_type === 'npc_proactive_dialogue' && !String(effect.proactive_prompt || '').trim()) {
+      errors.push(`${label} 需要填写主动发言提示`);
+    }
+  });
+
+  const warnings = [];
+  if (!form.effects?.length) warnings.push('当前事件没有效果，触发后不会产生动作');
+  if (!form.description?.trim()) warnings.push('建议补充描述，便于后续维护');
+
+  return { errors, warnings };
+}
 
 
 // ─── Key-Value Pair Editor ───────────────────────────────────────────────
@@ -113,6 +283,7 @@ function KeyValueEditor({ data, onChange, keyLabel, valueLabel }) {
             className="flex-1 bg-cyber-surface border border-cyber-green/15 text-cyber-green text-[11px] font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/40 placeholder:text-cyber-green/15"
           />
           <button
+            type="button"
             onClick={() => handleDelete(key)}
             className="text-cyber-green/15 hover:text-red-400/60 transition-colors shrink-0 opacity-0 group-hover:opacity-100"
           >
@@ -121,6 +292,7 @@ function KeyValueEditor({ data, onChange, keyLabel, valueLabel }) {
         </div>
       ))}
       <button
+        type="button"
         onClick={handleAdd}
         className="text-[10px] font-mono text-cyber-green/35 hover:text-cyber-green/70 flex items-center gap-1 transition-colors"
       >
@@ -137,11 +309,11 @@ function PipelinePreview({ triggerCondition, effects }) {
 
   return (
     <div className="flex items-center gap-2 text-[10px] font-mono flex-wrap">
-      <div className="flex items-center gap-1 px-2 py-0.5 rounded border border-cyber-green/15 bg-cyber-surface/50">
-        <span className="text-cyber-green/50">{'⚡'}</span>
+      <div className="flex items-center gap-1.5 rounded-lg border border-cyber-green/15 bg-cyber-surface/60 px-2.5 py-1">
+        <Zap size={12} className="text-cyber-green/50" />
         <span className="text-cyber-green/65">{tcLabel}</span>
       </div>
-      <span className="text-cyber-green/15">{'⟶'}</span>
+      <ArrowLeft size={12} className="rotate-180 text-cyber-green/18" />
 
       {t === 'composite' && (
         <span className="text-cyber-green/25">
@@ -165,9 +337,9 @@ function PipelinePreview({ triggerCondition, effects }) {
         </span>
       )}
 
-      {effects.length > 0 && <span className="text-cyber-green/15">{'⟶'}</span>}
+      {effects.length > 0 && <ArrowLeft size={12} className="rotate-180 text-cyber-green/18" />}
       {effects.map((eff, i) => (
-        <span key={i} className="px-2 py-0.5 rounded border border-cyber-green/8 bg-cyber-green/5 text-cyber-green/45">
+        <span key={i} className="rounded-lg border border-cyber-green/8 bg-cyber-green/5 px-2.5 py-1 text-cyber-green/45">
           {EFFECT_LABELS[eff.effect_type] || eff.effect_type}
         </span>
       ))}
@@ -180,7 +352,7 @@ function SubConditionEditor({ condition, onChange, onDelete, depth = 0 }) {
     <div className="ml-4 pl-4 border-l-2 border-cyber-green/10 rounded">
       <div className="flex items-center justify-between mb-1">
         <span className="text-[10px] font-mono text-cyber-green/40">子条件</span>
-        <button onClick={onDelete} className="text-cyber-green/20 hover:text-red-400 transition-colors">
+        <button type="button" onClick={onDelete} className="text-cyber-green/20 hover:text-red-400 transition-colors">
           <Trash2 size={10} />
         </button>
       </div>
@@ -303,6 +475,7 @@ function TriggerConditionForm({ condition, onChange, isSub = false, depth = 0 })
               <option value="or">OR（任一满足）</option>
             </select>
             <button
+              type="button"
               onClick={() => {
                 const subs = [...(condition.sub_conditions || []), { ...DEFAULT_SUB_CONDITION }];
                 update('sub_conditions', subs);
@@ -356,7 +529,9 @@ function TagInput({ tags, onChange, placeholder }) {
       {tags.map(tag => (
         <span key={tag} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-cyber-green/10 border border-cyber-green/20 rounded text-[10px] font-mono text-cyber-green/80">
           {tag}
-          <button onClick={() => removeTag(tag)} className="text-cyber-green/40 hover:text-red-400">&times;</button>
+          <button type="button" onClick={() => removeTag(tag)} className="text-cyber-green/40 hover:text-red-400">
+            <X size={10} />
+          </button>
         </span>
       ))}
       <input
@@ -390,7 +565,7 @@ function EffectEditor({ effect, onChange, onDelete, index }) {
             ))}
           </select>
         </div>
-        <button onClick={onDelete} className="text-cyber-green/20 hover:text-red-400 transition-colors">
+        <button type="button" onClick={onDelete} className="text-cyber-green/20 hover:text-red-400 transition-colors">
           <Trash2 size={14} />
         </button>
       </div>
@@ -530,6 +705,75 @@ function EffectEditor({ effect, onChange, onDelete, index }) {
             onChange={v => update('relationship_change', v)}
             keyLabel="关系属性"
             valueLabel="变化值"
+          />
+        </div>
+      )}
+
+      {/* Trigger another event */}
+      {t === 'trigger_event' && (
+        <input
+          type="text"
+          value={effect.next_event_id || ''}
+          onChange={e => update('next_event_id', e.target.value)}
+          placeholder="后续事件 ID"
+          className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50"
+        />
+      )}
+
+      {/* Branch event */}
+      {t === 'branch_event' && (
+        <div className="space-y-2">
+          <input
+            type="text"
+            value={effect.next_event_id || ''}
+            onChange={e => update('next_event_id', e.target.value)}
+            placeholder="默认后续事件 ID"
+            className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50"
+          />
+          <textarea
+            value={effect.branch_conditions_text || JSON.stringify(effect.branch_conditions || [], null, 2)}
+            onChange={e => {
+              const value = e.target.value;
+              try {
+                onChange({
+                  ...effect,
+                  branch_conditions: value.trim() ? JSON.parse(value) : [],
+                  branch_conditions_text: value,
+                });
+              } catch (err) {
+                update('branch_conditions_text', value);
+              }
+            }}
+            rows={3}
+            placeholder='分支 JSON，例如 [{"event_id":"evt_next","condition":{...}}]'
+            className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50 placeholder:text-cyber-green/18"
+          />
+        </div>
+      )}
+
+      {/* NPC proactive dialogue */}
+      {t === 'npc_proactive_dialogue' && (
+        <div className="space-y-2">
+          <input
+            type="text"
+            value={effect.proactive_character_id || ''}
+            onChange={e => update('proactive_character_id', e.target.value)}
+            placeholder="主动发言角色 ID（可选）"
+            className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50"
+          />
+          <input
+            type="text"
+            value={effect.target_session_id || ''}
+            onChange={e => update('target_session_id', e.target.value)}
+            placeholder="目标会话 ID（可选）"
+            className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50"
+          />
+          <textarea
+            value={effect.proactive_prompt || ''}
+            onChange={e => update('proactive_prompt', e.target.value)}
+            placeholder="主动发言提示"
+            rows={2}
+            className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50"
           />
         </div>
       )}

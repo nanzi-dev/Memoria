@@ -548,11 +548,10 @@ Content-Type: application/json
 ### 5. 删除事件
 
 ```http
-DELETE /api/v1/admin/events/{event_id}?permanent=true
+DELETE /api/v1/admin/events/{event_id}
 ```
 
-**查询参数：**
-- `permanent` (可选): 是否永久删除（默认 true）
+该接口会永久删除事件定义及其触发记录。
 
 **响应示例：**
 ```json
@@ -789,7 +788,7 @@ Content-Type: application/json
 }
 ```
 
-**关系类型：** `friend` (朋友), `enemy` (敌人), `family` (家人), `rival` (对手), `mentor` (师徒), `lover` (恋人)
+**关系类型：** 后端按字符串保存，不限制固定枚举；前端提供常用类型并支持新增/删除自定义类型。
 
 ### 2. 获取角色关系
 ```http
@@ -870,7 +869,7 @@ Content-Type: application/json
 
 ## 多角色对话 API
 
-多角色对话系统支持2个或更多NPC同时参与群聊，提供自然的多角色互动体验。
+多角色对话系统支持 2-5 个 NPC 同时参与群聊，提供自然的多角色互动体验。
 
 ### 1. 开始多角色会话
 ```http
@@ -929,14 +928,14 @@ Content-Type: application/json
   "session_id": "multi-session-uuid",
   "player_message": "大家好！",
   "strategy_type": "hybrid",
-  "discussion_mode": false,
-  "max_responses": 3
+  "discussion_mode": true,
+  "max_responses": 4
 }
 ```
 
 每次玩家发起的多角色轮次会先保存玩家消息和角色回复，再把“玩家消息 + 本轮角色回复”生成摘要，并写入 `group_memory` 作为群体事件记忆。后续多角色 Prompt 会召回这些群体记忆，帮助参与角色延续共同经历。
 
-根据发言策略和讨论触发条件，响应可能是单角色回复，也可能是多角色连续讨论回复。讨论模式下返回结构包含 `responses` 数组，每个元素对应一个角色发言。
+根据发言策略和讨论触发条件，响应可能是单角色回复，也可能是多角色连续讨论回复。`discussion_mode` 默认启用；`max_responses` 可传 1-5，但编排器会结合语境、参与人数和内部上限动态决定实际接话人数，当前最多 4 个角色发言。讨论模式下返回结构包含 `responses` 数组，每个元素对应一个角色发言。
 
 **响应示例：**
 ```json
@@ -1305,7 +1304,7 @@ POST /admin/log-level?level=DEBUG
 
 ### 4. 速率限制（Rate Limiting）
 
-所有 `/api/*` 路由均受基于玩家的速率限制保护。
+所有 `/api/*` 写操作（非 GET/HEAD/OPTIONS）均受基于玩家的速率限制保护。
 
 ```http
 X-Player-ID: player_001
@@ -1381,5 +1380,8 @@ X-Player-ID: player_001
 | `grant_item` | 给予物品（扩展）|
 | `start_quest` | 开启任务（扩展）|
 | `modify_relationship` | 修改角色间关系 |
+| `trigger_event` | 触发另一个事件（事件链）|
+| `branch_event` | 按上下文分支触发事件 |
+| `npc_proactive_dialogue` | NPC 主动发言（多角色编排器）|
 
 ---

@@ -136,7 +136,7 @@ RAG 召回 (ChromaDB)            ← 余弦相似度搜索
 
 ## 数据库设计
 
-Memoria 使用 SQLite (WAL 模式)，共 13 张表。
+Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 
 ### 1. users（用户表）
 
@@ -348,6 +348,8 @@ Memoria 使用 SQLite (WAL 模式)，共 13 张表。
 | character_id | TEXT | 角色专属事件（NULL=全局）|
 | trigger_config | TEXT NOT NULL | 触发条件配置（JSON）|
 | effects_config | TEXT NOT NULL | 效果列表配置（JSON）|
+| schedule | TEXT | 时间驱动事件调度配置 |
+| template_id | TEXT | 来源事件模板 ID |
 | priority | INTEGER DEFAULT 0 | 优先级（数值越大越优先）|
 | is_active | INTEGER DEFAULT 1 | 是否启用 |
 | created_at | TEXT | 创建时间 |
@@ -379,7 +381,69 @@ Memoria 使用 SQLite (WAL 模式)，共 13 张表。
 
 ---
 
-### 13. character_relationship（角色关系网络表）
+### 13. event_context_state（事件上下文状态表）
+
+持久化事件链和跨会话事件进度，确保剧情事件可以在后续会话继续推进。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | INTEGER | 自增主键 |
+| event_id | TEXT NOT NULL | 事件 ID |
+| character_id | TEXT NOT NULL | 角色 ID |
+| player_id | TEXT NOT NULL | 玩家 ID |
+| context_data | TEXT NOT NULL | 事件上下文数据（JSON）|
+| status | TEXT DEFAULT 'active' | 状态：active/completed/cancelled 等 |
+| progress | REAL DEFAULT 0.0 | 事件进度 |
+| last_session_id | TEXT | 最后关联会话 ID |
+| created_at | TEXT | 创建时间 |
+| updated_at | TEXT | 更新时间 |
+
+**唯一约束：** `UNIQUE(event_id, character_id, player_id)`
+**索引：** `idx_event_context_lookup ON event_context_state(character_id, player_id, status, updated_at DESC)`
+
+---
+
+### 14. event_schedule_state（事件调度状态表）
+
+记录时间驱动事件的检查和运行状态，用于 cron 式事件调度。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| event_id | TEXT NOT NULL | 事件 ID（联合主键）|
+| character_id | TEXT NOT NULL | 角色 ID（联合主键）|
+| player_id | TEXT NOT NULL | 玩家 ID（联合主键）|
+| schedule | TEXT NOT NULL | 调度表达式 |
+| last_checked_at | TEXT | 最后检查时间 |
+| last_run_at | TEXT | 最后运行时间 |
+| next_run_at | TEXT | 下次运行时间 |
+| status | TEXT DEFAULT 'active' | 调度状态 |
+| created_at | TEXT | 创建时间 |
+| updated_at | TEXT | 更新时间 |
+
+**主键：** `PRIMARY KEY (event_id, character_id, player_id)`
+**索引：** `idx_event_schedule_due ON event_schedule_state(status, next_run_at)`
+
+---
+
+### 15. event_template（事件模板表）
+
+存储可复用事件模板，用于快速创建常见事件配置。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| template_id | TEXT PRIMARY KEY | 模板 ID |
+| template_name | TEXT NOT NULL | 模板名称 |
+| category | TEXT | 模板分类 |
+| description | TEXT | 模板描述 |
+| trigger_config | TEXT NOT NULL | 默认触发条件配置（JSON）|
+| effects_config | TEXT NOT NULL | 默认效果配置（JSON）|
+| metadata | TEXT | 模板元数据（JSON）|
+| created_at | TEXT | 创建时间 |
+| updated_at | TEXT | 更新时间 |
+
+---
+
+### 16. character_relationship（角色关系网络表）
 
 存储角色之间的相互关系，用于多角色互动和关系图谱。
 
@@ -401,7 +465,7 @@ Memoria 使用 SQLite (WAL 模式)，共 13 张表。
 
 ### 完整索引汇总
 
-共 12 个索引，覆盖所有高频查询路径：
+共 14 个索引，覆盖所有高频查询路径：
 
 | 索引名 | 表 | 列 |
 |--------|-----|-----|
@@ -416,6 +480,8 @@ Memoria 使用 SQLite (WAL 模式)，共 13 张表。
 | `idx_character_active` | character_card | (is_active, created_at DESC) |
 | `idx_event_character` | event_definition | (character_id, is_active) |
 | `idx_event_trigger_log` | event_trigger_log | (event_id, character_id, player_id, triggered_at DESC) |
+| `idx_event_context_lookup` | event_context_state | (character_id, player_id, status, updated_at DESC) |
+| `idx_event_schedule_due` | event_schedule_state | (status, next_run_at) |
 | `idx_relationship_lookup` | character_relationship | (character_id_a, character_id_b) |
 
 ---
@@ -426,8 +492,8 @@ Memoria 使用 SQLite (WAL 模式)，共 13 张表。
 2. **显式列 + JSON 混合** — 高频读写字段（好感度、信任度）使用显式列以获得更好性能；复杂配置（角色卡、事件条件）使用 JSON 字段获得灵活性
 3. **软删除设计** — `is_active` 字段实现逻辑删除，支持数据恢复
 4. **多角色扩展** — `session.is_multi_character` + `multi_session_participant` 表支持群聊；`short_term_message` 扩展 `character_id` / `character_name` 列区分发言人；`shared_memory` 存储角色间互动记忆，`group_memory` 存储玩家轮次摘要形成的群体事件记忆
-5. **轻量迁移** — 启动时为旧库补齐 `character_card.avatar_url`、`session_summary.summary_status`、`session.group_name` 等新增列
-6. **完整索引覆盖** — 12 个精心设计的索引确保所有常用查询路径为 O(log n)
+5. **轻量迁移** — 启动时为旧库补齐 `character_card.avatar_url`、`session_summary.summary_status`、`session.group_name`、`event_definition.schedule`、`event_definition.template_id` 和事件上下文/调度/模板表等新增结构
+6. **完整索引覆盖** — 14 个精心设计的索引确保所有常用查询路径为 O(log n)
 7. **可迁移性** — 兼容 PostgreSQL 标准 SQL 语法，使用标准数据类型
 
 ## 角色卡规范

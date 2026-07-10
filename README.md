@@ -56,7 +56,7 @@
 
 ### 多角色对话系统
 - **群聊模式**：支持 2-5 个 NPC 同时参与对话
-- **讨论模式**：角色可以连续发言，每轮最多 3 个角色回应，实现真实的群体讨论
+- **讨论模式**：角色可以连续发言，每轮按上下文动态决定回应人数，最多 4 个角色回应，实现真实的群体讨论
 - **智能发言策略**：5 种策略（轮询、权重、智能、触发、混合）
 - **角色间互动**：角色会相互回应和讨论
 - **多角色记忆**：个人记忆、角色间记忆、群体记忆三层管理；群聊结束时统一生成整场摘要并保存为群体记忆
@@ -122,13 +122,13 @@ Memoria/
 │   │   └── repository.py       # SQLite 数据库操作
 │   └── main.py                 # 应用入口
 ├── tests/                      # 测试文件
-│   ├── test_core.py             # 核心模块测试（61 tests）
-│   ├── test_repository.py       # 数据库层测试（29 tests）
-│   ├── test_events.py           # 事件系统测试（11 tests）
+│   ├── test_core.py             # 核心模块测试（62 tests）
+│   ├── test_repository.py       # 数据库层测试（31 tests）
+│   ├── test_events.py           # 事件系统测试（15 tests）
 │   ├── test_orchestrator.py     # 编排器测试（14 tests）
-│   ├── test_multi_dialogue_api.py # 多角色 API 测试（4 tests）
-│   ├── test_dialogue_api.py     # 单角色 API 测试（1 test）
-│   ├── test_api_models.py       # API 模型测试（19 tests）
+│   ├── test_multi_dialogue_api.py # 多角色 API 测试（9 tests）
+│   ├── test_dialogue_api.py     # 单角色 API 测试（2 tests）
+│   ├── test_api_models.py       # API 模型测试（20 tests）
 │   ├── test_memory_extractor.py # 记忆/提示测试（22 tests）
 │   ├── test_system.py           # 系统级测试（13 tests）
 │   ├── test_vector_memory.py    # 向量记忆测试（2 tests）
@@ -242,7 +242,7 @@ npm run dev
 | 文档 | 内容 |
 |------|------|
 | [API 文档](docs/API.md) | 完整 REST API 参考（对话/角色卡/事件/关系/多角色/用户/系统管理），含请求/响应示例 |
-| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（13张表）、三层记忆架构、角色卡开发规范 |
+| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（16 张表）、三层记忆架构、角色卡开发规范 |
 | [开发路线图](docs/ROADMAP.md) | 已完成功能和未来规划 |
 | [故障排查](docs/FAQ.md) | 常见问题解决方案、调试技巧、性能优化建议 |
 | [贡献指南](docs/CONTRIBUTING.md) | 如何贡献代码、Commit 规范、代码审查标准 |
@@ -294,7 +294,7 @@ PYTHONPATH=src pytest tests/test_multi_dialogue_api.py -v # 多角色 API
 PYTHONPATH=src pytest tests/test_system.py -v            # 系统端点与限流
 ```
 
-当前测试集合为 176 tests（`pytest --collect-only -q tests`）。
+当前测试集合为 190 tests（`pytest --collect-only -q`）。
 
 ---
 
