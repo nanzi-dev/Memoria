@@ -90,10 +90,12 @@ class TestCodeReviewFixesAPI:
             action="smile",
             affinity_delta=1,
             current_affinity=50,
+            current_trust=30,
             current_mood="neutral",
             user_message_id=101,
             assistant_message_id=102
         )
+        assert r.current_trust == 30
         assert r.user_message_id == 101
         assert r.assistant_message_id == 102
 
@@ -104,6 +106,7 @@ class TestCodeReviewFixesAPI:
             action="smile",
             affinity_delta=1,
             current_affinity=50,
+            current_trust=30,
             current_mood="neutral"
         )
         assert r.user_message_id is None
@@ -116,8 +119,10 @@ class TestCodeReviewFixesAPI:
             opening_line="欢迎",
             action="wave",
             current_affinity=20,
+            current_trust=15,
             assistant_message_id=99
         )
+        assert r.current_trust == 15
         assert r.assistant_message_id == 99
 
     def test_history_message_with_message_id(self):

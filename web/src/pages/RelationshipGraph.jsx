@@ -28,6 +28,19 @@ function getRelationLabel(type) { return RELATION_TYPES.find(t => t.value === ty
 
 const NODE_R = 36;
 
+function getAffinityMagnitude(affinity = 0) {
+  const value = Math.abs(Number(affinity) || 0);
+  return Math.min(100, Math.max(0, value));
+}
+
+function getLinkWidth(edge) {
+  return 1.6 + (getAffinityMagnitude(edge.affinity) / 100) * 4.2;
+}
+
+function getLinkHoverWidth(edge) {
+  return getLinkWidth(edge) + 1.4;
+}
+
 // ── 添加关系弹窗 ──
 function AddRelationModal({ characters, onAdd, onClose, adding }) {
   const [charA, setCharA] = useState('');
@@ -316,33 +329,87 @@ export default function RelationshipGraph() {
       .force('y', d3.forceY(H / 2).strength(0.02));
     simulationRef.current = simulation;
 
-    // ── 边：曲线 ──
+    const getEdgePath = d => {
+      const sx = d.source.x, sy = d.source.y;
+      const tx = d.target.x, ty = d.target.y;
+      const dr = Math.sqrt((tx - sx) ** 2 + (ty - sy) ** 2);
+      return `M${sx},${sy}A${dr * 0.8},${dr * 0.8} 0 0,1 ${tx},${ty}`;
+    };
+
+    // ── 边：可见曲线 + 流动高光 + 透明命中区域 ──
     const linkGroup = g.append('g').attr('class', 'links');
-    const linkPath = linkGroup.selectAll('path').data(links).join('path')
+    const linkBase = linkGroup.append('g').attr('class', 'link-base').selectAll('path').data(links).join('path')
       .attr('fill', 'none')
       .attr('stroke', d => getRelationColor(d.relationship_type))
-      .attr('stroke-opacity', 0.3)
-      .attr('stroke-width', d => Math.max(1.5, Math.abs(d.affinity) / 30))
+      .attr('stroke-opacity', 0.34)
+      .attr('stroke-width', getLinkWidth)
+      .attr('stroke-linecap', 'round')
+      .attr('stroke-linejoin', 'round')
       .attr('marker-end', d => `url(#arrow-${d.relationship_type})`)
+      .attr('pointer-events', 'none');
+
+    const linkFlow = linkGroup.append('g').attr('class', 'link-flow').selectAll('path').data(links).join('path')
+      .attr('fill', 'none')
+      .attr('stroke', d => getRelationColor(d.relationship_type))
+      .attr('stroke-opacity', 0.58)
+      .attr('stroke-width', d => Math.max(1, getLinkWidth(d) * 0.42))
+      .attr('stroke-linecap', 'round')
+      .attr('stroke-dasharray', '2 12')
+      .attr('stroke-dashoffset', 0)
+      .attr('filter', 'url(#glow)')
+      .attr('pointer-events', 'none');
+
+    const linkHit = linkGroup.append('g').attr('class', 'link-hit').selectAll('path').data(links).join('path')
+      .attr('fill', 'none')
+      .attr('stroke', 'transparent')
+      .attr('stroke-width', d => Math.max(18, getLinkWidth(d) + 14))
+      .attr('stroke-linecap', 'round')
+      .attr('pointer-events', 'stroke')
       .style('cursor', 'pointer');
+
+    let flowStopped = false;
+    const animateFlow = () => {
+      if (flowStopped) return;
+      linkFlow
+        .attr('stroke-dashoffset', 0)
+        .transition()
+        .duration(1200)
+        .ease(d3.easeLinear)
+        .attr('stroke-dashoffset', -28)
+        .on('end', () => {
+          if (!flowStopped) animateFlow();
+        });
+    };
+
+    animateFlow();
 
     // 边标签
     const edgeLabelGroup = g.append('g').attr('class', 'edge-labels');
     const edgeLabelBg = edgeLabelGroup.selectAll('rect').data(links).join('rect')
-      .attr('fill', CYBER_DARK).attr('rx', 3).attr('opacity', 0);
+      .attr('fill', CYBER_DARK).attr('rx', 3).attr('opacity', 0)
+      .attr('pointer-events', 'none');
     const edgeLabelText = edgeLabelGroup.selectAll('text').data(links).join('text')
       .text(d => getRelationLabel(d.relationship_type))
       .attr('font-family', 'JetBrains Mono, monospace').attr('font-size', '9px')
       .attr('fill', d => getRelationColor(d.relationship_type))
-      .attr('text-anchor', 'middle').attr('dy', '-6').attr('opacity', 0);
+      .attr('text-anchor', 'middle').attr('dy', '-6').attr('opacity', 0)
+      .attr('pointer-events', 'none');
 
     // 边交互
-    linkPath.on('mouseenter', function(event, d) {
-      d3.select(this).attr('stroke-opacity', 0.8).attr('stroke-width', Math.max(3, Math.abs(d.affinity) / 20));
+    linkHit.on('mouseenter', function(event, d) {
+      linkBase
+        .attr('stroke-opacity', l => l === d ? 0.8 : 0.1)
+        .attr('stroke-width', l => l === d ? getLinkHoverWidth(l) : getLinkWidth(l));
+      linkFlow
+        .attr('stroke-opacity', l => l === d ? 0.95 : 0.04)
+        .attr('stroke-width', l => l === d ? Math.max(1.6, getLinkHoverWidth(l) * 0.48) : Math.max(1, getLinkWidth(l) * 0.32));
       edgeLabelBg.attr('opacity', l => l === d ? 0.9 : 0);
       edgeLabelText.attr('opacity', l => l === d ? 1 : 0);
-    }).on('mouseleave', function(event, d) {
-      d3.select(this).attr('stroke-opacity', 0.3).attr('stroke-width', Math.max(1.5, Math.abs(d.affinity) / 30));
+    }).on('mouseleave', function() {
+      linkBase.attr('stroke-opacity', 0.34).attr('stroke-width', getLinkWidth);
+      linkFlow
+        .attr('stroke-opacity', 0.58)
+        .attr('stroke-width', d => Math.max(1, getLinkWidth(d) * 0.42));
       edgeLabelBg.attr('opacity', 0);
       edgeLabelText.attr('opacity', 0);
     }).on('click', (event, d) => {
@@ -353,6 +420,7 @@ export default function RelationshipGraph() {
     // ── 节点 ──
     const nodeGroup = g.append('g').attr('class', 'nodes');
     const node = nodeGroup.selectAll('g').data(nodes).join('g')
+      .attr('opacity', 0)
       .attr('cursor', 'pointer')
       .call(d3.drag()
         .on('start', (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
@@ -362,6 +430,8 @@ export default function RelationshipGraph() {
         event.stopPropagation();
         navigate(`/editor/${d.character_id}`);
       });
+
+    node.transition().delay((d, i) => Math.min(i, 16) * 45).duration(360).ease(d3.easeCubicOut).attr('opacity', 1);
 
     // 光晕
     node.append('circle').attr('r', NODE_R + 10).attr('fill', CYBER_GREEN)
@@ -390,14 +460,14 @@ export default function RelationshipGraph() {
           .attr('clip-path', 'url(#' + clipId + ')')
           .attr('preserveAspectRatio', 'xMidYMid slice')
           .attr('pointer-events', 'none');
+      } else {
+        g.append('text')
+          .text((d.name || d.display_name || d.character_id).charAt(0))
+          .attr('text-anchor', 'middle').attr('dy', '0.35em')
+          .attr('fill', CYBER_GREEN).attr('font-family', 'ZCOOL XiaoWei, Noto Serif SC, serif')
+          .attr('font-size', '18px').attr('font-weight', 'bold')
+          .attr('pointer-events', 'none');
       }
-      // 始终显示名字首字母作为fallback文字
-      g.append('text')
-        .text((d.name || d.display_name || d.character_id).charAt(0))
-        .attr('text-anchor', 'middle').attr('dy', '0.35em')
-        .attr('fill', CYBER_GREEN).attr('font-family', 'Orbitron, sans-serif')
-        .attr('font-size', '18px').attr('font-weight', 'bold')
-        .attr('pointer-events', 'none');
     });
 
     // 主体圆（描边）
@@ -416,33 +486,37 @@ export default function RelationshipGraph() {
     node.append('text')
       .text(d => d.name || d.display_name || d.character_id)
       .attr('text-anchor', 'middle').attr('dy', NODE_R + 18)
-      .attr('fill', CYBER_GREEN).attr('font-family', 'JetBrains Mono, monospace')
-      .attr('font-size', '11px').attr('font-weight', '500')
+      .attr('fill', CYBER_GREEN).attr('font-family', 'ZCOOL XiaoWei, Noto Serif SC, serif')
+      .attr('font-size', '14px').attr('font-weight', '500')
       .attr('opacity', 0.75).attr('pointer-events', 'none');
 
     // 悬停高亮
     node.on('mouseenter', (event, d) => {
       node.select('.node-halo').attr('opacity', n => n.character_id === d.character_id ? 0.25 : 0);
-      linkPath
+      linkBase
         .attr('stroke-opacity', l => (l.source.character_id === d.character_id || l.target.character_id === d.character_id) ? 0.8 : 0.04)
         .attr('stroke-width', l => (l.source.character_id === d.character_id || l.target.character_id === d.character_id)
-          ? Math.max(3, Math.abs(l.affinity) / 20) : 0.5);
+          ? getLinkHoverWidth(l) : Math.max(0.8, getLinkWidth(l) * 0.55));
+      linkFlow
+        .attr('stroke-opacity', l => (l.source.character_id === d.character_id || l.target.character_id === d.character_id) ? 0.95 : 0.03)
+        .attr('stroke-width', l => (l.source.character_id === d.character_id || l.target.character_id === d.character_id)
+          ? Math.max(1.6, getLinkHoverWidth(l) * 0.48) : Math.max(0.8, getLinkWidth(l) * 0.24));
     });
     node.on('mouseleave', () => {
       node.select('.node-halo').attr('opacity', 0);
-      linkPath.attr('stroke-opacity', 0.3).attr('stroke-width', d => Math.max(1.5, Math.abs(d.affinity) / 30));
+      linkBase.attr('stroke-opacity', 0.34).attr('stroke-width', getLinkWidth);
+      linkFlow
+        .attr('stroke-opacity', 0.58)
+        .attr('stroke-width', d => Math.max(1, getLinkWidth(d) * 0.42));
     });
 
     svg.on('click', () => { setEditEdge(null); });
 
     // tick
     simulation.on('tick', () => {
-      linkPath.attr('d', d => {
-        const sx = d.source.x, sy = d.source.y;
-        const tx = d.target.x, ty = d.target.y;
-        const dr = Math.sqrt((tx - sx) ** 2 + (ty - sy) ** 2);
-        return `M${sx},${sy}A${dr * 0.8},${dr * 0.8} 0 0,1 ${tx},${ty}`;
-      });
+      linkBase.attr('d', getEdgePath);
+      linkFlow.attr('d', getEdgePath);
+      linkHit.attr('d', getEdgePath);
       edgeLabelBg.each(function(d) {
         const mx = (d.source.x + d.target.x) / 2;
         const my = (d.source.y + d.target.y) / 2;
@@ -466,7 +540,11 @@ export default function RelationshipGraph() {
       }
     }, 1200);
 
-    return () => { simulation.stop(); };
+    return () => {
+      flowStopped = true;
+      linkFlow.interrupt();
+      simulation.stop();
+    };
   }, [network, navigate]);
 
   // ── 操作 ──
@@ -523,9 +601,9 @@ export default function RelationshipGraph() {
 
   // ── Render ──
   return (
-    <div className="min-h-screen bg-cyber-bg flex flex-col select-none">
+    <div className="min-h-screen memoria-page flex flex-col select-none">
       {toast && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 bg-cyber-green/20 border border-cyber-green/30 text-cyber-green font-mono text-xs rounded shadow-lg">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 bg-cyber-green/20 border border-cyber-green/30 text-cyber-green font-mono text-xs rounded-lg shadow-lg animate-fade-up">
           {toast}
         </div>
       )}
@@ -537,10 +615,10 @@ export default function RelationshipGraph() {
       )}
 
       {/* Header */}
-      <div className="sticky top-0 z-20 bg-cyber-surface/95 backdrop-blur border-b border-cyber-green/20">
+      <div className="sticky top-0 z-20 memoria-glass border-x-0 border-t-0">
         <div className="flex items-center justify-between px-5 py-3">
           <button onClick={() => navigate('/')}
-            className="flex items-center gap-1.5 text-cyber-green/50 hover:text-cyber-green transition-colors font-mono text-sm">
+            className="flex items-center gap-1.5 text-cyber-green/50 hover:text-cyber-green hover:bg-cyber-green/5 rounded-lg px-2 py-2 transition-all font-mono text-sm">
             <ArrowLeft size={16} /> Back
           </button>
           <h1 className="font-display text-base text-cyber-green tracking-[0.2em] flex items-center gap-2">
@@ -551,11 +629,11 @@ export default function RelationshipGraph() {
               {characters.length} 角色 · {network.edges.length} 边
             </span>
             <button onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-1 px-3 py-1.5 bg-cyber-green/10 border border-cyber-green/25 text-cyber-green font-mono text-xs rounded hover:bg-cyber-green/20 transition-colors">
+              className="flex items-center gap-1 px-3 py-1.5 bg-cyber-green/10 border border-cyber-green/25 text-cyber-green font-mono text-xs rounded-lg hover:bg-cyber-green/20 hover:shadow-[0_0_22px_rgba(167,239,158,0.12)] active:scale-95 transition-all">
               <Plus size={13} /> 添加关系
             </button>
             <button onClick={loadData} disabled={loading}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-mono text-cyber-green/40 hover:text-cyber-green border border-cyber-green/15 rounded transition-colors">
+              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-mono text-cyber-green/40 hover:text-cyber-green hover:bg-cyber-green/5 border border-cyber-green/15 rounded-lg transition-all disabled:opacity-30">
               <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
             </button>
           </div>
@@ -565,7 +643,7 @@ export default function RelationshipGraph() {
       {/* Main */}
       <div className="flex-1 relative">
         {loading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-cyber-bg/80">
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-cyber-bg/80 backdrop-blur-sm">
             <div className="flex flex-col items-center gap-3">
               <Loader2 className="animate-spin text-cyber-green" size={30} />
               <span className="font-mono text-xs text-cyber-green/50">加载关系网络...</span>
@@ -573,18 +651,18 @@ export default function RelationshipGraph() {
           </div>
         )}
         {error && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 px-4 py-2 bg-red-900/80 text-red-300 font-mono text-xs rounded">
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 px-4 py-2 bg-red-900/80 text-red-300 font-mono text-xs rounded-lg border border-red-400/20 animate-fade-up">
             错误: {error}
           </div>
         )}
         {!loading && network.nodes.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center">
+            <div className="memoria-glass animate-fade-up text-center rounded-xl px-8 py-7">
               <Users size={56} className="mx-auto text-cyber-green/10 mb-5" />
               <p className="font-mono text-sm text-cyber-green/30 mb-2">暂无关系数据</p>
               <p className="font-mono text-[11px] text-cyber-green/15 mb-6">创建至少两个角色后，可在此构建关系图谱</p>
               <button onClick={() => setShowAddModal(true)}
-                className="px-4 py-2 bg-cyber-green/10 border border-cyber-green/25 text-cyber-green/60 font-mono text-xs rounded hover:bg-cyber-green/20 transition-colors inline-flex items-center gap-1.5">
+                className="px-4 py-2 bg-cyber-green/10 border border-cyber-green/25 text-cyber-green/70 font-mono text-xs rounded-lg hover:bg-cyber-green/20 active:scale-95 transition-all inline-flex items-center gap-1.5">
                 <Plus size={14} /> 添加第一条关系
               </button>
             </div>
@@ -597,19 +675,19 @@ export default function RelationshipGraph() {
         {/* 浮动控件 */}
         {!loading && network.nodes.length > 0 && (
           <>
-            <div className="absolute bottom-6 right-6 flex flex-col gap-1.5 z-10">
-              <button onClick={zoomIn} className="p-2.5 bg-cyber-surface border border-cyber-green/15 rounded-lg text-cyber-green/50 hover:text-cyber-green hover:border-cyber-green/30 transition-colors" title="放大">
+            <div className="absolute bottom-6 right-6 flex flex-col gap-1.5 z-10 animate-fade-up">
+              <button onClick={zoomIn} className="memoria-glass p-2.5 rounded-lg text-cyber-green/50 hover:text-cyber-green hover:border-cyber-green/30 active:scale-95 transition-all" title="放大">
                 <ZoomIn size={16} />
               </button>
-              <button onClick={zoomOut} className="p-2.5 bg-cyber-surface border border-cyber-green/15 rounded-lg text-cyber-green/50 hover:text-cyber-green hover:border-cyber-green/30 transition-colors" title="缩小">
+              <button onClick={zoomOut} className="memoria-glass p-2.5 rounded-lg text-cyber-green/50 hover:text-cyber-green hover:border-cyber-green/30 active:scale-95 transition-all" title="缩小">
                 <ZoomOut size={16} />
               </button>
-              <button onClick={zoomReset} className="p-2.5 bg-cyber-surface border border-cyber-green/15 rounded-lg text-cyber-green/50 hover:text-cyber-green hover:border-cyber-green/30 transition-colors" title="重置">
+              <button onClick={zoomReset} className="memoria-glass p-2.5 rounded-lg text-cyber-green/50 hover:text-cyber-green hover:border-cyber-green/30 active:scale-95 transition-all" title="重置">
                 <Maximize2 size={16} />
               </button>
             </div>
-            <div className="absolute bottom-6 left-6 z-10">
-              <div className="bg-cyber-surface/90 border border-cyber-green/10 rounded-lg px-3 py-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px]">
+            <div className="absolute bottom-6 left-6 z-10 animate-fade-up">
+              <div className="memoria-glass rounded-lg px-3 py-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px]">
                 {RELATION_TYPES.map(rt => (
                   <div key={rt.value} className="flex items-center gap-1.5">
                     <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: rt.color }} />
@@ -623,7 +701,7 @@ export default function RelationshipGraph() {
       </div>
 
       {!loading && network.nodes.length > 0 && (
-        <div className="text-center py-2 border-t border-cyber-green/5">
+        <div className="text-center py-2 border-t border-cyber-green/5 bg-[#0d0d14]/40 backdrop-blur-sm">
           <span className="text-[10px] font-mono text-cyber-green/15">
             拖拽节点 · 滚轮缩放 · 悬停高亮 · 点击边编辑 · 双击编辑角色
           </span>

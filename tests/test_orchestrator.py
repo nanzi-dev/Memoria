@@ -290,6 +290,7 @@ class TestDialogueTurn:
         result = orchestrator.run_dialogue_turn("sid", "你好")
 
         assert result["dialogue"] == "你好"
+        assert result["current_trust"] == 0
         assert result["user_message_id"] == 1
         assert result["assistant_message_id"] == 2
         assert saved_state == {

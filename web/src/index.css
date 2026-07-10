@@ -62,3 +62,76 @@
 .animate-scan {
   animation: scan 2.5s linear infinite;
 }
+
+/* ═══ Memoria UI polish ═══ */
+.font-character {
+  font-family: 'ZCOOL XiaoWei', 'Noto Serif SC', serif;
+  letter-spacing: 0;
+}
+
+.memoria-page {
+  position: relative;
+  isolation: isolate;
+  background:
+    linear-gradient(rgba(167, 239, 158, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(167, 239, 158, 0.03) 1px, transparent 1px),
+    radial-gradient(circle at 18% 12%, rgba(167, 239, 158, 0.08), transparent 28rem),
+    radial-gradient(circle at 86% 18%, rgba(8, 145, 178, 0.07), transparent 26rem),
+    #0b0b0c;
+  background-size: 32px 32px, 32px 32px, auto, auto, auto;
+  background-attachment: fixed;
+}
+
+.memoria-glass {
+  background: linear-gradient(135deg, rgba(18, 15, 23, 0.88), rgba(13, 13, 20, 0.68));
+  border: 1px solid rgba(167, 239, 158, 0.12);
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  backdrop-filter: blur(14px);
+}
+
+.memoria-card-hover {
+  transition: transform 220ms ease, border-color 220ms ease, background-color 220ms ease, box-shadow 220ms ease, opacity 220ms ease;
+}
+
+.memoria-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(167, 239, 158, 0.08);
+}
+
+.memoria-avatar-ring {
+  box-shadow: 0 0 0 1px rgba(167, 239, 158, 0.08), 0 0 22px rgba(167, 239, 158, 0.06);
+}
+
+@keyframes memoria-fade-up {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes memoria-soft-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 0.9; }
+}
+
+.animate-fade-up {
+  animation: memoria-fade-up 260ms ease both;
+}
+
+.animate-soft-pulse {
+  animation: memoria-soft-pulse 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-scan,
+  .animate-fade-up,
+  .animate-soft-pulse,
+  .animate-bounce,
+  .animate-pulse,
+  .animate-spin {
+    animation: none !important;
+  }
+  .memoria-card-hover,
+  .memoria-card-hover:hover {
+    transition: none !important;
+    transform: none !important;
+  }
+}

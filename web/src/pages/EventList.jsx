@@ -86,13 +86,13 @@ export default function EventList() {
   const activeCount = events.filter(e => e.is_active).length;
 
   return (
-    <div className="min-h-screen bg-cyber-bg">
+    <div className="min-h-screen memoria-page">
       {/* Header */}
-      <div className="sticky top-0 z-20 bg-cyber-bg/95 backdrop-blur border-b border-cyber-green/15">
+      <div className="sticky top-0 z-20 memoria-glass border-x-0 border-t-0">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
           <button
             onClick={() => navigate('/')}
-            className="flex items-center gap-2 text-cyber-green/50 hover:text-cyber-green transition-colors font-mono text-sm"
+            className="flex items-center gap-2 text-cyber-green/50 hover:text-cyber-green hover:bg-cyber-green/5 rounded-lg px-2 py-2 transition-all font-mono text-sm"
           >
             <ArrowLeft size={16} />
             Home
@@ -105,7 +105,7 @@ export default function EventList() {
           </div>
           <button
             onClick={() => navigate('/events/new')}
-            className="flex items-center gap-1.5 px-4 py-1.5 bg-cyber-green/15 border border-cyber-green/30 text-cyber-green font-mono text-xs rounded hover:bg-cyber-green/25 transition-colors"
+            className="flex items-center gap-1.5 px-4 py-1.5 bg-cyber-green/15 border border-cyber-green/30 text-cyber-green font-mono text-xs rounded-lg hover:bg-cyber-green/25 hover:shadow-[0_0_22px_rgba(167,239,158,0.12)] active:scale-95 transition-all"
           >
             <Plus size={14} />
             New
@@ -114,7 +114,7 @@ export default function EventList() {
 
         {/* Toolbar */}
         <div className="max-w-6xl mx-auto px-6 pb-3 flex items-center gap-3">
-          <div className="flex items-center gap-1 bg-cyber-surface/50 border border-cyber-green/10 rounded p-0.5">
+          <div className="flex items-center gap-1 bg-cyber-surface/70 border border-cyber-green/10 rounded-lg p-0.5 shadow-inner">
             {[
               { value: 'all', label: '全部' },
               { value: 'active', label: '启用' },
@@ -123,10 +123,10 @@ export default function EventList() {
               <button
                 key={opt.value}
                 onClick={() => setFilter(opt.value)}
-                className={`px-3 py-1 text-[10px] font-mono rounded transition-colors ${
+                className={`px-3 py-1 text-[10px] font-mono rounded-md transition-all ${
                   filter === opt.value
-                    ? 'bg-cyber-green/15 text-cyber-green'
-                    : 'text-cyber-green/40 hover:text-cyber-green/70'
+                    ? 'bg-cyber-green/15 text-cyber-green shadow-[0_0_16px_rgba(167,239,158,0.08)]'
+                    : 'text-cyber-green/40 hover:text-cyber-green/70 hover:bg-white/[0.03]'
                 }`}
               >
                 {opt.label}
@@ -141,7 +141,7 @@ export default function EventList() {
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="搜索..."
-              className="w-48 bg-cyber-surface/50 border border-cyber-green/10 text-cyber-green/80 text-[11px] font-mono rounded pl-7 pr-3 py-1.5 focus:outline-none focus:border-cyber-green/40 placeholder:text-cyber-green/20"
+              className="w-48 bg-cyber-surface/70 border border-cyber-green/10 text-cyber-green/80 text-[11px] font-mono rounded-lg pl-7 pr-3 py-1.5 focus:outline-none focus:border-cyber-green/40 focus:ring-2 focus:ring-cyber-green/10 placeholder:text-cyber-green/20 transition-all"
             />
           </div>
         </div>
@@ -163,7 +163,7 @@ export default function EventList() {
         )}
 
         {!loading && filtered.length === 0 && (
-          <div className="text-center py-32">
+          <div className="animate-fade-up text-center py-32">
             <div className="text-4xl text-cyber-green/10 mb-4">
               <Zap size={48} className="mx-auto" />
             </div>
@@ -182,21 +182,23 @@ export default function EventList() {
         )}
 
         {!loading && filtered.length > 0 && (
-          <div className="space-y-2">
-            {filtered.map(evt => (
+          <div className="space-y-3">
+            {filtered.map((evt, i) => (
               <div
                 key={evt.event_id}
                 onClick={() => navigate(`/events/${evt.event_id}`)}
-                className={`group cursor-pointer border transition-all duration-200
+                className={`memoria-card-hover animate-fade-up group cursor-pointer border rounded-xl overflow-hidden relative transition-all duration-200
                   ${evt.is_active
-                    ? 'border-cyber-green/10 bg-cyber-surface/20 hover:border-cyber-green/30 hover:bg-cyber-surface/40'
-                    : 'border-cyber-green/5 bg-cyber-surface/10 opacity-50 hover:opacity-70'
+                    ? 'border-cyber-green/10 bg-cyber-surface/30 hover:border-cyber-green/30 hover:bg-cyber-surface/50'
+                    : 'border-cyber-green/5 bg-cyber-surface/10 opacity-50 hover:opacity-75'
                   }`}
+                style={{ animationDelay: `${Math.min(i, 14) * 24}ms` }}
               >
+                <div className={`absolute left-0 top-3 bottom-3 w-px transition-colors ${evt.is_active ? 'bg-cyber-green/35' : 'bg-cyber-green/10'}`} />
                 <div className="flex items-center gap-4 px-5 py-3.5">
                   {/* Trigger icon */}
-                  <div className={`w-10 h-10 rounded flex items-center justify-center text-sm font-mono shrink-0
-                    ${evt.is_active ? 'bg-cyber-green/10 text-cyber-green/60' : 'bg-cyber-green/5 text-cyber-green/20'}`}
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm font-mono shrink-0 transition-all group-hover:scale-105
+                    ${evt.is_active ? 'bg-cyber-green/10 text-cyber-green/70 shadow-[0_0_22px_rgba(167,239,158,0.06)]' : 'bg-cyber-green/5 text-cyber-green/20'}`}
                   >
                     {TRIGGER_ICONS[evt.trigger_type] || '⚡'}
                   </div>
@@ -240,17 +242,17 @@ export default function EventList() {
                     <button
                       onClick={e => { e.stopPropagation(); handleToggle(evt); }}
                       title={evt.is_active ? '禁用' : '启用'}
-                      className={`p-1.5 rounded transition-colors ${
+                      className={`p-1.5 rounded-lg transition-all ${
                         evt.is_active
-                          ? 'text-cyber-green/40 hover:text-cyber-green hover:bg-cyber-green/10'
-                          : 'text-cyber-green/20 hover:text-cyber-green/50 hover:bg-cyber-green/5'
+                          ? 'text-cyber-green/40 hover:text-cyber-green hover:bg-cyber-green/10 active:scale-95'
+                          : 'text-cyber-green/20 hover:text-cyber-green/50 hover:bg-cyber-green/5 active:scale-95'
                       }`}
                     >
                       {evt.is_active ? <PowerOff size={14} /> : <Power size={14} />}
                     </button>
                     <button
                       onClick={e => { e.stopPropagation(); handleDelete(evt); }}
-                      className="p-1.5 rounded text-cyber-green/15 hover:text-red-400/70 hover:bg-red-400/5 transition-colors"
+                      className="p-1.5 rounded-lg text-cyber-green/15 hover:text-red-400/70 hover:bg-red-400/5 active:scale-95 transition-all"
                     >
                       <Trash2 size={14} />
                     </button>

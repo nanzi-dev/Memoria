@@ -17,14 +17,14 @@ export default function CharacterBadge({ character, onClick, isActive = true }) 
   };
 
   return (
-    <div className="relative group" style={{ width: 320, height: 460, pointerEvents: 'auto' }}>
+    <div className="relative group animate-fade-up" style={{ width: 320, height: 460, pointerEvents: 'auto' }}>
       <div
-        className={`relative cursor-pointer transition-all duration-300 hover:z-10 ${!isActive ? 'card-disabled' : ''}`}
+        className={`relative cursor-pointer transition-all duration-300 hover:z-10 hover:-translate-y-1 ${!isActive ? 'card-disabled' : ''}`}
         style={{ width: 320, height: 460, pointerEvents: 'auto' }}
         onDoubleClick={handleClick}
       >
         <Lanyard characterInfo={characterInfo} />
-        <div className="absolute inset-0 rounded-xl ring-1 ring-cyber-green/0 group-hover:ring-cyber-green/30 transition-all duration-500 pointer-events-none" />
+        <div className="absolute inset-0 rounded-xl ring-1 ring-cyber-green/0 group-hover:ring-cyber-green/30 group-hover:shadow-[0_0_36px_rgba(167,239,158,0.12)] transition-all duration-500 pointer-events-none" />
       </div>
     </div>
   );
@@ -39,7 +39,7 @@ export function AddCharacterBadge({ onClick }) {
 
   return (
     <div
-      className="group relative cursor-pointer transition-all duration-300 hover:scale-105 border-2 border-dashed border-cyber-green/20 hover:border-cyber-green/50 flex items-center justify-center bg-[#0d0d14]"
+      className="group relative cursor-pointer transition-all duration-300 hover:scale-[1.03] hover:-translate-y-1 border-2 border-dashed border-cyber-green/20 hover:border-cyber-green/50 flex items-center justify-center bg-[#0d0d14] animate-fade-up"
       style={{ width: 320, height: 460, pointerEvents: 'auto' }}
       onDoubleClick={handleClick}
     >
@@ -55,7 +55,7 @@ export function AddCharacterBadge({ onClick }) {
         <div className="text-5xl text-cyber-green/30 group-hover:text-cyber-green/70 transition-colors mb-3">
           +
         </div>
-        <p className="text-xs font-mono text-cyber-green/30 group-hover:text-cyber-green/70 transition-colors">
+        <p className="text-sm font-character text-cyber-green/30 group-hover:text-cyber-green/70 transition-colors">
           添加角色
         </p>
       </div>

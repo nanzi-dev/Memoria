@@ -59,7 +59,7 @@ function createFrontFace({ avatarUrl, name, gender, loadedImg }) {
   // ── Name: large, bold, left-aligned ──
   var nameText = name || 'UNNAMED';
   ctx.fillStyle = '#1A1A1A';
-  ctx.font = 'bold 44px "ZCOOL XiaoWei", serif';
+  ctx.font = 'bold 46px "ZCOOL XiaoWei", "Noto Serif SC", serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   ctx.fillText(nameText, padding, nameY);

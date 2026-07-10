@@ -10,7 +10,7 @@ import {
 
   Send, ArrowLeft, Heart, Zap, AlertTriangle, Loader2, User, X, Plus, Users,
 
-  Radio, Search, Cpu, Activity, TrendingUp, ChevronRight, MessageSquare
+  Search, Cpu, Activity, TrendingUp, ChevronRight, MessageSquare
 
 } from 'lucide-react';
 
@@ -182,11 +182,6 @@ export default function ChatRoom() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [isRecovered, setIsRecovered] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
-  const [tone, setTone] = useState('default');
-  const [showTopics, setShowTopics] = useState(false);
-  const [showMemory, setShowMemory] = useState(false);
-  const [memoryFacts, setMemoryFacts] = useState([]);
-  const [topicHints, setTopicHints] = useState([]);
 
 
 
@@ -616,6 +611,7 @@ export default function ChatRoom() {
       }
 
       setAffinity(session.current_affinity || 0);
+      setTrust(session.current_trust ?? 0);
 
       setHistoryOffset(nextHistoryOffset); setHasMoreHistory(nextHasMoreHistory);
 
@@ -782,7 +778,9 @@ export default function ChatRoom() {
 
         setHistoryOffset(prev => prev + 2);
 
-        setAffinity(res.current_affinity ?? affinity); setMood(res.current_mood || 'neutral');
+        setAffinity(res.current_affinity ?? affinity);
+        setTrust(res.current_trust ?? trust);
+        setMood(res.current_mood || 'neutral');
 
         if (res.triggered_events?.length || res.event_notification) {
 
@@ -845,7 +843,7 @@ export default function ChatRoom() {
 
     finally { setSending(false); setSendingMulti(false); }
 
-  }, [input, sending, sendingMulti, view, singleSessionId, multiSessionId, multiSessionStatus, groupName, affinity, participants, allChars, PLAYER_ID, PLAYER_NAME]);
+  }, [input, sending, sendingMulti, view, singleSessionId, multiSessionId, multiSessionStatus, groupName, affinity, trust, participants, allChars, PLAYER_ID, PLAYER_NAME]);
 
 
 
@@ -862,43 +860,6 @@ export default function ChatRoom() {
   const activeChars = filteredChars.filter(c => c.is_active);
 
   const inactiveChars = filteredChars.filter(c => !c.is_active);
-
-
-  // ── Tools: topic hints ──
-  const loadTopicHints = useCallback(async () => {
-    if (!character) return;
-    // Generate hints from character background + tags
-    const base = character.identity?.core_identity_summary || '';
-    const tags = (character.traits || character.status_labels || []).slice(0, 3);
-    const hints = [
-      `聊聊关于${tags[0] || '你的故事'}的事`,
-      `问问他${base ? '关于' + base : '最近的经历'}`,
-      `了解他的过去`,
-    ];
-    setTopicHints(hints);
-    setShowTopics(prev => !prev);
-  }, [character]);
-
-  // ── Tools: memory review ──
-  const loadMemoryFacts = useCallback(async () => {
-    if (!PLAYER_ID || !character) return;
-    try {
-      const facts = await dialogue.getLongTermFacts(character.character_id, PLAYER_ID, 10);
-      setMemoryFacts(facts?.facts || facts || []);
-    } catch (e) {
-      setMemoryFacts([]);
-    }
-    setShowMemory(prev => !prev);
-  }, [character, PLAYER_ID]);
-
-  // ── Tone switch ──
-  const cycleTone = () => {
-    const tones = ['default', 'formal', 'casual', 'intimate'];
-    const idx = tones.indexOf(tone);
-    setTone(tones[(idx + 1) % tones.length]);
-  };
-  const TONE_LABELS = { default: '默认', formal: '正式', casual: '随意', intimate: '亲密' };
-
 
   // ═══════════════════════════════════════════════
 
@@ -1024,9 +985,9 @@ export default function ChatRoom() {
   // ═══════════════════════════════════════════════
   if (view === 'list') {
     return (
-      <div className="min-h-screen bg-[#0b0b0c] flex flex-col font-mono">
-        <header className="flex items-center gap-3 px-4 py-2.5 border-b border-white/5 bg-[#0d0d14]/80 backdrop-blur-md shrink-0">
-          <button onClick={() => navigate('/')} className="text-cyber-green/30 hover:text-cyber-green/50 p-1"><ArrowLeft size={18} /></button>
+      <div className="min-h-screen memoria-page flex flex-col font-mono">
+        <header className="memoria-glass flex items-center gap-3 px-4 py-2.5 border-x-0 border-t-0 shrink-0">
+          <button onClick={() => navigate('/')} className="text-cyber-green/30 hover:text-cyber-green/70 hover:bg-cyber-green/5 rounded-lg p-2 transition-all"><ArrowLeft size={18} /></button>
           <div className="flex items-center gap-2">
             <Activity size={14} className="text-cyber-green/40" />
             <span className="text-xs font-bold text-cyber-green/60 uppercase tracking-[0.15em]">Memoria</span>
@@ -1035,13 +996,13 @@ export default function ChatRoom() {
           <div className="flex-1 hidden sm:flex items-center justify-center max-w-md mx-auto">
             <div className="relative w-full">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-cyber-green/20" />
-              <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="搜索对话..." className="w-full bg-[#0b0b0c] border border-white/5 rounded-full pl-9 pr-4 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/15 focus:outline-none focus:border-cyber-green/30 transition-colors" />
+              <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="搜索对话..." className="w-full bg-[#0b0b0c]/80 border border-cyber-green/10 rounded-full pl-9 pr-4 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/15 focus:outline-none focus:border-cyber-green/35 focus:ring-2 focus:ring-cyber-green/10 transition-all" />
             </div>
           </div>
-          <button onClick={enterGroupSetup} className="text-xs px-3 py-1.5 rounded-full border border-cyber-green/15 text-cyber-green/35 hover:text-cyber-green/60 hover:border-cyber-green/30 transition-all flex items-center gap-1.5 shrink-0"><Plus size={14} />群聊</button>
+          <button onClick={enterGroupSetup} className="text-xs px-3 py-1.5 rounded-full border border-cyber-green/15 text-cyber-green/45 hover:text-cyber-green/80 hover:border-cyber-green/35 hover:bg-cyber-green/10 active:scale-95 transition-all flex items-center gap-1.5 shrink-0"><Plus size={14} />群聊</button>
         </header>
 
-        <div className="flex items-center gap-1 px-4 py-2 border-b border-white/[0.03] bg-[#0d0d14]/40">
+        <div className="flex items-center gap-1 px-4 py-2 border-b border-cyber-green/[0.06] bg-[#0d0d14]/50 backdrop-blur-md">
           <button onClick={() => { setActiveTab('chat'); setSearchQuery(''); }} className={`text-xs px-4 py-1.5 rounded-full border transition-all ${activeTab === 'chat' ? 'border-cyber-green/30 bg-cyber-green/10 text-cyber-green' : 'border-transparent text-cyber-green/30 hover:text-cyber-green/50'}`}>对话</button>
           <button onClick={() => { setActiveTab('contacts'); setSearchQuery(''); }} className={`text-xs px-4 py-1.5 rounded-full border transition-all ${activeTab === 'contacts' ? 'border-cyber-green/30 bg-cyber-green/10 text-cyber-green' : 'border-transparent text-cyber-green/30 hover:text-cyber-green/50'}`}>联系人</button>
         </div>
@@ -1060,7 +1021,7 @@ export default function ChatRoom() {
               );
             }
             return (
-              <div className="divide-y divide-white/[0.03]">
+              <div className="p-3 space-y-2">
                 {chatItems.filter(item => {
                   if (!searchQuery) return true;
                   const name = item.type === 'single' ? item.name : item.group_name || '';
@@ -1096,10 +1057,10 @@ export default function ChatRoom() {
                           const hist = await multiDialogue.getHistory(item.session_id);
                           if (hist?.messages) setMessages(sortMessagesChronologically(hist.messages.map(msg => normalizeGroupMessage(msg, [...loadedParticipants, ...allChars]))));
                         } catch {}
-                      }} className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-all cursor-pointer group relative">
+                      }} className="memoria-glass memoria-card-hover animate-fade-up flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer group relative overflow-hidden" style={{ animationDelay: `${Math.min(i, 12) * 24}ms` }}>
                         <div className="flex -space-x-2 shrink-0">
                           {groupParts.slice(0, 3).map((p, j) => (
-                            <div key={p.character_id || j} className="w-10 h-10 rounded-full overflow-hidden border-2 border-[#0d0d14] bg-[#0b0b0c] ring-1 ring-cyber-green/10">
+                            <div key={p.character_id || j} className="memoria-avatar-ring w-10 h-10 rounded-full overflow-hidden border-2 border-[#0d0d14] bg-[#0b0b0c] ring-1 ring-cyber-green/10 transition-transform duration-200 group-hover:-translate-y-0.5">
                               {p.avatar_url ? (
                                 <img src={p.avatar_url} alt="" className="w-full h-full object-cover" />
                               ) : (
@@ -1109,27 +1070,27 @@ export default function ChatRoom() {
                           ))}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5"><span className="text-sm text-zinc-300 font-medium truncate">{item.group_name || '群聊'}</span></div>
+                          <div className="flex items-center gap-1.5"><span className="font-character text-lg leading-none text-zinc-200 truncate">{item.group_name || '群聊'}</span></div>
                           <div className="text-[11px] text-cyber-green/20 truncate mt-0.5">{item.last_message || '暂无消息'}</div>
                         </div>
                         <div className="flex flex-col items-end gap-1 shrink-0"><span className="text-[11px] text-cyber-green/15">{timeStr}</span></div>
-                        <div className="absolute inset-0 bg-cyber-green/[0.02] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none rounded" />
+                        <div className="absolute left-0 top-3 bottom-3 w-px bg-cyber-green/0 group-hover:bg-cyber-green/35 transition-colors pointer-events-none" />
                       </div>
                     );
                   }
                   return (
-                    <div key={item.session_id || i} onClick={() => enterSingleChat(item)} className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.02] transition-all cursor-pointer group relative">
-                      <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-slate-700/30 bg-[#0b0b0c] shrink-0 group-hover:border-cyber-green/40 transition-colors">
+                    <div key={item.session_id || i} onClick={() => enterSingleChat(item)} className="memoria-glass memoria-card-hover animate-fade-up flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer group relative overflow-hidden" style={{ animationDelay: `${Math.min(i, 12) * 24}ms` }}>
+                      <div className="memoria-avatar-ring w-10 h-10 rounded-full overflow-hidden border-2 border-slate-700/30 bg-[#0b0b0c] shrink-0 group-hover:border-cyber-green/45 transition-all group-hover:scale-105">
                         {item.avatar_url ? <img src={item.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-sm font-bold">{item.name?.charAt(0)}</div>}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5"><span className="text-sm text-zinc-300 font-medium truncate">{item.name}</span></div>
+                        <div className="flex items-center gap-1.5"><span className="font-character text-lg leading-none text-zinc-200 truncate">{item.name}</span></div>
                         <div className="text-[11px] text-cyber-green/20 truncate mt-0.5">{item.last_message || '暂无消息'}</div>
                       </div>
                       <div className="flex flex-col items-end gap-1 shrink-0">
                         <span className="text-[11px] text-cyber-green/15">{timeStr}</span>
                       </div>
-                      <div className="absolute inset-0 bg-cyber-green/[0.02] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none rounded" />
+                      <div className="absolute left-0 top-3 bottom-3 w-px bg-cyber-green/0 group-hover:bg-cyber-green/35 transition-colors pointer-events-none" />
                     </div>
                   );
                 })}
@@ -1138,13 +1099,13 @@ export default function ChatRoom() {
           })())}
           {activeTab === 'contacts' && (
             <div className="p-3 space-y-0.5">
-              {allChars.filter(c => c.is_active).map(char => (
-                <div key={char.character_id} onClick={() => enterSingleChat(char)} className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/[0.02] transition-all cursor-pointer group">
-                  <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-slate-700/30 bg-[#0b0b0c] shrink-0 group-hover:border-cyber-green/40 transition-colors">
+              {allChars.filter(c => c.is_active).map((char, i) => (
+                <div key={char.character_id} onClick={() => enterSingleChat(char)} className="memoria-glass memoria-card-hover animate-fade-up flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer group" style={{ animationDelay: `${Math.min(i, 12) * 22}ms` }}>
+                  <div className="memoria-avatar-ring w-10 h-10 rounded-full overflow-hidden border-2 border-slate-700/30 bg-[#0b0b0c] shrink-0 group-hover:border-cyber-green/40 transition-all group-hover:scale-105">
                     {char.avatar_url ? <img src={char.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-sm font-bold">{char.name?.charAt(0)}</div>}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm text-zinc-300">{char.name}</div>
+                    <div className="font-character text-lg leading-none text-zinc-200 truncate">{char.name}</div>
                     {char.core_identity && <div className="text-[11px] text-cyber-green/20 truncate mt-0.5">{char.core_identity}</div>}
                   </div>
                   <ChevronRight size={14} className="text-cyber-green/15 shrink-0" />
@@ -1153,10 +1114,10 @@ export default function ChatRoom() {
               {allChars.filter(c => !c.is_active).length > 0 && (
                 <div className="pt-3 mt-2 border-t border-white/[0.03]">
                   <div className="text-[10px] text-cyber-green/12 uppercase px-2 mb-1">已禁用</div>
-                  {allChars.filter(c => !c.is_active).map(char => (
-                    <div key={char.character_id} onClick={() => enterSingleChat(char)} className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/[0.02] transition-all cursor-pointer group opacity-50">
+                  {allChars.filter(c => !c.is_active).map((char, i) => (
+                    <div key={char.character_id} onClick={() => enterSingleChat(char)} className="memoria-card-hover animate-fade-up flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/[0.02] transition-all cursor-pointer group opacity-50" style={{ animationDelay: `${Math.min(i, 8) * 22}ms` }}>
                       <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-slate-700/30 bg-[#0b0b0c] shrink-0">{char.avatar_url ? <img src={char.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/10 text-sm font-bold">{char.name?.charAt(0)}</div>}</div>
-                      <div className="flex-1 min-w-0"><div className="text-sm text-zinc-500">{char.name}</div></div>
+                      <div className="flex-1 min-w-0"><div className="font-character text-lg leading-none text-zinc-500 truncate">{char.name}</div></div>
                     </div>
                   ))}
                 </div>
@@ -1176,9 +1137,9 @@ export default function ChatRoom() {
 
     return (
 
-      <div className="min-h-screen bg-[#0b0b0c] flex flex-col font-mono">
+      <div className="min-h-screen memoria-page flex flex-col font-mono">
 
-        <header className="flex items-center gap-4 px-6 py-3 border-b border-white/5 bg-[#0d0d14]/80 backdrop-blur-md shrink-0">
+        <header className="memoria-glass flex items-center gap-4 px-6 py-3 border-x-0 border-t-0 shrink-0">
 
           <button onClick={goToList} className="text-cyber-green/30 hover:text-cyber-green/50 p-1"><ArrowLeft size={18} /></button>
 
@@ -1200,7 +1161,7 @@ export default function ChatRoom() {
 
           {/* Group name */}
 
-          <div>
+          <div className="memoria-glass rounded-xl p-4">
 
             <label htmlFor="group-name" className="text-[12px] text-cyber-green/40 uppercase tracking-wider mb-2 block">群聊名称</label>
 
@@ -1211,26 +1172,26 @@ export default function ChatRoom() {
               onChange={e => setGroupName(e.target.value)}
               maxLength={40}
               placeholder="输入唯一群名"
-              className="w-full bg-[#0d0d14] border border-white/10 rounded-lg px-3 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/12 focus:outline-none focus:border-cyber-green/30 transition-colors"
+              className="w-full bg-[#0b0b0c]/70 border border-cyber-green/10 rounded-lg px-3 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/12 focus:outline-none focus:border-cyber-green/35 focus:ring-2 focus:ring-cyber-green/10 transition-all"
             />
 
           </div>
 
           {/* Character selection */}
 
-          <div>
+          <div className="memoria-glass rounded-xl p-4">
 
             <label className="text-[12px] text-cyber-green/40 uppercase tracking-wider mb-2 block">选择角色 ({participants.length}/5)</label>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
 
-              {allChars.filter(c=>c.is_active).map(char=>{
+              {allChars.filter(c=>c.is_active).map((char, i)=>{
 
                 const sel = participants.find(p=>p.character_id===char.character_id);
 
                 return (
 
-                  <div key={char.character_id} onClick={()=>toggleParticipant(char)} className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${sel ? 'border-cyber-green/40 bg-cyber-green/5' : 'border-white/5 bg-[#0d0d14] hover:border-cyber-green/15'}`}>
+                  <div key={char.character_id} onClick={()=>toggleParticipant(char)} className={`memoria-card-hover animate-fade-up flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${sel ? 'border-cyber-green/40 bg-cyber-green/5 shadow-[0_0_22px_rgba(167,239,158,0.08)]' : 'border-white/5 bg-[#0d0d14]/80 hover:border-cyber-green/20'}`} style={{ animationDelay: `${Math.min(i, 12) * 20}ms` }}>
 
                     <div className="w-8 h-8 rounded-full overflow-hidden border border-white/10 bg-[#0d0d14] shrink-0">
 
@@ -1238,7 +1199,7 @@ export default function ChatRoom() {
 
                     </div>
 
-                    <span className="text-xs text-cyber-green/60 truncate flex-1">{char.name}</span>
+                    <span className="font-character text-base leading-none text-cyber-green/70 truncate flex-1">{char.name}</span>
 
                     {sel && <div className="text-cyber-green/40"><X size={13} /></div>}
 
@@ -1252,7 +1213,7 @@ export default function ChatRoom() {
 
           </div>
 
-          {participants.length>0 && <div className="flex flex-wrap gap-1.5">{participants.map(p=><div key={p.character_id} className="flex items-center gap-1 text-[12px] bg-cyber-green/5 border border-cyber-green/15 rounded-full px-2 py-0.5 text-cyber-green/50">{p.name}<button onClick={()=>toggleParticipant(p)} className="text-cyber-green/20 hover:text-red-400 ml-0.5"><X size={10}/></button></div>)}</div>}
+          {participants.length>0 && <div className="flex flex-wrap gap-1.5">{participants.map(p=><div key={p.character_id} className="flex items-center gap-1 text-[12px] bg-cyber-green/5 border border-cyber-green/15 rounded-full px-2 py-0.5 text-cyber-green/50"><span className="font-character text-sm leading-none">{p.name}</span><button onClick={()=>toggleParticipant(p)} className="text-cyber-green/20 hover:text-red-400 ml-0.5"><X size={10}/></button></div>)}</div>}
 
           <button onClick={startGroupChat} disabled={participants.length<2 || !groupName.trim()} className="w-full py-2.5 bg-cyber-green/10 hover:bg-cyber-green/20 border border-cyber-green/20 rounded-lg text-sm font-bold text-cyber-green disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"><Users size={16} />开始群聊 ({participants.length}人)</button>
 
@@ -1312,13 +1273,14 @@ export default function ChatRoom() {
     const moodBubble = MOOD_BUBBLE[mood] || MOOD_BUBBLE.neutral;
     const affinityPct = Math.round((affinity + 100) / 2);
     const affinityColor = affinity > 30 ? 'text-red-400' : affinity < -30 ? 'text-blue-400' : 'text-cyber-green/40';
-    const trustStars = Math.min(5, Math.max(0, Math.round(trust / 20)));
+    const trustValue = Math.min(100, Math.max(0, Math.round(Number(trust) || 0)));
+    const trustStars = Math.min(5, Math.max(0, Math.round(trustValue / 20)));
 
     return (
-      <div className="h-dvh max-h-dvh bg-[#0b0b0c] font-mono flex flex-col overflow-hidden">
+      <div className="h-dvh max-h-dvh memoria-page font-mono flex flex-col overflow-hidden">
 
         {/* ═══ Top bar: 融合型 — 返回+名字+状态徽章 ═══ */}
-        <header className="flex items-center gap-2 px-3 py-2 border-b border-white/5 bg-[#0d0d14]/80 backdrop-blur-md shrink-0">
+        <header className="memoria-glass flex items-center gap-2 px-3 py-2 border-x-0 border-t-0 shrink-0">
           <button onClick={goToList} className="text-cyber-green/30 hover:text-cyber-green/50 p-1 shrink-0">
             <ArrowLeft size={18} />
           </button>
@@ -1326,7 +1288,7 @@ export default function ChatRoom() {
           {/* 角色头像小圆圈 — 点击展开详情 */}
           <div
             onClick={() => setShowDetail(!showDetail)}
-            className={`w-8 h-8 rounded-full overflow-hidden border-2 shrink-0 cursor-pointer ${moodBorder} ${moodGlow} transition-all duration-500`}
+            className={`memoria-avatar-ring w-8 h-8 rounded-full overflow-hidden border-2 shrink-0 cursor-pointer ${moodBorder} ${moodGlow} transition-all duration-500 hover:scale-105`}
           >
             {character?.avatar_url
               ? <img src={character.avatar_url} alt="" className="w-full h-full object-cover" />
@@ -1336,7 +1298,7 @@ export default function ChatRoom() {
           {/* 角色名 + 状态徽章行 — 点击展开详情 */}
           <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setShowDetail(!showDetail)}>
             <div className="flex items-center gap-2">
-              <h1 className="text-xs font-bold text-zinc-300 truncate">{character?.name}</h1>
+              <h1 className="font-character text-lg leading-none text-zinc-200 truncate">{character?.name}</h1>
               {sending && <span className="w-1.5 h-1.5 rounded-full bg-cyber-green/50 animate-pulse shrink-0" />}
             </div>
             {/* 第二行：好感度 | 情绪 | 信任星级 */}
@@ -1370,7 +1332,7 @@ export default function ChatRoom() {
 
         {/* ═══ 状态详情下拉面板 ═══ */}
         {showDetail && (
-          <div className="bg-[#0d0d14]/95 border-b border-white/5 backdrop-blur-md px-4 py-3 space-y-3 shrink-0">
+          <div className="memoria-glass animate-fade-up border-x-0 border-t-0 px-4 py-3 space-y-3 shrink-0">
             {/* 头像+名字+简介 */}
             <div className="flex items-center gap-3">
               <div className={`w-14 h-14 rounded-full overflow-hidden border-2 ${moodBorder} ${moodGlow}`}>
@@ -1379,7 +1341,7 @@ export default function ChatRoom() {
                   : <div className="w-full h-full flex items-center justify-center text-cyber-green/20"><User size={24} /></div>}
               </div>
               <div className="flex-1">
-                <h2 className="text-sm font-bold text-zinc-200">{character?.name}</h2>
+                <h2 className="font-character text-xl leading-none text-zinc-100">{character?.name}</h2>
                 {character?.identity?.core_identity_summary && (
                   <p className="text-[12px] text-zinc-500">{character.identity.core_identity_summary}</p>
                 )}
@@ -1405,9 +1367,9 @@ export default function ChatRoom() {
                 </div>
               </div>
               <div>
-                <div className="flex justify-between text-[12px] mb-0.5"><span className="text-cyber-green/40">信任度</span><span className="text-amber-400/60">{trust}</span></div>
+                <div className="flex justify-between text-[12px] mb-0.5"><span className="text-cyber-green/40">信任度</span><span className="text-amber-400/60">{trustValue}</span></div>
                 <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-amber-400/30 to-amber-400/60 rounded-full transition-all duration-700" style={{ width: `${trust}%` }} />
+                  <div className="h-full bg-gradient-to-r from-amber-400/30 to-amber-400/60 rounded-full transition-all duration-700" style={{ width: `${trustValue}%` }} />
                 </div>
               </div>
             </div>
@@ -1438,7 +1400,7 @@ export default function ChatRoom() {
             const isUser = msg.role === 'user';
             const charInfo = msg.charId ? getCharById(msg.charId) : null;
             return (
-              <div key={msg.message_id || i} className={`flex gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
+              <div key={msg.message_id || i} className={`animate-fade-up flex gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
                 {/* 头像 */}
                 <div className={`w-8 h-8 rounded-full overflow-hidden border-2 shrink-0 mt-0.5 ${
                   isUser ? 'border-cyber-green/10 bg-cyber-green/[0.03]' : moodBorder
@@ -1461,7 +1423,7 @@ export default function ChatRoom() {
                   {/* 角色名 + action 标签 */}
                   {!isUser && (
                     <div className="flex items-center gap-1.5 mb-0.5 ml-1">
-                      <span className="text-[12px] text-zinc-500">{msg.charName || character?.name}</span>
+                      <span className="font-character text-sm leading-none text-zinc-400">{msg.charName || character?.name}</span>
                       {msg.action && (
                         <span className="text-[12px] px-1.5 py-px rounded border border-cyber-green/10 text-cyber-green/25 bg-cyber-green/[0.02]">
                           {msg.action}
@@ -1471,7 +1433,7 @@ export default function ChatRoom() {
                   )}
 
                   {/* 气泡 — 角色消息用情绪颜色 */}
-                  <div className={`px-3 py-2 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words border backdrop-blur-sm ${
+                  <div className={`memoria-card-hover px-3 py-2 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words border backdrop-blur-sm ${
                     isUser
                       ? 'bg-cyber-green/10 border-cyber-green/15 rounded-br-sm text-cyber-green/85'
                       : `${moodBubble} border rounded-bl-sm`
@@ -1515,70 +1477,9 @@ export default function ChatRoom() {
           <div ref={bottomRef} />
         </div>
 
-        {/* ═══ 话题提示面板 ═══ */}
-        {showTopics && (
-          <div className="px-4 py-2 border-t border-white/5 bg-[#0d0d14]/80 backdrop-blur-md shrink-0">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[12px] text-cyber-green/30">💡 话题建议</span>
-              <button onClick={() => setShowTopics(false)} className="text-cyber-green/20 hover:text-cyber-green/40"><X size={14} /></button>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {topicHints.map((hint, i) => (
-                <button key={i} onClick={() => { setInput(hint); setShowTopics(false); inputRef.current?.focus(); }}
-                  className="text-[12px] px-2.5 py-1 rounded-full bg-cyber-green/[0.04] border border-cyber-green/10 text-cyber-green/40 hover:bg-cyber-green/[0.08] hover:text-cyber-green/60 transition-colors">
-                  {hint}
-                </button>
-              ))}
-              {topicHints.length === 0 && (
-                <p className="text-[12px] text-cyber-green/15">基于角色背景生成中...</p>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ═══ 记忆面板 ═══ */}
-        {showMemory && (
-          <div className="px-4 py-2 border-t border-white/5 bg-[#0d0d14]/80 backdrop-blur-md shrink-0 max-h-32 overflow-y-auto">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[12px] text-purple-400/40">📋 {character?.name}记得...</span>
-              <button onClick={() => setShowMemory(false)} className="text-cyber-green/20 hover:text-cyber-green/40"><X size={14} /></button>
-            </div>
-            <div className="space-y-1">
-              {memoryFacts.length === 0 ? (
-                <p className="text-[12px] text-cyber-green/15">暂无记忆（需要几轮对话后才有记录）</p>
-              ) : (
-                memoryFacts.slice(0, 5).map((f, i) => (
-                  <div key={i} className="text-[12px] text-purple-300/30 pl-2 border-l border-purple-500/10">
-                    {typeof f === 'string' ? f : f.fact_text || f.content || JSON.stringify(f)}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
-
         {/* ═══ 底部输入栏 — 功能型 ═══ */}
         <div className="px-3 py-2 border-t border-white/5 bg-[#0d0d14]/60 backdrop-blur-md shrink-0">
           <div className="flex items-end gap-1.5">
-            {/* 工具按钮组 */}
-            <div className="flex gap-0.5 shrink-0 pb-0.5">
-              <button onClick={loadTopicHints}
-                className={`p-2 rounded-lg transition-colors ${showTopics ? 'bg-cyber-green/10 text-cyber-green' : 'text-cyber-green/20 hover:text-cyber-green/40 hover:bg-white/[0.02]'}`}
-                title="话题提示">
-                <Search size={15} />
-              </button>
-              <button onClick={loadMemoryFacts}
-                className={`p-2 rounded-lg transition-colors ${showMemory ? 'bg-purple-500/10 text-purple-400' : 'text-cyber-green/20 hover:text-cyber-green/40 hover:bg-white/[0.02]'}`}
-                title="角色记忆">
-                <MessageSquare size={15} />
-              </button>
-              <button onClick={cycleTone}
-                className={`p-2 rounded-lg transition-colors ${tone !== 'default' ? 'bg-amber-500/10 text-amber-400' : 'text-cyber-green/20 hover:text-cyber-green/40 hover:bg-white/[0.02]'}`}
-                title={`语气: ${TONE_LABELS[tone]}`}>
-                <Radio size={15} />
-              </button>
-            </div>
-
             {/* 输入框 */}
             <textarea
               ref={inputRef}
@@ -1586,7 +1487,7 @@ export default function ChatRoom() {
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               rows={1}
-              placeholder={tone !== 'default' ? `[${TONE_LABELS[tone]}] 输入消息...` : '输入消息...'}
+              placeholder="输入消息..."
               disabled={sending || sendingMulti}
               className="flex-1 bg-[#0b0b0c] border border-white/10 rounded-xl px-3 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/10 resize-none focus:outline-none focus:border-cyber-green/30 transition-colors disabled:opacity-40 min-h-[36px] max-h-[100px]"
             />
@@ -1600,9 +1501,6 @@ export default function ChatRoom() {
               <Send size={16} />
             </button>
           </div>
-          {tone !== 'default' && (
-            <div className="text-[12px] text-amber-400/30 mt-1 text-center">当前语气: {TONE_LABELS[tone]}</div>
-          )}
         </div>
       </div>
     );
@@ -1612,11 +1510,11 @@ export default function ChatRoom() {
 
     return (
 
-      <div className="h-dvh max-h-dvh bg-[#0b0b0c] font-mono flex flex-col overflow-hidden">
+      <div className="h-dvh max-h-dvh memoria-page font-mono flex flex-col overflow-hidden">
 
         {/* Top bar */}
 
-        <header className="flex items-center gap-3 px-4 py-2.5 border-b border-white/5 bg-[#0d0d14]/80 backdrop-blur-md shrink-0">
+        <header className="memoria-glass flex items-center gap-3 px-4 py-2.5 border-x-0 border-t-0 shrink-0">
 
           <button onClick={goToList} className="text-cyber-green/30 hover:text-cyber-green/50 p-1"><ArrowLeft size={18} /></button>
 
@@ -1624,7 +1522,7 @@ export default function ChatRoom() {
 
             {participants.slice(0,3).map(p => (
 
-              <div key={p.character_id} className="w-9 h-9 rounded-full overflow-hidden border-2 border-[#0d0d14] bg-[#0b0b0c]">
+              <div key={p.character_id} className="memoria-avatar-ring w-9 h-9 rounded-full overflow-hidden border-2 border-[#0d0d14] bg-[#0b0b0c] transition-transform duration-200 hover:-translate-y-0.5">
 
                 {p.avatar_url ? <img src={p.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-[12px] font-bold">{p.name?.charAt(0)}</div>}
 
@@ -1636,7 +1534,7 @@ export default function ChatRoom() {
 
           <div className="flex-1 min-w-0">
 
-            <h1 className="text-xs font-bold text-zinc-300 truncate">{groupName || '群聊'} · {participants.length}人</h1>
+            <h1 className="font-character text-lg leading-none text-zinc-200 truncate">{groupName || '群聊'} · {participants.length}人</h1>
 
             <div className="flex items-center gap-1.5 text-[13px] text-cyber-green/30">
 
@@ -1658,15 +1556,15 @@ export default function ChatRoom() {
 
           {/* Left: Member Panel */}
 
-          <aside className="hidden lg:flex w-[280px] min-h-0 flex-col border-r border-white/5 bg-[#0d0d14]/60 backdrop-blur-md overflow-y-auto shrink-0">
+          <aside className="hidden lg:flex w-[280px] min-h-0 flex-col border-r border-cyber-green/10 bg-[#0d0d14]/60 backdrop-blur-md overflow-y-auto shrink-0">
 
             <div className="p-4 space-y-3">
 
               <h3 className="text-[13px] text-cyber-green/30 uppercase tracking-[0.2em] flex items-center gap-1.5"><Users size={10} />群成员 ({participants.length})</h3>
 
-              {participants.map(p => (
+              {participants.map((p, i) => (
 
-                <div key={p.character_id} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-white/[0.02] transition-colors">
+                <div key={p.character_id} className="memoria-card-hover animate-fade-up flex items-center gap-2.5 p-2 rounded-lg hover:bg-white/[0.03] transition-colors" style={{ animationDelay: `${Math.min(i, 10) * 24}ms` }}>
 
                   <div className="w-9 h-9 rounded-full overflow-hidden border-2 border-white/10 shrink-0">
 
@@ -1676,7 +1574,7 @@ export default function ChatRoom() {
 
                   <div className="flex-1 min-w-0">
 
-                    <div className="text-[13px] text-zinc-300 truncate">{p.name}</div>
+                    <div className="font-character text-base leading-none text-zinc-200 truncate">{p.name}</div>
 
                     <div className="flex items-center gap-1 text-[13px] text-cyber-green/20">
 
@@ -1800,7 +1698,7 @@ export default function ChatRoom() {
 
             return (
 
-              <div key={i} className={`flex gap-2.5 ${isUser ? 'flex-row-reverse' : ''}`}>
+              <div key={i} className={`animate-fade-up flex gap-2.5 ${isUser ? 'flex-row-reverse' : ''}`}>
 
                 <div className={`w-10 h-10 rounded-full overflow-hidden border-2 shrink-0 mt-0.5 ${isUser ? 'border-cyber-green/10 bg-cyber-green/[0.03] flex items-center justify-center' : 'border-purple-500/15'}`}>
 
@@ -1840,7 +1738,7 @@ export default function ChatRoom() {
 
                   {!isUser && (msg.charName || mode==='single') && (
 
-                    <div className="text-[13px] text-cyber-green/20 mb-0.5 ml-1">
+                    <div className="font-character text-sm leading-none text-cyber-green/35 mb-1 ml-1">
 
                       {mode==='single' ? character?.name : msg.charName}
 
@@ -1848,7 +1746,7 @@ export default function ChatRoom() {
 
                   )}
 
-                  <div className={`px-3 py-2 rounded-xl text-sm leading-relaxed whitespace-pre-wrap break-words backdrop-blur-sm ${
+                  <div className={`memoria-card-hover px-3 py-2 rounded-xl text-sm leading-relaxed whitespace-pre-wrap break-words backdrop-blur-sm ${
 
                     isUser
 
@@ -1940,11 +1838,11 @@ export default function ChatRoom() {
 
         {mode === 'group' && (
 
-          <div className="px-4 py-1.5 flex items-center gap-1.5 border-t border-white/[0.03] overflow-x-auto shrink-0">
+          <div className="px-4 py-1.5 flex items-center gap-2 border-t border-white/[0.03] bg-[#0d0d14]/35 overflow-x-auto shrink-0">
 
-            {participants.map(p => (
+            {participants.map((p, i) => (
 
-              <div key={p.character_id} className="flex flex-col items-center gap-0.5 shrink-0" title={p.name}>
+              <div key={p.character_id} className="animate-fade-up flex flex-col items-center gap-0.5 shrink-0" style={{ animationDelay: `${Math.min(i, 12) * 18}ms` }} title={p.name}>
 
                 <div className="w-7 h-7 rounded-full overflow-hidden border border-white/5 bg-[#0d0d14]">
 
@@ -1952,7 +1850,7 @@ export default function ChatRoom() {
 
                 </div>
 
-                <span className="text-[12px] text-cyber-green/15 truncate max-w-[40px]">{p.name}</span>
+                <span className="font-character text-sm leading-none text-cyber-green/25 truncate max-w-[52px]">{p.name}</span>
 
               </div>
 

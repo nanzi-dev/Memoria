@@ -104,6 +104,7 @@ def start_session(character_id: str, player_id: str, player_name: str) -> dict:
         "opening_line": dialogue,
         "action": result.get("action", card.action_vocabulary.default_action),
         "current_affinity": runtime_state.get("affection_level", 0),
+        "current_trust": runtime_state.get("trust_level", 0),
         "assistant_message_id": assistant_msg_id,
     }
     
@@ -360,6 +361,7 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
         "action": action,
         "affinity_delta": affinity_delta,
         "current_affinity": new_affinity,
+        "current_trust": new_trust,
         "current_mood": mood_after,
         "triggered_events": triggered_events_info,
         "event_notification": event_notification,

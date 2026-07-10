@@ -49,6 +49,7 @@ class SessionStartResponse(BaseModel):
     opening_line: str
     action: str
     current_affinity: int
+    current_trust: int
     assistant_message_id: int | None = None
     recovered: bool = False
     messages: list[HistoryMessage] = []
@@ -59,6 +60,7 @@ class DialogueTurnResponse(BaseModel):
     action: str
     affinity_delta: int
     current_affinity: int
+    current_trust: int
     current_mood: str
     triggered_events: list[dict] = []
     event_notification: str | None = None
@@ -111,6 +113,7 @@ class HistoryResponse(BaseModel):
     messages: list[HistoryMessage]
     has_more: bool
     current_affinity: int
+    current_trust: int
     current_mood: str
     
 
@@ -147,17 +150,19 @@ def _messages_for_session(session_id: str, limit: int = 100) -> list[HistoryMess
     return [HistoryMessage(**m) for m in messages]
 
 
-def _current_character_state(character_id: str, player_id: str) -> tuple[int, str]:
+def _current_character_state(character_id: str, player_id: str) -> tuple[int, int, str]:
     current_affinity = 0
+    current_trust = 0
     current_mood = "neutral"
     try:
         card = character_loader.load_character_card(character_id)
         runtime_state = repository.get_runtime_state(character_id, player_id, card)
         current_affinity = runtime_state.get("affection_level", 0)
+        current_trust = runtime_state.get("trust_level", 0)
         current_mood = runtime_state.get("current_mood", "neutral")
     except Exception:
         pass
-    return current_affinity, current_mood
+    return current_affinity, current_trust, current_mood
 
 
 def _start_empty_session(character_id: str, player_id: str, player_name: str) -> SessionStartResponse:
@@ -171,6 +176,7 @@ def _start_empty_session(character_id: str, player_id: str, player_name: str) ->
         opening_line="",
         action="",
         current_affinity=runtime_state.get("affection_level", 0),
+        current_trust=runtime_state.get("trust_level", 0),
         assistant_message_id=None,
         recovered=False,
         messages=[],
@@ -325,12 +331,13 @@ def session_start(
         _close_idle_sessions(req.player_id, background_tasks)
         active_session = repository.get_latest_active_session(req.player_id, req.character_id)
         if active_session:
-            current_affinity, _ = _current_character_state(req.character_id, req.player_id)
+            current_affinity, current_trust, _ = _current_character_state(req.character_id, req.player_id)
             return SessionStartResponse(
                 session_id=active_session["session_id"],
                 opening_line="",
                 action="",
                 current_affinity=current_affinity,
+                current_trust=current_trust,
                 assistant_message_id=None,
                 recovered=True,
                 messages=_messages_for_session(active_session["session_id"]),
@@ -442,7 +449,7 @@ def get_history(
     )
 
     # 尝试加载角色卡片（可能不存在于磁盘）
-    current_affinity, current_mood = _current_character_state(character_id, player_id)
+    current_affinity, current_trust, current_mood = _current_character_state(character_id, player_id)
 
     return HistoryResponse(
         messages=[
@@ -456,6 +463,7 @@ def get_history(
         ],
         has_more=has_more,
         current_affinity=current_affinity,
+        current_trust=current_trust,
         current_mood=current_mood,
     )
 
