@@ -4,7 +4,7 @@
 提供多角色群聊功能的 RESTful 接口
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Optional
 import logging
@@ -94,6 +94,12 @@ class AddParticipantRequest(BaseModel):
     speak_frequency: float = Field(1.0, ge=0.0, le=2.0)
 
 
+class RemoveParticipantRequest(BaseModel):
+    """移除参与者请求"""
+    session_id: str
+    character_id: str
+
+
 class UpdateParticipantRequest(BaseModel):
     """更新参与者配置请求"""
     session_id: str
@@ -109,6 +115,11 @@ class TriggerInteractionRequest(BaseModel):
         None,
         description="触发角色ID，留空则自动选择"
     )
+
+
+class EndMultiSessionRequest(BaseModel):
+    """结束多角色会话请求"""
+    session_id: str
 
 
 class SessionParticipant(BaseModel):
@@ -438,7 +449,11 @@ async def add_participant(request: AddParticipantRequest):
 
 
 @router.post("/participant/remove")
-async def remove_participant(session_id: str, character_id: str):
+async def remove_participant(
+    request: RemoveParticipantRequest | None = Body(None),
+    session_id: str | None = Query(None),
+    character_id: str | None = Query(None),
+):
     """
     从会话移除参与者
     
@@ -448,6 +463,11 @@ async def remove_participant(session_id: str, character_id: str):
     - **character_id**: 要移除的角色ID
     """
     try:
+        if request is not None:
+            session_id = request.session_id
+            character_id = request.character_id
+        if not session_id or not character_id:
+            raise HTTPException(status_code=422, detail="session_id 和 character_id 为必填项")
         logger.info(f"移除参与者: session={session_id}, character={character_id}")
         
         # 验证会话
@@ -488,7 +508,7 @@ async def remove_participant(session_id: str, character_id: str):
         raise HTTPException(status_code=500, detail="服务器内部错误")
 
 
-@router.put("/participant/update")
+@router.api_route("/participant/update", methods=["POST", "PUT"])
 async def update_participant(request: UpdateParticipantRequest):
     """
     更新参与者配置
@@ -556,7 +576,10 @@ async def update_participant(request: UpdateParticipantRequest):
 
 
 @router.post("/session/end")
-async def end_multi_session(session_id: str):
+async def end_multi_session(
+    request: EndMultiSessionRequest | None = Body(None),
+    session_id: str | None = Query(None),
+):
     """
     结束多角色会话
     
@@ -565,6 +588,10 @@ async def end_multi_session(session_id: str):
     - **session_id**: 会话ID
     """
     try:
+        if request is not None:
+            session_id = request.session_id
+        if not session_id:
+            raise HTTPException(status_code=422, detail="session_id 为必填项")
         logger.info(f"结束多角色会话: session={session_id}")
         
         # 验证会话

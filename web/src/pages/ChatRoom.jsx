@@ -364,50 +364,18 @@ export default function ChatRoom() {
 
         const list = await characterAdmin.list(false);
 
-        const enriched = [];
-
-        for (let i = 0; i < list.length; i++) {
-          const c = list[i];
-
-          if (i > 0) await new Promise(r => setTimeout(r, 300));
-
-          try {
-
-            const detail = await characterAdmin.get(c.character_id);
-
-            const cd = detail.card_data || {};
-
-            enriched.push({
-
-              character_id: c.character_id,
-
-              name: cd.meta?.name || cd.identity?.display_name || c.display_name || c.character_id,
-
-              display_name: cd.meta?.display_name || c.character_id,
-
-              avatar_url: detail.avatar_url || cd.avatar_url || null,
-
-              is_active: c.is_active,
-
-              core_identity: cd.identity?.core_identity_summary || '',
-
-              traits: cd.personality?.traits || [],
-
-              gender: cd.identity?.gender || null,
-
-              age: cd.identity?.age || null,
-
-              race: cd.identity?.race || null,
-
-            });
-
-          } catch {
-
-            enriched.push({ character_id: c.character_id, name: c.display_name || c.character_id, avatar_url: null, is_active: c.is_active });
-
-          }
-
-        }
+        const enriched = list.map((c) => ({
+          character_id: c.character_id,
+          name: c.name || c.display_name || c.character_id,
+          display_name: c.display_name || c.name || c.character_id,
+          avatar_url: c.avatar_url || null,
+          is_active: c.is_active,
+          core_identity: '',
+          traits: [],
+          gender: null,
+          age: null,
+          race: null,
+        }));
 
         enriched.sort((a, b) => (b.is_active ? 1 : 0) - (a.is_active ? 1 : 0));
 

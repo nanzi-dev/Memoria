@@ -42,6 +42,7 @@ class CharacterCardListItem(BaseModel):
     name: str | None = None
     display_name: str | None = None
     version: str | None = None
+    avatar_url: str | None = None
     is_active: int = 1
     source: str = "db"
     created_at: str | None = None
@@ -110,17 +111,13 @@ def get_character_detail(character_id: str):
         # 解析 JSON 数据
         card_data = json.loads(db_card["card_data"])
         
-        avatar_url = db_card.get("avatar_url")
-        # 如果是远程 URL，异步下载
-        _process_avatar_async(character_id, avatar_url)
-        
         return CharacterCardDetail(
             character_id=db_card["character_id"],
             card_data=card_data,
             version=db_card.get("version"),
             name=db_card.get("name"),
             display_name=db_card.get("display_name"),
-            avatar_url=avatar_url,
+            avatar_url=db_card.get("avatar_url"),
             is_active=db_card.get("is_active", 1),
             source=db_card.get("source", "db"),
             created_at=db_card.get("created_at"),
@@ -615,4 +612,3 @@ def set_character_avatar_url(character_id: str, req: AvatarUrlRequest):
     except Exception as e:
         logger.error(f"设置头像 URL 失败: {e}")
         raise HTTPException(status_code=500, detail=f"设置头像 URL 失败: {str(e)}")
-

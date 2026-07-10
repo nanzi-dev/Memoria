@@ -1213,7 +1213,7 @@ def list_character_cards_from_db(only_active: bool = True) -> list[dict]:
     """
     with get_conn() as conn:
         query = """
-            SELECT character_id, name, display_name, version, created_at, updated_at, is_active, source
+            SELECT character_id, name, display_name, version, avatar_url, created_at, updated_at, is_active, source
             FROM character_card
         """
         if only_active:

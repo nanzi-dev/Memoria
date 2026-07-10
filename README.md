@@ -20,6 +20,7 @@
     - [事件系统](#事件系统)
     - [沉浸感保护](#沉浸感保护)
     - [多模型支持](#多模型支持)
+    - [Web 前端](#web-前端)
   - [系统架构](#系统架构)
   - [快速开始](#快速开始)
     - [环境要求](#环境要求)
@@ -58,7 +59,7 @@
 - **讨论模式**：角色可以连续发言，每轮最多 3 个角色回应，实现真实的群体讨论
 - **智能发言策略**：5 种策略（轮询、权重、智能、触发、混合）
 - **角色间互动**：角色会相互回应和讨论
-- **多角色记忆**：个人记忆、角色间记忆、群体记忆三层管理
+- **多角色记忆**：个人记忆、角色间记忆、群体记忆三层管理；玩家每轮群聊会把“玩家消息 + 角色回复”摘要为群体事件记忆
 - **动态参与者管理**：支持运行时添加/移除角色
 
 ### 事件系统
@@ -77,6 +78,12 @@
 - **主辅模型分离**：主对话使用高质量模型，记忆萃取使用轻量模型降低成本
 - **JSON 强制输出**：支持结构化输出的模型可获得更好的稳定性
 
+### Web 前端
+- **登录与用户资料**：支持用户注册、登录、资料编辑和头像设置
+- **角色卡编辑器**：分步编辑角色身份、性格、语言风格、背景和交互规则
+- **会话体验**：支持单角色对话、会话恢复、多角色群聊和会话列表
+- **管理视图**：提供事件列表/编辑器和角色关系图谱页面
+
 ---
 
 ## 系统架构
@@ -89,7 +96,8 @@ Memoria/
 │   │   ├── character_admin.py  # 角色卡管理 API
 │   │   ├── event_admin.py      # 事件管理 API
 │   │   ├── multi_dialogue.py   # 多角色对话 API
-│   │   └── relationship.py     # 角色关系 API
+│   │   ├── relationship.py     # 角色关系 API
+│   │   └── user.py             # 用户注册、登录、资料和头像 API
 │   ├── characters/             # 角色卡 JSON 配置文件
 │   │   ├── npc_luo_xiaohei.json
 │   │   ├── npc_wuxian.json
@@ -114,12 +122,15 @@ Memoria/
 │   └── main.py                 # 应用入口
 ├── tests/                      # 测试文件
 │   ├── test_core.py             # 核心模块测试（61 tests）
-│   ├── test_repository.py       # 数据库层测试（17 tests）
+│   ├── test_repository.py       # 数据库层测试（29 tests）
 │   ├── test_events.py           # 事件系统测试（11 tests）
-│   ├── test_orchestrator.py     # 编排器测试（6 tests）
-│   ├── test_api_models.py       # API 模型测试（11 tests）
+│   ├── test_orchestrator.py     # 编排器测试（14 tests）
+│   ├── test_multi_dialogue_api.py # 多角色 API 测试（4 tests）
+│   ├── test_dialogue_api.py     # 单角色 API 测试（1 test）
+│   ├── test_api_models.py       # API 模型测试（19 tests）
 │   ├── test_memory_extractor.py # 记忆/提示测试（22 tests）
 │   ├── test_system.py           # 系统级测试（13 tests）
+│   ├── test_vector_memory.py    # 向量记忆测试（2 tests）
 ├── docs/                       # 项目文档
 │   ├── API.md                  # API 文档
 │   ├── ARCHITECTURE.md         # 系统架构与数据库
@@ -132,7 +143,11 @@ Memoria/
 ├── scripts/                    # 工具脚本
 │   ├── chat.sh                 # CLI 聊天启动脚本
 │   ├── cli_chat.py             # 命令行对话工具
-│   └── run_all_tests.sh        # 测试执行脚本
+│   └── run_tests.sh            # 测试执行脚本
+├── web/                        # React + Vite 前端
+│   ├── src/pages/              # Home、ChatRoom、CharacterEditor、EventList、RelationshipGraph
+│   ├── src/components/         # 通用组件与编辑器步骤组件
+│   └── package.json            # 前端脚本与依赖
 ├── config/                     # 配置文件
 │   ├── .env.example            # 环境变量模板
 │   └── settings.yaml           # 应用配置参考
@@ -148,6 +163,7 @@ Memoria/
 ### 环境要求
 
 - Python 3.10+
+- Node.js 18+（运行 Web 前端时需要）
 - 支持 OpenAI 兼容接口的大模型 API（DeepSeek、Kimi、Qwen 等）
 
 ### 安装步骤
@@ -209,14 +225,23 @@ uvicorn memoria.main:app --reload --host 0.0.0.0 --port 8000
 - API 文档 (ReDoc): http://localhost:8000/redoc
 - CLI 聊天: `python scripts/cli_chat.py`
 
+**7. 启动 Web 前端（可选）**
+```bash
+cd web
+npm install
+npm run dev
+```
+
+默认访问地址为 http://127.0.0.1:5173。
+
 ---
 
 ## 文档导航
 
 | 文档 | 内容 |
 |------|------|
-| [API 文档](docs/API.md) | 完整 REST API 参考（对话/角色卡/事件/关系/多角色/系统管理），含请求/响应示例 |
-| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（12张表）、三层记忆架构、角色卡开发规范 |
+| [API 文档](docs/API.md) | 完整 REST API 参考（对话/角色卡/事件/关系/多角色/用户/系统管理），含请求/响应示例 |
+| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（13张表）、三层记忆架构、角色卡开发规范 |
 | [开发路线图](docs/ROADMAP.md) | 已完成功能和未来规划 |
 | [故障排查](docs/FAQ.md) | 常见问题解决方案、调试技巧、性能优化建议 |
 | [贡献指南](docs/CONTRIBUTING.md) | 如何贡献代码、Commit 规范、代码审查标准 |
@@ -258,14 +283,17 @@ VECTOR_SEARCH_TOP_K=10                         # 向量检索返回数量
 pip install -e ".[dev]"
 
 # 运行所有测试
-PYTHONPATH=src pytest tests/ -v
+bash scripts/run_tests.sh
 
 PYTHONPATH=src pytest tests/test_core.py -v              # 核心模块
-PYTHONPATH=src pytest tests/test_repository.py -v      # 数据库层
-PYTHONPATH=src pytest tests/test_events.py -v           # 事件系统
-PYTHONPATH=src pytest tests/test_memory_extractor.py -v # 记忆/提示
-PYTHONPATH=src pytest tests/test_system.py -v           # 系统级（需启动服务）
+PYTHONPATH=src pytest tests/test_repository.py -v        # 数据库层
+PYTHONPATH=src pytest tests/test_events.py -v            # 事件系统
+PYTHONPATH=src pytest tests/test_memory_extractor.py -v  # 记忆/提示
+PYTHONPATH=src pytest tests/test_multi_dialogue_api.py -v # 多角色 API
+PYTHONPATH=src pytest tests/test_system.py -v            # 系统端点与限流
 ```
+
+当前测试集合为 176 tests（`pytest --collect-only -q tests`）。
 
 ---
 

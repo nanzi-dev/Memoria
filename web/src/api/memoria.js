@@ -319,7 +319,7 @@ export const multiDialogue = {
   },
   /** 结束会话 */
   endSession(sessionId) {
-    return request('/dialogue/session/end', {
+    return request('/multi-dialogue/session/end', {
       method: 'POST',
       body: JSON.stringify({ session_id: sessionId }),
     });

@@ -46,23 +46,11 @@ export default function MultiRoom() {
     (async () => {
       try {
         const list = await characterAdmin.list(false);
-        const enriched = [];
-        for (const c of list) {
-          try {
-            const detail = await characterAdmin.get(c.character_id);
-            enriched.push({
-              character_id: c.character_id,
-              name: detail.card_data?.meta?.name || c.display_name || c.character_id,
-              avatar_url: detail.avatar_url || null,
-            });
-          } catch {
-            enriched.push({
-              character_id: c.character_id,
-              name: c.display_name || c.character_id,
-              avatar_url: null,
-            });
-          }
-        }
+        const enriched = list.map((c) => ({
+          character_id: c.character_id,
+          name: c.name || c.display_name || c.character_id,
+          avatar_url: c.avatar_url || null,
+        }));
         setAllChars(enriched);
       } catch (e) {
         setError(e.message);

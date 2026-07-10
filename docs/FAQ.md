@@ -31,7 +31,7 @@ python -c "from sentence_transformers import SentenceTransformer; SentenceTransf
 
 # 方案 3：使用国内镜像
 export HF_ENDPOINT=https://hf-mirror.com
-uvicorn memoria.main:app --reload
+PYTHONPATH=src uvicorn memoria.main:app --reload
 ```
 
 ---
@@ -170,7 +170,7 @@ sqlite3 data/sqlite_db/memoria.db \
 
 ### Q: 如何调整日志级别
 
-启动时设置环境变量：`LOG_LEVEL=DEBUG uvicorn memoria.main:app`
+启动时设置环境变量：`LOG_LEVEL=DEBUG PYTHONPATH=src uvicorn memoria.main:app`
 
 运行时动态调整：`curl -X POST http://localhost:8000/admin/log-level?level=DEBUG`
 

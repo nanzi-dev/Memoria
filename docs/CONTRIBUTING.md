@@ -55,7 +55,7 @@ def calculate_affinity_change(
 
 ```bash
 pip install -e ".[dev]"
-PYTHONPATH=src pytest tests/ -v
+bash scripts/run_tests.sh
 ```
 
 ### 5. 提交 Pull Request

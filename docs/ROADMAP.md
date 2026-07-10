@@ -40,19 +40,19 @@
 - [x] 角色间互动（主动发言触发 + 对话历史上下文注入）
 - [x] 三层多角色记忆 — long_term_fact（个人）+ shared_memory（角色间）+ group_memory（群体），含 DDL、CRUD、去重
 - [x] 动态参与者管理（添加/移除/更新频率）
+- [x] 玩家轮次群体事件记忆（“玩家消息 + 角色回复”摘要写入 group_memory）
 
 ---
 
 ## 计划中
 
-### 第五阶段 - 质量与稳定性 🔄
+### 第五阶段 - 质量与稳定性 ✅
 
 **目标：** 提升系统健壮性，为生产环境做准备。
 
-**当前进度：** 测试覆盖 61→128；记忆去重、重试、限流、健康检查、懒加载、CI/CD 已上线。
+**当前进度：** 测试集合扩展到 176 tests；记忆去重、重试、限流、健康检查、懒加载、会话恢复和 API 回归测试已上线。
 
-- [x] 单元测试覆盖（当前 106 tests，覆盖 schema/repository/orchestrator/events/API models）
-- [x] 单元测试覆盖持续扩展（当前 128 tests，新增 test_memory_extractor.py: memory_extractor/prompt_builder/llm_client/config/character_loader/dedup_helpers）
+- [x] 单元测试覆盖（当前 176 tests，覆盖 schema/repository/orchestrator/events/API models/API endpoints/vector memory）
 - [ ] 数据库迁移到 PostgreSQL（保留 SQLite 开发模式）
 - [x] LLM 调用重试机制（指数退避 3 次，base_delay=1s，max 7s）
 - [x] 请求速率限制（per-player，60s 窗口 60 次，X-Player-ID 头识别）
@@ -60,24 +60,25 @@
 - [x] 健康检查端点（`/health` 存活 + `/ready` 数据库就绪）
 - [x] 配置文件校验（启动时检查 LLM_API_KEY 等必需项，警告而非崩溃）
 - [x] 内存使用优化（LLM Client 懒加载 + vector_memory 懒加载，首次调用时初始化）
-- [x] CI/CD 流水线（GitHub Actions: Python 3.10/3.11/3.12 自动测试）
+- [ ] CI/CD 流水线（GitHub Actions: Python 3.10/3.11/3.12 自动测试）
 
-### 第六阶段 - Web 前端
+### 第六阶段 - Web 前端 🔄
 
 **目标：** 提供开箱即用的 Web UI，降低使用门槛。
 
-- [ ] 单角色对话界面（角色头像、消息气泡、好感度/情绪指示器、事件通知）
-- [ ] 多角色群聊界面（角色头像、讨论模式切换、参与者管理面板）
+- [x] 单角色对话界面（角色头像、消息气泡、会话列表、会话恢复）
+- [ ] 多角色群聊界面（后端 API 已完成，当前前端路由未挂载 MultiRoom）
 - [x] 角色卡编辑器（分步表单：身份→性格→语言风格→背景→交互规则）
-- [ ] 事件管理面板（可视化触发条件编排 + 效果配置）
-- [ ] 角色关系图谱（D3.js / Cytoscape.js 力导引图）
-- [ ] 响应式设计（桌面端为主，移动端适配）
+- [x] 事件管理面板（事件列表 + 编辑器）
+- [x] 角色关系图谱（D3 力导引图）
+- [x] 用户登录/注册与资料设置（含用户头像）
+- [ ] 响应式设计完善（桌面端为主，移动端继续适配）
 
 ### 第七阶段 - 事件系统深度集成
 
 **目标：** 让事件系统真正影响对话体验，而非孤立的数据模型。
 
-- [ ] 事件与对话编排器集成（对话轮次后自动触发检测 + 执行）
+- [x] 事件与对话编排器集成（对话轮次后自动触发检测 + 执行）
 - [ ] 事件链（一个事件触发另一个事件，支持分支）
 - [ ] 时间驱动事件（定时检查 + cron 式调度）
 - [ ] 事件模板库（预设常见 RPG 事件：好感度里程碑、关键剧情节点）
@@ -123,14 +124,17 @@
 
 | 文件 | 测试数 | 覆盖范围 |
 |------|--------|---------|
-| `tests/test_core.py` | 61 | CharacterSchema(9), EventSchema(9), SpeakingStrategies(12), EventDetector(15), MultiCharMemory(8), EdgeCases(8) |
-| `tests/test_repository.py` | 17 | RuntimeState, Session, Memory CRUD, CharacterCard, EventDef, Relationship, MultiSession, Dedup(4) |
-| `tests/test_orchestrator.py` | 6 | _clip/_safe_float, HistoryFormatting, LoadRelationships, CharInteraction |
+| `tests/test_core.py` | 61 | CharacterSchema(9), EventSchema(9), SpeakingStrategies(12), EventDetector(15), MultiCharMemory(8), EdgeCases(9) |
+| `tests/test_repository.py` | 29 | RuntimeState, Session, Memory CRUD, CharacterCard, EventDef, Relationship, MultiSession, Dedup, MessageId, SummaryStatus, LatestActiveSession, SessionListFields |
+| `tests/test_orchestrator.py` | 14 | _clip/_safe_float, HistoryFormatting, LoadRelationships, CharInteraction, MultiCharacterGroupMemory, SessionLifecycle, DialogueTurn |
 | `tests/test_events.py` | 11 | EventExecutor 全部 8 种效果类型, EventDetector 边界 |
-| `tests/test_api_models.py` | 11 | Dialogue(3), CharacterAdmin(2), EventAdmin(2), Relationship(2), MultiDialogue(2) |
+| `tests/test_api_models.py` | 19 | Dialogue, CharacterAdmin, EventAdmin, Relationship, MultiDialogue, message_id/recovery response models |
 | `tests/test_memory_extractor.py` | 22 | MemoryExtractor, PromptBuilder, Config, LLMClient, CharacterLoader, DedupHelpers |
+| `tests/test_dialogue_api.py` | 1 | 单角色 session start API |
+| `tests/test_multi_dialogue_api.py` | 4 | 多角色参与者 JSON body、POST update、session end、讨论响应包装 |
 | `tests/test_system.py` | 13 | 健康检查, 配置校验, 速率限制, 日志级别, 懒加载 |
-| **合计** | **141** | |
+| `tests/test_vector_memory.py` | 2 | CUDA 失败回退 CPU、禁用嵌入跳过向量操作 |
+| **合计** | **176** | |
 
 ## 版本规划
 
@@ -139,8 +143,8 @@
 | v0.1 | 1-2 | 单角色对话 + 记忆系统 + 记忆去重 | ✅ |
 | v0.2 | 3 | 事件系统 + 角色关系网络 | ✅ |
 | v0.3 | 4 | 多角色对话 + 讨论模式 + shared/group 记忆 | ✅ |
-| **v0.4** | **5** | **质量与稳定性（106 tests + 去重系统）** | 🔄 |
-| v0.5 | 6 | Web 前端 | [ ] |
+| **v0.4** | **5** | **质量与稳定性（176 tests + 去重/恢复/限流）** | ✅ |
+| v0.5 | 6 | Web 前端 | 🔄 |
 | v0.6 | 7 | 事件深度集成 | [ ] |
 | v1.0 | 8-10 | 开发者体验 + 高级特性 + 生态 | [ ] |
 

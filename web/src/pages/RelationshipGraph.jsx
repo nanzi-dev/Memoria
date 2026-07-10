@@ -215,16 +215,11 @@ export default function RelationshipGraph() {
     try {
       setLoading(true); setError(null);
       const charList = await characterAdmin.list(false);
-      const detailMap = {};
-      for (const c of charList) {
-        try { const d = await characterAdmin.get(c.character_id); detailMap[c.character_id] = d.avatar_url || null; }
-        catch { detailMap[c.character_id] = null; }
-      }
       const netData = await relationshipAdmin.network();
       const map = {};
       for (const c of charList) {
         map[c.character_id] = {
-          character_id: c.character_id, avatar_url: detailMap[c.character_id] || null,
+          character_id: c.character_id, avatar_url: c.avatar_url || null,
           name: c.name || c.display_name || c.character_id,
           display_name: c.name || c.display_name || c.character_id,
           is_active: !!c.is_active,

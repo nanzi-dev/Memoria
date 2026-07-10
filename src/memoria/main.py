@@ -146,8 +146,8 @@ async def set_log_level(level: str = "INFO"):
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
     """per-player 速率限制中间件"""
-    # 仅对 API 路由应用限流
-    if request.url.path.startswith("/api/"):
+    # 仅对 API 写操作应用限流；列表、详情、历史等读请求不消耗窗口。
+    if request.url.path.startswith("/api/") and request.method not in {"GET", "HEAD", "OPTIONS"}:
         player_id = request.headers.get("X-Player-ID", request.client.host if request.client else "unknown")
         if not _check_rate_limit(player_id):
             return JSONResponse(

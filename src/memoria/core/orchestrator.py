@@ -327,6 +327,10 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
             except Exception as e:
                 logger.error(f"执行事件失败: {event.event_id}, 错误: {e}")
         
+    except Exception as e:
+        logger.error(f"事件系统处理失败: {e}", exc_info=True)
+
+    try:
         # 更新最终状态
         repository.save_runtime_state(
             character_id,
@@ -345,9 +349,8 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
                 player_id,
                 str(memory_fact).strip()
             )
-
     except Exception as e:
-        logger.error(f"事件系统处理失败: {e}", exc_info=True)
+        logger.error(f"对话持久化失败: {e}", exc_info=True)
         
     # =========================
     # 返回结果

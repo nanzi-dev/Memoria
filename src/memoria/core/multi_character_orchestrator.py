@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from memoria.core import character_loader, llm_client, prompt_builder
+from memoria.core import character_loader, llm_client, multi_character_memory, prompt_builder
 from memoria.core.speaking_strategy import StrategyFactory, SpeakingStrategy
 from memoria.db import repository
 
@@ -143,11 +143,14 @@ class MultiCharacterOrchestrator:
             # 单角色回应模式（原有逻辑）
             speaker_id = self._decide_next_speaker(player_message)
             result = self._generate_character_response(speaker_id, player_message)
+            self._remember_group_turn(player_message, [result])
             return result
         
         else:
             # 多角色讨论模式
-            return self._generate_group_discussion(player_message, max_responses)
+            responses = self._generate_group_discussion(player_message, max_responses)
+            self._remember_group_turn(player_message, responses)
+            return responses
     
     
     def _generate_group_discussion(self, player_message: str, max_responses: int = 3) -> list[dict]:
@@ -277,6 +280,82 @@ class MultiCharacterOrchestrator:
                     relationships[f"{char_a}_{char_b}"] = rel
         
         return relationships
+
+
+    def _load_memory_context(self, character_id: str, query_context: str | None = None) -> list[str]:
+        """加载多角色记忆上下文，供 prompt 的历史记录区使用。"""
+        other_character_ids = [cid for cid in self.character_ids if cid != character_id]
+
+        try:
+            context = multi_character_memory.integrate_multi_character_context(
+                character_id=character_id,
+                player_id=self.player_id,
+                session_id=self.session_id,
+                other_character_ids=other_character_ids,
+                query_context=query_context,
+            )
+        except Exception as e:
+            logger.warning(f"加载多角色记忆上下文失败: {e}")
+            return []
+
+        memory_lines = []
+
+        for memory in context.get("group_memories", [])[:5]:
+            memory_lines.append(f"群体记忆：{memory}")
+
+        impressions = context.get("character_impressions", {})
+        for other_id, memories in impressions.items():
+            other_card = self.character_cards.get(other_id)
+            other_name = other_card.meta.display_name if other_card else other_id
+            for memory in memories[:2]:
+                memory_lines.append(f"对{other_name}的印象：{memory}")
+
+        return memory_lines
+
+
+    def _remember_group_turn(self, player_message: str, responses: list[dict]) -> None:
+        """摘要当前多角色轮次并保存为群体记忆。"""
+        if not responses:
+            return
+
+        turn_messages = [{"role": "user", "content": player_message}]
+        character_names = {}
+        for response in responses:
+            character_id = response.get("character_id")
+            character_name = response.get("character_name") or character_id or "角色"
+            if character_id:
+                character_names[character_id] = character_name
+
+            dialogue = str(response.get("dialogue") or "").strip()
+            if dialogue:
+                turn_messages.append({
+                    "role": "assistant",
+                    "content": dialogue,
+                    "character_id": character_id,
+                    "character_name": character_name,
+                })
+
+        if len(turn_messages) <= 1:
+            return
+
+        try:
+            summary = str(multi_character_memory.generate_multi_character_summary(
+                session_id=self.session_id,
+                messages=turn_messages,
+                character_names=character_names,
+                player_name=self.player_name,
+            ) or "").strip()
+            if not summary:
+                summary = f"玩家提出：{player_message}"
+
+            multi_character_memory.save_group_event_memory(
+                event_description=summary,
+                character_ids=self.character_ids,
+                session_id=self.session_id,
+                importance=0.6,
+            )
+        except Exception as e:
+            logger.warning(f"保存群体记忆失败: {e}")
     
     
     def _select_character_for_interaction(self) -> str:
@@ -422,7 +501,8 @@ class MultiCharacterOrchestrator:
             runtime_state=runtime_state,
             player_name=self.player_name,
             other_characters=other_characters,
-            character_relationships=self._load_all_relationships()
+            character_relationships=self._load_all_relationships(),
+            past_summaries=self._load_memory_context(character_id, player_message)
         )
         
         # 获取对话历史
@@ -537,6 +617,7 @@ class MultiCharacterOrchestrator:
             player_name=self.player_name,
             other_characters=other_characters,
             character_relationships=self._load_all_relationships(),
+            past_summaries=self._load_memory_context(trigger_character_id),
             is_interaction=True
         )
         
