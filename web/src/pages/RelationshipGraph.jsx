@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import * as d3 from 'd3';
 import { characterAdmin, relationshipAdmin } from '../api/memoria';
 import { useDialog } from '../context/DialogContext';
+import SideRays from '../components/SideRays';
 import {
   ArrowLeft, Loader2, RefreshCw, ZoomIn, ZoomOut, Maximize2,
   Users, Plus, Trash2, X, Link2, Heart, Zap
@@ -12,6 +14,20 @@ const CYBER_GREEN = '#A7EF9E';
 const CYBER_BG = '#0b0b0c';
 const CYBER_SURFACE = '#120F17';
 const CYBER_DARK = '#0a0a0e';
+
+const GRAPH_RAYS_PROPS = {
+  speed: 2.2,
+  rayColor1: '#FFD166',
+  rayColor2: '#9AD7FF',
+  intensity: 4.2,
+  spread: 2.65,
+  origin: 'top-right',
+  tilt: -12,
+  saturation: 1.55,
+  blend: 0.58,
+  falloff: 1.08,
+  opacity: 1,
+};
 
 const RELATION_TYPES = [
   { value: 'friend', label: '朋友', color: '#A7EF9E' },
@@ -60,9 +76,9 @@ function AddRelationModal({ characters, onAdd, onClose, adding }) {
     <option key={c.character_id} value={c.character_id}>{c.display_name || c.name}</option>
   ));
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 font-mono" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/78 backdrop-blur-md" />
+  return createPortal(
+    <div className="fixed inset-0 z-[1000] flex min-h-screen items-center justify-center overflow-y-auto p-4 font-mono" onClick={onClose}>
+      <div className="fixed inset-0 bg-[#05070a]/90 backdrop-blur-md backdrop-saturate-75" />
       <div
         className="relative w-full max-w-md overflow-hidden rounded-xl border border-cyber-green/20 bg-[#0d0d14]/95 shadow-[0_0_70px_rgba(167,239,158,0.08)] animate-fade-up"
         role="dialog"
@@ -143,7 +159,8 @@ function AddRelationModal({ characters, onAdd, onClose, adding }) {
           </button>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -156,9 +173,9 @@ function EditRelationModal({ edge, onUpdate, onDelete, onClose, saving }) {
   const sourceName = edge.source?.display_name || edge.source?.name || edge.source;
   const targetName = edge.target?.display_name || edge.target?.name || edge.target;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 font-mono" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/78 backdrop-blur-md" />
+  return createPortal(
+    <div className="fixed inset-0 z-[1000] flex min-h-screen items-center justify-center overflow-y-auto p-4 font-mono" onClick={onClose}>
+      <div className="fixed inset-0 bg-[#05070a]/90 backdrop-blur-md backdrop-saturate-75" />
       <div
         className="relative w-full max-w-md overflow-hidden rounded-xl border border-cyber-green/20 bg-[#0d0d14]/95 shadow-[0_0_70px_rgba(167,239,158,0.08)] animate-fade-up"
         role="dialog"
@@ -230,7 +247,8 @@ function EditRelationModal({ edge, onUpdate, onDelete, onClose, saving }) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -294,36 +312,14 @@ export default function RelationshipGraph() {
     svg.selectAll('*').remove();
     svg.attr('viewBox', `0 0 ${W} ${H}`).attr('width', W).attr('height', H);
 
-    // 背景：径向渐变 + 粒子星空
     const defs = svg.append('defs');
-    const bgGrad = defs.append('radialGradient').attr('id', 'bgGrad');
-    bgGrad.append('stop').attr('offset', '0%').attr('stop-color', '#1a1a2e');
-    bgGrad.append('stop').attr('offset', '50%').attr('stop-color', '#0d0d1a');
-    bgGrad.append('stop').attr('offset', '100%').attr('stop-color', '#050510');
-    svg.append('rect').attr('width', W).attr('height', H).attr('fill', 'url(#bgGrad)');
-
-    // 随机星空粒子
-    const stars = [];
-    const prng = d3.randomUniform(0);
-    for (let i = 0; i < 200; i++) {
-      stars.push({ x: prng() * W, y: prng() * H, r: prng() * 1.5 + 0.3, o: prng() * 0.6 + 0.1 });
-    }
-    svg.append('g').selectAll('circle').data(stars).join('circle')
-      .attr('cx', d => d.x).attr('cy', d => d.y).attr('r', d => d.r)
-      .attr('fill', '#A7EF9E').attr('opacity', d => d.o)
-      .attr('class', 'star-particle');
-
-    // 微妙网格叠加
-    defs.append('pattern').attr('id', 'grid').attr('width', 50).attr('height', 50).attr('patternUnits', 'userSpaceOnUse')
-      .append('path').attr('d', 'M 50 0 L 0 0 0 50').attr('fill', 'none').attr('stroke', CYBER_GREEN).attr('stroke-opacity', 0.02).attr('stroke-width', 0.5);
-    svg.append('rect').attr('width', W).attr('height', H).attr('fill', 'url(#grid)');
 
     // 箭头标记
     RELATION_TYPES.forEach(rt => {
       defs.append('marker').attr('id', 'arrow-' + rt.value)
         .attr('viewBox', '0 -5 10 10').attr('refX', 30).attr('refY', 0).attr('orient', 'auto')
         .attr('markerWidth', 5).attr('markerHeight', 5)
-        .append('path').attr('d', 'M 0,-4 L 8,0 L 0,4').attr('fill', rt.color).attr('opacity', 0.6);
+        .append('path').attr('d', 'M 0,-4 L 8,0 L 0,4').attr('fill', rt.color).attr('opacity', 0.82);
     });
 
     // 发光滤镜
@@ -369,7 +365,7 @@ export default function RelationshipGraph() {
     const linkBase = linkGroup.append('g').attr('class', 'link-base').selectAll('path').data(links).join('path')
       .attr('fill', 'none')
       .attr('stroke', d => getRelationColor(d.relationship_type))
-      .attr('stroke-opacity', 0.34)
+      .attr('stroke-opacity', 0.48)
       .attr('stroke-width', getLinkWidth)
       .attr('stroke-linecap', 'round')
       .attr('stroke-linejoin', 'round')
@@ -379,7 +375,7 @@ export default function RelationshipGraph() {
     const linkFlow = linkGroup.append('g').attr('class', 'link-flow').selectAll('path').data(links).join('path')
       .attr('fill', 'none')
       .attr('stroke', d => getRelationColor(d.relationship_type))
-      .attr('stroke-opacity', 0.58)
+      .attr('stroke-opacity', 0.72)
       .attr('stroke-width', d => Math.max(1, getLinkWidth(d) * 0.42))
       .attr('stroke-linecap', 'round')
       .attr('stroke-dasharray', '2 12')
@@ -434,9 +430,9 @@ export default function RelationshipGraph() {
       edgeLabelBg.attr('opacity', l => l === d ? 0.9 : 0);
       edgeLabelText.attr('opacity', l => l === d ? 1 : 0);
     }).on('mouseleave', function() {
-      linkBase.attr('stroke-opacity', 0.34).attr('stroke-width', getLinkWidth);
+      linkBase.attr('stroke-opacity', 0.48).attr('stroke-width', getLinkWidth);
       linkFlow
-        .attr('stroke-opacity', 0.58)
+        .attr('stroke-opacity', 0.72)
         .attr('stroke-width', d => Math.max(1, getLinkWidth(d) * 0.42));
       edgeLabelBg.attr('opacity', 0);
       edgeLabelText.attr('opacity', 0);
@@ -502,12 +498,12 @@ export default function RelationshipGraph() {
     node.append('circle').attr('r', NODE_R)
       .attr('fill', 'none')
       .attr('stroke', d => d.is_active ? CYBER_GREEN : '#EF4444')
-      .attr('stroke-width', d => d.is_active ? 2 : 2.5)
-      .attr('stroke-opacity', 0.7);
+      .attr('stroke-width', d => d.is_active ? 2.4 : 2.8)
+      .attr('stroke-opacity', 0.9);
 
     // 装饰虚线环
     node.append('circle').attr('r', NODE_R - 4).attr('fill', 'none')
-      .attr('stroke', CYBER_GREEN).attr('stroke-opacity', 0.15).attr('stroke-width', 1)
+      .attr('stroke', CYBER_GREEN).attr('stroke-opacity', 0.26).attr('stroke-width', 1)
       .attr('stroke-dasharray', '3 6');
 
     // 名称
@@ -516,7 +512,7 @@ export default function RelationshipGraph() {
       .attr('text-anchor', 'middle').attr('dy', NODE_R + 18)
       .attr('fill', CYBER_GREEN).attr('font-family', 'ZCOOL XiaoWei, Noto Serif SC, serif')
       .attr('font-size', '14px').attr('font-weight', '500')
-      .attr('opacity', 0.75).attr('pointer-events', 'none');
+      .attr('opacity', 0.92).attr('pointer-events', 'none');
 
     // 悬停高亮
     node.on('mouseenter', (event, d) => {
@@ -532,9 +528,9 @@ export default function RelationshipGraph() {
     });
     node.on('mouseleave', () => {
       node.select('.node-halo').attr('opacity', 0);
-      linkBase.attr('stroke-opacity', 0.34).attr('stroke-width', getLinkWidth);
+      linkBase.attr('stroke-opacity', 0.48).attr('stroke-width', getLinkWidth);
       linkFlow
-        .attr('stroke-opacity', 0.58)
+        .attr('stroke-opacity', 0.72)
         .attr('stroke-width', d => Math.max(1, getLinkWidth(d) * 0.42));
     });
 
@@ -634,12 +630,18 @@ export default function RelationshipGraph() {
   };
 
   // ── Render ──
+  const modalOpen = showAddModal || !!editEdge;
+
   return (
     <div className="min-h-screen memoria-page flex flex-col select-none">
-      {toast && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 bg-cyber-green/20 border border-cyber-green/30 text-cyber-green font-mono text-xs rounded-lg shadow-lg animate-fade-up">
+      {toast && createPortal(
+        <div
+          role="status"
+          className="pointer-events-none fixed left-1/2 top-5 z-[1100] -translate-x-1/2 rounded-lg border border-cyber-green/30 bg-[#07100a]/95 px-4 py-2 font-mono text-xs text-cyber-green shadow-[0_0_28px_rgba(167,239,158,0.16)] backdrop-blur-md animate-fade-up"
+        >
           {toast}
-        </div>
+        </div>,
+        document.body
       )}
 {showAddModal && (
         <AddRelationModal characters={characters} onAdd={handleAdd} onClose={() => setShowAddModal(false)} adding={saving} />
@@ -676,6 +678,7 @@ export default function RelationshipGraph() {
 
       {/* Main */}
       <div className="flex-1 relative">
+        {!modalOpen && <SideRays {...GRAPH_RAYS_PROPS} className="side-rays-graph" />}
         {loading && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-cyber-bg/80 backdrop-blur-sm">
             <div className="flex flex-col items-center gap-3">
@@ -702,7 +705,7 @@ export default function RelationshipGraph() {
             </div>
           </div>
         )}
-        <div ref={containerRef} className="absolute inset-0">
+        <div ref={containerRef} className="absolute inset-0 z-[1]">
           <svg ref={svgRef} className="w-full h-full" />
         </div>
 
