@@ -83,6 +83,57 @@
   background-attachment: fixed;
 }
 
+.character-editor-page {
+  position: relative;
+  isolation: isolate;
+  overflow-x: hidden;
+  background:
+    linear-gradient(rgba(167, 239, 158, 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(167, 239, 158, 0.024) 1px, transparent 1px),
+    radial-gradient(circle at 8% 24%, rgba(167, 239, 158, 0.1), transparent 20rem),
+    radial-gradient(circle at 92% 22%, rgba(8, 145, 178, 0.08), transparent 22rem),
+    linear-gradient(180deg, #120f17 0%, #0b0b0c 45%, #080809 100%);
+  background-size: 36px 36px, 36px 36px, auto, auto, auto;
+  background-attachment: fixed;
+}
+
+.character-editor-page::before,
+.character-editor-page::after {
+  content: "";
+  position: fixed;
+  top: 96px;
+  bottom: 0;
+  width: max(180px, calc((100vw - 980px) / 2));
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.62;
+}
+
+.character-editor-page::before {
+  left: 0;
+  background:
+    linear-gradient(90deg, rgba(167, 239, 158, 0.08), transparent 58%),
+    repeating-linear-gradient(0deg, rgba(167, 239, 158, 0.08) 0 1px, transparent 1px 18px),
+    repeating-linear-gradient(90deg, rgba(167, 239, 158, 0.05) 0 1px, transparent 1px 26px);
+  mask-image: linear-gradient(90deg, #000 0%, rgba(0, 0, 0, 0.82) 42%, transparent 100%);
+}
+
+.character-editor-page::after {
+  right: 0;
+  background:
+    linear-gradient(270deg, rgba(167, 239, 158, 0.08), transparent 58%),
+    repeating-linear-gradient(0deg, rgba(167, 239, 158, 0.08) 0 1px, transparent 1px 18px),
+    repeating-linear-gradient(90deg, rgba(167, 239, 158, 0.05) 0 1px, transparent 1px 26px);
+  mask-image: linear-gradient(270deg, #000 0%, rgba(0, 0, 0, 0.82) 42%, transparent 100%);
+}
+
+@media (max-width: 1023px) {
+  .character-editor-page::before,
+  .character-editor-page::after {
+    display: none;
+  }
+}
+
 .memoria-glass {
   background: linear-gradient(135deg, rgba(18, 15, 23, 0.88), rgba(13, 13, 20, 0.68));
   border: 1px solid rgba(167, 239, 158, 0.12);

@@ -247,10 +247,10 @@ export default function CharacterEditor() {
   const StepComponent = [StepIdentity, StepPersonality, StepSpeechStyle, StepBackground, StepInteraction][currentStep];
 
   return (
-    <div className="min-h-screen bg-cyber-bg">
+    <div className="min-h-screen character-editor-page">
       {/* Header */}
-      <div className="sticky top-0 z-20 bg-cyber-surface/95 backdrop-blur border-b border-cyber-green/20">
-        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div className="sticky top-0 z-20 bg-cyber-surface/90 backdrop-blur-xl border-b border-cyber-green/20 shadow-[0_10px_34px_rgba(0,0,0,0.22)]">
+        <div className="max-w-5xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
           <button
             onClick={() => navigate('/')}
             className="flex items-center gap-1 text-cyber-green/60 hover:text-cyber-green transition-colors font-mono text-sm"
@@ -258,10 +258,10 @@ export default function CharacterEditor() {
             <ArrowLeft size={16} />
             Back
           </button>
-          <h1 className="font-display text-lg text-cyber-green tracking-widest">
+          <h1 className="font-display text-base sm:text-lg text-cyber-green tracking-widest order-first basis-full text-center sm:order-none sm:basis-auto">
             {characterId ? 'EDIT CHARACTER' : 'NEW CHARACTER'}
           </h1>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 overflow-x-auto max-w-full pb-0.5">
             {characterId ? (
               <button
                 onClick={handleExportFile}
@@ -321,14 +321,14 @@ export default function CharacterEditor() {
 
         {/* Step indicator */}
         <div className="max-w-5xl mx-auto px-4 pb-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-start lg:justify-between gap-3 overflow-x-auto pb-1">
             {STEPS.map((step, idx) => (
               <button
                 key={step.id}
                 onClick={() => setCurrentStep(idx)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-mono transition-all ${
+                className={`shrink-0 flex items-center gap-2 px-3 py-1.5 rounded text-xs font-mono transition-all ${
                   idx === currentStep
-                    ? 'bg-cyber-violet/20 text-cyber-violet border border-cyber-violet/40'
+                    ? 'bg-cyber-green/12 text-cyber-green border border-cyber-green/35 shadow-[0_0_18px_rgba(167,239,158,0.08)]'
                     : idx < currentStep
                     ? 'text-cyber-green/60 hover:text-cyber-green'
                     : 'text-cyber-green/30'
@@ -336,7 +336,7 @@ export default function CharacterEditor() {
               >
                 <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
                   idx < currentStep ? 'bg-cyber-green/20 text-cyber-green' :
-                  idx === currentStep ? 'bg-cyber-violet/30 text-cyber-violet' :
+                  idx === currentStep ? 'bg-cyber-green/25 text-cyber-green' :
                   'bg-cyber-green/5 text-cyber-green/30'
                 }`}>
                   {idx < currentStep ? <Check size={10} /> : idx + 1}
@@ -358,7 +358,7 @@ export default function CharacterEditor() {
       )}
 
       {/* Form content - Paper folder style */}
-      <div className="max-w-4xl mx-auto px-4 py-8">
+      <div className="relative z-10 max-w-4xl mx-auto px-4 py-8">
         <div className="relative">
           {/* Paper folder background */}
           <div

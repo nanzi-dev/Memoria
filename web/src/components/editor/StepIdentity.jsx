@@ -75,7 +75,7 @@ export default function StepIdentity({ formData, updateField }) {
           头像 Avatar
         </label>
 
-        <div className="flex items-start gap-4">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-4">
           {/* Preview */}
           <div
             className="relative w-24 h-24 flex-shrink-0 rounded-lg overflow-hidden border-2 border-dashed"
