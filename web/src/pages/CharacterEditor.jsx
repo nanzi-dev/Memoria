@@ -7,6 +7,7 @@ import StepPersonality from '../components/editor/StepPersonality';
 import StepSpeechStyle from '../components/editor/StepSpeechStyle';
 import StepBackground from '../components/editor/StepBackground';
 import StepInteraction from '../components/editor/StepInteraction';
+import { useDialog } from '../context/DialogContext';
 
 const STEPS = [
   { id: 'identity', label: '身份 Identity', Icon: null },
@@ -75,6 +76,7 @@ function exportFilename(data) {
 export default function CharacterEditor() {
   const { characterId } = useParams();
   const navigate = useNavigate();
+  const dialog = useDialog();
   const fileInputRef = useRef(null);
   const [currentStep, setCurrentStep] = useState(0);
   const [formData, setFormData] = useState(DEFAULT_DATA);
@@ -210,7 +212,13 @@ export default function CharacterEditor() {
   async function handleToggleActive() {
     if (!characterId) return;
     const action = isActive ? '禁用' : '启用';
-    if (!window.confirm(`确定要${action}这个角色卡吗？`)) return;
+    const ok = await dialog.confirm({
+      title: `${action}角色卡`,
+      message: `确定要${action}这个角色卡吗？`,
+      variant: isActive ? 'warning' : 'info',
+      confirmText: action,
+    });
+    if (!ok) return;
     try {
       if (isActive) {
         await characterAdmin.delete(characterId, false); // soft delete = disable
@@ -225,8 +233,14 @@ export default function CharacterEditor() {
 
   function handleDelete() {
     if (!characterId) return;
-    if (!window.confirm('确定要永久删除这个角色卡吗？此操作不可撤销！')) return;
     (async () => {
+      const ok = await dialog.confirm({
+        title: '永久删除角色卡',
+        message: '确定要永久删除这个角色卡吗？此操作不可撤销！',
+        variant: 'danger',
+        confirmText: '删除',
+      });
+      if (!ok) return;
       try {
         await characterAdmin.delete(characterId, true); // permanent delete
       } catch (e) {

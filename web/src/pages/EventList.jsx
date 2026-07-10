@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Plus, Power, PowerOff, Trash2, Loader2, Clock, Zap, Filter, Search, ChevronRight } from 'lucide-react';
 import { eventAdmin } from '../api/memoria';
+import { useDialog } from '../context/DialogContext';
 
 const TRIGGER_LABELS = {
   affinity_threshold: '好感度阈值',
@@ -27,6 +28,7 @@ const TRIGGER_ICONS = {
 
 export default function EventList() {
   const navigate = useNavigate();
+  const dialog = useDialog();
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -59,7 +61,13 @@ export default function EventList() {
   }
 
   async function handleDelete(evt) {
-    if (!window.confirm(`确定删除事件 "${evt.event_name}" 吗？此操作不可撤销。`)) return;
+    const ok = await dialog.confirm({
+      title: '删除事件',
+      message: `确定删除事件 "${evt.event_name}" 吗？\n此操作不可撤销。`,
+      variant: 'danger',
+      confirmText: '删除',
+    });
+    if (!ok) return;
     try {
       await eventAdmin.delete(evt.event_id);
       setEvents(prev => prev.filter(e => e.event_id !== evt.event_id));

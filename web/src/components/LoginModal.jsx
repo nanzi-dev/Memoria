@@ -106,8 +106,9 @@ export default function LoginModal({ onClose }) {
       <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={onClose} />
 
       <div
-        className="relative w-full max-w-sm bg-[#0d0d14] border border-cyber-green/20 rounded-xl shadow-[0_0_60px_rgba(167,239,158,0.06)] overflow-hidden font-mono"
+        className="relative w-full max-w-sm bg-[#0d0d14] border border-cyber-green/20 rounded-xl shadow-[0_0_60px_rgba(167,239,158,0.06)] overflow-hidden font-mono animate-fade-up"
         role="dialog"
+        aria-modal="true"
         aria-label={mode === 'login' ? '登录' : '注册'}
       >
         {/* Header */}

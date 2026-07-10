@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as d3 from 'd3';
 import { characterAdmin, relationshipAdmin } from '../api/memoria';
+import { useDialog } from '../context/DialogContext';
 import {
   ArrowLeft, Loader2, RefreshCw, ZoomIn, ZoomOut, Maximize2,
   Users, Plus, Trash2, X, Link2, Heart, Zap
@@ -60,23 +61,36 @@ function AddRelationModal({ characters, onAdd, onClose, adding }) {
   ));
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-cyber-surface border border-cyber-green/20 rounded-lg p-6 w-full max-w-md shadow-2xl"
-        onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="font-display text-sm text-cyber-green tracking-widest flex items-center gap-2">
-            <Link2 size={16} /> NEW RELATIONSHIP
-          </h2>
-          <button onClick={onClose} className="text-cyber-green/40 hover:text-cyber-green transition-colors">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 font-mono" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/78 backdrop-blur-md" />
+      <div
+        className="relative w-full max-w-md overflow-hidden rounded-xl border border-cyber-green/20 bg-[#0d0d14]/95 shadow-[0_0_70px_rgba(167,239,158,0.08)] animate-fade-up"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-relation-title"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="absolute inset-0 pointer-events-none opacity-[0.04]" style={{
+          backgroundImage: 'linear-gradient(#A7EF9E 1px, transparent 1px), linear-gradient(90deg, #A7EF9E 1px, transparent 1px)',
+          backgroundSize: '20px 20px',
+        }} />
+        <div className="relative flex items-center justify-between border-b border-white/[0.04] px-5 py-4">
+          <div>
+            <h2 id="add-relation-title" className="font-display text-sm text-cyber-green tracking-widest flex items-center gap-2">
+              <Link2 size={16} /> NEW RELATIONSHIP
+            </h2>
+            <p className="mt-1 text-[10px] text-cyber-green/30">建立两个角色之间的图谱连接</p>
+          </div>
+          <button onClick={onClose} className="rounded-full p-1 text-cyber-green/30 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green/70" aria-label="关闭">
             <X size={18} />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="relative space-y-4 px-5 py-5">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">角色 A</label>
               <select value={charA} onChange={e => setCharA(e.target.value)}
-                className="w-full bg-cyber-bg border border-cyber-green/20 rounded px-3 py-2 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none">
+                className="w-full bg-cyber-bg border border-cyber-green/20 rounded-lg px-3 py-2.5 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none focus:ring-2 focus:ring-cyber-green/10 transition-all">
                 <option value="">选择...</option>
                 {opts}
               </select>
@@ -84,7 +98,7 @@ function AddRelationModal({ characters, onAdd, onClose, adding }) {
             <div>
               <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">角色 B</label>
               <select value={charB} onChange={e => setCharB(e.target.value)}
-                className="w-full bg-cyber-bg border border-cyber-green/20 rounded px-3 py-2 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none">
+                className="w-full bg-cyber-bg border border-cyber-green/20 rounded-lg px-3 py-2.5 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none focus:ring-2 focus:ring-cyber-green/10 transition-all">
                 <option value="">选择...</option>
                 {opts}
               </select>
@@ -96,7 +110,7 @@ function AddRelationModal({ characters, onAdd, onClose, adding }) {
               {RELATION_TYPES.map(rt => (
                 <button key={rt.value} type="button"
                   onClick={() => setType(rt.value)}
-                  className="px-2.5 py-1 rounded text-[10px] font-mono border transition-all"
+                  className="px-2.5 py-1.5 rounded-lg text-[10px] font-mono border transition-all active:scale-[0.98]"
                   style={{
                     backgroundColor: type === rt.value ? rt.color + '22' : 'transparent',
                     borderColor: rt.color,
@@ -120,10 +134,10 @@ function AddRelationModal({ characters, onAdd, onClose, adding }) {
             <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">描述（可选）</label>
             <input type="text" value={desc} onChange={e => setDesc(e.target.value)}
               placeholder="如：青梅竹马、宿敌..."
-              className="w-full bg-cyber-bg border border-cyber-green/20 rounded px-3 py-2 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none placeholder:text-cyber-green/20" />
+              className="w-full bg-cyber-bg border border-cyber-green/20 rounded-lg px-3 py-2.5 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none focus:ring-2 focus:ring-cyber-green/10 placeholder:text-cyber-green/20 transition-all" />
           </div>
           <button type="submit" disabled={adding || !charA || !charB || charA === charB}
-            className="w-full py-2.5 bg-cyber-green/10 border border-cyber-green/30 text-cyber-green font-mono text-sm rounded hover:bg-cyber-green/20 disabled:opacity-30 transition-colors flex items-center justify-center gap-2">
+            className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-cyber-green/30 bg-cyber-green/10 py-2.5 text-sm font-bold text-cyber-green transition-all hover:bg-cyber-green/20 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-30 disabled:active:scale-100">
             {adding ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
             {adding ? '创建中...' : '创建关系'}
           </button>
@@ -143,28 +157,41 @@ function EditRelationModal({ edge, onUpdate, onDelete, onClose, saving }) {
   const targetName = edge.target?.display_name || edge.target?.name || edge.target;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={onClose}>
-      <div className="bg-cyber-surface border border-cyber-green/20 rounded-lg p-6 w-full max-w-md shadow-2xl"
-        onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="font-display text-sm text-cyber-green tracking-widest flex items-center gap-2">
-            <Link2 size={16} /> EDIT RELATIONSHIP
-          </h2>
-          <button onClick={onClose} className="text-cyber-green/40 hover:text-cyber-green transition-colors">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 font-mono" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/78 backdrop-blur-md" />
+      <div
+        className="relative w-full max-w-md overflow-hidden rounded-xl border border-cyber-green/20 bg-[#0d0d14]/95 shadow-[0_0_70px_rgba(167,239,158,0.08)] animate-fade-up"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-relation-title"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="absolute inset-0 pointer-events-none opacity-[0.04]" style={{
+          backgroundImage: 'linear-gradient(#A7EF9E 1px, transparent 1px), linear-gradient(90deg, #A7EF9E 1px, transparent 1px)',
+          backgroundSize: '20px 20px',
+        }} />
+        <div className="relative flex items-center justify-between border-b border-white/[0.04] px-5 py-4">
+          <div>
+            <h2 id="edit-relation-title" className="font-display text-sm text-cyber-green tracking-widest flex items-center gap-2">
+              <Link2 size={16} /> EDIT RELATIONSHIP
+            </h2>
+            <p className="mt-1 text-[10px] text-cyber-green/30">调整图谱连接属性</p>
+          </div>
+          <button onClick={onClose} className="rounded-full p-1 text-cyber-green/30 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green/70" aria-label="关闭">
             <X size={18} />
           </button>
         </div>
-        <p className="font-mono text-xs text-cyber-green/50 mb-4">
-          {sourceName} ↔ {targetName}
-        </p>
-        <div className="space-y-4">
+        <div className="relative space-y-4 px-5 py-5">
+          <p className="rounded-lg border border-cyber-green/10 bg-cyber-green/[0.03] px-3 py-2 text-xs text-cyber-green/55">
+            {sourceName} ↔ {targetName}
+          </p>
           <div>
             <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">关系类型</label>
             <div className="flex flex-wrap gap-1.5">
               {RELATION_TYPES.map(rt => (
                 <button key={rt.value} type="button"
                   onClick={() => setType(rt.value)}
-                  className="px-2.5 py-1 rounded text-[10px] font-mono border transition-all"
+                  className="px-2.5 py-1.5 rounded-lg text-[10px] font-mono border transition-all active:scale-[0.98]"
                   style={{
                     backgroundColor: type === rt.value ? rt.color + '22' : 'transparent',
                     borderColor: rt.color,
@@ -187,17 +214,17 @@ function EditRelationModal({ edge, onUpdate, onDelete, onClose, saving }) {
           <div>
             <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">描述</label>
             <input type="text" value={desc} onChange={e => setDesc(e.target.value)}
-              className="w-full bg-cyber-bg border border-cyber-green/20 rounded px-3 py-2 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none" />
+              className="w-full bg-cyber-bg border border-cyber-green/20 rounded-lg px-3 py-2.5 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none focus:ring-2 focus:ring-cyber-green/10 transition-all" />
           </div>
           <div className="flex gap-3">
             <button onClick={() => onUpdate(edge, { relationship_type: type, affinity, description: desc || null })}
               disabled={saving}
-              className="flex-1 py-2 bg-cyber-green/10 border border-cyber-green/30 text-cyber-green font-mono text-sm rounded hover:bg-cyber-green/20 disabled:opacity-30 transition-colors">
+              className="min-h-[42px] flex-1 rounded-lg border border-cyber-green/30 bg-cyber-green/10 py-2 text-sm font-bold text-cyber-green transition-all hover:bg-cyber-green/20 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-30 disabled:active:scale-100">
               {saving ? '保存中...' : '保存修改'}
             </button>
             <button onClick={() => onDelete(edge)}
               disabled={saving}
-              className="px-4 py-2 bg-red-500/10 border border-red-500/30 text-red-400 font-mono text-sm rounded hover:bg-red-500/20 disabled:opacity-30 transition-colors flex items-center gap-1">
+              className="flex min-h-[42px] items-center gap-1 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-bold text-red-400 transition-all hover:bg-red-500/20 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-30 disabled:active:scale-100">
               <Trash2 size={14} /> 删除
             </button>
           </div>
@@ -209,6 +236,7 @@ function EditRelationModal({ edge, onUpdate, onDelete, onClose, saving }) {
 
 export default function RelationshipGraph() {
   const navigate = useNavigate();
+  const dialog = useDialog();
   const svgRef = useRef(null);
   const containerRef = useRef(null);
   const simulationRef = useRef(null);
@@ -575,7 +603,13 @@ export default function RelationshipGraph() {
   const handleDelete = async (edge) => {
     const sn = edge.source?.display_name || edge.source?.name;
     const tn = edge.target?.display_name || edge.target?.name;
-    if (!window.confirm('确定删除 "' + sn + '" 与 "' + tn + '" 之间的关系？')) return;
+    const ok = await dialog.confirm({
+      title: '删除关系',
+      message: `确定删除「${sn}」与「${tn}」之间的关系吗？`,
+      variant: 'danger',
+      confirmText: '删除',
+    });
+    if (!ok) return;
     setSaving(true);
     try {
       await relationshipAdmin.remove(edge.source.character_id, edge.target.character_id);

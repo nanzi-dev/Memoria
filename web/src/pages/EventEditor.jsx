@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Save, Loader2, Plus, Trash2, Zap, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { eventAdmin } from '../api/memoria';
+import { useDialog } from '../context/DialogContext';
 
 const TRIGGER_TYPES = [
   { value: 'affinity_threshold', label: '好感度阈值' },
@@ -539,6 +540,7 @@ function EffectEditor({ effect, onChange, onDelete, index }) {
 export default function EventEditor() {
   const { eventId } = useParams();
   const navigate = useNavigate();
+  const dialog = useDialog();
   const [loading, setLoading] = useState(!!eventId);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
@@ -607,7 +609,13 @@ export default function EventEditor() {
 
   async function handleDelete() {
     if (!eventId || eventId === 'new') return;
-    if (!window.confirm('确定要永久删除此事件吗？')) return;
+    const ok = await dialog.confirm({
+      title: '永久删除事件',
+      message: `确定要永久删除「${form.event_name || eventId}」吗？\n删除后无法恢复。`,
+      variant: 'danger',
+      confirmText: '删除',
+    });
+    if (!ok) return;
     try {
       await eventAdmin.delete(eventId);
       navigate('/events');

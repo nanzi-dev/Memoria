@@ -1,8 +1,10 @@
 import { useRef, useState } from 'react';
 import { Upload, Link, X, Image as ImageIcon } from 'lucide-react';
 import TagInput from './TagInput';
+import { useDialog } from '../../context/DialogContext';
 
 export default function StepIdentity({ formData, updateField }) {
+  const dialog = useDialog();
   const meta = formData.meta || {};
   const identity = formData.identity || {};
   const avatarUrl = formData.avatar_url || null;
@@ -172,7 +174,11 @@ export default function StepIdentity({ formData, updateField }) {
   function uploadFile(file) {
     if (!file.type.startsWith('image/')) return;
     if (file.size > 2 * 1024 * 1024) {
-      alert('文件过大，最大 2MB');
+      dialog.alert({
+        title: '头像文件过大',
+        message: '请选择 2MB 以内的 PNG、JPEG、GIF 或 WebP 图片。',
+        variant: 'warning',
+      });
       return;
     }
     const reader = new FileReader();
@@ -195,7 +201,11 @@ export default function StepIdentity({ formData, updateField }) {
       setImgError(false);
     };
     img.onerror = () => {
-      alert('头像 URL 不可用，请检查链接是否有效');
+      dialog.alert({
+        title: '头像链接不可用',
+        message: '无法加载这张网络图片，请检查链接是否有效，或换一个可公开访问的图片地址。',
+        variant: 'warning',
+      });
       setImgError(true);
     };
     img.src = url;
