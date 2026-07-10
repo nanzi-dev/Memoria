@@ -101,20 +101,14 @@ class TestMultiCharacterGroupMemory:
         assert "群体记忆：大家决定一起调查旧仓库" in memory_context
         assert "对角色二的印象：行动很谨慎" in memory_context
 
-    def test_process_player_message_saves_group_memory(self, monkeypatch):
+    def test_process_player_message_does_not_save_group_memory(self, monkeypatch):
         from memoria.core import multi_character_orchestrator
 
-        saved = {}
+        save_called = False
 
         def fake_save_group_event_memory(**kwargs):
-            saved.update(kwargs)
-            return "memory-1"
-
-        def fake_generate_multi_character_summary(**kwargs):
-            assert kwargs["player_name"] == "Player"
-            assert kwargs["messages"][0]["content"] == "去旧仓库看看"
-            assert kwargs["messages"][1]["content"] == "我们马上出发。"
-            return "玩家提议调查旧仓库，角色一决定马上出发。"
+            nonlocal save_called
+            save_called = True
 
         monkeypatch.setattr(
             multi_character_orchestrator.repository,
@@ -125,11 +119,6 @@ class TestMultiCharacterGroupMemory:
             multi_character_orchestrator.multi_character_memory,
             "save_group_event_memory",
             fake_save_group_event_memory,
-        )
-        monkeypatch.setattr(
-            multi_character_orchestrator.multi_character_memory,
-            "generate_multi_character_summary",
-            fake_generate_multi_character_summary,
         )
 
         orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
@@ -148,15 +137,10 @@ class TestMultiCharacterGroupMemory:
         result = orch.process_player_message("去旧仓库看看")
 
         assert result["dialogue"] == "我们马上出发。"
-        assert saved["session_id"] == "session-2"
-        assert saved["character_ids"] == ["c1", "c2"]
-        assert saved["event_description"] == "玩家提议调查旧仓库，角色一决定马上出发。"
+        assert save_called is False
 
-    def test_process_player_message_discussion_saves_all_replies(self, monkeypatch):
+    def test_process_player_message_discussion_does_not_save_group_memory(self, monkeypatch):
         from memoria.core import multi_character_orchestrator
-
-        saved = {}
-        summarized_messages = []
 
         monkeypatch.setattr(
             multi_character_orchestrator.repository,
@@ -166,17 +150,7 @@ class TestMultiCharacterGroupMemory:
         monkeypatch.setattr(
             multi_character_orchestrator.multi_character_memory,
             "save_group_event_memory",
-            lambda **kwargs: saved.update(kwargs) or "memory-2",
-        )
-
-        def fake_generate_multi_character_summary(**kwargs):
-            summarized_messages.extend(kwargs["messages"])
-            return "玩家要求制定计划，两个角色分别提出侦查和准备装备。"
-
-        monkeypatch.setattr(
-            multi_character_orchestrator.multi_character_memory,
-            "generate_multi_character_summary",
-            fake_generate_multi_character_summary,
+            lambda **kwargs: (_ for _ in ()).throw(AssertionError("不应在每轮群聊保存群体记忆")),
         )
 
         orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
@@ -184,7 +158,9 @@ class TestMultiCharacterGroupMemory:
         )
         orch.session_id = "session-3"
         orch.player_name = "Player"
+        orch.participants = [{"character_id": "c1"}, {"character_id": "c2"}, {"character_id": "c3"}]
         orch.character_ids = ["c1", "c2", "c3"]
+        orch.character_cards = {}
         orch._generate_group_discussion = lambda player_message, max_responses: [
             {"character_id": "c1", "character_name": "角色一", "dialogue": "我去侦查。"},
             {"character_id": "c2", "character_name": "角色二", "dialogue": "我准备装备。"},
@@ -195,85 +171,6 @@ class TestMultiCharacterGroupMemory:
         )
 
         assert len(result) == 2
-        assert [msg["content"] for msg in summarized_messages] == [
-            "制定一个计划",
-            "我去侦查。",
-            "我准备装备。",
-        ]
-        assert saved["character_ids"] == ["c1", "c2", "c3"]
-        assert saved["event_description"] == "玩家要求制定计划，两个角色分别提出侦查和准备装备。"
-
-    def test_remember_group_turn_uses_fallback_when_summary_empty(self, monkeypatch):
-        from memoria.core import multi_character_orchestrator
-
-        saved = {}
-
-        monkeypatch.setattr(
-            multi_character_orchestrator.multi_character_memory,
-            "generate_multi_character_summary",
-            lambda **kwargs: "   ",
-        )
-        monkeypatch.setattr(
-            multi_character_orchestrator.multi_character_memory,
-            "save_group_event_memory",
-            lambda **kwargs: saved.update(kwargs) or "memory-3",
-        )
-
-        orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
-            multi_character_orchestrator.MultiCharacterOrchestrator
-        )
-        orch.session_id = "session-4"
-        orch.player_name = "Player"
-        orch.character_ids = ["c1", "c2"]
-
-        orch._remember_group_turn(
-            "继续前进",
-            [{"character_id": "c1", "character_name": "角色一", "dialogue": "好。"}],
-        )
-
-        assert saved["event_description"] == "玩家提出：继续前进"
-        assert saved["character_ids"] == ["c1", "c2"]
-
-    def test_remember_group_turn_skips_empty_replies(self, monkeypatch):
-        from memoria.core import multi_character_orchestrator
-
-        summary_called = False
-        save_called = False
-
-        def fake_generate_multi_character_summary(**kwargs):
-            nonlocal summary_called
-            summary_called = True
-            return "不应调用"
-
-        def fake_save_group_event_memory(**kwargs):
-            nonlocal save_called
-            save_called = True
-
-        monkeypatch.setattr(
-            multi_character_orchestrator.multi_character_memory,
-            "generate_multi_character_summary",
-            fake_generate_multi_character_summary,
-        )
-        monkeypatch.setattr(
-            multi_character_orchestrator.multi_character_memory,
-            "save_group_event_memory",
-            fake_save_group_event_memory,
-        )
-
-        orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
-            multi_character_orchestrator.MultiCharacterOrchestrator
-        )
-        orch.session_id = "session-5"
-        orch.player_name = "Player"
-        orch.character_ids = ["c1", "c2"]
-
-        orch._remember_group_turn(
-            "有人吗",
-            [{"character_id": "c1", "character_name": "角色一", "dialogue": "   "}],
-        )
-
-        assert summary_called is False
-        assert save_called is False
 
     def test_load_memory_context_returns_empty_on_failure(self, monkeypatch):
         from memoria.core import multi_character_orchestrator

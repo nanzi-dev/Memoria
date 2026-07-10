@@ -2,14 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useUser } from '../context/UserContext';
 import { multiDialogue, characterAdmin } from '../api/memoria';
-import { Send, ArrowLeft, Users, Loader2, User, X, Plus, Settings, MessageSquare, Radio, ShieldAlert } from 'lucide-react';
-
-const STRATEGIES = [
-  { value: 'hybrid', label: '智能混合' },
-  { value: 'round_robin', label: '轮流发言' },
-  { value: 'smart', label: '情境感知' },
-  { value: 'trigger', label: '事件触发' },
-];
+import { Send, ArrowLeft, Users, Loader2, User, X, Plus, Settings, MessageSquare, ShieldAlert } from 'lucide-react';
 
 export default function MultiRoom() {
   const navigate = useNavigate();
@@ -30,9 +23,6 @@ export default function MultiRoom() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
-  const [discussionMode, setDiscussionMode] = useState(false);
-  const [maxResponses, setMaxResponses] = useState(3);
-  const [strategy, setStrategy] = useState('hybrid');
   const [groupName, setGroupName] = useState('');
   const [phase, setPhase] = useState('setup'); // setup | chat
   const [loading, setLoading] = useState(false);
@@ -70,12 +60,8 @@ export default function MultiRoom() {
     setParticipants(prev =>
       prev.find(p => p.character_id === char.character_id)
         ? prev.filter(p => p.character_id !== char.character_id)
-        : [...prev, { ...char, frequency: 1.0 }]
+        : [...prev, char]
     );
-  };
-
-  const updateFrequency = (charId, freq) => {
-    setParticipants(prev => prev.map(p => p.character_id === charId ? { ...p, frequency: freq } : p));
   };
 
   const startSession = async () => {
@@ -91,9 +77,7 @@ export default function MultiRoom() {
     setError(null);
     setLoading(true);
     try {
-      const freqs = {};
-      participants.forEach(p => { freqs[p.character_id] = p.frequency; });
-      const res = await multiDialogue.startSession(PLAYER_ID, PLAYER_NAME, participants.map(p => p.character_id), strategy, freqs, cleanGroupName);
+      const res = await multiDialogue.startSession(PLAYER_ID, PLAYER_NAME, participants.map(p => p.character_id), cleanGroupName);
       setSessionId(res.session_id);
       setPhase('chat');
       if (res.opening?.dialogue) {
@@ -119,37 +103,24 @@ export default function MultiRoom() {
     setSending(true);
     setMessages(prev => [...prev, { role: 'user', content: text }]);
     try {
-      let res;
-      if (discussionMode) {
-        res = await multiDialogue.discussMessage(sessionId, text, maxResponses, strategy);
-        const msgs = res.responses.map(r => ({
-          role: 'assistant',
-          charId: r.character_id,
-          charName: r.character_name || '未知',
-          content: r.dialogue,
-          action: r.action || '',
-          affinity_delta: r.affinity_delta || 0,
-          mood: r.current_mood || 'neutral',
-        }));
-        setMessages(prev => [...prev, ...msgs]);
-      } else {
-        res = await multiDialogue.sendMessage(sessionId, text, strategy);
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          charId: res.character_id,
-          charName: res.character_name || '未知',
-          content: res.dialogue,
-          action: res.action || '',
-          affinity_delta: res.affinity_delta || 0,
-          mood: res.current_mood || 'neutral',
-        }]);
-      }
+      const res = await multiDialogue.discussMessage(sessionId, text);
+      const groupResponses = Array.isArray(res.responses) ? res.responses : [res];
+      const msgs = groupResponses.map(r => ({
+        role: 'assistant',
+        charId: r.character_id,
+        charName: r.character_name || '未知',
+        content: r.dialogue,
+        action: r.action || '',
+        affinity_delta: r.affinity_delta || 0,
+        mood: r.current_mood || 'neutral',
+      }));
+      setMessages(prev => [...prev, ...msgs]);
     } catch (e) {
       setError(e.message);
     } finally {
       setSending(false);
     }
-  }, [input, sessionId, sending, discussionMode, maxResponses, strategy]);
+  }, [input, sessionId, sending]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -215,52 +186,6 @@ export default function MultiRoom() {
             />
           </div>
 
-          {/* Strategy selector */}
-          <div>
-            <label className="text-[10px] text-cyber-green/50 uppercase tracking-wider mb-2 block">发言策略</label>
-            <div className="flex flex-wrap gap-1.5">
-              {STRATEGIES.map(s => {
-                const activeClass = strategy === s.value
-                  ? 'border-cyber-green/50 bg-cyber-green/10 text-cyber-green'
-                  : 'border-cyber-green/10 text-cyber-green/40 hover:border-cyber-green/30';
-                return (
-                  <button
-                    key={s.value}
-                    onClick={() => setStrategy(s.value)}
-                    className={`text-xs px-3 py-1.5 rounded border transition-colors ${activeClass}`}
-                  >
-                    {s.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Discussion mode */}
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={discussionMode}
-                onChange={e => setDiscussionMode(e.target.checked)}
-                className="sr-only peer"
-              />
-              <div className="w-8 h-4 rounded-full bg-cyber-green/10 border border-cyber-green/20 peer-checked:bg-cyber-green/30 peer-checked:border-cyber-green/50 transition-colors relative after:absolute after:top-0.5 after:left-0.5 after:w-3 after:h-3 after:rounded-full after:bg-cyber-green/50 after:transition-transform peer-checked:after:translate-x-4" />
-              <span className="text-xs text-cyber-green/70">讨论模式</span>
-            </label>
-            {discussionMode && (
-              <select
-                value={maxResponses}
-                onChange={e => setMaxResponses(Number(e.target.value))}
-                className="text-xs bg-[#0d0d14] border border-cyber-green/20 rounded px-2 py-1 text-cyber-green/60"
-              >
-                {[1, 2, 3, 4, 5].map(n => (
-                  <option key={n} value={n}>最多 {n} 人回应</option>
-                ))}
-              </select>
-            )}
-          </div>
-
           {/* Character selection */}
           <div>
             <label className="text-[10px] text-cyber-green/50 uppercase tracking-wider mb-2 block">
@@ -289,22 +214,7 @@ export default function MultiRoom() {
                       )}
                     </div>
                     <span className="text-xs text-cyber-green/80 truncate flex-1">{char.name}</span>
-                    {selected && (
-                      <div className="text-[10px] flex items-center gap-1">
-                        {/* Frequency slider for selected */}
-                        <input
-                          type="range"
-                          min="0"
-                          max="2"
-                          step="0.1"
-                          value={selected.frequency}
-                          onClick={e => e.stopPropagation()}
-                          onChange={e => { e.stopPropagation(); updateFrequency(char.character_id, parseFloat(e.target.value)); }}
-                          className="w-12 h-1 accent-cyber-green"
-                        />
-                        <span className="text-cyber-green/40 w-5 text-right">{selected.frequency.toFixed(1)}</span>
-                      </div>
-                    )}
+                    {selected && <X size={13} className="text-cyber-green/40" />}
                   </div>
                 );
               })}
@@ -351,26 +261,6 @@ export default function MultiRoom() {
           <span className="text-xs font-bold text-cyber-green truncate">{groupName || '群聊'}</span>
           <span className="text-[10px] text-cyber-green/30">{participants.length}人</span>
         </div>
-        <button
-          onClick={() => setDiscussionMode(!discussionMode)}
-          className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
-            discussionMode
-              ? 'border-purple-400/40 bg-purple-400/10 text-purple-300'
-              : 'border-cyber-green/15 text-cyber-green/40'
-          }`}
-        >
-          <Radio size={12} className="inline mr-1" />
-          讨论: {discussionMode ? 'ON' : 'OFF'}
-        </button>
-        {discussionMode && (
-          <select
-            value={maxResponses}
-            onChange={e => setMaxResponses(Number(e.target.value))}
-            className="text-[10px] bg-[#0d0d14] border border-cyber-green/20 rounded px-1.5 py-0.5 text-cyber-green/60"
-          >
-            {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}人回应</option>)}
-          </select>
-        )}
         <button
           onClick={() => setShowManage(!showManage)}
           className={`text-cyber-green/40 hover:text-cyber-green p-1 transition-colors ${showManage ? 'text-cyber-green' : ''}`}
@@ -513,7 +403,7 @@ export default function MultiRoom() {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={discussionMode ? '输入消息（讨论模式）...' : '输入消息...'}
+            placeholder="输入消息..."
             disabled={sending}
             className="flex-1 bg-[#0d0d14] border border-cyber-green/15 rounded-lg px-3 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/20 focus:outline-none focus:border-cyber-green/40 transition-colors disabled:opacity-50"
           />

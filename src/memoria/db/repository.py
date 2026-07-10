@@ -1760,19 +1760,31 @@ def append_multi_character_message(
 
 def get_multi_character_history(
     session_id: str,
-    limit_messages: int = 20
+    limit_messages: int | None = 20
 ) -> list[dict]:
     """
     获取多角色会话历史
     
     Args:
         session_id: 会话 ID
-        limit_messages: 最大消息数量
+        limit_messages: 最大消息数量；传 None 时返回全部消息
     
     Returns:
         list[dict]: 消息列表，包含 role, content, character_id, character_name
     """
     with get_conn() as conn:
+        if limit_messages is None:
+            rows = conn.execute(
+                """
+                SELECT role, content, character_id, character_name, created_at
+                FROM short_term_message
+                WHERE session_id = ?
+                ORDER BY id ASC
+                """,
+                (session_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
         rows = conn.execute(
             """
             SELECT role, content, character_id, character_name, created_at
@@ -1783,7 +1795,7 @@ def get_multi_character_history(
             """,
             (session_id, limit_messages),
         ).fetchall()
-    
+
     messages = [dict(r) for r in rows]
     messages.reverse()  # 按时间正序返回
     return messages

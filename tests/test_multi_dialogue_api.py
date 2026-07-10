@@ -88,8 +88,35 @@ async def test_end_multi_session_accepts_json_body(monkeypatch):
     from memoria.api import multi_dialogue
 
     ended = {}
+    saved_summary = {}
 
     monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: _multi_session(session_id))
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_multi_character_history",
+        lambda session_id, limit_messages=None: [
+            {"role": "user", "content": "制定计划", "character_id": None, "character_name": None},
+            {"role": "assistant", "content": "我负责侦查。", "character_id": "c1", "character_name": "角色一"},
+        ] if limit_messages is None else [],
+    )
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session_participants",
+        lambda session_id, only_active=False: [
+            {"character_id": "c1", "name": "角色一", "display_name": None},
+            {"character_id": "c2", "name": "角色二", "display_name": "二号"},
+        ],
+    )
+    monkeypatch.setattr(
+        multi_dialogue.multi_character_memory,
+        "generate_multi_character_summary",
+        lambda **kwargs: "玩家和角色一制定了侦查计划。",
+    )
+    monkeypatch.setattr(
+        multi_dialogue.multi_character_memory,
+        "save_multi_character_summary",
+        lambda **kwargs: saved_summary.update(kwargs),
+    )
     monkeypatch.setattr(
         multi_dialogue.repository,
         "end_session",
@@ -102,6 +129,13 @@ async def test_end_multi_session_accepts_json_body(monkeypatch):
 
     assert response["session_id"] == "session-1"
     assert ended == {"session_id": "session-1"}
+    assert saved_summary == {
+        "session_id": "session-1",
+        "character_ids": ["c1", "c2"],
+        "player_id": "player-1",
+        "summary_text": "玩家和角色一制定了侦查计划。",
+        "message_count": 2,
+    }
 
 
 @pytest.mark.asyncio

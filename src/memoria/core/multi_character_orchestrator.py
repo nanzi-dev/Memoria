@@ -119,15 +119,15 @@ class MultiCharacterOrchestrator:
         return result
     
     
-    def process_player_message(self, player_message: str, allow_multiple_responses: bool = False, 
-                                max_responses: int = 3) -> dict | list[dict]:
+    def process_player_message(self, player_message: str, allow_multiple_responses: bool = False,
+                                max_responses: int | None = None) -> dict | list[dict]:
         """
         处理玩家消息，决定哪个角色回应
         
         Args:
             player_message: 玩家消息内容
             allow_multiple_responses: 是否允许多个角色连续回应（讨论模式）
-            max_responses: 最多允许几个角色回应（默认3个）
+            max_responses: 最多允许几个角色回应；实际人数会按群聊语境动态决定
         
         Returns:
             dict | list[dict]: 单个角色回应或多个角色回应列表
@@ -143,14 +143,68 @@ class MultiCharacterOrchestrator:
             # 单角色回应模式（原有逻辑）
             speaker_id = self._decide_next_speaker(player_message)
             result = self._generate_character_response(speaker_id, player_message)
-            self._remember_group_turn(player_message, [result])
             return result
         
         else:
             # 多角色讨论模式
-            responses = self._generate_group_discussion(player_message, max_responses)
-            self._remember_group_turn(player_message, responses)
+            response_count = self._decide_group_response_count(player_message, max_responses)
+            responses = self._generate_group_discussion(player_message, response_count)
             return responses
+
+
+    def _decide_group_response_count(self, player_message: str, max_responses: int | None = None) -> int:
+        """按普通群聊节奏决定本轮实际接话人数。"""
+        participant_count = len(self.participants)
+        if participant_count <= 1:
+            return participant_count
+
+        requested_cap = max_responses or participant_count
+        try:
+            requested_cap = int(requested_cap)
+        except Exception:
+            requested_cap = participant_count
+        cap = min(max(1, requested_cap), participant_count, 4)
+
+        text = (player_message or "").strip()
+        if not text:
+            return 1
+
+        mentioned = 0
+        for card in self.character_cards.values():
+            names = [card.meta.name, card.meta.display_name] + list(getattr(card.meta, "aliases", []) or [])
+            if any(name and name in text for name in names):
+                mentioned += 1
+
+        if mentioned == 1:
+            return 1
+        if mentioned >= 2:
+            return min(cap, max(2, mentioned))
+
+        broad_cues = (
+            "大家", "你们", "各位", "都", "一起", "商量", "讨论", "投票", "选择",
+            "怎么办", "怎么看", "意见", "想法", "谁", "有没有", "要不要", "为什么",
+        )
+        short_ack = text in {"好", "好的", "嗯", "哦", "行", "可以", "知道了", "明白", "没事"}
+        is_question = any(mark in text for mark in ("?", "？", "吗", "呢"))
+
+        if short_ack:
+            weights = [(1, 0.9), (2, 0.1)]
+        elif any(cue in text for cue in broad_cues):
+            weights = [(1, 0.2), (2, 0.5), (3, 0.25), (4, 0.05)]
+        elif is_question:
+            weights = [(1, 0.55), (2, 0.35), (3, 0.1)]
+        else:
+            weights = [(1, 0.7), (2, 0.25), (3, 0.05)]
+
+        available = [(count, weight) for count, weight in weights if count <= cap]
+        total = sum(weight for _, weight in available)
+        pick = random.uniform(0, total)
+        upto = 0.0
+        for count, weight in available:
+            upto += weight
+            if pick <= upto:
+                return count
+        return available[-1][0]
     
     
     def _generate_group_discussion(self, player_message: str, max_responses: int = 3) -> list[dict]:
@@ -313,51 +367,6 @@ class MultiCharacterOrchestrator:
         return memory_lines
 
 
-    def _remember_group_turn(self, player_message: str, responses: list[dict]) -> None:
-        """摘要当前多角色轮次并保存为群体记忆。"""
-        if not responses:
-            return
-
-        turn_messages = [{"role": "user", "content": player_message}]
-        character_names = {}
-        for response in responses:
-            character_id = response.get("character_id")
-            character_name = response.get("character_name") or character_id or "角色"
-            if character_id:
-                character_names[character_id] = character_name
-
-            dialogue = str(response.get("dialogue") or "").strip()
-            if dialogue:
-                turn_messages.append({
-                    "role": "assistant",
-                    "content": dialogue,
-                    "character_id": character_id,
-                    "character_name": character_name,
-                })
-
-        if len(turn_messages) <= 1:
-            return
-
-        try:
-            summary = str(multi_character_memory.generate_multi_character_summary(
-                session_id=self.session_id,
-                messages=turn_messages,
-                character_names=character_names,
-                player_name=self.player_name,
-            ) or "").strip()
-            if not summary:
-                summary = f"玩家提出：{player_message}"
-
-            multi_character_memory.save_group_event_memory(
-                event_description=summary,
-                character_ids=self.character_ids,
-                session_id=self.session_id,
-                importance=0.6,
-            )
-        except Exception as e:
-            logger.warning(f"保存群体记忆失败: {e}")
-    
-    
     def _select_character_for_interaction(self) -> str:
         """
         选择一个角色发起互动（用于角色主动发言）
@@ -784,8 +793,8 @@ def process_multi_character_turn(
     session_id: str,
     player_message: str,
     strategy_type: str = "hybrid",
-    discussion_mode: bool = False,
-    max_responses: int = 3
+    discussion_mode: bool = True,
+    max_responses: int | None = None
 ) -> dict | list[dict]:
     """
     处理多角色对话轮次
@@ -795,7 +804,7 @@ def process_multi_character_turn(
         player_message: 玩家消息
         strategy_type: 发言策略类型
         discussion_mode: 是否启用讨论模式（多角色连续发言）
-        max_responses: 讨论模式下最多几个角色回应
+        max_responses: 可选的人数上限；不传时按语境动态决定
     
     Returns:
         dict | list[dict]: 角色回应结果（单个或多个）

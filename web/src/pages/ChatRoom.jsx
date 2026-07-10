@@ -41,14 +41,6 @@ const MOOD_BUBBLE = { happy: 'bg-emerald-950 border-emerald-400/20 text-zinc-200
 
 
 
-const STRATEGIES = [
-
-  { value: 'hybrid', label: '智能混合' }, { value: 'round_robin', label: '轮流发言' },
-
-  { value: 'smart', label: '情境感知' }, { value: 'trigger', label: '事件触发' },
-
-];
-
 const IDLE_SESSION_END_MS = 5 * 60 * 1000;
 
 
@@ -231,12 +223,6 @@ export default function ChatRoom() {
   const [multiSessionId, setMultiSessionId] = useState(null);
 
   const [multiSessionStatus, setMultiSessionStatus] = useState('active');
-
-  const [discussionMode, setDiscussionMode] = useState(false);
-
-  const [maxResponses, setMaxResponses] = useState(3);
-
-  const [strategy, setStrategy] = useState('hybrid');
 
   const [groupName, setGroupName] = useState('');
 
@@ -702,21 +688,11 @@ export default function ChatRoom() {
 
         ? prev.filter(p => p.character_id !== char.character_id)
 
-        : [...prev, { ...char, frequency: 1.0 }]
+        : [...prev, char]
 
     );
 
   };
-
-
-
-  const updateFrequency = (charId, freq) => {
-
-    setParticipants(prev => prev.map(p => p.character_id === charId ? { ...p, frequency: freq } : p));
-
-  };
-
-
 
   const startGroupChat = async () => {
 
@@ -729,9 +705,7 @@ export default function ChatRoom() {
 
     try {
 
-      const freqs = {}; participants.forEach(p => { freqs[p.character_id] = p.frequency; });
-
-      const res = await multiDialogue.startSession(PLAYER_ID, PLAYER_NAME, participants.map(p => p.character_id), strategy, freqs, cleanGroupName);
+      const res = await multiDialogue.startSession(PLAYER_ID, PLAYER_NAME, participants.map(p => p.character_id), cleanGroupName);
 
       setMultiSessionId(res.session_id);
       setMultiSessionStatus('active');
@@ -798,14 +772,10 @@ export default function ChatRoom() {
         let targetSessionId = multiSessionId;
 
         const startReplacementGroupSession = async () => {
-          const freqs = {};
-          participants.forEach(p => { freqs[p.character_id] = p.frequency || 1.0; });
           const replacement = await multiDialogue.startSession(
             PLAYER_ID,
             PLAYER_NAME,
             participants.map(p => p.character_id),
-            strategy,
-            freqs,
             groupName.trim() || '未命名群聊'
           );
           targetSessionId = replacement.session_id;
@@ -816,9 +786,7 @@ export default function ChatRoom() {
           return replacement.session_id;
         };
 
-        const sendGroupTurn = (sessionId) => discussionMode
-          ? multiDialogue.discussMessage(sessionId, text, maxResponses, strategy)
-          : multiDialogue.sendMessage(sessionId, text, strategy);
+        const sendGroupTurn = (sessionId) => multiDialogue.discussMessage(sessionId, text);
 
         if (multiSessionStatus !== 'active') {
           targetSessionId = await startReplacementGroupSession();
@@ -832,18 +800,11 @@ export default function ChatRoom() {
           res = await sendGroupTurn(targetSessionId);
         }
 
-        if (discussionMode) {
-
-          setMessages(prev => [
-            ...prev,
-            ...res.responses.map(r => normalizeGroupMessage(r, [...participants, ...allChars])),
-          ]);
-
-        } else {
-
-          setMessages(prev => [...prev, normalizeGroupMessage(res, [...participants, ...allChars])]);
-
-        }
+        const groupResponses = Array.isArray(res.responses) ? res.responses : [res];
+        setMessages(prev => [
+          ...prev,
+          ...groupResponses.map(r => normalizeGroupMessage(r, [...participants, ...allChars])),
+        ]);
 
       }
 
@@ -851,7 +812,7 @@ export default function ChatRoom() {
 
     finally { setSending(false); setSendingMulti(false); }
 
-  }, [input, sending, sendingMulti, view, singleSessionId, multiSessionId, multiSessionStatus, discussionMode, maxResponses, strategy, groupName, affinity, participants, allChars, PLAYER_ID, PLAYER_NAME]);
+  }, [input, sending, sendingMulti, view, singleSessionId, multiSessionId, multiSessionStatus, groupName, affinity, participants, allChars, PLAYER_ID, PLAYER_NAME]);
 
 
 
@@ -1013,12 +974,12 @@ export default function ChatRoom() {
                         setHasMoreHistory(false);
                         activeSessionRef.current = item.session_id;
                         setView('group');
-                        let loadedParticipants = groupParts.map(p => ({ ...p, frequency: p.frequency || 1.0 }));
+                        let loadedParticipants = groupParts;
                         try {
                           const info = await multiDialogue.getSessionInfo(item.session_id);
                           setMultiSessionStatus(info.status || item.status || 'active');
                           setGroupName(info.group_name || item.group_name || '');
-                          loadedParticipants = info.participants?.map(p => ({ character_id: p.character_id, name: p.name, avatar_url: p.avatar_url, frequency: p.speak_frequency || 1.0 })) || loadedParticipants;
+                          loadedParticipants = info.participants?.map(p => ({ character_id: p.character_id, name: p.name, avatar_url: p.avatar_url })) || loadedParticipants;
                           setParticipants(loadedParticipants);
                         } catch {
                           setParticipants(loadedParticipants);
@@ -1148,42 +1109,6 @@ export default function ChatRoom() {
 
           </div>
 
-          {/* Strategy */}
-
-          <div>
-
-            <label className="text-[12px] text-cyber-green/40 uppercase tracking-wider mb-2 block">发言策略</label>
-
-            <div className="flex flex-wrap gap-1.5">
-
-              {STRATEGIES.map(s => (
-
-                <button key={s.value} onClick={()=>setStrategy(s.value)} className={`text-xs px-3 py-1.5 rounded border transition-all ${strategy===s.value ? 'border-cyber-green/40 bg-cyber-green/10 text-cyber-green' : 'border-white/5 text-cyber-green/30 hover:border-cyber-green/20'}`}>{s.label}</button>
-
-              ))}
-
-            </div>
-
-          </div>
-
-          {/* Discussion mode */}
-
-          <div className="flex items-center gap-3">
-
-            <label className="flex items-center gap-2 cursor-pointer">
-
-              <input type="checkbox" checked={discussionMode} onChange={e=>setDiscussionMode(e.target.checked)} className="sr-only peer" />
-
-              <div className="w-8 h-4 rounded-full bg-white/5 border border-white/10 peer-checked:bg-cyber-green/20 peer-checked:border-cyber-green/40 transition-colors relative after:absolute after:top-0.5 after:left-0.5 after:w-3 after:h-3 after:rounded-full after:bg-cyber-green/40 transition-transform peer-checked:after:translate-x-4" />
-
-              <span className="text-xs text-cyber-green/50">讨论模式</span>
-
-            </label>
-
-            {discussionMode && <select value={maxResponses} onChange={e=>setMaxResponses(Number(e.target.value))} className="text-xs bg-[#0d0d14] border border-white/10 rounded px-2 py-1 text-cyber-green/40">{[1,2,3,4,5].map(n=><option key={n} value={n}>最多{n}人</option>)}</select>}
-
-          </div>
-
           {/* Character selection */}
 
           <div>
@@ -1208,7 +1133,7 @@ export default function ChatRoom() {
 
                     <span className="text-xs text-cyber-green/60 truncate flex-1">{char.name}</span>
 
-                    {sel && <div className="text-[12px] flex items-center gap-1"><input type="range" min="0" max="2" step="0.1" value={sel.frequency} onClick={e=>e.stopPropagation()} onChange={e=>{e.stopPropagation(); updateFrequency(char.character_id, parseFloat(e.target.value));}} className="w-10 h-1 accent-cyber-green" /><span className="text-cyber-green/30 w-4 text-right">{sel.frequency.toFixed(1)}</span></div>}
+                    {sel && <div className="text-cyber-green/40"><X size={13} /></div>}
 
                   </div>
 
@@ -1616,22 +1541,6 @@ export default function ChatRoom() {
 
           </div>
 
-          <button onClick={() => setDiscussionMode(!discussionMode)} className={`hidden sm:flex text-[12px] px-2 py-0.5 rounded border transition-colors ${discussionMode ? 'border-purple-400/30 bg-purple-400/10 text-purple-300' : 'border-white/10 text-cyber-green/30'}`}>
-
-            <Radio size={12} className="inline mr-1" />讨论:{discussionMode?'ON':'OFF'}
-
-          </button>
-
-          {discussionMode && (
-
-            <select value={maxResponses} onChange={e=>setMaxResponses(Number(e.target.value))} className="text-[12px] bg-[#0d0d14] border border-white/10 rounded px-1.5 py-0.5 text-cyber-green/30 hidden sm:block">
-
-              {[1,2,3,4,5].map(n=><option key={n} value={n}>{n}人</option>)}
-
-            </select>
-
-          )}
-
         </header>
 
 
@@ -1671,8 +1580,6 @@ export default function ChatRoom() {
                     </div>
 
                   </div>
-
-                  <div className="text-[13px] text-cyber-green/15">{(p.frequency*100).toFixed(0)}%</div>
 
                 </div>
 

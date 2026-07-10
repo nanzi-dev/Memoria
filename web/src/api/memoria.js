@@ -279,7 +279,7 @@ export const dialogue = {
 // ═══════════════════════════════════════════════
 export const multiDialogue = {
   /** 开始多角色群聊 */
-  startSession(playerId, playerName, characterIds, strategyType = 'hybrid', speakFrequencies = null, groupName = null) {
+  startSession(playerId, playerName, characterIds, groupName = null) {
     return request('/multi-dialogue/session/start', {
       method: 'POST',
       body: JSON.stringify({
@@ -287,34 +287,31 @@ export const multiDialogue = {
         player_name: playerName,
         group_name: groupName,
         character_ids: characterIds,
-        strategy_type: strategyType,
-        speak_frequencies: speakFrequencies,
       }),
     });
   },
-  /** 发送消息（单角色回复模式） */
-  sendMessage(sessionId, playerMessage, strategyType = 'hybrid') {
+  /** 发送群聊消息 */
+  sendMessage(sessionId, playerMessage) {
     return request('/multi-dialogue/turn', {
       method: 'POST',
       body: JSON.stringify({
         session_id: sessionId,
         player_message: playerMessage,
-        strategy_type: strategyType,
-        discussion_mode: false,
-      }),
-    });
-  },
-  /** 讨论模式发送消息 */
-  discussMessage(sessionId, playerMessage, maxResponses = 3, strategyType = 'hybrid') {
-    return request('/multi-dialogue/turn', {
-      method: 'POST',
-      body: JSON.stringify({
-        session_id: sessionId,
-        player_message: playerMessage,
-        strategy_type: strategyType,
         discussion_mode: true,
-        max_responses: maxResponses,
       }),
+    });
+  },
+  /** 发送群聊消息，后端按语境决定实际回复人数 */
+  discussMessage(sessionId, playerMessage, maxResponses = null) {
+    const body = {
+      session_id: sessionId,
+      player_message: playerMessage,
+      discussion_mode: true,
+    };
+    if (maxResponses) body.max_responses = maxResponses;
+    return request('/multi-dialogue/turn', {
+      method: 'POST',
+      body: JSON.stringify(body),
     });
   },
   /** 结束会话 */

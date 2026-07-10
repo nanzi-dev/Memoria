@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 import logging
 
+from memoria.core import multi_character_memory
 from memoria.core.multi_character_orchestrator import (
     start_multi_character_session,
     process_multi_character_turn,
@@ -37,7 +38,7 @@ class StartMultiSessionRequest(BaseModel):
     )
     strategy_type: str = Field(
         "hybrid",
-        description="发言策略类型：round_robin/weighted/smart/trigger/hybrid"
+        description="兼容旧客户端的发言策略字段，普通群聊固定使用默认策略"
     )
 
 
@@ -58,14 +59,14 @@ class MultiDialogueTurnRequest(BaseModel):
         description="发言策略类型"
     )
     discussion_mode: bool = Field(
-        False, 
-        description="是否启用讨论模式（多角色连续发言）"
+        True,
+        description="是否启用群聊接话，普通群聊默认启用"
     )
-    max_responses: int = Field(
-        3, 
-        ge=1, 
-        le=5, 
-        description="讨论模式下最多几个角色回应"
+    max_responses: Optional[int] = Field(
+        None,
+        ge=1,
+        le=5,
+        description="群聊接话人数上限；不传时按语境动态决定"
     )
 
 
@@ -84,7 +85,7 @@ class MultiDialogueGroupResponse(BaseModel):
     """多角色群体讨论响应（讨论模式）"""
     responses: list[MultiDialogueTurnResponse] = Field(..., description="所有角色的回应列表")
     total_speakers: int = Field(..., description="发言角色数量")
-    discussion_mode: bool = Field(True, description="讨论模式标识")
+    discussion_mode: bool = Field(True, description="群聊接话标识")
 
 
 class AddParticipantRequest(BaseModel):
@@ -152,6 +153,44 @@ class MultiDialogueHistory(BaseModel):
     session_info: dict
 
 
+def _save_session_summary_on_end(session_id: str, session: dict) -> None:
+    """结束多角色会话时，将整场群聊统一摘要后保存。"""
+    messages = repository.get_multi_character_history(session_id, limit_messages=None)
+    meaningful_messages = [m for m in messages if str(m.get("content") or "").strip()]
+    if not meaningful_messages:
+        logger.info(f"多角色会话无可摘要消息，跳过保存: session={session_id}")
+        return
+
+    participants = repository.get_session_participants(session_id, only_active=False)
+    character_ids = [p["character_id"] for p in participants if p.get("character_id")]
+    if not character_ids:
+        logger.info(f"多角色会话无参与角色，跳过摘要保存: session={session_id}")
+        return
+
+    character_names = {
+        p["character_id"]: p.get("display_name") or p.get("name") or p["character_id"]
+        for p in participants
+        if p.get("character_id")
+    }
+    summary = multi_character_memory.generate_multi_character_summary(
+        session_id=session_id,
+        messages=meaningful_messages,
+        character_names=character_names,
+        player_name=session.get("player_name") or "玩家",
+    ).strip()
+    if not summary:
+        logger.info(f"多角色会话摘要为空，跳过保存: session={session_id}")
+        return
+
+    multi_character_memory.save_multi_character_summary(
+        session_id=session_id,
+        character_ids=character_ids,
+        player_id=session["player_id"],
+        summary_text=summary,
+        message_count=len(meaningful_messages),
+    )
+
+
 # =========================
 # API 端点
 # =========================
@@ -166,8 +205,8 @@ async def start_multi_session(request: StartMultiSessionRequest):
     - **player_id**: 玩家唯一标识
     - **player_name**: 玩家显示名称
     - **character_ids**: 参与的角色ID列表（至少2个）
-    - **speak_frequencies**: 可选的发言频率配置
-    - **strategy_type**: 发言策略（推荐使用hybrid）
+    - **speak_frequencies**: 兼容旧客户端的发言频率配置
+    - **strategy_type**: 兼容旧客户端的发言策略字段
     
     返回会话ID和第一个角色的开场白。
     """
@@ -187,7 +226,7 @@ async def start_multi_session(request: StartMultiSessionRequest):
             player_name=request.player_name,
             character_ids=request.character_ids,
             speak_frequencies=request.speak_frequencies,
-            strategy_type=request.strategy_type,
+            strategy_type="hybrid",
             group_name=request.group_name,
         )
         
@@ -212,13 +251,13 @@ async def multi_dialogue_turn(request: MultiDialogueTurnRequest):
     """
     处理多角色对话轮次
     
-    玩家发送消息后，系统会根据策略选择一个或多个角色回应。
+    玩家发送消息后，系统会模拟普通群聊，选择少量角色接话。
     
     - **session_id**: 会话ID
     - **player_message**: 玩家消息内容
-    - **strategy_type**: 发言策略（可覆盖会话默认策略）
-    - **discussion_mode**: 是否启用讨论模式（多角色连续发言）
-    - **max_responses**: 讨论模式下最多几个角色回应（1-5）
+    - **strategy_type**: 兼容旧客户端的发言策略字段
+    - **discussion_mode**: 是否启用群聊接话，默认启用
+    - **max_responses**: 可选的人数上限；不传时按语境动态决定
     
     返回选中角色的回应（单个或多个）。
     """
@@ -240,7 +279,7 @@ async def multi_dialogue_turn(request: MultiDialogueTurnRequest):
         result = process_multi_character_turn(
             session_id=request.session_id,
             player_message=request.player_message,
-            strategy_type=request.strategy_type,
+            strategy_type="hybrid",
             discussion_mode=request.discussion_mode,
             max_responses=request.max_responses
         )
@@ -608,6 +647,11 @@ async def end_multi_session(
                 "message": "会话已经是结束状态"
             }
         
+        try:
+            _save_session_summary_on_end(session_id, session)
+        except Exception as e:
+            logger.warning(f"结束会话时保存多角色摘要失败: {e}", exc_info=True)
+
         # 结束会话
         repository.end_session(session_id)
         
