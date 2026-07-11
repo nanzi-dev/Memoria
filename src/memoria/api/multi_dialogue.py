@@ -159,6 +159,14 @@ def _get_owned_multi_session(session_id: str, current_user_id: str) -> dict:
     return session
 
 
+def _inactive_character_ids(character_ids: list[str]) -> list[str]:
+    return [
+        character_id
+        for character_id in character_ids
+        if not repository.is_character_card_active(character_id)
+    ]
+
+
 def _generate_bounded_session_summary(
     session_id: str,
     messages: list[dict],
@@ -354,6 +362,13 @@ async def start_multi_session(
                 detail="多角色会话至少需要2个角色"
             )
 
+        inactive_ids = _inactive_character_ids(request.character_ids)
+        if inactive_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"角色卡已禁用，不能新建群聊: {', '.join(inactive_ids)}",
+            )
+
         clean_group_name = (request.group_name or "").strip()
         if clean_group_name and repository.player_group_name_exists(request.player_id, clean_group_name):
             raise HTTPException(status_code=400, detail="群聊名称已存在，请换一个名称")
@@ -441,6 +456,9 @@ async def multi_dialogue_turn(
     
     except HTTPException:
         raise
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     
     except Exception as e:
         logger.error(f"处理多角色对话异常: {e}", exc_info=True)
@@ -482,6 +500,9 @@ async def trigger_interaction(
     
     except HTTPException:
         raise
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     
     except Exception as e:
         logger.error(f"触发角色互动异常: {e}", exc_info=True)

@@ -96,6 +96,11 @@ class MultiCharacterOrchestrator:
         self.last_speaker_id = None
         
         logger.info(f"多角色编排器已初始化: session={session_id}, 参与角色={self.character_ids}")
+
+
+    def _ensure_has_active_participants(self) -> None:
+        if not self.participants:
+            raise ValueError("群聊中没有可回复的在线角色")
     
     
     def start_conversation(self) -> dict:
@@ -106,8 +111,7 @@ class MultiCharacterOrchestrator:
             dict: 包含开场白的响应
         """
         # 选择第一个角色发言（按加入顺序）
-        if not self.participants:
-            raise ValueError("没有可用的参与者")
+        self._ensure_has_active_participants()
         
         first_speaker = self.participants[0]
         character_id = first_speaker["character_id"]
@@ -140,12 +144,14 @@ class MultiCharacterOrchestrator:
         
         if not allow_multiple_responses:
             # 单角色回应模式（原有逻辑）
+            self._ensure_has_active_participants()
             speaker_id = self._decide_next_speaker(player_message)
             result = self._generate_character_response(speaker_id, player_message)
             return result
         
         else:
             # 多角色讨论模式
+            self._ensure_has_active_participants()
             response_count = self._decide_group_response_count(player_message, max_responses)
             responses = self._generate_group_discussion(player_message, response_count)
             return responses
@@ -441,7 +447,7 @@ class MultiCharacterOrchestrator:
             candidates.append((char_id, weight))
         
         if not candidates:
-            return self.character_ids[0]
+            raise ValueError("群聊中没有可回复的在线角色")
         
         # 加权随机选择
         total_weight = sum(w for _, w in candidates)
@@ -532,6 +538,8 @@ class MultiCharacterOrchestrator:
         Returns:
             dict: 角色回应结果
         """
+        if character_id not in self.character_cards:
+            raise ValueError(f"角色不可回复: {character_id}")
         card = self.character_cards[character_id]
         runtime_state = repository.get_runtime_state(
             character_id,
@@ -649,6 +657,8 @@ class MultiCharacterOrchestrator:
         Returns:
             dict: 角色互动结果
         """
+        if trigger_character_id not in self.character_cards:
+            raise ValueError(f"角色不可回复: {trigger_character_id}")
         card = self.character_cards[trigger_character_id]
         runtime_state = repository.get_runtime_state(
             trigger_character_id,

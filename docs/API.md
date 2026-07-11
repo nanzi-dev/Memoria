@@ -49,7 +49,7 @@ Content-Type: application/json
 }
 ```
 
-如果该玩家与角色已有活跃会话，接口会复用原会话并返回 `recovered: true` 与最近消息；否则创建空会话，开场白为空字符串。
+如果该玩家与角色已有活跃会话，接口会复用原会话并返回 `recovered: true` 与最近消息；否则创建空会话，开场白为空字符串。角色卡被禁用后不能创建新的单聊；已有历史仍可通过历史接口查看，继续发送消息会返回 400。
 
 **响应示例：**
 ```json
@@ -222,7 +222,7 @@ GET /api/v1/dialogue/sessions/player?player_id=player_001
 - `group_name`: 多角色群聊名称，单角色会话为 `null`
 - `is_multi_character`: 是否多角色会话
 - `last_message_at`: 最近消息时间
-- `name` / `display_name` / `avatar_url`: 列表展示用角色信息
+- `name` / `display_name` / `avatar_url` / `is_active`: 列表展示用角色信息；禁用角色会保留在已有会话列表中，前端展示为离线
 
 ### 9. 恢复最近活跃会话
 ```http
@@ -901,7 +901,7 @@ Content-Type: application/json
 - `player_id`: 玩家ID
 - `player_name`: 玩家显示名称
 - `group_name` (可选): 群聊名称，会写入会话列表
-- `character_ids`: 参与角色ID列表（至少2个）
+- `character_ids`: 参与角色ID列表（至少2个）；禁用角色不能用于新建群聊
 
 **响应示例：**
 ```json
@@ -934,9 +934,9 @@ Content-Type: application/json
 }
 ```
 
-每次玩家发起的多角色轮次会先保存玩家消息和角色回复，再把“玩家消息 + 本轮角色回复”生成摘要，并写入 `group_memory` 作为群体事件记忆。后续多角色 Prompt 会召回这些群体记忆，帮助参与角色延续共同经历。
+每次玩家发起的多角色轮次会保存玩家消息和角色回复。群聊结束时系统会将整场对话统一摘要并写入 `group_memory` 作为群体事件记忆；后续多角色 Prompt 会召回这些群体记忆，帮助参与角色延续共同经历。
 
-根据讨论触发条件，响应可能是单角色回复，也可能是多角色连续讨论回复。`discussion_mode` 默认启用；`max_responses` 可传 1-5，但编排器会结合语境、参与人数和内部上限动态决定实际接话人数，当前最多 4 个角色发言。讨论模式下返回结构包含 `responses` 数组，每个元素对应一个角色发言。
+根据讨论触发条件，响应可能是单角色回复，也可能是多角色连续讨论回复。`discussion_mode` 默认启用；`max_responses` 可传 1-5，但编排器会结合语境、参与人数和内部上限动态决定实际接话人数，当前最多 4 个角色发言。讨论模式下返回结构包含 `responses` 数组，每个元素对应一个角色发言。已有群聊中如果某个角色卡被禁用，该成员仍保留在参与者列表和历史中，但不会再被编排器选中回复；如果没有任何在线可回复角色，本接口返回 400。
 
 **响应示例：**
 ```json
@@ -1025,7 +1025,7 @@ GET /api/v1/multi-dialogue/session/{session_id}
       "display_name": "小黑",
       "join_order": 0,
       "speak_frequency": 1.2,
-      "is_active": true,
+      "is_active": false,
       "message_count": 5,
       "last_spoke_at": "2026-07-02T10:15:00Z"
     },

@@ -12,7 +12,7 @@ import {
 
   Send, ArrowLeft, Heart, Zap, AlertTriangle, Loader2, User, X, Plus, Users,
 
-  Search, Cpu, Activity, TrendingUp, ChevronRight, MessageSquare
+  Search, Cpu, Activity, TrendingUp, MessageSquare
 
 } from 'lucide-react';
 
@@ -342,6 +342,12 @@ export default function ChatRoom() {
 
 
 
+  function isCharacterActive(char) {
+    return char?.is_active == null || char?.is_active === true || char?.is_active === 1;
+  }
+
+
+
   function clearIdleSessionEnd(sessionId = null) {
 
     if (sessionId) {
@@ -531,6 +537,7 @@ export default function ChatRoom() {
               character_id: p.character_id,
               name: p.name || p.character_id,
               avatar_url: p.avatar_url || null,
+              is_active: p.is_active,
             }));
           } catch {}
 
@@ -586,6 +593,8 @@ export default function ChatRoom() {
             avatar_url: cached?.avatar_url || s.avatar_url || null,
 
             core_identity: cached?.core_identity || '',
+
+            is_active: cached?.is_active ?? 1,
 
           });
 
@@ -665,6 +674,11 @@ export default function ChatRoom() {
 
     if (!PLAYER_ID) { setError('请先登录后使用对话功能'); return; }
 
+    if (!isCharacterActive(char) && !char.session_id) {
+      setError('角色已离线，不能新建聊天');
+      return;
+    }
+
     setError(null);
 
     setView('single-loading');
@@ -679,9 +693,9 @@ export default function ChatRoom() {
 
       const cd = detail.card_data || {};
 
-      setCharacter(prev => ({
+      const nextCharacter = {
 
-        ...prev,
+        ...char,
 
         identity: cd.identity || {},
 
@@ -691,7 +705,32 @@ export default function ChatRoom() {
 
         status_labels: cd.identity?.status_labels || [cd.personality?.core_personality_summary || ''],
 
-      }));
+        is_active: detail.is_active ?? char.is_active,
+
+      };
+
+      setCharacter(nextCharacter);
+
+      if (!isCharacterActive(nextCharacter)) {
+        const hist = await dialogue.getHistory(char.character_id, PLAYER_ID, 0, 20);
+        if (hist?.messages?.length) {
+          setMessages(sortMessagesChronologically(hist.messages.map(normalizeDialogueMessage)));
+          setIsRecovered(true);
+          setHistoryOffset(hist.messages.length);
+          setHasMoreHistory(hist.has_more);
+        } else {
+          setMessages([]);
+          setHistoryOffset(0);
+          setHasMoreHistory(false);
+        }
+        setSingleSessionId(null);
+        activeSessionRef.current = null;
+        setAffinity(0);
+        setTrust(0);
+        setMood('neutral');
+        setView('single');
+        return;
+      }
 
       const session = await dialogue.startSession(char.character_id, PLAYER_ID, PLAYER_NAME);
 
@@ -811,6 +850,8 @@ export default function ChatRoom() {
 
   const toggleParticipant = (char) => {
 
+    if (!isCharacterActive(char)) return;
+
     setParticipants(prev =>
 
       prev.find(p => p.character_id === char.character_id)
@@ -832,6 +873,7 @@ export default function ChatRoom() {
     if (!cleanGroupName) { setError('请输入群聊名称'); return; }
     if (groupNameExists) { setError('群聊名称已存在，请换一个名称'); return; }
     if (participants.length < 2) { setError('至少选择2个角色'); return; }
+    if (participants.some(p => !isCharacterActive(p))) { setError('离线角色不能用于新建群聊'); return; }
 
     setError(null); setView('single-loading');
 
@@ -868,6 +910,11 @@ export default function ChatRoom() {
     if (!PLAYER_ID) { setError('请先登录后使用对话功能'); return; }
 
     if (!text || sending || sendingMulti) return;
+
+    if (view === 'single' && (!singleSessionId || !isCharacterActive(character))) {
+      setError('角色已离线，只能查看历史');
+      return;
+    }
 
     setError(null);
 
@@ -928,6 +975,7 @@ export default function ChatRoom() {
               character_id: p.character_id,
               name: p.name,
               avatar_url: p.avatar_url,
+              is_active: p.is_active,
             })));
           }
           activeSessionRef.current = continued.session_id;
@@ -962,7 +1010,7 @@ export default function ChatRoom() {
 
     finally { setSending(false); setSendingMulti(false); }
 
-  }, [input, sending, sendingMulti, view, singleSessionId, multiSessionId, multiSessionStatus, groupName, affinity, trust, participants, allChars, PLAYER_ID, PLAYER_NAME]);
+  }, [input, sending, sendingMulti, view, singleSessionId, multiSessionId, multiSessionStatus, groupName, affinity, trust, character, participants, allChars, PLAYER_ID, PLAYER_NAME]);
 
 
 
@@ -973,12 +1021,6 @@ export default function ChatRoom() {
   // ── Helpers ──
 
   const getCharById = (id) => participants.find(p => p.character_id === id) || allChars.find(c => c.character_id === id);
-
-  const filteredChars = allChars.filter(c => !searchQuery || c.name.toLowerCase().includes(searchQuery.toLowerCase()));
-
-  const activeChars = filteredChars.filter(c => c.is_active);
-
-  const inactiveChars = filteredChars.filter(c => !c.is_active);
 
   // ═══════════════════════════════════════════════
 
@@ -1168,7 +1210,7 @@ export default function ChatRoom() {
                           const info = await multiDialogue.getSessionInfo(item.session_id);
                           setMultiSessionStatus(info.status || item.status || 'active');
                           setGroupName(info.group_name || item.group_name || '');
-                          loadedParticipants = info.participants?.map(p => ({ character_id: p.character_id, name: p.name, avatar_url: p.avatar_url })) || loadedParticipants;
+                          loadedParticipants = info.participants?.map(p => ({ character_id: p.character_id, name: p.name, avatar_url: p.avatar_url, is_active: p.is_active })) || loadedParticipants;
                           setParticipants(loadedParticipants);
                         } catch {
                           setParticipants(loadedParticipants);
@@ -1198,13 +1240,17 @@ export default function ChatRoom() {
                       </div>
                     );
                   }
+                  const itemActive = isCharacterActive(item);
                   return (
                     <div key={item.session_id || i} onClick={() => enterSingleChat(item)} className="memoria-glass memoria-card-hover animate-fade-up flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer group relative overflow-hidden" style={{ animationDelay: `${Math.min(i, 12) * 24}ms` }}>
-                      <div className="memoria-avatar-ring w-10 h-10 rounded-full overflow-hidden border-2 border-slate-700/30 bg-[#0b0b0c] shrink-0 group-hover:border-cyber-green/45 transition-all group-hover:scale-105">
+                      <div className={`memoria-avatar-ring w-10 h-10 rounded-full overflow-hidden border-2 bg-[#0b0b0c] shrink-0 group-hover:border-cyber-green/45 transition-all group-hover:scale-105 ${itemActive ? 'border-slate-700/30' : 'border-zinc-700/30 opacity-60 grayscale'}`}>
                         {item.avatar_url ? <img src={item.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-sm font-bold">{item.name?.charAt(0)}</div>}
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5"><span className="font-character text-lg leading-none text-zinc-200 truncate">{item.name}</span></div>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`font-character text-lg leading-none truncate ${itemActive ? 'text-zinc-200' : 'text-zinc-500'}`}>{item.name}</span>
+                          {!itemActive && <span className="text-[10px] text-zinc-500 border border-zinc-700/60 rounded-full px-1.5 py-0.5 shrink-0">离线</span>}
+                        </div>
                         <div className="text-[11px] text-cyber-green/20 truncate mt-0.5">{item.last_message || '暂无消息'}</div>
                       </div>
                       <div className="flex flex-col items-end gap-1 shrink-0">
@@ -1219,7 +1265,7 @@ export default function ChatRoom() {
           })())}
           {activeTab === 'contacts' && (
             <div className="p-3 space-y-0.5">
-              {allChars.filter(c => c.is_active).map((char, i) => (
+              {allChars.filter(c => isCharacterActive(c)).map((char, i) => (
                 <div key={char.character_id} onClick={() => enterSingleChat(char)} className="memoria-glass memoria-card-hover animate-fade-up flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer group" style={{ animationDelay: `${Math.min(i, 12) * 22}ms` }}>
                   <div className="memoria-avatar-ring w-10 h-10 rounded-full overflow-hidden border-2 border-slate-700/30 bg-[#0b0b0c] shrink-0 group-hover:border-cyber-green/40 transition-all group-hover:scale-105">
                     {char.avatar_url ? <img src={char.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-sm font-bold">{char.name?.charAt(0)}</div>}
@@ -1228,16 +1274,23 @@ export default function ChatRoom() {
                     <div className="font-character text-lg leading-none text-zinc-200 truncate">{char.name}</div>
                     {char.core_identity && <div className="text-[11px] text-cyber-green/20 truncate mt-0.5">{char.core_identity}</div>}
                   </div>
-                  <ChevronRight size={14} className="text-cyber-green/15 shrink-0" />
+                  <div className="flex items-center gap-1.5 text-[11px] text-cyber-green/35 shrink-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyber-green/45" />
+                    在线
+                  </div>
                 </div>
               ))}
-              {allChars.filter(c => !c.is_active).length > 0 && (
+              {allChars.filter(c => !isCharacterActive(c)).length > 0 && (
                 <div className="pt-3 mt-2 border-t border-white/[0.03]">
-                  <div className="text-[10px] text-cyber-green/12 uppercase px-2 mb-1">已禁用</div>
-                  {allChars.filter(c => !c.is_active).map((char, i) => (
-                    <div key={char.character_id} onClick={() => enterSingleChat(char)} className="memoria-card-hover animate-fade-up flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/[0.02] transition-all cursor-pointer group opacity-50" style={{ animationDelay: `${Math.min(i, 8) * 22}ms` }}>
+                  <div className="text-[10px] text-cyber-green/12 uppercase px-2 mb-1">离线</div>
+                  {allChars.filter(c => !isCharacterActive(c)).map((char, i) => (
+                    <div key={char.character_id} onClick={() => setError('角色已离线，不能新建聊天')} className="animate-fade-up flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all cursor-not-allowed group opacity-50" style={{ animationDelay: `${Math.min(i, 8) * 22}ms` }}>
                       <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-slate-700/30 bg-[#0b0b0c] shrink-0">{char.avatar_url ? <img src={char.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/10 text-sm font-bold">{char.name?.charAt(0)}</div>}</div>
                       <div className="flex-1 min-w-0"><div className="font-character text-lg leading-none text-zinc-500 truncate">{char.name}</div></div>
+                      <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
+                        离线
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1311,7 +1364,7 @@ export default function ChatRoom() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
 
-              {allChars.filter(c=>c.is_active).map((char, i)=>{
+              {allChars.filter(c => isCharacterActive(c)).map((char, i)=>{
 
                 const sel = participants.find(p=>p.character_id===char.character_id);
 
@@ -1394,6 +1447,7 @@ export default function ChatRoom() {
 
   function renderSingleChat() {
 
+    const singleReadOnly = !isCharacterActive(character);
     const moodEmoji = MOOD_EMOJI[mood] || '😐';
     const moodBorder = MOOD_BORDER[mood] || 'border-slate-500/40';
     const moodGlow = MOOD_GLOW[mood] || '';
@@ -1427,7 +1481,9 @@ export default function ChatRoom() {
           <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setShowDetail(!showDetail)}>
             <div className="flex items-center gap-2">
               <h1 className="font-character text-lg leading-none text-zinc-200 truncate">{character?.name}</h1>
-              {sending && <span className="w-1.5 h-1.5 rounded-full bg-cyber-green/50 animate-pulse shrink-0" />}
+              {singleReadOnly
+                ? <span className="text-[10px] text-zinc-500 border border-zinc-700/60 rounded-full px-1.5 py-0.5 shrink-0">离线</span>
+                : sending && <span className="w-1.5 h-1.5 rounded-full bg-cyber-green/50 animate-pulse shrink-0" />}
             </div>
             {/* 第二行：好感度 | 情绪 | 信任星级 */}
             <div className="flex items-center gap-1.5 sm:gap-2 text-[12px] mt-0.5 overflow-hidden">
@@ -1605,15 +1661,15 @@ export default function ChatRoom() {
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               rows={1}
-              placeholder="输入消息..."
-              disabled={sending || sendingMulti}
+              placeholder={singleReadOnly ? '角色已离线，只能查看历史' : '输入消息...'}
+              disabled={singleReadOnly || sending || sendingMulti}
               className="flex-1 bg-[#0b0b0c] border border-white/10 rounded-xl px-3 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/10 resize-none focus:outline-none focus:border-cyber-green/30 transition-colors disabled:opacity-40 min-h-[44px] max-h-[100px]"
             />
 
             {/* 发送按钮 */}
             <button
               onClick={sendMessage}
-              disabled={!input.trim() || sending || sendingMulti}
+              disabled={singleReadOnly || !input.trim() || sending || sendingMulti}
               className="px-3 py-2 min-w-[44px] min-h-[44px] bg-cyber-green/10 hover:bg-cyber-green/[0.18] active:scale-95 border border-cyber-green/20 rounded-xl text-cyber-green disabled:opacity-20 disabled:cursor-not-allowed disabled:active:scale-100 transition-all shrink-0 flex items-center justify-center"
             >
               <Send size={16} />
@@ -1625,6 +1681,8 @@ export default function ChatRoom() {
 
   }
   function renderGroupChat() {
+
+    const activeParticipantCount = participants.filter(p => isCharacterActive(p)).length;
 
     return (
 
@@ -1659,7 +1717,7 @@ export default function ChatRoom() {
 
               <span className="w-1.5 h-1.5 rounded-full bg-cyber-green/50 animate-pulse" />
 
-              {sendingMulti ? '角色思考中...' : '在线'}
+              {sendingMulti ? '角色思考中...' : `${activeParticipantCount} 在线`}
 
             </div>
 
@@ -1697,9 +1755,9 @@ export default function ChatRoom() {
 
                     <div className="flex items-center gap-1 text-[13px] text-cyber-green/20">
 
-                      <span className="w-1 h-1 rounded-full bg-cyber-green/30 animate-pulse" />
+                      <span className={`w-1 h-1 rounded-full ${isCharacterActive(p) ? 'bg-cyber-green/30 animate-pulse' : 'bg-zinc-600'}`} />
 
-                      在线
+                      {isCharacterActive(p) ? '在线' : '离线'}
 
                     </div>
 
@@ -1949,13 +2007,13 @@ export default function ChatRoom() {
 
               <div key={p.character_id} className="animate-fade-up flex flex-col items-center gap-0.5 shrink-0" style={{ animationDelay: `${Math.min(i, 12) * 18}ms` }} title={p.name}>
 
-                <div className="w-7 h-7 rounded-full overflow-hidden border border-white/5 bg-[#0d0d14]">
+                <div className={`w-7 h-7 rounded-full overflow-hidden border border-white/5 bg-[#0d0d14] ${isCharacterActive(p) ? '' : 'opacity-45 grayscale'}`}>
 
                   {p.avatar_url ? <img src={p.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-[12px] font-bold">{p.name?.charAt(0)}</div>}
 
                 </div>
 
-                <span className="font-character text-sm leading-none text-cyber-green/25 truncate max-w-[52px]">{p.name}</span>
+                <span className={`font-character text-sm leading-none truncate max-w-[52px] ${isCharacterActive(p) ? 'text-cyber-green/25' : 'text-zinc-600'}`}>{p.name}</span>
 
               </div>
 

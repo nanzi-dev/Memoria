@@ -86,6 +86,7 @@ def _patch_multi_summary(monkeypatch, multi_dialogue, saved_summary):
 async def test_start_multi_session_rejects_duplicate_group_name(monkeypatch):
     from memoria.api import multi_dialogue
 
+    monkeypatch.setattr(multi_dialogue.repository, "is_character_card_active", lambda character_id: True)
     monkeypatch.setattr(multi_dialogue.repository, "player_group_name_exists", lambda player_id, group_name: True)
 
     with pytest.raises(HTTPException) as exc:
@@ -101,6 +102,31 @@ async def test_start_multi_session_rejects_duplicate_group_name(monkeypatch):
 
     assert exc.value.status_code == 400
     assert exc.value.detail == "群聊名称已存在，请换一个名称"
+
+
+@pytest.mark.asyncio
+async def test_start_multi_session_rejects_disabled_character(monkeypatch):
+    from memoria.api import multi_dialogue
+
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "is_character_card_active",
+        lambda character_id: character_id != "c2",
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await multi_dialogue.start_multi_session(
+            multi_dialogue.StartMultiSessionRequest(
+                player_id="player-1",
+                player_name="Player",
+                group_name="小队",
+                character_ids=["c1", "c2"],
+            ),
+            current_user_id="player-1",
+        )
+
+    assert exc.value.status_code == 400
+    assert "c2" in exc.value.detail
 
 
 @pytest.mark.asyncio
@@ -400,6 +426,61 @@ async def test_continue_multi_session_creates_new_active_session_without_reactiv
     assert created["group_name"] == "小队"
     assert created["character_ids"] == ["c1", "c2"]
     assert ended_source["status"] == "ended"
+
+
+@pytest.mark.asyncio
+async def test_continue_multi_session_keeps_disabled_participants(monkeypatch):
+    from memoria.api import multi_dialogue
+
+    created = {}
+    disabled_participant = {**_participant("c2", "角色二", 2), "is_active": False}
+
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session",
+        lambda session_id: _multi_session("old-session", status="ended"),
+    )
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_multi_character_thread_sessions",
+        lambda session_id: [
+            {
+                "session_id": "old-session",
+                "status": "ended",
+                "group_name": "小队",
+                "group_thread_id": "thread-1",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "ended_at": "2026-01-01T00:10:00+00:00",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session_participants",
+        lambda session_id, only_active=False: [
+            _participant("c1", "角色一", 1),
+            disabled_participant,
+        ],
+    )
+
+    def fake_create_multi_character_session(**kwargs):
+        created.update(kwargs)
+        return True
+
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "create_multi_character_session",
+        fake_create_multi_character_session,
+    )
+
+    response = await multi_dialogue.continue_multi_session(
+        "old-session",
+        current_user_id="player-1",
+    )
+
+    assert response.status == "active"
+    assert created["character_ids"] == ["c1", "c2"]
+    assert any(p.character_id == "c2" and not p.is_active for p in response.participants)
 
 
 @pytest.mark.asyncio

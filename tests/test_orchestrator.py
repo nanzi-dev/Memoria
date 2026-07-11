@@ -165,6 +165,7 @@ class TestMultiCharacterGroupMemory:
         )
         orch.session_id = "session-2"
         orch.player_name = "Player"
+        orch.participants = [{"character_id": "c1"}, {"character_id": "c2"}]
         orch.character_ids = ["c1", "c2"]
         orch._decide_next_speaker = lambda player_message: "c1"
         orch._generate_character_response = lambda character_id, player_message: {

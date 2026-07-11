@@ -191,6 +191,8 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 **索引：** `idx_character_active ON character_card(is_active, created_at DESC)`
 
+**禁用语义：** `is_active=0` 是软禁用，不删除角色卡数据。禁用角色卡不能创建新的单聊或群聊；已有单聊历史仍可查看但不能继续发送；已有群聊保留该成员和历史消息，但编排器只加载当前启用的参与角色，因此禁用角色不会继续回复。
+
 ---
 
 ### 4. relationship_state（关系状态表）
@@ -273,6 +275,8 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 **外键：** `FOREIGN KEY (session_id) REFERENCES session(session_id)`
 **唯一约束：** `UNIQUE(session_id, character_id)`
 **索引：** `idx_multi_participant ON multi_session_participant(session_id, is_active)`
+
+`multi_session_participant.is_active` 表示该成员在会话内是否活跃；查询可回复成员时还会叠加 `character_card.is_active`，因此角色卡被禁用会让其在既有群聊中显示离线且不再发言。
 
 ---
 

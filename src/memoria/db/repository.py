@@ -1663,6 +1663,20 @@ def get_character_card_from_db(character_id: str, include_inactive: bool = False
     return _row_to_dict(row)
 
 
+def is_character_card_active(character_id: str) -> bool:
+    """返回角色卡是否存在且启用。"""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT is_active FROM character_card WHERE character_id = ?",
+            (character_id,),
+        ).fetchone()
+
+    if not row:
+        return True
+    data = _row_to_dict(row) or {}
+    return bool(data.get("is_active"))
+
+
 
 def update_character_avatar(character_id: str, avatar_url: str | None) -> bool:
     """更新角色头像 URL"""
@@ -2358,14 +2372,28 @@ def get_session_participants(session_id: str, only_active: bool = True) -> list[
     """
     with get_conn() as conn:
         query = """
-            SELECT p.*, c.name, c.display_name, c.avatar_url
+            SELECT
+                p.session_id,
+                p.character_id,
+                p.join_order,
+                p.speak_frequency,
+                CASE
+                    WHEN p.is_active = 1 AND COALESCE(c.is_active, 1) = 1 THEN 1
+                    ELSE 0
+                END AS is_active,
+                p.created_at,
+                p.last_spoke_at,
+                p.message_count,
+                c.name,
+                c.display_name,
+                c.avatar_url
             FROM multi_session_participant p
             LEFT JOIN character_card c ON p.character_id = c.character_id
             WHERE p.session_id = ?
         """
         
         if only_active:
-            query += " AND p.is_active = 1"
+            query += " AND p.is_active = 1 AND COALESCE(c.is_active, 1) = 1"
         
         query += " ORDER BY p.join_order ASC"
         

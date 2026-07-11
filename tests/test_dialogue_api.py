@@ -19,6 +19,7 @@ def test_session_start_creates_session_without_llm_opening(monkeypatch):
 
     monkeypatch.setattr(dialogue.repository, "get_all_player_sessions", lambda player_id: [])
     monkeypatch.setattr(dialogue.repository, "get_latest_active_session", lambda player_id, character_id=None: None)
+    monkeypatch.setattr(dialogue.repository, "is_character_card_active", lambda character_id: True)
     monkeypatch.setattr(dialogue.character_loader, "load_character_card", lambda character_id: SimpleNamespace())
     monkeypatch.setattr(dialogue.repository, "get_runtime_state", lambda *args, **kwargs: {"affection_level": 12})
     monkeypatch.setattr(
@@ -48,6 +49,49 @@ def test_session_start_creates_session_without_llm_opening(monkeypatch):
     assert res.opening_line == ""
     assert res.recovered is False
     assert res.messages == []
+
+
+def test_session_start_rejects_disabled_character_without_existing_session(monkeypatch):
+    from memoria.api import dialogue
+
+    monkeypatch.setattr(dialogue.repository, "get_all_player_sessions", lambda player_id: [])
+    monkeypatch.setattr(dialogue.repository, "get_latest_active_session", lambda player_id, character_id=None: None)
+    monkeypatch.setattr(dialogue.repository, "is_character_card_active", lambda character_id: False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        dialogue.session_start(
+            dialogue.SessionStartRequest(character_id="char-1", player_id="player-1", player_name="Tester"),
+            BackgroundTasks(),
+            current_user_id="player-1",
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "角色卡已禁用" in exc_info.value.detail
+
+
+def test_dialogue_turn_rejects_disabled_character(monkeypatch):
+    from memoria.api import dialogue
+
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_session",
+        lambda session_id: {
+            "session_id": session_id,
+            "character_id": "char-1",
+            "player_id": "player-1",
+            "status": "active",
+        },
+    )
+    monkeypatch.setattr(dialogue.repository, "is_character_card_active", lambda character_id: False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        dialogue.dialogue_turn(
+            dialogue.DialogueTurnRequest(session_id="session-1", player_message="你好"),
+            current_user_id="player-1",
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "角色卡已禁用" in exc_info.value.detail
 
 
 def test_session_start_rejects_other_player(monkeypatch):

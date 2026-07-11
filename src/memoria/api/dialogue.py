@@ -151,6 +151,11 @@ def _messages_for_session(session_id: str, limit: int = 100) -> list[HistoryMess
     return [HistoryMessage(**m) for m in messages]
 
 
+def _ensure_character_can_chat(character_id: str) -> None:
+    if not repository.is_character_card_active(character_id):
+        raise HTTPException(status_code=400, detail="角色卡已禁用，不能新建或继续单聊")
+
+
 def _current_character_state(character_id: str, player_id: str) -> tuple[int, int, str]:
     current_affinity = 0
     current_trust = 0
@@ -168,6 +173,7 @@ def _current_character_state(character_id: str, player_id: str) -> tuple[int, in
 
 def _start_empty_session(character_id: str, player_id: str, player_name: str) -> SessionStartResponse:
     """创建会话但不阻塞等待开场白生成。"""
+    _ensure_character_can_chat(character_id)
     card = character_loader.load_character_card(character_id)
     runtime_state = repository.get_runtime_state(character_id, player_id, card)
     session_id = str(uuid.uuid4())
@@ -357,7 +363,8 @@ def dialogue_turn(
     current_user_id: str = Depends(require_current_user_id),
 ):
     try:
-        _get_owned_session(req.session_id, current_user_id)
+        session = _get_owned_session(req.session_id, current_user_id)
+        _ensure_character_can_chat(session["character_id"])
         result = orchestrator.run_dialogue_turn(
             req.session_id,
             req.player_message

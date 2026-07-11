@@ -167,6 +167,26 @@ class TestMultiSession:
         hist = repository.get_multi_character_history(sid,5)
         assert len(hist) >= 1
 
+    def test_disabled_character_stays_in_group_but_is_not_active_participant(self):
+        sid = str(uuid.uuid4())
+        active_id = f"ga_{uuid.uuid4().hex[:8]}"
+        disabled_id = f"gd_{uuid.uuid4().hex[:8]}"
+        active_card = json.dumps({"character_id": active_id, "meta": {"name": "A", "display_name": "A"}})
+        disabled_card = json.dumps({"character_id": disabled_id, "meta": {"name": "D", "display_name": "D"}})
+
+        assert repository.save_character_card_to_db(active_id, active_card, name="A", display_name="A")
+        assert repository.save_character_card_to_db(disabled_id, disabled_card, name="D", display_name="D")
+        assert repository.create_multi_character_session(sid, "p1", "Player", [active_id, disabled_id])
+        assert repository.delete_character_card_from_db(disabled_id, soft_delete=True)
+
+        visible_parts = repository.get_session_participants(sid, only_active=False)
+        active_parts = repository.get_session_participants(sid, only_active=True)
+
+        assert {p["character_id"] for p in visible_parts} == {active_id, disabled_id}
+        assert [p["character_id"] for p in active_parts] == [active_id]
+        disabled_part = next(p for p in visible_parts if p["character_id"] == disabled_id)
+        assert not disabled_part["is_active"]
+
     def test_group_name_visible_in_player_sessions(self):
         sid = str(uuid.uuid4())
         player_id = f"pg_{uuid.uuid4().hex[:8]}"
