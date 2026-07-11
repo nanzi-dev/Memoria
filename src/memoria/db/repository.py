@@ -303,6 +303,7 @@ CREATE TABLE IF NOT EXISTS session (
     ended_at        TEXT,           -- 会话结束时间
     status          TEXT DEFAULT 'active',  -- active / ended
     group_name      TEXT,           -- 多角色群聊名称
+    group_thread_id TEXT,           -- 逻辑群聊线程 ID，同一群聊多段 session 共享
     
     -- 多角色会话标识
     is_multi_character INTEGER DEFAULT 0  -- 0=单角色, 1=多角色群聊
@@ -378,6 +379,9 @@ ON session(character_id, player_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_session_multi
 ON session(is_multi_character, player_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_session_group_thread
+ON session(group_thread_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_multi_participant
 ON multi_session_participant(session_id, is_active);
@@ -511,6 +515,7 @@ def _migrate(conn):
         conn.execute("ALTER TABLE session ADD COLUMN group_name TEXT")
     except Exception:
         pass  # 列已存在，跳过
+    add_column("session", "group_thread_id TEXT")
     add_column("event_definition", "schedule TEXT")
     add_column("event_definition", "template_id TEXT")
     add_column("event_context_state", "context_data TEXT NOT NULL DEFAULT '{}'")
@@ -882,6 +887,10 @@ def get_sessions_by_player_and_character(character_id: str, player_id: str) -> l
                 s.ended_at,
                 s.status,
                 s.group_name,
+                CASE
+                    WHEN COALESCE(s.is_multi_character, 0) = 1 THEN COALESCE(s.group_thread_id, s.session_id)
+                    ELSE s.group_thread_id
+                END AS group_thread_id,
                 s.is_multi_character,
                 c.name,
                 c.display_name,
@@ -963,6 +972,10 @@ def get_all_player_sessions(player_id: str) -> list[dict]:
                 s.ended_at,
                 s.status,
                 s.group_name,
+                CASE
+                    WHEN COALESCE(s.is_multi_character, 0) = 1 THEN COALESCE(s.group_thread_id, s.session_id)
+                    ELSE s.group_thread_id
+                END AS group_thread_id,
                 s.is_multi_character,
                 c.name,
                 c.display_name,
@@ -2028,7 +2041,8 @@ def create_multi_character_session(
     player_id: str,
     player_name: str,
     character_ids: list[str],
-    group_name: str | None = None
+    group_name: str | None = None,
+    group_thread_id: str | None = None,
 ) -> bool:
     """
     创建多角色群聊会话
@@ -2050,13 +2064,14 @@ def create_multi_character_session(
         with get_conn() as conn:
             # 创建会话（使用第一个角色作为主角色）
             clean_group_name = (group_name or "").strip() or None
+            thread_id = (group_thread_id or "").strip() or session_id
             conn.execute(
                 """
                 INSERT INTO session
-                (session_id, character_id, player_id, player_name, created_at, status, group_name, is_multi_character)
-                VALUES (?, ?, ?, ?, ?, 'active', ?, 1)
+                (session_id, character_id, player_id, player_name, created_at, status, group_name, group_thread_id, is_multi_character)
+                VALUES (?, ?, ?, ?, ?, 'active', ?, ?, 1)
                 """,
-                (session_id, character_ids[0], player_id, player_name, _now(), clean_group_name),
+                (session_id, character_ids[0], player_id, player_name, _now(), clean_group_name, thread_id),
             )
             
             # 添加参与者
@@ -2104,6 +2119,42 @@ def get_session_participants(session_id: str, only_active: bool = True) -> list[
         
         rows = conn.execute(query, (session_id,)).fetchall()
     
+    return [dict(r) for r in rows]
+
+
+def get_group_thread_id(session_id: str) -> str | None:
+    """返回群聊逻辑线程 ID；旧数据没有该列值时使用自身 session_id。"""
+    session = get_session(session_id)
+    if not session:
+        return None
+    return session.get("group_thread_id") or session["session_id"]
+
+
+def get_multi_character_thread_sessions(session_id: str) -> list[dict]:
+    """获取同一逻辑群聊下的所有物理 session。"""
+    session = get_session(session_id)
+    if not session:
+        return []
+    thread_id = session.get("group_thread_id") or session["session_id"]
+    if not thread_id:
+        return []
+    group_name_key = (session.get("group_name") or "").strip().lower()
+
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT session_id, status, group_name, group_thread_id, created_at, ended_at
+            FROM session
+            WHERE player_id = ?
+              AND COALESCE(is_multi_character, 0) = 1
+              AND (
+                COALESCE(group_thread_id, session_id) = ?
+                OR (? != '' AND LOWER(TRIM(COALESCE(group_name, ''))) = ?)
+              )
+            ORDER BY created_at ASC, session_id ASC
+            """,
+            (session["player_id"], thread_id, group_name_key, group_name_key),
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -2199,6 +2250,64 @@ def get_multi_character_history(
 
     messages = [dict(r) for r in rows]
     messages.reverse()  # 按时间正序返回
+    return messages
+
+
+def get_multi_character_thread_history(
+    session_id: str,
+    limit_messages: int | None = 20
+) -> list[dict]:
+    """
+    获取同一逻辑群聊下跨多个 session 的历史消息。
+    """
+    session = get_session(session_id)
+    if not session:
+        return []
+    thread_id = session.get("group_thread_id") or session["session_id"]
+    if not thread_id:
+        return []
+    group_name_key = (session.get("group_name") or "").strip().lower()
+
+    with get_conn() as conn:
+        if limit_messages is None:
+            rows = conn.execute(
+                """
+                SELECT m.id AS message_id, m.session_id, m.role, m.content,
+                       m.character_id, m.character_name, m.created_at
+                FROM short_term_message m
+                INNER JOIN session s ON s.session_id = m.session_id
+                WHERE s.player_id = ?
+                  AND COALESCE(s.is_multi_character, 0) = 1
+                  AND (
+                    COALESCE(s.group_thread_id, s.session_id) = ?
+                    OR (? != '' AND LOWER(TRIM(COALESCE(s.group_name, ''))) = ?)
+                  )
+                ORDER BY m.id ASC
+                """,
+                (session["player_id"], thread_id, group_name_key, group_name_key),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+        rows = conn.execute(
+            """
+            SELECT m.id AS message_id, m.session_id, m.role, m.content,
+                   m.character_id, m.character_name, m.created_at
+            FROM short_term_message m
+            INNER JOIN session s ON s.session_id = m.session_id
+            WHERE s.player_id = ?
+              AND COALESCE(s.is_multi_character, 0) = 1
+              AND (
+                COALESCE(s.group_thread_id, s.session_id) = ?
+                OR (? != '' AND LOWER(TRIM(COALESCE(s.group_name, ''))) = ?)
+              )
+            ORDER BY m.id DESC
+            LIMIT ?
+            """,
+            (session["player_id"], thread_id, group_name_key, group_name_key, limit_messages),
+        ).fetchall()
+
+    messages = [dict(r) for r in rows]
+    messages.reverse()
     return messages
 
 

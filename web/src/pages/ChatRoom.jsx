@@ -467,13 +467,14 @@ export default function ChatRoom() {
             status: s.status,
             created_at: s.created_at,
             ended_at: s.ended_at,
+            group_thread_id: s.group_thread_id || info?.group_thread_id || s.session_id,
             last_message_at: s.last_message_at,
             last_message: s.last_message,
             message_count: s.message_count,
             participants: groupParticipants,
             group_name: resolvedGroupName,
           };
-          const groupKey = resolvedGroupName.toLowerCase();
+          const groupKey = resolvedGroupName.trim().toLowerCase() || String(groupItem.group_thread_id).toLowerCase();
           const existing = groupItemsByName.get(groupKey);
           if (!existing || new Date(getActivityTime(groupItem) || 0) > new Date(getActivityTime(existing) || 0)) {
             groupItemsByName.set(groupKey, groupItem);
@@ -833,33 +834,36 @@ export default function ChatRoom() {
         let res;
         let targetSessionId = multiSessionId;
 
-        const startReplacementGroupSession = async () => {
-          const replacement = await multiDialogue.startSession(
-            PLAYER_ID,
-            PLAYER_NAME,
-            participants.map(p => p.character_id),
-            groupName.trim() || '未命名群聊'
-          );
-          targetSessionId = replacement.session_id;
-          setMultiSessionId(replacement.session_id);
+        const continueGroupSession = async () => {
+          const continued = await multiDialogue.continueSession(targetSessionId);
+          targetSessionId = continued.session_id;
+          setMultiSessionId(continued.session_id);
           setMultiSessionStatus('active');
-          activeSessionRef.current = replacement.session_id;
-          sessionKindRef.current.set(replacement.session_id, 'group');
-          clearIdleSessionEnd(replacement.session_id);
-          return replacement.session_id;
+          setGroupName(continued.group_name || groupName);
+          if (continued.participants?.length) {
+            setParticipants(continued.participants.map(p => ({
+              character_id: p.character_id,
+              name: p.name,
+              avatar_url: p.avatar_url,
+            })));
+          }
+          activeSessionRef.current = continued.session_id;
+          sessionKindRef.current.set(continued.session_id, 'group');
+          clearIdleSessionEnd(continued.session_id);
+          return continued.session_id;
         };
 
         const sendGroupTurn = (sessionId) => multiDialogue.discussMessage(sessionId, text);
 
         if (multiSessionStatus !== 'active') {
-          targetSessionId = await startReplacementGroupSession();
+          targetSessionId = await continueGroupSession();
         }
 
         try {
           res = await sendGroupTurn(targetSessionId);
         } catch (err) {
           if (!String(err.message || '').includes('会话已结束')) throw err;
-          targetSessionId = await startReplacementGroupSession();
+          targetSessionId = await continueGroupSession();
           res = await sendGroupTurn(targetSessionId);
         }
 

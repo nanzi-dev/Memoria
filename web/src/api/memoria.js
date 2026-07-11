@@ -285,6 +285,9 @@ export const multiDialogue = {
       body: JSON.stringify({ session_id: sessionId }),
     });
   },
+  continueSession(sessionId) {
+    return request(`/multi-dialogue/session/${sessionId}/continue`, { method: 'POST' });
+  },
   endSessionOnUnload(sessionId) {
     if (!sessionId) return;
     const body = JSON.stringify({ session_id: sessionId });

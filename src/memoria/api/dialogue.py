@@ -223,11 +223,11 @@ def _end_session(session_id: str, background_tasks: BackgroundTasks | None = Non
 
     if session.get("is_multi_character"):
         from memoria.api.multi_dialogue import finish_multi_character_session
-        result = finish_multi_character_session(session_id)
+        result = finish_multi_character_session(session_id, background_tasks)
         summary = repository.get_session_summary(session_id)
         return SessionEndResponse(
             session_id=result["session_id"],
-            summary=summary.get("summary_text") if summary else None,
+            summary=summary.get("summary_text") if summary and summary.get("summary_status") == "completed" else None,
             message_count=summary.get("message_count", 0) if summary else 0,
         )
 

@@ -180,7 +180,98 @@ class TestMultiSession:
         sessions = repository.get_all_player_sessions(player_id)
         group = next(s for s in sessions if s["session_id"] == sid)
         assert group["group_name"] == "旅团作战室"
+        assert group["group_thread_id"] == sid
         assert group["is_multi_character"]
+
+    def test_multi_character_session_defaults_group_thread_id_to_session_id(self):
+        sid = str(uuid.uuid4())
+        player_id = f"gtd_{uuid.uuid4().hex[:8]}"
+
+        assert repository.create_multi_character_session(
+            sid,
+            player_id,
+            "Player",
+            ["gc1", "gc2"],
+            group_name="默认线程群聊",
+        )
+
+        session = repository.get_session(sid)
+        assert session["group_thread_id"] == sid
+        assert repository.get_group_thread_id(sid) == sid
+
+    def test_multi_character_thread_history_spans_sessions(self):
+        thread_id = str(uuid.uuid4())
+        first_sid = str(uuid.uuid4())
+        second_sid = str(uuid.uuid4())
+        player_id = f"gth_{uuid.uuid4().hex[:8]}"
+
+        assert repository.create_multi_character_session(
+            first_sid,
+            player_id,
+            "Player",
+            ["gc1", "gc2"],
+            group_name="连续群聊",
+            group_thread_id=thread_id,
+        )
+        assert repository.create_multi_character_session(
+            second_sid,
+            player_id,
+            "Player",
+            ["gc1", "gc2"],
+            group_name="连续群聊",
+            group_thread_id=thread_id,
+        )
+
+        repository.append_multi_character_message(first_sid, "user", "第一段消息")
+        repository.append_multi_character_message(second_sid, "assistant", "第二段消息", "gc1", "角色一")
+
+        sessions = repository.get_multi_character_thread_sessions(first_sid)
+        assert [s["session_id"] for s in sessions] == [first_sid, second_sid]
+
+        history = repository.get_multi_character_thread_history(first_sid, limit_messages=None)
+        assert [m["content"] for m in history] == ["第一段消息", "第二段消息"]
+        assert [m["session_id"] for m in history] == [first_sid, second_sid]
+
+    def test_multi_character_thread_history_merges_same_name_sessions(self):
+        first_sid = str(uuid.uuid4())
+        second_sid = str(uuid.uuid4())
+        other_player_sid = str(uuid.uuid4())
+        player_id = f"gtn_{uuid.uuid4().hex[:8]}"
+
+        assert repository.create_multi_character_session(
+            first_sid,
+            player_id,
+            "Player",
+            ["gc1", "gc2"],
+            group_name="同名群聊",
+            group_thread_id=str(uuid.uuid4()),
+        )
+        assert repository.create_multi_character_session(
+            second_sid,
+            player_id,
+            "Player",
+            ["gc1", "gc2"],
+            group_name=" 同名群聊 ",
+            group_thread_id=str(uuid.uuid4()),
+        )
+        assert repository.create_multi_character_session(
+            other_player_sid,
+            f"other_{uuid.uuid4().hex[:8]}",
+            "Other",
+            ["gc1", "gc2"],
+            group_name="同名群聊",
+            group_thread_id=str(uuid.uuid4()),
+        )
+
+        repository.append_multi_character_message(first_sid, "user", "同名第一段")
+        repository.append_multi_character_message(second_sid, "assistant", "同名第二段", "gc1", "角色一")
+        repository.append_multi_character_message(other_player_sid, "user", "其他玩家消息")
+
+        sessions = repository.get_multi_character_thread_sessions(first_sid)
+        assert [s["session_id"] for s in sessions] == [first_sid, second_sid]
+
+        history = repository.get_multi_character_thread_history(first_sid, limit_messages=None)
+        assert [m["content"] for m in history] == ["同名第一段", "同名第二段"]
 
     def test_player_group_name_exists_matches_trimmed_names(self):
         sid = str(uuid.uuid4())

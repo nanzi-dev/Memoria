@@ -563,7 +563,7 @@ class MultiCharacterOrchestrator:
         )
         
         # 获取对话历史
-        history = repository.get_multi_character_history(
+        history = repository.get_multi_character_thread_history(
             self.session_id,
             limit_messages=20
         )
@@ -679,7 +679,7 @@ class MultiCharacterOrchestrator:
         )
         
         # 获取对话历史
-        history = repository.get_multi_character_history(
+        history = repository.get_multi_character_thread_history(
             self.session_id,
             limit_messages=20
         )
@@ -792,6 +792,7 @@ def start_multi_character_session(
     player_name: str,
     character_ids: list[str],
     group_name: str | None = None,
+    group_thread_id: str | None = None,
 ) -> dict:
     """
     创建并启动多角色会话
@@ -813,6 +814,7 @@ def start_multi_character_session(
         player_name=player_name,
         character_ids=character_ids,
         group_name=group_name,
+        group_thread_id=group_thread_id,
     )
     
     if not success:
@@ -828,6 +830,7 @@ def start_multi_character_session(
         "session_id": session_id,
         "opening": opening_result,
         "group_name": group_name,
+        "group_thread_id": group_thread_id or session_id,
     }
 
 
