@@ -48,7 +48,9 @@ Memoria/
 ├── web/                        # React + Vite 前端
 │   ├── src/pages/              # Home、ChatRoom、CharacterEditor、EventList、RelationshipGraph
 │   ├── src/components/         # 通用组件与编辑器步骤组件
+│   ├── src/context/            # 登录态与对话上下文
 │   ├── src/api/                # 前端 API 客户端
+│   ├── src/assets/             # 前端静态资源
 │   └── package.json            # npm 脚本与依赖声明
 ├── config/                     # 配置模板
 │   ├── .env.example
@@ -63,9 +65,9 @@ Memoria/
 
 - `GET /health` — 存活检查，返回 `{"status": "ok", "version": "0.4.0"}`
 - `GET /ready` — 数据库就绪检查，失败返回 503
-- `POST /admin/log-level?level=DEBUG` — 动态调整日志级别
+- `POST /admin/log-level?level=DEBUG` — 动态调整日志级别，需要登录态
 
-API 路由通过 per-player 速率限制中间件保护（60 请求 / 60 秒窗口，`X-Player-ID` 头识别）。
+API 写操作通过速率限制中间件保护（60 请求 / 60 秒窗口）。限流 key 优先使用认证 token 解析出的用户 ID，未登录或 token 无效时退回客户端 IP，不信任客户端传入的 `X-Player-ID`。
 
 ## 核心架构模式
 
@@ -136,17 +138,17 @@ RAG 召回 (ChromaDB)            ← 余弦相似度搜索
 
 ## 数据库设计
 
-Memoria 使用 SQLite (WAL 模式)，共 16 张表。
+Memoria 使用 SQLite (WAL 模式)，共 17 张表。
 
 ### 1. users（用户表）
 
-存储 Web 前端用户登录资料和头像。当前认证实现使用内存 token，生产环境应替换为 JWT 或持久化会话。
+存储 Web 前端用户登录资料和头像。登录 token 持久化在 `auth_token` 表；进程内 `_tokens` 仅保留给旧测试/开发进程兼容。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | user_id | TEXT PRIMARY KEY | 用户 ID，格式为 `usr_<8字符>` |
 | username | TEXT NOT NULL UNIQUE | 用户名 |
-| password_hash | TEXT NOT NULL | SHA256 密码哈希 |
+| password_hash | TEXT NOT NULL | PBKDF2-SHA256 密码哈希；旧 SHA256 登录后会自动升级 |
 | gender | TEXT DEFAULT 'unknown' | 性别：male/female/unknown |
 | avatar_url | TEXT | 头像 data URL |
 | created_at | TEXT | 创建时间 |
@@ -154,7 +156,23 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 
 ---
 
-### 2. character_card（角色卡表）
+### 2. auth_token（认证 token 表）
+
+存储用户登录态 token，支持服务重启后继续识别有效登录态。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| token | TEXT PRIMARY KEY | 登录 token |
+| user_id | TEXT NOT NULL | 用户 ID（外键）|
+| created_at | TEXT NOT NULL | 创建时间 |
+| expires_at | TEXT NOT NULL | 过期时间 |
+
+**外键：** `FOREIGN KEY (user_id) REFERENCES users(user_id)`
+**索引：** `idx_auth_token_user ON auth_token(user_id, expires_at)`
+
+---
+
+### 3. character_card（角色卡表）
 
 存储角色卡的完整 JSON 数据。
 
@@ -175,7 +193,7 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 
 ---
 
-### 3. relationship_state（关系状态表）
+### 4. relationship_state（关系状态表）
 
 存储玩家与角色的运行时关系状态。使用显式列而非 JSON，因为好感度和信任度在每次对话中都会高频更新。
 
@@ -194,7 +212,7 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 
 ---
 
-### 4. long_term_fact（长期记忆表）
+### 5. long_term_fact（长期记忆表）
 
 存储从对话中萃取出的长期记忆事实，同时同步到 ChromaDB 向量数据库。
 
@@ -212,7 +230,7 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 
 ---
 
-### 5. session（会话表）
+### 6. session（会话表）
 
 管理对话会话的生命周期，通过 `is_multi_character` 字段区分单角色和多角色会话。
 
@@ -226,15 +244,17 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 | ended_at | TEXT | 结束时间（结束时写入）|
 | status | TEXT DEFAULT 'active' | 状态：active 或 ended |
 | group_name | TEXT | 多角色群聊名称 |
+| group_thread_id | TEXT | 逻辑群聊线程 ID，同一群聊多段 session 共享 |
 | is_multi_character | INTEGER DEFAULT 0 | 0=单角色，1=多角色群聊 |
 
 **索引：**
 - `idx_session_lookup ON session(character_id, player_id, created_at DESC)` — 按角色和玩家查询历史会话
 - `idx_session_multi ON session(is_multi_character, player_id, created_at DESC)` — 按会话类型筛选
+- `idx_session_group_thread ON session(group_thread_id, created_at DESC)` — 按群聊线程查询续聊历史
 
 ---
 
-### 6. multi_session_participant（多角色会话参与者表）
+### 7. multi_session_participant（多角色会话参与者表）
 
 记录多角色群聊中每个会话的参与角色，支持动态添加/移除。
 
@@ -258,7 +278,7 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 
 ---
 
-### 7. shared_memory（角色间共享记忆表）
+### 8. shared_memory（角色间共享记忆表）
 
 存储两个角色之间共同经历的记忆，用于多角色对话中查询角色间的历史互动信息。
 
@@ -276,7 +296,7 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 
 ---
 
-### 8. group_memory（群体记忆表）
+### 9. group_memory（群体记忆表）
 
 存储多角色会话中的群体共同记忆，以 session 为粒度记录所有参与者的集体经历。玩家每发起一轮多角色对话后，系统会将“玩家消息 + 角色回复”摘要保存为群体事件记忆，`memory_text` 通常带有 `群体事件：` 前缀。
 
@@ -294,7 +314,7 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 
 ---
 
-### 9. short_term_message（短期记忆表）
+### 10. short_term_message（短期记忆表）
 
 存储对话历史消息。多角色会话场景下，`character_id` 和 `character_name` 字段记录发言人信息。
 
@@ -314,7 +334,7 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 
 ---
 
-### 10. session_summary（会话摘要表）
+### 11. session_summary（会话摘要表）
 
 存储会话摘要（中期记忆），在会话结束时由 AI 自动生成。
 
@@ -336,7 +356,7 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 
 ---
 
-### 11. event_definition（事件定义表）
+### 12. event_definition（事件定义表）
 
 存储事件的配置和定义。`character_id` 为 NULL 时表示全局事件。
 
@@ -361,7 +381,7 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 
 ---
 
-### 12. event_trigger_log（事件触发日志表）
+### 13. event_trigger_log（事件触发日志表）
 
 记录每次事件触发的详细信息，用于调试和分析。
 
@@ -381,7 +401,7 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 
 ---
 
-### 13. event_context_state（事件上下文状态表）
+### 14. event_context_state（事件上下文状态表）
 
 持久化事件链和跨会话事件进度，确保剧情事件可以在后续会话继续推进。
 
@@ -403,7 +423,7 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 
 ---
 
-### 14. event_schedule_state（事件调度状态表）
+### 15. event_schedule_state（事件调度状态表）
 
 记录时间驱动事件的检查和运行状态，用于 cron 式事件调度。
 
@@ -425,7 +445,7 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 
 ---
 
-### 15. event_template（事件模板表）
+### 16. event_template（事件模板表）
 
 存储可复用事件模板，用于快速创建常见事件配置。
 
@@ -443,7 +463,7 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 
 ---
 
-### 16. character_relationship（角色关系网络表）
+### 17. character_relationship（角色关系网络表）
 
 存储角色之间的相互关系，用于多角色互动和关系图谱。
 
@@ -465,12 +485,13 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 
 ### 完整索引汇总
 
-共 14 个索引，覆盖所有高频查询路径：
+共 16 个索引，覆盖所有高频查询路径：
 
 | 索引名 | 表 | 列 |
 |--------|-----|-----|
 | `idx_session_lookup` | session | (character_id, player_id, created_at DESC) |
 | `idx_session_multi` | session | (is_multi_character, player_id, created_at DESC) |
+| `idx_session_group_thread` | session | (group_thread_id, created_at DESC) |
 | `idx_multi_participant` | multi_session_participant | (session_id, is_active) |
 | `idx_message_session` | short_term_message | (session_id, id ASC) |
 | `idx_message_character` | short_term_message | (session_id, character_id, created_at DESC) |
@@ -482,6 +503,7 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 | `idx_event_trigger_log` | event_trigger_log | (event_id, character_id, player_id, triggered_at DESC) |
 | `idx_event_context_lookup` | event_context_state | (character_id, player_id, status, updated_at DESC) |
 | `idx_event_schedule_due` | event_schedule_state | (status, next_run_at) |
+| `idx_auth_token_user` | auth_token | (user_id, expires_at) |
 | `idx_relationship_lookup` | character_relationship | (character_id_a, character_id_b) |
 
 ---
@@ -492,8 +514,8 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 2. **显式列 + JSON 混合** — 高频读写字段（好感度、信任度）使用显式列以获得更好性能；复杂配置（角色卡、事件条件）使用 JSON 字段获得灵活性
 3. **软删除设计** — `is_active` 字段实现逻辑删除，支持数据恢复
 4. **多角色扩展** — `session.is_multi_character` + `multi_session_participant` 表支持群聊；`short_term_message` 扩展 `character_id` / `character_name` 列区分发言人；`shared_memory` 存储角色间互动记忆，`group_memory` 存储玩家轮次摘要形成的群体事件记忆
-5. **轻量迁移** — 启动时为旧库补齐 `character_card.avatar_url`、`session_summary.summary_status`、`session.group_name`、`event_definition.schedule`、`event_definition.template_id` 和事件上下文/调度/模板表等新增结构
-6. **完整索引覆盖** — 14 个精心设计的索引确保所有常用查询路径为 O(log n)
+5. **轻量迁移** — 启动时为旧库补齐 `character_card.avatar_url`、`session_summary.summary_status`、`session.group_name`、`session.group_thread_id`、`event_definition.schedule`、`event_definition.template_id`、`auth_token` 和事件上下文/调度/模板表等新增结构
+6. **完整索引覆盖** — 16 个精心设计的索引确保所有常用查询路径为 O(log n)
 7. **可迁移性** — 兼容 PostgreSQL 标准 SQL 语法，使用标准数据类型
 
 ## 角色卡规范
@@ -634,4 +656,4 @@ Memoria 使用 SQLite (WAL 模式)，共 16 张表。
 | 嵌入模型 | all-MiniLM-L6-v2 | ~80MB，HuggingFace 下载 |
 | LLM 客户端 | OpenAI SDK | 兼容接口，支持多供应商 |
 | 包管理 | pip + pyproject.toml | 可选 dev 依赖组 |
-| 测试 | pytest + pytest-asyncio | TestClient 集成测试 |
+| 测试 | pytest + pytest-asyncio | 直接调用 handler、模型校验和数据库回归测试 |

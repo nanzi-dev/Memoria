@@ -1,8 +1,10 @@
 # Memoria API 文档
 
-完整的 REST API 参考，所有端点前缀为 `/api/v1`（多角色对话为 `/api/v1/multi-dialogue`）。
+完整的 REST API 参考，业务端点前缀为 `/api/v1`（多角色对话为 `/api/v1/multi-dialogue`），系统端点 `/health`、`/ready`、`/admin/log-level` 不带该前缀。
 
-访问 http://localhost:8000/docs 可查看 Swagger 交互式文档，http://localhost:8000/redoc 可查看 ReDoc 文档。
+访问 http://127.0.0.1:8001/docs 可查看 Swagger 交互式文档，http://127.0.0.1:8001/redoc 可查看 ReDoc 文档。
+
+除 `GET /api/v1/characters`、用户注册/登录，以及关系只读查询外，业务接口通常需要登录态。认证方式支持 `Authorization: Bearer <token>`、`?token=<token>` 或登录后写入的 `memoria-token` HttpOnly Cookie。带 `player_id` 的接口会校验 `player_id` 必须等于当前登录用户 ID。
 
 ---
   - [对话系统 API](#对话系统-api)
@@ -52,9 +54,10 @@ Content-Type: application/json
 ```json
 {
   "session_id": "550e8400-e29b-41d4-a716-446655440000",
-  "opening_line": "[好奇地打量]你好呀！你是谁？",
-  "action": "greeting_curious",
+  "opening_line": "",
+  "action": "",
   "current_affinity": 0,
+  "current_trust": 0,
   "assistant_message_id": null,
   "recovered": false,
   "messages": []
@@ -78,7 +81,9 @@ Content-Type: application/json
   "dialogue": "[开心地摆尾巴]你认识我呀！",
   "action": "emotional_happy",
   "affinity_delta": 2,
+  "trust_delta": 0,
   "current_affinity": 2,
+  "current_trust": 0,
   "current_mood": "开心",
   "user_message_id": 101,
   "assistant_message_id": 102,
@@ -157,6 +162,7 @@ GET /api/v1/dialogue/history?character_id=npc_luo_xiaohei&player_id=player_001&o
   ],
   "has_more": false,
   "current_affinity": 2,
+  "current_trust": 0,
   "current_mood": "开心"
 }
 ```
@@ -245,6 +251,8 @@ GET /api/v1/dialogue/session/latest?player_id=player_001&character_id=npc_luo_xi
 ---
 
 ## 角色卡管理 API
+
+本节接口均需要登录态。
 
 ### 1. 获取角色卡列表
 ```http
@@ -386,6 +394,8 @@ Content-Type: application/json
 ---
 
 ## 事件管理 API
+
+本节接口均需要登录态。
 
 ---
 
@@ -774,6 +784,8 @@ GET /api/v1/admin/event-context?character_id=&player_id=&status=&limit=100
 
 ## 角色关系 API
 
+创建、更新、删除和批量创建关系需要登录态；关系详情、角色关系列表和关系网络查询为只读接口，不强制登录。
+
 ### 1. 创建角色关系
 ```http
 POST /api/v1/relationships
@@ -895,12 +907,14 @@ Content-Type: application/json
 {
   "session_id": "multi-session-uuid",
   "group_name": "森林小队",
+  "group_thread_id": "multi-session-uuid",
   "opening": {
     "character_id": "npc_luo_xiaohei",
     "character_name": "小黑",
     "dialogue": "[好奇地看着周围]哇，这里好多人呀！",
     "action": "greeting_curious",
     "current_affinity": 0,
+    "current_trust": 0,
     "current_mood": "好奇"
   }
 }
@@ -931,7 +945,9 @@ Content-Type: application/json
   "dialogue": "[微笑]你好，欢迎。",
   "action": "greeting_polite",
   "affinity_delta": 1,
+  "trust_delta": 0,
   "current_affinity": 1,
+  "current_trust": 0,
   "current_mood": "平静"
 }
 ```
@@ -946,7 +962,9 @@ Content-Type: application/json
       "dialogue": "[举手]我也想听听！",
       "action": "curious_talk",
       "affinity_delta": 1,
+      "trust_delta": 0,
       "current_affinity": 1,
+      "current_trust": 0,
       "current_mood": "好奇"
     }
   ],
@@ -996,6 +1014,7 @@ GET /api/v1/multi-dialogue/session/{session_id}
   "player_id": "player_001",
   "player_name": "旅行者",
   "group_name": "森林小队",
+  "group_thread_id": "multi-session-uuid",
   "created_at": "2026-07-02T10:00:00Z",
   "status": "active",
   "participants": [
@@ -1073,6 +1092,13 @@ Content-Type: application/json
   "session_id": "multi-session-uuid"
 }
 ```
+
+### 7. 继续群聊会话
+```http
+POST /api/v1/multi-dialogue/session/{session_id}/continue
+```
+
+当原群聊已结束时，该接口会在同一个 `group_thread_id` 下创建新的 active 会话；若同一线程已有 active 会话，则直接返回该会话。
 
 ---
 
@@ -1227,6 +1253,7 @@ GET /ready
 
 ```http
 POST /admin/log-level?level=DEBUG
+Authorization: Bearer token-value
 ```
 
 **查询参数：**
@@ -1246,18 +1273,14 @@ POST /admin/log-level?level=DEBUG
 
 ### 4. 速率限制（Rate Limiting）
 
-所有 `/api/*` 写操作（非 GET/HEAD/OPTIONS）均受基于玩家的速率限制保护。
-
-```http
-X-Player-ID: player_001
-```
+所有 `/api/*` 写操作（非 GET/HEAD/OPTIONS）均受速率限制保护。服务端优先使用认证 token 解析出的用户 ID 作为限流 key，未登录或 token 无效时退回客户端 IP；不会信任客户端传入的 `X-Player-ID`。
 
 | 项目       | 值                    |
 |------------|-----------------------|
 | 窗口大小   | 60 秒                 |
 | 最大请求数 | 60 次 / 窗口          |
-| 识别方式   | X-Player-ID 请求头    |
-| 兜底策略   | 未提供则使用客户端 IP |
+| 识别方式   | 登录用户 ID           |
+| 兜底策略   | 未登录则使用客户端 IP |
 | 超限响应码 | HTTP 429             |
 
 **超限响应示例：**

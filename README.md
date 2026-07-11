@@ -122,15 +122,16 @@ Memoria/
 │   │   └── repository.py       # SQLite 数据库操作
 │   └── main.py                 # 应用入口
 ├── tests/                      # 测试文件
-│   ├── test_core.py             # 核心模块测试（62 tests）
-│   ├── test_repository.py       # 数据库层测试（31 tests）
+│   ├── test_core.py             # 核心模块测试（56 tests）
+│   ├── test_repository.py       # 数据库层测试（35 tests）
 │   ├── test_events.py           # 事件系统测试（15 tests）
-│   ├── test_orchestrator.py     # 编排器测试（14 tests）
-│   ├── test_multi_dialogue_api.py # 多角色 API 测试（9 tests）
+│   ├── test_orchestrator.py     # 编排器测试（15 tests）
+│   ├── test_multi_dialogue_api.py # 多角色 API 测试（10 tests）
 │   ├── test_dialogue_api.py     # 单角色 API 测试（2 tests）
-│   ├── test_api_models.py       # API 模型测试（20 tests）
-│   ├── test_memory_extractor.py # 记忆/提示测试（22 tests）
-│   ├── test_system.py           # 系统级测试（13 tests）
+│   ├── test_api_models.py       # API 模型测试（19 tests）
+│   ├── test_memory_extractor.py # 记忆/提示测试（25 tests）
+│   ├── test_security_fixes.py   # 安全回归测试（5 tests）
+│   ├── test_system.py           # 系统级测试（12 tests）
 │   ├── test_vector_memory.py    # 向量记忆测试（2 tests）
 ├── docs/                       # 项目文档
 │   ├── API.md                  # API 文档
@@ -148,6 +149,9 @@ Memoria/
 ├── web/                        # React + Vite 前端
 │   ├── src/pages/              # Home、ChatRoom、CharacterEditor、EventList、RelationshipGraph
 │   ├── src/components/         # 通用组件与编辑器步骤组件
+│   ├── src/context/            # 登录态与对话上下文
+│   ├── src/api/                # 前端 API 客户端
+│   ├── src/assets/             # 前端静态资源
 │   └── package.json            # 前端脚本与依赖
 ├── config/                     # 配置文件
 │   ├── .env.example            # 环境变量模板
@@ -218,12 +222,12 @@ LLM_MODEL=gpt-4-turbo-preview
 
 **5. 启动服务**
 ```bash
-uvicorn memoria.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn memoria.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
 **6. 访问应用**
-- API 文档 (Swagger): http://localhost:8000/docs
-- API 文档 (ReDoc): http://localhost:8000/redoc
+- API 文档 (Swagger): http://127.0.0.1:8001/docs
+- API 文档 (ReDoc): http://127.0.0.1:8001/redoc
 - CLI 聊天: `python scripts/cli_chat.py`
 
 **7. 启动 Web 前端（可选）**
@@ -242,7 +246,7 @@ npm run dev
 | 文档 | 内容 |
 |------|------|
 | [API 文档](docs/API.md) | 完整 REST API 参考（对话/角色卡/事件/关系/多角色/用户/系统管理），含请求/响应示例 |
-| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（16 张表）、三层记忆架构、角色卡开发规范 |
+| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（17 张表）、三层记忆架构、角色卡开发规范 |
 | [开发路线图](docs/ROADMAP.md) | 已完成功能和未来规划 |
 | [故障排查](docs/FAQ.md) | 常见问题解决方案、调试技巧、性能优化建议 |
 | [贡献指南](docs/CONTRIBUTING.md) | 如何贡献代码、Commit 规范、代码审查标准 |
@@ -266,6 +270,7 @@ LLM_LIGHT_MODEL=                               # 轻量模型名称
 
 # ====== 应用配置 ======
 DATABASE_PATH=./data/sqlite_db/memoria.db      # 数据库文件路径
+AUTH_COOKIE_SECURE=false                       # HTTPS 部署时可设为 true
 SHORT_TERM_MEMORY_TURNS=8                      # 短期记忆轮数
 MAX_OUTPUT_TOKENS=600                          # 单轮最大输出 token 数
 
@@ -294,7 +299,7 @@ PYTHONPATH=src pytest tests/test_multi_dialogue_api.py -v # 多角色 API
 PYTHONPATH=src pytest tests/test_system.py -v            # 系统端点与限流
 ```
 
-当前测试集合为 190 tests（`pytest --collect-only -q`）。
+当前测试集合为 196 tests（`pytest --collect-only -q`）。
 
 ---
 

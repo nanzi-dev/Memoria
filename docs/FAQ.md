@@ -31,7 +31,7 @@ python -c "from sentence_transformers import SentenceTransformer; SentenceTransf
 
 # 方案 3：使用国内镜像
 export HF_ENDPOINT=https://hf-mirror.com
-PYTHONPATH=src uvicorn memoria.main:app --reload
+PYTHONPATH=src uvicorn memoria.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
 ---
@@ -170,15 +170,15 @@ sqlite3 data/sqlite_db/memoria.db \
 
 ### Q: 如何调整日志级别
 
-启动时设置环境变量：`LOG_LEVEL=DEBUG PYTHONPATH=src uvicorn memoria.main:app`
+启动时设置环境变量：`LOG_LEVEL=DEBUG PYTHONPATH=src uvicorn memoria.main:app --host 127.0.0.1 --port 8001`
 
-运行时动态调整：`curl -X POST http://localhost:8000/admin/log-level?level=DEBUG`
+运行时动态调整：`curl -X POST http://127.0.0.1:8001/admin/log-level?level=DEBUG -H "Authorization: Bearer <token>"`
 
 可选级别：DEBUG / INFO / WARNING / ERROR
 
 ### Q: API 返回 429 Too Many Requests
 
-触发了 per-player 速率限制（60次/60秒）。等待窗口重置后重试。可通过 `X-Player-ID` 请求头区分不同玩家。
+触发了写操作速率限制（60次/60秒）。登录请求优先按认证用户限流，未登录或 token 无效时按客户端 IP 限流；`X-Player-ID` 不会作为可信限流依据。
 
 ### Q: 启动时出现配置警告
 
@@ -240,7 +240,7 @@ SELECT * FROM session LIMIT 5;
 
 ### 5. 使用 FastAPI 交互式文档
 
-访问 http://localhost:8000/docs，点击任意接口的 "Try it out" 按钮，填写参数后点击 "Execute" 查看响应。
+访问 http://127.0.0.1:8001/docs，点击任意接口的 "Try it out" 按钮，填写参数后点击 "Execute" 查看响应。
 
 ---
 

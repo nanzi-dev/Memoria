@@ -55,14 +55,14 @@ def _validate_config():
 
 
 # =========================
-# 速率限制（per-player 简单实现）
+# 速率限制（认证用户优先，未登录回退 IP）
 # =========================
 _request_counts: dict[str, list[float]] = {}
 _RATE_LIMIT_WINDOW = 60.0   # 60 seconds
 _RATE_LIMIT_MAX = 60        # max 60 requests per window
 
 def _check_rate_limit(player_id: str) -> bool:
-    """检查 per-player 速率限制，返回 True 表示允许"""
+    """检查指定限流 key 是否允许请求。"""
     import time
     now = time.time()
     if player_id not in _request_counts:
@@ -168,7 +168,7 @@ async def set_log_level(level: str = "INFO", _current_user_id: str = Depends(req
 # =========================
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
-    """per-player 速率限制中间件"""
+    """写操作速率限制中间件。"""
     # 仅对 API 写操作应用限流；列表、详情、历史等读请求不消耗窗口。
     if request.url.path.startswith("/api/") and request.method not in {"GET", "HEAD", "OPTIONS"}:
         rate_limit_key = _get_rate_limit_key(request)
