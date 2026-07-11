@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import * as d3 from 'd3';
 import { characterAdmin, relationshipAdmin } from '../api/memoria';
 import { useDialog } from '../context/DialogContext';
+import { useUser } from '../context/UserContext';
 import SideRays from '../components/SideRays';
 import {
   ArrowLeft, Loader2, RefreshCw, ZoomIn, ZoomOut, Maximize2,
@@ -377,6 +378,7 @@ function EditRelationModal({ edge, relationTypes, usedTypeValues, onAddType, onR
 export default function RelationshipGraph() {
   const navigate = useNavigate();
   const dialog = useDialog();
+  const { user, loading: userLoading } = useUser();
   const svgRef = useRef(null);
   const containerRef = useRef(null);
   const simulationRef = useRef(null);
@@ -399,6 +401,18 @@ export default function RelationshipGraph() {
   }, [relationTypes]);
 
   const loadData = useCallback(async () => {
+    if (userLoading) {
+      setLoading(true);
+      return;
+    }
+    if (!user) {
+      setCharacters([]);
+      setNetwork({ nodes: [], edges: [] });
+      setError('未提供认证信息');
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true); setError(null);
       const charList = await characterAdmin.list(false);
@@ -425,7 +439,7 @@ export default function RelationshipGraph() {
     } catch (e) {
       setError(e.message);
     } finally { setLoading(false); }
-  }, []);
+  }, [userLoading, user?.user_id]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -770,6 +784,7 @@ export default function RelationshipGraph() {
   // ── Render ──
   const modalOpen = showAddModal || !!editEdge;
   const usedTypeValues = new Set(network.edges.map(edge => edge.relationship_type).filter(Boolean));
+  const isAuthError = !!error && /认证|未登录|401|token/i.test(error);
 
   return (
     <div className="min-h-screen memoria-page flex flex-col select-none">
@@ -823,7 +838,8 @@ export default function RelationshipGraph() {
               {characters.length} 角色 · {network.edges.length} 边
             </span>
             <button onClick={() => setShowAddModal(true)}
-              className="flex items-center gap-1 px-3 py-1.5 bg-cyber-green/10 border border-cyber-green/25 text-cyber-green font-mono text-xs rounded-lg hover:bg-cyber-green/20 hover:shadow-[0_0_22px_rgba(167,239,158,0.12)] active:scale-95 transition-all">
+              disabled={!user || loading}
+              className="flex items-center gap-1 px-3 py-1.5 bg-cyber-green/10 border border-cyber-green/25 text-cyber-green font-mono text-xs rounded-lg hover:bg-cyber-green/20 hover:shadow-[0_0_22px_rgba(167,239,158,0.12)] active:scale-95 transition-all disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-cyber-green/10 disabled:hover:shadow-none disabled:active:scale-100">
               <Plus size={13} /> 添加关系
             </button>
             <button onClick={loadData} disabled={loading}
@@ -846,11 +862,19 @@ export default function RelationshipGraph() {
           </div>
         )}
         {error && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 px-4 py-2 bg-red-900/80 text-red-300 font-mono text-xs rounded-lg border border-red-400/20 animate-fade-up">
-            错误: {error}
+          <div className="absolute inset-x-4 top-4 z-10 flex justify-center">
+            <div className="flex w-full max-w-xl flex-col gap-3 rounded-xl border border-red-400/18 bg-red-400/[0.055] px-4 py-3 text-center shadow-[0_0_32px_rgba(248,113,113,0.08)] backdrop-blur-sm animate-fade-up sm:flex-row sm:items-center sm:justify-between sm:text-left">
+              <p className="text-sm font-mono text-red-200/80">{error}</p>
+              <button
+                onClick={isAuthError ? () => navigate('/') : loadData}
+                className="inline-flex min-h-[38px] items-center justify-center gap-2 rounded-lg border border-red-300/20 px-3 text-xs font-mono text-red-200/80 transition-all hover:bg-red-400/10"
+              >
+                {isAuthError ? '返回首页登录' : '重试'}
+              </button>
+            </div>
           </div>
         )}
-        {!loading && network.nodes.length === 0 && (
+        {!loading && !error && network.nodes.length === 0 && (
           <div className="absolute inset-0 z-10 flex items-center justify-center">
             <div className="memoria-glass animate-fade-up text-center rounded-xl px-8 py-7">
               <Users size={56} className="mx-auto text-cyber-green/10 mb-5" />

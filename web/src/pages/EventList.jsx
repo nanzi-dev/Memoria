@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { eventAdmin } from '../api/memoria';
 import { useDialog } from '../context/DialogContext';
+import { useUser } from '../context/UserContext';
 import SideRays from '../components/SideRays';
 
 const EVENT_RAYS_PROPS = {
@@ -61,6 +62,8 @@ const SORT_OPTIONS = [
   { value: 'name_asc', label: '名称 A-Z' },
   { value: 'trigger_desc', label: '触发次数' },
 ];
+
+const AUTH_ERROR_PATTERN = /认证|未登录|401|token/i;
 
 function getSearchText(evt) {
   return [
@@ -102,6 +105,7 @@ function EventStat({ label, value, tone = 'default' }) {
 export default function EventList() {
   const navigate = useNavigate();
   const dialog = useDialog();
+  const { user, loading: userLoading } = useUser();
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -113,9 +117,21 @@ export default function EventList() {
   const [busyEventId, setBusyEventId] = useState(null);
   const [notice, setNotice] = useState('');
 
-  useEffect(() => { loadEvents(); }, []);
+  const loadEvents = useCallback(async ({ soft = false } = {}) => {
+    if (userLoading) {
+      if (soft) setRefreshing(true);
+      else setLoading(true);
+      return;
+    }
 
-  async function loadEvents({ soft = false } = {}) {
+    if (!user) {
+      setEvents([]);
+      setError('未提供认证信息');
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
     try {
       if (soft) setRefreshing(true);
       else setLoading(true);
@@ -123,12 +139,16 @@ export default function EventList() {
       const list = await eventAdmin.list();
       setEvents(Array.isArray(list) ? list : []);
     } catch (e) {
-      setError(e.message || '事件列表加载失败');
+      const message = e.message || '事件列表加载失败';
+      setError(message);
+      if (AUTH_ERROR_PATTERN.test(message)) setEvents([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }
+  }, [userLoading, user?.user_id]);
+
+  useEffect(() => { loadEvents(); }, [loadEvents]);
 
   async function handleToggle(evt) {
     setBusyEventId(evt.event_id);
@@ -141,7 +161,9 @@ export default function EventList() {
       setNotice(!evt.is_active ? '事件已启用' : '事件已禁用');
       window.setTimeout(() => setNotice(''), 1800);
     } catch (e) {
-      setError(e.message || '切换事件状态失败');
+      const message = e.message || '切换事件状态失败';
+      setError(message);
+      if (AUTH_ERROR_PATTERN.test(message)) setEvents([]);
     } finally {
       setBusyEventId(null);
     }
@@ -163,7 +185,9 @@ export default function EventList() {
       setNotice('事件已删除');
       window.setTimeout(() => setNotice(''), 1800);
     } catch (e) {
-      setError(e.message || '删除事件失败');
+      const message = e.message || '删除事件失败';
+      setError(message);
+      if (AUTH_ERROR_PATTERN.test(message)) setEvents([]);
     } finally {
       setBusyEventId(null);
     }
@@ -185,6 +209,8 @@ export default function EventList() {
   const disabledCount = Math.max(0, events.length - activeCount);
   const totalTriggers = events.reduce((sum, evt) => sum + (Number(evt.trigger_count) || 0), 0);
   const hasFilters = filter !== 'all' || triggerFilter !== 'all' || !!search.trim();
+  const isAuthError = !!error && AUTH_ERROR_PATTERN.test(error);
+  const isAuthBlocked = !user || isAuthError;
 
   return (
     <div className="relative min-h-screen overflow-x-hidden memoria-page">
@@ -210,7 +236,7 @@ export default function EventList() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => loadEvents({ soft: true })}
-              disabled={loading || refreshing}
+              disabled={isAuthBlocked || loading || refreshing}
               className="flex min-h-[40px] items-center gap-2 rounded-lg border border-cyber-green/15 px-3 text-xs font-mono text-cyber-green/60 transition-all hover:border-cyber-green/30 hover:bg-cyber-green/5 hover:text-cyber-green disabled:cursor-not-allowed disabled:opacity-40"
             >
               <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
@@ -218,7 +244,8 @@ export default function EventList() {
             </button>
             <button
               onClick={() => navigate('/events/new')}
-              className="flex min-h-[40px] items-center gap-2 rounded-lg border border-cyber-green/30 bg-cyber-green/12 px-4 text-xs font-bold text-cyber-green transition-all hover:bg-cyber-green/20 hover:shadow-[0_0_24px_rgba(167,239,158,0.12)] active:scale-[0.98]"
+              disabled={isAuthBlocked || loading}
+              className="flex min-h-[40px] items-center gap-2 rounded-lg border border-cyber-green/30 bg-cyber-green/12 px-4 text-xs font-bold text-cyber-green transition-all hover:bg-cyber-green/20 hover:shadow-[0_0_24px_rgba(167,239,158,0.12)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-cyber-green/12 disabled:hover:shadow-none disabled:active:scale-100"
             >
               <Plus size={14} />
               New
@@ -310,11 +337,11 @@ export default function EventList() {
           <div className="mb-5 flex flex-col gap-3 rounded-xl border border-red-400/18 bg-red-400/[0.055] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm font-mono text-red-200/80">{error}</p>
             <button
-              onClick={() => loadEvents()}
+              onClick={isAuthError ? () => navigate('/') : () => loadEvents()}
               className="inline-flex min-h-[38px] items-center justify-center gap-2 rounded-lg border border-red-300/20 px-3 text-xs font-mono text-red-200/80 transition-all hover:bg-red-400/10"
             >
-              <RefreshCw size={14} />
-              重试
+              {!isAuthError && <RefreshCw size={14} />}
+              {isAuthError ? '返回首页登录' : '重试'}
             </button>
           </div>
         )}
@@ -328,7 +355,7 @@ export default function EventList() {
           </div>
         )}
 
-        {!loading && filtered.length === 0 && (
+        {!loading && !error && filtered.length === 0 && (
           <div className="animate-fade-up flex min-h-[360px] flex-col items-center justify-center rounded-xl border border-cyber-green/10 bg-cyber-surface/20 px-5 text-center">
             <Activity size={44} className="text-cyber-green/18" />
             <p className="mt-4 text-sm font-mono text-cyber-green/35">

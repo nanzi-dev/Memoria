@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useUser } from '../context/UserContext';
 import LoginModal from '../components/LoginModal';
 import UserSettingsModal from '../components/UserSettingsModal';
@@ -14,18 +13,31 @@ export default function Home() {
   const [characters, setCharacters] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const navigate = useNavigate();
-  const { user } = useUser();
+  const { user, loading: userLoading } = useUser();
   const [showLogin, setShowLogin] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
 
-  useEffect(() => { loadCharacters(); }, []);
+  useEffect(() => {
+    let cancelled = false;
 
-  async function loadCharacters() {
-    try {
+    if (userLoading) {
       setLoading(true);
+      return () => { cancelled = true; };
+    }
+
+    if (!user) {
+      setCharacters([]);
+      setError(null);
+      setLoading(false);
+      return () => { cancelled = true; };
+    }
+
+    async function loadCharacters() {
+      setLoading(true);
+      setError(null);
       try {
         const list = await characterAdmin.list(false);
+        if (cancelled) return;
         const enriched = list.map((c) => ({
           character_id: c.character_id,
           name: c.name || c.display_name || c.character_id,
@@ -39,16 +51,18 @@ export default function Home() {
         enriched.sort((a, b) => (b.is_active ? 1 : 0) - (a.is_active ? 1 : 0)); // is_active: 1/0 or true/false
         setCharacters(enriched);
       } catch (apiErr) {
-        console.error('后端不可用:', apiErr.message);
-        setError('无法连接到后端服务');
+        if (cancelled) return;
+        console.error('角色列表加载失败:', apiErr.message);
+        setError(apiErr.message);
         setCharacters([]);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
     }
-  }
+
+    loadCharacters();
+    return () => { cancelled = true; };
+  }, [userLoading, user?.user_id]);
 
 
   return (
@@ -135,11 +149,11 @@ export default function Home() {
                 isActive={!!char.is_active}
               />
             ))}
-            <AddCharacterBadge />
+            {user && <AddCharacterBadge />}
           </div>
         )}
 
-        {!loading && characters.length === 0 && (
+        {!loading && user && characters.length === 0 && (
           <div className="text-[#A7EF9E] font-mono text-sm mt-8 drop-shadow-[0_0_8px_#A7EF9E]">
             还没有角色，点击 + 卡片开始创建
           </div>
