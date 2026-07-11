@@ -350,6 +350,82 @@ class TestDialogueTurn:
         assert saved_messages == [("sid", "user", "你好"), ("sid", "assistant", "你好")]
         assert saved_facts == [("char", "player", "玩家主动打招呼")]
 
+    def test_event_state_changes_are_included_in_relationship_delta(self, monkeypatch):
+        """事件改变信任/好感时，返回和保存的 delta 应反映最终总变化。"""
+        from types import SimpleNamespace
+        from memoria.core import orchestrator
+
+        saved_messages = []
+        card = SimpleNamespace(
+            action_vocabulary=SimpleNamespace(
+                default_action="idle",
+                greeting_actions=[],
+                farewell_actions=[],
+                agreement_actions=[],
+                disagreement_actions=[],
+                emotional_reactions=[],
+            ),
+            runtime_state_schema=SimpleNamespace(
+                current_mood=SimpleNamespace(emotions=["neutral", "happy"])
+            ),
+        )
+
+        monkeypatch.setattr(orchestrator.repository, "get_session", lambda session_id: {
+            "session_id": session_id,
+            "character_id": "char",
+            "player_id": "player",
+            "player_name": "Tester",
+            "created_at": None,
+            "status": "active",
+        })
+        monkeypatch.setattr(orchestrator.character_loader, "load_character_card", lambda *args, **kwargs: card)
+        monkeypatch.setattr(orchestrator.repository, "get_runtime_state", lambda *args, **kwargs: {
+            "affection_level": 10,
+            "trust_level": 20,
+            "current_mood": "neutral",
+        })
+        monkeypatch.setattr(orchestrator.repository, "get_short_term_history", lambda *args, **kwargs: [])
+        monkeypatch.setattr(orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: [])
+        monkeypatch.setattr(orchestrator.prompt_builder, "build_system_prompt", lambda *args, **kwargs: "prompt")
+        monkeypatch.setattr(orchestrator.llm_client, "call_role_turn", lambda *args, **kwargs: {
+            "dialogue": "可以",
+            "action": "idle",
+            "affinity_delta": 1,
+            "trust_delta": 0,
+            "mood_after": "neutral",
+            "memory_worth_keeping": None,
+        })
+        monkeypatch.setattr(orchestrator.event_runtime, "detect_and_execute_events", lambda *args, **kwargs: [object()])
+        monkeypatch.setattr(
+            orchestrator.event_runtime,
+            "apply_event_results_to_dialogue_state",
+            lambda event_results, dialogue, affinity, trust, mood: (
+                dialogue,
+                affinity + 2,
+                trust + 5,
+                "happy",
+                [{"event_id": "evt"}],
+                "信任提升",
+            ),
+        )
+        monkeypatch.setattr(orchestrator.repository, "save_runtime_state", lambda *args, **kwargs: None)
+
+        def append_message(session_id, role, content, **kwargs):
+            saved_messages.append({"role": role, "content": content, **kwargs})
+            return len(saved_messages)
+
+        monkeypatch.setattr(orchestrator.repository, "append_short_term_message", append_message)
+
+        result = orchestrator.run_dialogue_turn("sid", "你好")
+
+        assert result["current_affinity"] == 13
+        assert result["current_trust"] == 25
+        assert result["affinity_delta"] == 3
+        assert result["trust_delta"] == 5
+        assert saved_messages[1]["affinity_delta"] == 3
+        assert saved_messages[1]["trust_delta"] == 5
+        assert saved_messages[1]["current_trust"] == 25
+
     def test_persistence_failure_raises(self, monkeypatch):
         """核心对话持久化失败时不应返回成功响应"""
         from types import SimpleNamespace

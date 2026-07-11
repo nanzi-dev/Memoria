@@ -92,13 +92,27 @@ function ScanLine() {
 
 }
 
+const toDelta = (value) => {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+};
+
+const currentDelta = (currentValue, previousValue, fallbackDelta = 0) => {
+  if (currentValue == null) return toDelta(fallbackDelta);
+  const current = Number(currentValue);
+  const previous = Number(previousValue ?? 0);
+  if (!Number.isFinite(current) || !Number.isFinite(previous)) return toDelta(fallbackDelta);
+  const delta = current - previous;
+  return Number.isFinite(delta) ? Number(delta.toFixed(6)) : toDelta(fallbackDelta);
+};
+
 function normalizeDialogueMessage(message) {
   return {
     role: message.role,
     content: message.content,
     action: message.action || '',
-    affinity_delta: message.affinity_delta || 0,
-    trust_delta: message.trust_delta || 0,
+    affinity_delta: toDelta(message.affinity_delta),
+    trust_delta: toDelta(message.trust_delta),
     created_at: message.created_at,
     message_id: message.message_id || message.id,
   };
@@ -118,8 +132,8 @@ function normalizeGroupMessage(message, knownParticipants = []) {
     charName: role === 'assistant' ? (charName || charId || '未知') : undefined,
     content: message.content ?? message.dialogue ?? message.message ?? '',
     action: message.action || '',
-    affinity_delta: message.affinity_delta || 0,
-    trust_delta: message.trust_delta || 0,
+    affinity_delta: toDelta(message.affinity_delta),
+    trust_delta: toDelta(message.trust_delta),
     created_at: message.created_at,
     message_id: message.message_id || message.id,
   };
@@ -943,14 +957,13 @@ export default function ChatRoom() {
 
         const res = await dialogue.sendMessage(singleSessionId, text);
 
-        const trustDelta = res.trust_delta ?? (
-          res.current_trust != null ? Number(res.current_trust) - Number(trust || 0) : 0
-        );
+        const affinityDelta = currentDelta(res.current_affinity, affinity, res.affinity_delta);
+        const trustDelta = currentDelta(res.current_trust, trust, res.trust_delta);
         setMessages(prev => [...prev, {
           role: 'assistant',
           content: res.dialogue,
           action: res.action || '',
-          affinity_delta: res.affinity_delta || 0,
+          affinity_delta: affinityDelta,
           trust_delta: trustDelta,
         }]);
 

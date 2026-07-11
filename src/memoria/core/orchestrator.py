@@ -180,6 +180,8 @@ def run_dialogue_turn(
         card,
         query_context=player_message
     )
+    previous_affinity = _safe_float(runtime_state.get("affection_level", 0))
+    previous_trust = _safe_float(runtime_state.get("trust_level", 0))
     
     # =========================
     # 短期记忆
@@ -316,6 +318,9 @@ def run_dialogue_turn(
     except Exception as e:
         logger.error(f"事件系统处理失败: {e}", exc_info=True)
 
+    final_affinity_delta = round(new_affinity - previous_affinity, 6)
+    final_trust_delta = round(new_trust - previous_trust, 6)
+
     try:
         # 更新最终状态
         repository.save_runtime_state(
@@ -332,8 +337,8 @@ def run_dialogue_turn(
             "assistant",
             dialogue,
             action=action,
-            affinity_delta=affinity_delta,
-            trust_delta=trust_delta,
+            affinity_delta=final_affinity_delta,
+            trust_delta=final_trust_delta,
             current_affinity=new_affinity,
             current_trust=new_trust,
             current_mood=mood_after,
@@ -356,8 +361,8 @@ def run_dialogue_turn(
     return {
         "dialogue": dialogue,
         "action": action,
-        "affinity_delta": affinity_delta,
-        "trust_delta": trust_delta,
+        "affinity_delta": final_affinity_delta,
+        "trust_delta": final_trust_delta,
         "current_affinity": new_affinity,
         "current_trust": new_trust,
         "current_mood": mood_after,

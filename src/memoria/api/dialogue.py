@@ -41,6 +41,13 @@ class DialogueTurnRequest(BaseModel):
 class HistoryMessage(BaseModel):
     role: str
     content: str
+    action: str | None = None
+    affinity_delta: float | None = None
+    trust_delta: float | None = None
+    current_affinity: float | None = None
+    current_trust: float | None = None
+    current_mood: str | None = None
+    event_notification: str | None = None
     created_at: str | None = None
     message_id: int | None = None
 
@@ -49,8 +56,8 @@ class SessionStartResponse(BaseModel):
     session_id: str
     opening_line: str
     action: str
-    current_affinity: int
-    current_trust: int
+    current_affinity: float
+    current_trust: float
     assistant_message_id: int | None = None
     recovered: bool = False
     messages: list[HistoryMessage] = []
@@ -59,10 +66,10 @@ class SessionStartResponse(BaseModel):
 class DialogueTurnResponse(BaseModel):
     dialogue: str
     action: str
-    affinity_delta: int
-    trust_delta: int = 0
-    current_affinity: int
-    current_trust: int
+    affinity_delta: float
+    trust_delta: float = 0
+    current_affinity: float
+    current_trust: float
     current_mood: str
     triggered_events: list[dict] = []
     event_notification: str | None = None
@@ -114,8 +121,8 @@ class SessionInfo(BaseModel):
 class HistoryResponse(BaseModel):
     messages: list[HistoryMessage]
     has_more: bool
-    current_affinity: int
-    current_trust: int
+    current_affinity: float
+    current_trust: float
     current_mood: str
     
 
@@ -452,15 +459,7 @@ def get_history(
     current_affinity, current_trust, current_mood = _current_character_state(character_id, player_id)
 
     return HistoryResponse(
-        messages=[
-            HistoryMessage(
-                role=m["role"],
-                content=m["content"],
-                created_at=m.get("created_at"),
-                message_id=m.get("message_id"),
-            )
-            for m in messages
-        ],
+        messages=[HistoryMessage(**m) for m in messages],
         has_more=has_more,
         current_affinity=current_affinity,
         current_trust=current_trust,

@@ -533,6 +533,33 @@ class TestSessionListFields:
         assert has_more is False
         assert messages[0]["message_id"] == msg_id
 
+    def test_paginated_messages_include_relationship_state(self):
+        sid = str(uuid.uuid4())
+        repository.create_session(sid, "pmStateC", "pmStateP", "Tester")
+        repository.append_short_term_message(
+            sid,
+            "assistant",
+            "关系变化",
+            action="smile",
+            affinity_delta=1.5,
+            trust_delta=2.0,
+            current_affinity=11.5,
+            current_trust=22.0,
+            current_mood="happy",
+            event_notification="信任提升",
+        )
+
+        messages, has_more = repository.get_messages_paginated(sid, offset=0, limit=20)
+
+        assert has_more is False
+        assert messages[0]["action"] == "smile"
+        assert messages[0]["affinity_delta"] == 1.5
+        assert messages[0]["trust_delta"] == 2.0
+        assert messages[0]["current_affinity"] == 11.5
+        assert messages[0]["current_trust"] == 22.0
+        assert messages[0]["current_mood"] == "happy"
+        assert messages[0]["event_notification"] == "信任提升"
+
     def test_cross_session_history_pages_from_latest_messages(self):
         cid = f"hist_{uuid.uuid4().hex[:8]}"
         player_id = f"player_{uuid.uuid4().hex[:8]}"

@@ -1327,6 +1327,7 @@ def get_messages_paginated(session_id: str, offset: int, limit: int) -> tuple[li
     - offset=20, limit=20: 获取次新的20条（用于"加载更多"）
     """
     with get_conn() as conn:
+        _ensure_short_term_message_state_columns(conn)
         # 先统计总数
         total_count = conn.execute(
             "SELECT COUNT(*) FROM short_term_message WHERE session_id = ?",
@@ -1336,7 +1337,10 @@ def get_messages_paginated(session_id: str, offset: int, limit: int) -> tuple[li
         # 倒序查询（最新的在前）
         rows = conn.execute(
             """
-            SELECT id AS message_id, role, content, created_at
+            SELECT id AS message_id, role, content, action,
+                   affinity_delta, trust_delta,
+                   current_affinity, current_trust, current_mood,
+                   event_notification, created_at
             FROM short_term_message
             WHERE session_id = ?
             ORDER BY id DESC
@@ -1388,6 +1392,7 @@ def get_messages_by_player_and_character(
     """
 
     with get_conn() as conn:
+        _ensure_short_term_message_state_columns(conn)
         exclude_clause = ""
         params: list = [character_id, player_id]
 
@@ -1403,6 +1408,13 @@ def get_messages_by_player_and_character(
                 m.id AS message_id,
                 m.role,
                 m.content,
+                m.action,
+                m.affinity_delta,
+                m.trust_delta,
+                m.current_affinity,
+                m.current_trust,
+                m.current_mood,
+                m.event_notification,
                 m.created_at,
                 m.session_id
             FROM short_term_message m
