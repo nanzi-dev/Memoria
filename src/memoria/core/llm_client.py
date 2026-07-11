@@ -97,6 +97,162 @@ def _extract_json(raw_text: str) -> Optional[dict]:
     
     return None
 
+
+def _strip_markdown_code_fence(raw_text: str) -> str:
+    text = (raw_text or "").strip()
+    code_block = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.S)
+    if code_block:
+        return code_block.group(1).strip()
+    return text
+
+
+def _extract_balanced_json_object(raw_text: str) -> Optional[str]:
+    """
+    从混杂文本中按括号配平提取第一个 JSON 对象。
+
+    正则的 `{.*}` 在字段内容包含花括号时容易截错，这里只做一个小型扫描器。
+    """
+    text = _strip_markdown_code_fence(raw_text)
+    start = text.find("{")
+    if start < 0:
+        return None
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        ch = text[index]
+        if escaped:
+            escaped = False
+            continue
+        if ch == "\\":
+            escaped = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:index + 1]
+    return text[start:] if start >= 0 else None
+
+
+def _cleanup_jsonish_text(raw_text: str) -> str:
+    text = _extract_balanced_json_object(raw_text) or _strip_markdown_code_fence(raw_text)
+    text = text.strip()
+    text = text.replace("“", '"').replace("”", '"')
+    text = text.replace("‘", "'").replace("’", "'")
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+    return text
+
+
+def _json_loads_string(value: str) -> str:
+    try:
+        return json.loads(f'"{value}"')
+    except Exception:
+        return value.replace('\\"', '"').replace("\\n", "\n").strip()
+
+
+def _extract_jsonish_string_field(text: str, field: str) -> Optional[str]:
+    """
+    从整体 JSON 已经损坏的文本里提取字符串字段。
+
+    通过下一个已知字段名或对象结尾作为边界，避免把整段 JSON 都吃进 dialogue。
+    """
+    next_fields = (
+        "dialogue", "action", "affinity_delta", "trust_delta",
+        "mood_after", "memory_worth_keeping",
+    )
+    boundary_fields = [name for name in next_fields if name != field]
+    boundary = "|".join(re.escape(name) for name in boundary_fields)
+    pattern = (
+        rf'"{re.escape(field)}"\s*:\s*"([\s\S]*?)"'
+        rf'\s*(?=,\s*"(?:{boundary})"\s*:|\s*}})'
+    )
+    match = re.search(pattern, text)
+    if match:
+        value = _json_loads_string(match.group(1)).strip()
+        return value if value else None
+
+    bare_match = re.search(
+        rf'"{re.escape(field)}"\s*:\s*(null|[^,\n\r}}]+)',
+        text,
+        re.I,
+    )
+    if not bare_match:
+        return None
+    value = bare_match.group(1).strip().strip('"')
+    if not value or value.lower() == "null":
+        return None
+    return value
+
+
+def _extract_jsonish_number_field(text: str, field: str, default: int = 0) -> int:
+    match = re.search(rf'"{re.escape(field)}"\s*:\s*(-?\d+(?:\.\d+)?)', text)
+    if not match:
+        return default
+    try:
+        return int(float(match.group(1)))
+    except Exception:
+        return default
+
+
+def _looks_like_provider_rejection(raw_text: str) -> bool:
+    text = (raw_text or "").lower()
+    return any(
+        marker in text
+        for marker in (
+            "the request was rejected",
+            "considered high risk",
+            "content policy",
+            "safety policy",
+            "risk control",
+        )
+    )
+
+
+def _local_role_turn_fallback(raw_text: str, default_action: str = "neutral") -> Optional[dict]:
+    """
+    修复模型也失败时，在本地从 JSON-ish 输出里保底提取角色回合字段。
+    """
+    cleaned = _cleanup_jsonish_text(raw_text)
+    if not cleaned:
+        return None
+
+    # 先尝试常见的小破损：代码块、前后混杂文本、尾逗号、智能引号。
+    parsed = _extract_json(cleaned)
+    if isinstance(parsed, dict):
+        parsed.setdefault("dialogue", "……")
+        parsed.setdefault("action", default_action)
+        parsed.setdefault("affinity_delta", 0)
+        parsed.setdefault("trust_delta", 0)
+        parsed.setdefault("mood_after", None)
+        parsed.setdefault("memory_worth_keeping", None)
+        parsed["_fallback_mode"] = True
+        parsed["_fallback_parser"] = "local_json"
+        return parsed
+
+    dialogue = _extract_jsonish_string_field(cleaned, "dialogue")
+    if not dialogue:
+        return None
+
+    return {
+        "dialogue": dialogue,
+        "action": _extract_jsonish_string_field(cleaned, "action") or default_action,
+        "affinity_delta": _extract_jsonish_number_field(cleaned, "affinity_delta"),
+        "trust_delta": _extract_jsonish_number_field(cleaned, "trust_delta"),
+        "mood_after": _extract_jsonish_string_field(cleaned, "mood_after"),
+        "memory_worth_keeping": _extract_jsonish_string_field(cleaned, "memory_worth_keeping"),
+        "_fallback_mode": True,
+        "_fallback_parser": "local_fields",
+    }
+
+
 # =========================
 # JSON 修复请求（二次纠错）
 # =========================
@@ -148,16 +304,27 @@ JSON 结构如下：
 def _plain_text_fallback(raw_text: str, default_action: str = "neutral") -> dict:
     """
     当 JSON 完全解析失败时：
-    - 保留模型输出作为 dialogue
+    - 优先从 JSON-ish 文本中本地提取 dialogue/action/关系变化
+    - 如果只是普通文本，则保留模型输出作为 dialogue
+    - 如果是服务商拒绝/风控提示，则避免技术文本进入对白
     - 其余字段降级处理
     """
 
+    local_result = _local_role_turn_fallback(raw_text, default_action)
+    if local_result is not None:
+        logger.warning("LLM JSON 解析失败，已使用本地字段兜底: %s", raw_text[:200])
+        return local_result
+
     logger.warning("LLM JSON 解析失败，进入纯文本模式: %s", raw_text[:200])
+    dialogue = (raw_text or "").strip()
+    if _looks_like_provider_rejection(dialogue):
+        dialogue = "……"
 
     return {
-        "dialogue": raw_text.strip() or "……",
+        "dialogue": dialogue or "……",
         "action": default_action,
         "affinity_delta": 0,
+        "trust_delta": 0,
         "mood_after": None,  # 保持当前情绪
         "memory_worth_keeping": None,
         "_fallback_mode": True,
@@ -293,4 +460,3 @@ def call_light_task(prompt: str) -> str:
     except Exception as e:
         logger.error(f"Exception in call_light_task: {e}")
         return ""
-

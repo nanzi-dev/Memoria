@@ -77,6 +77,47 @@ class TestLLMClient:
         assert r["dialogue"] == "你好，我是小黑"
         assert r["_fallback_mode"] is True
 
+    def test_plain_text_fallback_extracts_jsonish_role_fields(self):
+        from memoria.core.llm_client import _plain_text_fallback
+        raw = '''{
+          "dialogue": "别慌。她现在的状态，更像是某种信号接收器。",
+          "action": "观察",
+          "affinity_delta": 0,
+          "trust_delta": -1,
+          "mood_after": "平静",
+          "memory_worth_keeping": "南子出现类似附身的机械性社交反应。",
+        }'''
+        r = _plain_text_fallback(raw)
+        assert r["dialogue"] == "别慌。她现在的状态，更像是某种信号接收器。"
+        assert r["action"] == "观察"
+        assert r["trust_delta"] == -1
+        assert r["memory_worth_keeping"] == "南子出现类似附身的机械性社交反应。"
+        assert r["_fallback_parser"] == "local_json"
+
+    def test_plain_text_fallback_extracts_fields_from_broken_json(self):
+        from memoria.core.llm_client import _plain_text_fallback
+        raw = '''{
+          "dialogue": "按住腰间的武器柄，冷静地打量南子。",
+          "action": "观察",
+          "affinity_delta": 1,
+          "trust_delta": 2,
+          "mood_after": "警觉",
+          "memory_worth_keeping": "南子的状态需要持续观察。"
+        '''
+        r = _plain_text_fallback(raw)
+        assert r["dialogue"] == "按住腰间的武器柄，冷静地打量南子。"
+        assert r["action"] == "观察"
+        assert r["affinity_delta"] == 1
+        assert r["trust_delta"] == 2
+        assert not r["dialogue"].lstrip().startswith("{")
+        assert r["_fallback_parser"] == "local_fields"
+
+    def test_plain_text_fallback_hides_provider_rejection(self):
+        from memoria.core.llm_client import _plain_text_fallback
+        r = _plain_text_fallback("The request was rejected because it was considered high risk")
+        assert r["dialogue"] == "……"
+        assert r["trust_delta"] == 0
+
     def test_retry_as_json(self):
         from memoria.core.llm_client import _retry_as_json
         r = _retry_as_json('{"broken json', "deepseek-chat")

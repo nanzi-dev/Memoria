@@ -69,7 +69,9 @@ class MultiDialogueTurnResponse(BaseModel):
     dialogue: str
     action: str
     affinity_delta: Optional[float] = None
+    trust_delta: Optional[float] = None
     current_affinity: Optional[float] = None
+    current_trust: Optional[float] = None
     current_mood: Optional[str] = None
 
 

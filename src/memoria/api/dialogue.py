@@ -59,6 +59,7 @@ class DialogueTurnResponse(BaseModel):
     dialogue: str
     action: str
     affinity_delta: int
+    trust_delta: int = 0
     current_affinity: int
     current_trust: int
     current_mood: str

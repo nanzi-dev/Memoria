@@ -98,6 +98,7 @@ function normalizeDialogueMessage(message) {
     content: message.content,
     action: message.action || '',
     affinity_delta: message.affinity_delta || 0,
+    trust_delta: message.trust_delta || 0,
     created_at: message.created_at,
     message_id: message.message_id || message.id,
   };
@@ -118,6 +119,7 @@ function normalizeGroupMessage(message, knownParticipants = []) {
     content: message.content ?? message.dialogue ?? message.message ?? '',
     action: message.action || '',
     affinity_delta: message.affinity_delta || 0,
+    trust_delta: message.trust_delta || 0,
     created_at: message.created_at,
     message_id: message.message_id || message.id,
   };
@@ -152,7 +154,79 @@ function sortMessagesChronologically(messages) {
   });
 }
 
+const INLINE_ACTION_PATTERN = /(\*[^*\n]{1,80}\*|【[^【】\n]{1,80}】|\[[^[\]\n]{1,80}\]|（[^（）\n]{1,80}）)/g;
 
+function cleanActionText(value = '') {
+  return String(value)
+    .trim()
+    .replace(/^\*+|\*+$/g, '')
+    .replace(/^[【\[\(（]\s*/, '')
+    .replace(/\s*[】\]\)）]$/, '')
+    .trim();
+}
+
+function MessageAction({ children }) {
+  const text = cleanActionText(children);
+  if (!text) return null;
+
+  return (
+    <span className="mx-0.5 inline-block max-w-full rounded-[4px] border border-emerald-200/45 bg-emerald-300/14 px-1.5 py-0 align-baseline font-character text-[0.94em] font-medium [line-height:inherit] text-emerald-50 shadow-[0_0_10px_rgba(110,231,183,0.12)] whitespace-normal break-words italic">
+      {text}
+    </span>
+  );
+}
+
+function MessageContent({ content }) {
+  const source = String(content ?? '');
+  if (!source) return null;
+
+  const parts = [];
+  let lastIndex = 0;
+
+  source.replace(INLINE_ACTION_PATTERN, (match, _whole, offset) => {
+    if (offset > lastIndex) {
+      parts.push({ type: 'text', value: source.slice(lastIndex, offset) });
+    }
+    parts.push({ type: 'action', value: match });
+    lastIndex = offset + match.length;
+    return match;
+  });
+
+  if (lastIndex < source.length) {
+    parts.push({ type: 'text', value: source.slice(lastIndex) });
+  }
+
+  if (parts.length === 0) return source;
+
+  return parts.map((part, index) => (
+    part.type === 'action'
+      ? <MessageAction key={`${part.type}-${index}`}>{part.value}</MessageAction>
+      : <span key={`${part.type}-${index}`}>{part.value}</span>
+  ));
+}
+
+function RelationshipDeltaLine({ affinityDelta = 0, trustDelta = 0 }) {
+  const affinity = Number(affinityDelta) || 0;
+  const trust = Number(trustDelta) || 0;
+  if (affinity === 0 && trust === 0) return null;
+
+  const formatDelta = (value) => (
+    Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, '')
+  );
+
+  const renderDelta = (label, value) => (
+    <span className={value > 0 ? 'text-emerald-400/70' : 'text-red-400/70'}>
+      {label} {value > 0 ? '+' : ''}{formatDelta(value)}
+    </span>
+  );
+
+  return (
+    <div className="mt-0.5 ml-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] leading-normal">
+      {affinity !== 0 && renderDelta('好感', affinity)}
+      {trust !== 0 && renderDelta('信任', trust)}
+    </div>
+  );
+}
 
 // ═══════════════════════════════════════════════
 
@@ -807,7 +881,16 @@ export default function ChatRoom() {
 
         const res = await dialogue.sendMessage(singleSessionId, text);
 
-        setMessages(prev => [...prev, { role: 'assistant', content: res.dialogue, action: res.action || '', affinity_delta: res.affinity_delta || 0 }]);
+        const trustDelta = res.trust_delta ?? (
+          res.current_trust != null ? Number(res.current_trust) - Number(trust || 0) : 0
+        );
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: res.dialogue,
+          action: res.action || '',
+          affinity_delta: res.affinity_delta || 0,
+          trust_delta: trustDelta,
+        }]);
 
         setHistoryOffset(prev => prev + 2);
 
@@ -1174,7 +1257,7 @@ export default function ChatRoom() {
 
     return (
 
-      <div className="min-h-screen memoria-page flex flex-col font-mono">
+      <div className="h-dvh max-h-dvh memoria-page flex flex-col overflow-hidden font-mono">
         <ChatBackdrop origin="bottom-left" tilt={8} />
 
         <header className="memoria-glass flex items-center gap-4 px-6 py-3 border-x-0 border-t-0 shrink-0">
@@ -1185,7 +1268,8 @@ export default function ChatRoom() {
 
         </header>
 
-        <div className="flex-1 overflow-y-auto px-6 py-6 max-w-2xl mx-auto w-full space-y-5">
+        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6">
+          <div className="max-w-2xl mx-auto w-full space-y-5">
 
           {error && (
 
@@ -1258,6 +1342,7 @@ export default function ChatRoom() {
           {participants.length>0 && <div className="flex flex-wrap gap-1.5">{participants.map(p=><div key={p.character_id} className="flex items-center gap-1 text-[12px] bg-cyber-green/5 border border-cyber-green/15 rounded-full px-2 py-0.5 text-cyber-green/50"><span className="font-character text-sm leading-none">{p.name}</span><button onClick={()=>toggleParticipant(p)} className="text-cyber-green/20 hover:text-red-400 ml-0.5"><X size={10}/></button></div>)}</div>}
 
           <button onClick={startGroupChat} disabled={participants.length<2 || !groupName.trim() || groupNameExists} className="w-full py-2.5 bg-cyber-green/10 hover:bg-cyber-green/20 border border-cyber-green/20 rounded-lg text-sm font-bold text-cyber-green disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"><Users size={16} />开始群聊 ({participants.length}人)</button>
+          </div>
 
         </div>
 
@@ -1467,11 +1552,6 @@ export default function ChatRoom() {
                   {!isUser && (
                     <div className="flex items-center gap-1.5 mb-0.5 ml-1">
                       <span className="font-character text-sm leading-none text-zinc-400">{msg.charName || character?.name}</span>
-                      {msg.action && (
-                        <span className="text-[12px] px-1.5 py-px rounded border border-cyber-green/10 text-cyber-green/25 bg-cyber-green/[0.02]">
-                          {msg.action}
-                        </span>
-                      )}
                     </div>
                   )}
 
@@ -1481,15 +1561,10 @@ export default function ChatRoom() {
                       ? 'bg-cyber-green/10 border-cyber-green/15 rounded-br-sm text-cyber-green/85'
                       : `${moodBubble} border rounded-bl-sm`
                   }`}>
-                    {msg.content}
+                    <MessageContent content={msg.content} />
                   </div>
 
-                  {/* 好感变化 */}
-                  {msg.affinity_delta !== 0 && msg.affinity_delta != null && (
-                    <div className={`text-[12px] mt-0.5 ml-1 ${msg.affinity_delta > 0 ? 'text-red-400/40' : 'text-blue-400/40'}`}>
-                      好感 {msg.affinity_delta > 0 ? '+' : ''}{msg.affinity_delta}
-                    </div>
-                  )}
+                  <RelationshipDeltaLine affinityDelta={msg.affinity_delta} trustDelta={msg.trust_delta} />
                 </div>
               </div>
             );
@@ -1800,7 +1875,7 @@ export default function ChatRoom() {
 
                   }`}>
 
-                    {msg.content}
+                    <MessageContent content={msg.content} />
 
                     {/* Scan line on AI messages when sending */}
 
@@ -1808,21 +1883,7 @@ export default function ChatRoom() {
 
                   </div>
 
-                  {msg.action && (
-
-                    <div className="text-[13px] text-cyber-green/15 mt-0.5 italic ml-1">*{msg.action}*</div>
-
-                  )}
-
-                  {msg.affinity_delta !== 0 && msg.affinity_delta != null && (
-
-                    <div className={`text-[12px] mt-0.5 ml-1 ${msg.affinity_delta>0 ? 'text-red-400/40' : 'text-blue-400/40'}`}>
-
-                      好感 {msg.affinity_delta>0?'+':''}{msg.affinity_delta}
-
-                    </div>
-
-                  )}
+                  <RelationshipDeltaLine affinityDelta={msg.affinity_delta} trustDelta={msg.trust_delta} />
 
                 </div>
 

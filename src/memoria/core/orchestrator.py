@@ -295,6 +295,7 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
         "dialogue": dialogue,
         "action": action,
         "affinity_delta": affinity_delta,
+        "trust_delta": trust_delta,
         "current_affinity": new_affinity,
         "current_trust": new_trust,
         "current_mood": mood_after,
