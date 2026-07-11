@@ -758,6 +758,7 @@ class TestMultiCharacterMemory:
         from memoria.db import repository
 
         mid = repository.save_shared_memory(
+            "user_shared_a",
             "char_x", "char_y",
             memory_text="一起完成了训练",
             context="train:session_001",
@@ -765,7 +766,7 @@ class TestMultiCharacterMemory:
         )
         assert mid is not None
         
-        results = repository.get_shared_memories("char_x", "char_y", limit=5)
+        results = repository.get_shared_memories("user_shared_a", "char_x", "char_y", limit=5)
         assert len(results) >= 1
         assert any("训练" in r["memory_text"] for r in results)
 
@@ -773,23 +774,38 @@ class TestMultiCharacterMemory:
         """测试共享记忆双向查询"""
         from memoria.db import repository
 
-        repository.save_shared_memory("char_p", "char_q", "共同击败了敌人", importance=0.9)
+        repository.save_shared_memory("user_shared_b", "char_p", "char_q", "共同击败了敌人", importance=0.9)
         
-        forward = repository.get_shared_memories("char_p", "char_q", 5)
-        backward = repository.get_shared_memories("char_q", "char_p", 5)
+        forward = repository.get_shared_memories("user_shared_b", "char_p", "char_q", 5)
+        backward = repository.get_shared_memories("user_shared_b", "char_q", "char_p", 5)
         
         assert len(forward) == len(backward)
         if forward:
             assert forward[0]["memory_text"] == backward[0]["memory_text"]
 
+    def test_shared_memory_isolated_by_user(self):
+        """测试相同角色 ID 在不同用户下共享记忆隔离"""
+        from memoria.db import repository
+
+        repository.save_shared_memory("user_alpha", "char_same", "char_peer", "Alpha 的共同记忆", importance=0.8)
+        repository.save_shared_memory("user_beta", "char_same", "char_peer", "Beta 的共同记忆", importance=0.8)
+
+        alpha = repository.get_shared_memories("user_alpha", "char_same", "char_peer", 10)
+        beta = repository.get_shared_memories("user_beta", "char_same", "char_peer", 10)
+
+        assert any("Alpha" in item["memory_text"] for item in alpha)
+        assert all("Beta" not in item["memory_text"] for item in alpha)
+        assert any("Beta" in item["memory_text"] for item in beta)
+        assert all("Alpha" not in item["memory_text"] for item in beta)
+
     def test_get_character_shared_memories(self):
         """测试获取角色的所有共享记忆"""
         from memoria.db import repository
 
-        repository.save_shared_memory("char_m", "char_n", "记忆1", importance=0.5)
-        repository.save_shared_memory("char_m", "char_o", "记忆2", importance=0.7)
+        repository.save_shared_memory("user_shared_c", "char_m", "char_n", "记忆1", importance=0.5)
+        repository.save_shared_memory("user_shared_c", "char_m", "char_o", "记忆2", importance=0.7)
         
-        results = repository.get_character_shared_memories("char_m", limit=10)
+        results = repository.get_character_shared_memories("user_shared_c", "char_m", limit=10)
         assert len(results) >= 2
 
     def test_save_and_get_group_memory(self):
@@ -836,10 +852,11 @@ class TestMultiCharacterMemory:
             target_id="npc_b",
             impression="觉得B很可靠",
             session_id="test_session",
+            player_id="user_shared_d",
             importance=0.7
         )
         
-        imps = get_character_impressions("npc_a", "npc_b", limit=5)
+        imps = get_character_impressions("npc_a", "npc_b", player_id="user_shared_d", limit=5)
         assert len(imps) >= 1
         assert any("可靠" in imp["memory_text"] for imp in imps)
 

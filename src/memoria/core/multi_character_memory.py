@@ -144,6 +144,7 @@ def save_character_impression(
     target_id: str,
     impression: str,
     session_id: str,
+    player_id: str = None,
     importance: float = 0.6
 ):
     """
@@ -154,14 +155,18 @@ def save_character_impression(
         target_id: 目标角色ID
         impression: 印象描述
         session_id: 会话ID（作为上下文）
+        player_id: 当前用户/玩家ID，用于隔离不同用户的角色间记忆
         importance: 重要性权重（默认 0.6）
     
     Returns:
         str: 记忆ID
     """
+    if not player_id:
+        raise ValueError("player_id is required for character impression isolation")
     memory_text = f"对 {target_id} 的印象：{impression}"
     
     memory_id = repository.save_shared_memory(
+        owner_user_id=player_id,
         character_a_id=observer_id,
         character_b_id=target_id,
         memory_text=memory_text,
@@ -176,6 +181,7 @@ def save_character_impression(
 def get_character_impressions(
     observer_id: str,
     target_id: str,
+    player_id: str = None,
     limit: int = 5
 ) -> list[dict]:
     """
@@ -184,12 +190,16 @@ def get_character_impressions(
     Args:
         observer_id: 观察者角色ID
         target_id: 目标角色ID
+        player_id: 当前用户/玩家ID，用于隔离不同用户的角色间记忆
         limit: 最大返回数量
     
     Returns:
         list[dict]: 印象记忆列表，每项含 memory_text、importance 等字段
     """
+    if not player_id:
+        raise ValueError("player_id is required for character impression isolation")
     return repository.get_shared_memories(
+        owner_user_id=player_id,
         character_id_a=observer_id,
         character_id_b=target_id,
         limit=limit
@@ -423,6 +433,7 @@ def integrate_multi_character_context(
     for other_id in other_character_ids:
         if other_id != character_id:
             impressions = repository.get_shared_memories(
+                owner_user_id=player_id,
                 character_id_a=character_id,
                 character_id_b=other_id,
                 limit=3
@@ -539,6 +550,7 @@ def query_multi_character_memories(
     # 查询对其他角色的印象
     if include_impressions:
         shared = repository.get_character_shared_memories(
+            owner_user_id=player_id,
             character_id=character_id,
             limit=10
         )

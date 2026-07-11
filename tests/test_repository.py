@@ -174,6 +174,8 @@ class TestEventDeepIntegrationRepository:
         template = repository.get_event_template(tid)
         assert template["template_name"] == "测试模板"
         assert any(t["template_id"] == tid for t in repository.list_event_templates(category="test"))
+        assert repository.delete_event_template(tid)
+        assert repository.get_event_template(tid) is None
 
 class TestRelationship:
     def test_crud(self):
@@ -387,8 +389,8 @@ class TestDedup:
         assert s["summary_text"] == "v2"
 
     def test_shared_memory_dedup(self):
-        m1 = repository.save_shared_memory("dA","dB","一起去探险",0.5)
-        m2 = repository.save_shared_memory("dA","dB","一起去探险",0.9)
+        m1 = repository.save_shared_memory("user_dedup","dA","dB","一起去探险",importance=0.5)
+        m2 = repository.save_shared_memory("user_dedup","dA","dB","一起去探险",importance=0.9)
         assert m2 == m1
 
     def test_group_memory_dedup(self):

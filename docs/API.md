@@ -680,7 +680,7 @@ DELETE /api/v1/admin/events/{event_id}/history?character_id=&player_id=
 GET /api/v1/admin/event-templates?category=relationship
 ```
 
-内置模板包括好感度里程碑、信任度里程碑和关键剧情节点。服务启动时会自动初始化模板库。
+内置模板包括好感度里程碑、信任度里程碑和关键剧情节点。服务启动时会自动初始化模板库。模板库是全局系统模板；套用模板创建事件时，事件会保存到当前登录用户自己的 `event_definition` 中。
 
 **响应示例：**
 ```json
@@ -697,6 +697,64 @@ GET /api/v1/admin/event-templates?category=relationship
     "metadata": {"threshold_editable": true}
   }
 ]
+```
+
+### 10.1 创建或更新系统事件模板（开发用途）
+
+```http
+POST /api/v1/admin/event-templates
+```
+
+该接口用于开发维护系统模板库，不在普通用户前端暴露。
+
+**请求体：**
+```json
+{
+  "template_id": "tpl_dev_keyword",
+  "template_name": "开发关键词模板",
+  "category": "dev",
+  "description": "玩家提到指定关键词时通知玩家。",
+  "trigger_config": {
+    "trigger_type": "keyword_match",
+    "keywords": ["线索"],
+    "match_mode": "any"
+  },
+  "effects_config": [
+    {
+      "effect_type": "notify_player",
+      "notification_message": "触发了开发模板事件。"
+    }
+  ],
+  "metadata": {
+    "dev_only": true
+  }
+}
+```
+
+**响应：**
+```json
+{
+  "success": true,
+  "message": "事件模板 'tpl_dev_keyword' 已保存",
+  "template_id": "tpl_dev_keyword"
+}
+```
+
+### 10.2 删除系统事件模板（开发用途）
+
+```http
+DELETE /api/v1/admin/event-templates/{template_id}
+```
+
+删除指定模板记录。内置默认模板在服务启动或模板列表自动初始化时可能被重新写入。
+
+**响应：**
+```json
+{
+  "success": true,
+  "message": "事件模板 'tpl_dev_keyword' 已删除",
+  "template_id": "tpl_dev_keyword"
+}
 ```
 
 ---

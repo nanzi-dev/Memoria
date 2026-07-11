@@ -584,6 +584,7 @@ ON auth_token(user_id, expires_at);
 -- =========================
 CREATE TABLE IF NOT EXISTS shared_memory (
     id              TEXT PRIMARY KEY,
+    owner_user_id   TEXT NOT NULL,
     character_a_id  TEXT NOT NULL,
     character_b_id  TEXT NOT NULL,
     memory_text     TEXT NOT NULL,
@@ -593,6 +594,9 @@ CREATE TABLE IF NOT EXISTS shared_memory (
     last_referenced TEXT,
     reference_count INTEGER DEFAULT 0
 );
+
+CREATE INDEX IF NOT EXISTS idx_shared_memory_owner_pair
+ON shared_memory(owner_user_id, character_a_id, character_b_id, importance DESC);
 
 -- =========================
 -- 多角色群体记忆（会话级）
@@ -703,6 +707,7 @@ def _migrate(conn):
     add_column("short_term_message", "current_trust REAL")
     add_column("short_term_message", "current_mood TEXT")
     add_column("short_term_message", "event_notification TEXT")
+    add_column("shared_memory", "owner_user_id TEXT")
 
 
 _SHORT_TERM_MESSAGE_STATE_COLUMNS = (
@@ -1498,22 +1503,25 @@ def get_recent_summaries(
 # 角色间共享记忆（shared_memory）
 # =========================
 def save_shared_memory(
+    owner_user_id: str,
     character_a_id: str,
     character_b_id: str,
     memory_text: str,
     context: str = None,
     importance: float = 0.5
 ) -> str:
-    """保存两个角色之间的共享记忆。含去重检查。"""
+    """保存同一用户下两个角色之间的共享记忆。含去重检查。"""
     import uuid
+    if not owner_user_id:
+        raise ValueError("owner_user_id is required for shared_memory isolation")
     memory_id = str(uuid.uuid4())
     a, b = sorted([character_a_id, character_b_id])
 
     with get_conn() as conn:
         existing = _dedup_check(
             conn, "shared_memory", "memory_text", memory_text,
-            "character_a_id = ? AND character_b_id = ?",
-            (a, b), threshold=0.75
+            "owner_user_id = ? AND character_a_id = ? AND character_b_id = ?",
+            (owner_user_id, a, b), threshold=0.75
         )
         if existing:
             new_imp = max(existing.get("importance", 0), importance)
@@ -1522,28 +1530,32 @@ def save_shared_memory(
             return existing["id"]
 
         conn.execute(
-            "INSERT INTO shared_memory (id, character_a_id, character_b_id, memory_text, context, importance, created_at, last_referenced, reference_count) VALUES (?,?,?,?,?,?,?,?,0)",
-            (memory_id, a, b, memory_text, context, importance, _now(), _now()))
+            "INSERT INTO shared_memory (id, owner_user_id, character_a_id, character_b_id, memory_text, context, importance, created_at, last_referenced, reference_count) VALUES (?,?,?,?,?,?,?,?,?,0)",
+            (memory_id, owner_user_id, a, b, memory_text, context, importance, _now(), _now()))
 
     return memory_id
 
 
-def get_shared_memories(character_id_a: str, character_id_b: str, limit: int = 10) -> list[dict]:
-    """获取两个角色之间的共享记忆"""
+def get_shared_memories(owner_user_id: str, character_id_a: str, character_id_b: str, limit: int = 10) -> list[dict]:
+    """获取同一用户下两个角色之间的共享记忆"""
+    if not owner_user_id:
+        raise ValueError("owner_user_id is required for shared_memory isolation")
     a, b = sorted([character_id_a, character_id_b])
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, memory_text, context, importance, created_at FROM shared_memory WHERE character_a_id=? AND character_b_id=? ORDER BY importance DESC, last_referenced DESC LIMIT ?",
-            (a, b, limit)).fetchall()
+            "SELECT id, memory_text, context, importance, created_at FROM shared_memory WHERE owner_user_id=? AND character_a_id=? AND character_b_id=? ORDER BY importance DESC, last_referenced DESC LIMIT ?",
+            (owner_user_id, a, b, limit)).fetchall()
     return [dict(r) for r in rows]
 
 
-def get_character_shared_memories(character_id: str, limit: int = 20) -> list[dict]:
-    """获取某个角色与其他所有角色的共享记忆"""
+def get_character_shared_memories(owner_user_id: str, character_id: str, limit: int = 20) -> list[dict]:
+    """获取同一用户下某个角色与其他所有角色的共享记忆"""
+    if not owner_user_id:
+        raise ValueError("owner_user_id is required for shared_memory isolation")
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, character_a_id, character_b_id, memory_text, context, importance, created_at FROM shared_memory WHERE character_a_id=? OR character_b_id=? ORDER BY importance DESC, last_referenced DESC LIMIT ?",
-            (character_id, character_id, limit)).fetchall()
+            "SELECT id, owner_user_id, character_a_id, character_b_id, memory_text, context, importance, created_at FROM shared_memory WHERE owner_user_id=? AND (character_a_id=? OR character_b_id=?) ORDER BY importance DESC, last_referenced DESC LIMIT ?",
+            (owner_user_id, character_id, character_id, limit)).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -2188,7 +2200,17 @@ def get_event_template(template_id: str) -> dict | None:
             (template_id,),
         ).fetchone()
     return _row_to_dict(row)
-    
+
+
+def delete_event_template(template_id: str) -> bool:
+    """删除事件模板。"""
+    with get_conn() as conn:
+        cursor = conn.execute(
+            "DELETE FROM event_template WHERE template_id = ?",
+            (template_id,),
+        )
+    return cursor.rowcount > 0
+
 
 # =========================
 # 角色关系网络

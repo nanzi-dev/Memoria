@@ -287,11 +287,12 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ### 8. shared_memory（角色间共享记忆表）
 
-存储两个角色之间共同经历的记忆，用于多角色对话中查询角色间的历史互动信息。
+存储同一用户下两个角色之间共同经历的记忆，用于多角色对话中查询角色间的历史互动信息。隔离维度是 `owner_user_id`，因此不同用户可以拥有相同的 `character_id` 组合而不会共享角色间记忆。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | id | TEXT PRIMARY KEY | 记忆 UUID |
+| owner_user_id | TEXT NOT NULL | 记忆归属用户 ID |
 | character_a_id | TEXT NOT NULL | 角色 A ID |
 | character_b_id | TEXT NOT NULL | 角色 B ID |
 | memory_text | TEXT NOT NULL | 记忆内容 |
@@ -459,6 +460,8 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 存储可复用事件模板，用于快速创建常见事件配置。
 
+该表是全局系统模板库，不按用户隔离。用户创建事件时会把模板的触发条件和效果复制到自己的 `event_definition`，事件本身仍按 `owner_user_id` 隔离。
+
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | template_id | TEXT PRIMARY KEY | 模板 ID |
@@ -525,8 +528,8 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 1. **双模式存储** — 默认 SQLite WAL 模式便于本地开发；配置 `DATABASE_URL` 后使用 PostgreSQL
 2. **显式列 + JSON 混合** — 高频读写字段（好感度、信任度）使用显式列以获得更好性能；复杂配置（角色卡、事件条件）使用 JSON 字段获得灵活性
 3. **软删除设计** — `is_active` 字段实现逻辑删除，支持数据恢复
-4. **多角色扩展** — `session.is_multi_character` + `multi_session_participant` 表支持群聊；`short_term_message` 扩展 `character_id` / `character_name` 列区分发言人；`shared_memory` 存储角色间互动记忆，`group_memory` 存储玩家轮次摘要形成的群体事件记忆
-5. **用户资源隔离** — `character_card`、`event_definition`、`character_relationship` 都带 `owner_user_id`；API 只读写当前登录用户的数据
+4. **多角色扩展** — `session.is_multi_character` + `multi_session_participant` 表支持群聊；`short_term_message` 扩展 `character_id` / `character_name` 列区分发言人；`shared_memory` 存储用户隔离的角色间互动记忆，`group_memory` 存储玩家轮次摘要形成的群体事件记忆
+5. **用户资源隔离** — `character_card`、`event_definition`、`character_relationship`、`shared_memory` 都带 `owner_user_id`；API 只读写当前登录用户的数据。`event_template` 是全局系统模板，不属于用户资源
 6. **轻量迁移** — 启动时为旧库补齐 `character_card.avatar_url`、`session_summary.summary_status`、`session.group_name`、`session.group_thread_id`、`event_definition.schedule`、`event_definition.template_id`、`auth_token` 和事件上下文/调度/模板表等新增结构；`owner_user_id` 相关主键重建不做旧数据迁移，升级前需要删除旧 SQLite 数据库或手动重建表
 7. **完整索引覆盖** — 16 个精心设计的索引确保所有常用查询路径为 O(log n)
 8. **可迁移性** — Repository 层适配 SQLite/PostgreSQL 占位符、自增主键和少量 UPSERT 差异

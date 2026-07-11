@@ -31,6 +31,12 @@ def test_admin_and_relationship_write_routes_require_auth_dependency():
 
     assert "require_current_user_id" in _route_dependencies(character_router, "/admin/characters", "POST")
     assert "require_current_user_id" in _route_dependencies(event_router, "/admin/events", "POST")
+    assert "require_current_user_id" in _route_dependencies(event_router, "/admin/event-templates", "POST")
+    assert "require_current_user_id" in _route_dependencies(
+        event_router,
+        "/admin/event-templates/{template_id}",
+        "DELETE",
+    )
     assert "require_current_user_id" in _route_dependencies(relationship_router, "/relationships", "POST")
     assert "require_current_user_id" in _route_dependencies(
         relationship_router,

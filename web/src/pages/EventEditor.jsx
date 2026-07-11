@@ -88,6 +88,8 @@ const DEFAULT_SUB_CONDITION = {
   match_mode: 'any',
 };
 
+const cloneJson = value => JSON.parse(JSON.stringify(value ?? null));
+
 const EDITOR_RAYS_PROPS = {
   speed: 1.45,
   rayColor1: '#A7EF9E',
@@ -798,9 +800,37 @@ export default function EventEditor() {
     effects: [],
     priority: 0,
     is_active: true,
+    template_id: '',
   });
 
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
+  const [templatesError, setTemplatesError] = useState('');
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+
+  const selectedTemplate = useMemo(
+    () => templates.find(t => t.template_id === selectedTemplateId),
+    [templates, selectedTemplateId]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await eventAdmin.templates();
+        if (cancelled) return;
+        setTemplates(Array.isArray(rows) ? rows : []);
+        setTemplatesError('');
+      } catch (e) {
+        if (cancelled) return;
+        setTemplatesError(e.message || '模板加载失败');
+      } finally {
+        if (!cancelled) setTemplatesLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (!eventId || eventId === 'new') {
@@ -819,7 +849,9 @@ export default function EventEditor() {
           effects: detail.effects || [],
           priority: detail.priority || 0,
           is_active: detail.is_active,
+          template_id: detail.template_id || '',
         });
+        setSelectedTemplateId(detail.template_id || '');
       } catch (e) {
         console.error('Load event failed:', e.message);
       } finally {
@@ -836,7 +868,7 @@ export default function EventEditor() {
     setSaving(true);
     setSaveMsg('');
     try {
-      const payload = { ...form, priority: form.priority || 0 };
+      const payload = { ...form, priority: form.priority || 0, template_id: form.template_id || null };
       if (eventId && eventId !== 'new') {
         await eventAdmin.update(eventId, payload);
       } else {
@@ -877,6 +909,19 @@ export default function EventEditor() {
   }
 
   const updateField = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
+
+  const handleApplyTemplate = () => {
+    if (!selectedTemplate) return;
+    setForm(prev => ({
+      ...prev,
+      event_name: prev.event_name || selectedTemplate.template_name || '',
+      description: selectedTemplate.description || prev.description || '',
+      trigger_condition: cloneJson(selectedTemplate.trigger_config) || prev.trigger_condition,
+      effects: cloneJson(selectedTemplate.effects_config) || [],
+      template_id: selectedTemplate.template_id,
+    }));
+    setSaveMsg(`已应用模板: ${selectedTemplate.template_name}`);
+  };
 
   return (
     <div className="min-h-screen bg-cyber-bg">
@@ -937,6 +982,42 @@ export default function EventEditor() {
               <Zap size={14} />
               基本信息
             </h2>
+
+            <div className="border-b border-cyber-green/10 pb-4">
+              <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+                <div className="flex-1">
+                  <label className="block text-[10px] font-mono text-cyber-green/40 mb-1">系统模板</label>
+                  <select
+                    value={selectedTemplateId}
+                    onChange={e => setSelectedTemplateId(e.target.value)}
+                    disabled={templatesLoading}
+                    className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-3 py-1.5 focus:outline-none focus:border-cyber-green/50 disabled:opacity-50"
+                  >
+                    <option value="">{templatesLoading ? '加载模板中...' : '不使用模板'}</option>
+                    {templates.map(template => (
+                      <option key={template.template_id} value={template.template_id}>
+                        {template.category ? `[${template.category}] ` : ''}{template.template_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleApplyTemplate}
+                  disabled={!selectedTemplate || templatesLoading}
+                  className="flex items-center justify-center gap-1 px-3 py-1.5 border border-cyber-green/30 text-cyber-green/70 hover:text-cyber-green hover:border-cyber-green/50 rounded text-xs font-mono transition-colors disabled:opacity-40 disabled:hover:text-cyber-green/70 disabled:hover:border-cyber-green/30"
+                >
+                  <Wand2 size={14} />
+                  应用模板
+                </button>
+              </div>
+              {templatesError && (
+                <p className="mt-2 text-[10px] font-mono text-red-400/70">{templatesError}</p>
+              )}
+              {selectedTemplate?.description && (
+                <p className="mt-2 text-[10px] font-mono text-cyber-green/35">{selectedTemplate.description}</p>
+              )}
+            </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>

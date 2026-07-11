@@ -126,6 +126,12 @@ export const eventAdmin = {
     const qs = params.toString();
     return request(`/admin/events${qs ? '?' + qs : ''}`);
   },
+  templates(category = null) {
+    const params = new URLSearchParams();
+    if (category) params.set('category', category);
+    const qs = params.toString();
+    return request(`/admin/event-templates${qs ? '?' + qs : ''}`);
+  },
   get(eventId) {
     return request(`/admin/events/${eventId}`);
   },

@@ -135,6 +135,7 @@ class OperationResponse(BaseModel):
     success: bool
     message: str
     event_id: Optional[str] = None
+    template_id: Optional[str] = None
 
 
 class EventTemplateItem(BaseModel):
@@ -144,6 +145,16 @@ class EventTemplateItem(BaseModel):
     description: Optional[str] = None
     trigger_config: dict
     effects_config: list[dict]
+    metadata: Optional[dict] = None
+
+
+class EventTemplateCreateRequest(BaseModel):
+    template_id: str
+    template_name: str
+    category: Optional[str] = None
+    description: Optional[str] = None
+    trigger_config: TriggerConditionDTO
+    effects_config: list[EventEffectDTO] = Field(default_factory=list)
     metadata: Optional[dict] = None
 
 
@@ -558,6 +569,53 @@ def list_event_templates(category: Optional[str] = None):
             metadata=metadata,
         ))
     return result
+
+
+@router.post("/admin/event-templates", response_model=OperationResponse)
+def create_event_template(req: EventTemplateCreateRequest):
+    """创建或更新系统事件模板。仅作为开发维护 API 使用。"""
+    try:
+        TriggerCondition.model_validate(req.trigger_config.model_dump())
+        for eff in req.effects_config:
+            EventEffect.model_validate(eff.model_dump())
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"模板配置校验失败: {e}")
+
+    success = repository.save_event_template(
+        template_id=req.template_id,
+        template_name=req.template_name,
+        category=req.category,
+        description=req.description,
+        trigger_config=req.trigger_config.model_dump_json(),
+        effects_config=json.dumps([e.model_dump() for e in req.effects_config], ensure_ascii=False),
+        metadata=json.dumps(req.metadata, ensure_ascii=False) if req.metadata is not None else None,
+    )
+    if not success:
+        raise HTTPException(status_code=500, detail="保存事件模板失败")
+
+    return OperationResponse(
+        success=True,
+        message=f"事件模板 '{req.template_id}' 已保存",
+        template_id=req.template_id,
+    )
+
+
+@router.delete("/admin/event-templates/{template_id}", response_model=OperationResponse)
+def delete_event_template(template_id: str):
+    """删除系统事件模板。仅作为开发维护 API 使用。"""
+    existing = repository.get_event_template(template_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"事件模板 '{template_id}' 不存在")
+
+    success = repository.delete_event_template(template_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="删除事件模板失败")
+
+    return OperationResponse(
+        success=True,
+        message=f"事件模板 '{template_id}' 已删除",
+        template_id=template_id,
+    )
 
 
 @router.post("/admin/events/schedules", response_model=OperationResponse)

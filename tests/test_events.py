@@ -308,3 +308,36 @@ class TestEventDeepIntegration:
         assert count >= 3
         assert "tpl_affinity_milestone" in ids
         assert "tpl_story_keyword_node" in ids
+
+    def test_event_template_admin_create_and_delete(self):
+        from memoria.api import event_admin
+        from memoria.db import repository
+
+        tid = "tpl_api_dev_test"
+        req = event_admin.EventTemplateCreateRequest(
+            template_id=tid,
+            template_name="开发测试模板",
+            category="dev",
+            description="dev template",
+            trigger_config=event_admin.TriggerConditionDTO(
+                trigger_type="keyword_match",
+                keywords=["dev"],
+                match_mode="any",
+            ),
+            effects_config=[
+                event_admin.EventEffectDTO(
+                    effect_type="notify_player",
+                    notification_message="dev ok",
+                )
+            ],
+            metadata={"dev": True},
+        )
+
+        created = event_admin.create_event_template(req)
+        assert created.success is True
+        assert created.template_id == tid
+        assert repository.get_event_template(tid) is not None
+
+        deleted = event_admin.delete_event_template(tid)
+        assert deleted.success is True
+        assert repository.get_event_template(tid) is None
