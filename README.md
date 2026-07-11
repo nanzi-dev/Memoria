@@ -129,7 +129,7 @@ Memoria/
 │   ├── test_repository.py       # 数据库层测试（39 tests）
 │   ├── test_events.py           # 事件系统测试（16 tests）
 │   ├── test_orchestrator.py     # 编排器测试（15 tests）
-│   ├── test_multi_dialogue_api.py # 多角色 API 测试（13 tests）
+│   ├── test_multi_dialogue_api.py # 多角色 API 测试（14 tests）
 │   ├── test_dialogue_api.py     # 单角色 API 测试（7 tests）
 │   ├── test_api_models.py       # API 模型测试（19 tests）
 │   ├── test_memory_extractor.py # 记忆/提示测试（28 tests）

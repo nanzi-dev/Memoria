@@ -252,15 +252,14 @@ def _save_session_summary_on_end(session_id: str, session: dict) -> None:
         summary = str(summary or "").strip()
         if not summary:
             logger.info(f"多角色会话摘要为空，跳过保存: session={session_id}")
-            return
-
-        multi_character_memory.save_multi_character_summary(
-            session_id=session_id,
-            character_ids=character_ids,
-            player_id=session["player_id"],
-            summary_text=summary,
-            message_count=len(meaningful_messages),
-        )
+        else:
+            multi_character_memory.save_multi_character_summary(
+                session_id=session_id,
+                character_ids=character_ids,
+                player_id=session["player_id"],
+                summary_text=summary,
+                message_count=len(meaningful_messages),
+            )
 
     try:
         multi_character_memory.process_character_impressions(

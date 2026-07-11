@@ -293,6 +293,40 @@ async def test_end_multi_session_summary_failure_does_not_block_end(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_end_multi_session_empty_summary_still_processes_impressions(monkeypatch):
+    from memoria.api import multi_dialogue
+
+    saved_summary = {}
+
+    monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: _multi_session(session_id))
+    _, saved_impressions = _patch_multi_summary(monkeypatch, multi_dialogue, saved_summary)
+    monkeypatch.setattr(
+        multi_dialogue.multi_character_memory,
+        "generate_multi_character_summary",
+        lambda **kwargs: "  ",
+    )
+    monkeypatch.setattr(multi_dialogue.repository, "end_session", lambda session_id: None)
+
+    tasks = FakeBackgroundTasks()
+    response = await multi_dialogue.end_multi_session(
+        multi_dialogue.EndMultiSessionRequest(session_id="session-1"),
+        tasks,
+        current_user_id="player-1",
+    )
+
+    assert response["session_id"] == "session-1"
+    assert len(tasks.tasks) == 1
+
+    func, args, kwargs = tasks.tasks[0]
+    func(*args, **kwargs)
+    assert saved_summary == {}
+    assert saved_impressions
+    assert saved_impressions[0]["session_id"] == "session-1"
+    assert saved_impressions[0]["character_ids"] == ["c1", "c2"]
+    assert saved_impressions[0]["player_id"] == "player-1"
+
+
+@pytest.mark.asyncio
 async def test_end_multi_session_skips_summary_when_message_count_not_enough(monkeypatch):
     from memoria.api import multi_dialogue
 

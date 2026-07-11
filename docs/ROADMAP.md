@@ -50,9 +50,9 @@
 
 **目标：** 提升系统健壮性，为生产环境做准备。
 
-**当前进度：** 测试集合扩展到 230 tests；记忆去重、重试、认证限流、健康检查、懒加载、会话恢复、用户资源隔离、PostgreSQL 兼容和 API/安全回归测试已上线。
+**当前进度：** 测试集合扩展到 231 tests；记忆去重、重试、认证限流、健康检查、懒加载、会话恢复、用户资源隔离、PostgreSQL 兼容和 API/安全回归测试已上线。
 
-- [x] 单元测试覆盖（当前 230 tests，覆盖 schema/repository/orchestrator/events/API models/API endpoints/security/vector memory/developer experience/PostgreSQL compatibility）
+- [x] 单元测试覆盖（当前 231 tests，覆盖 schema/repository/orchestrator/events/API models/API endpoints/security/vector memory/developer experience/PostgreSQL compatibility）
 - [x] 数据库迁移到 PostgreSQL（保留 SQLite 开发模式）
 - [x] LLM 调用重试机制（指数退避 3 次，base_delay=1s，max 7s）
 - [x] 请求速率限制（60s 窗口 60 次，优先按认证用户限流，未登录回退 IP）
@@ -128,14 +128,14 @@
 | `tests/test_api_models.py` | 19 | Dialogue, CharacterAdmin, EventAdmin, Relationship, MultiDialogue, message_id/recovery response models |
 | `tests/test_memory_extractor.py` | 28 | MemoryExtractor, PromptBuilder, Config, LLMClient, CharacterLoader, DedupHelpers |
 | `tests/test_dialogue_api.py` | 7 | 单角色 session start API、跨玩家会话保护、禁用角色保护、会话摘要保存条件 |
-| `tests/test_multi_dialogue_api.py` | 13 | 多角色参与者 JSON body、POST update、session end、群体摘要、讨论响应包装、跨玩家会话保护、禁用角色保护 |
+| `tests/test_multi_dialogue_api.py` | 14 | 多角色参与者 JSON body、POST update、session end、群体摘要、讨论响应包装、跨玩家会话保护、禁用角色保护、空摘要仍提取角色间印象 |
 | `tests/test_cli_debug.py` | 1 | CLI `--debug` 参数传递 |
 | `tests/test_developer_experience.py` | 5 | 对话回放、性能分析、追踪、质量评分 API |
 | `tests/test_postgres_compat.py` | 5 | PostgreSQL SQL/schema 兼容层 |
 | `tests/test_security_fixes.py` | 8 | 管理/写接口鉴权、头像下载私网拦截、密码哈希升级、持久化 token、轻量模型客户端 |
 | `tests/test_system.py` | 12 | 健康检查, 配置校验, 速率限制, 日志级别, 懒加载 |
 | `tests/test_vector_memory.py` | 2 | CUDA 失败回退 CPU、禁用嵌入跳过向量操作 |
-| **合计** | **230** | |
+| **合计** | **231** | |
 
 ## 版本规划
 
@@ -144,7 +144,7 @@
 | v0.1 | 1-2 | 单角色对话 + 记忆系统 + 记忆去重 | ✅ |
 | v0.2 | 3 | 事件系统 + 角色关系网络 | ✅ |
 | v0.3 | 4 | 多角色对话 + 讨论模式 + shared/group 记忆 | ✅ |
-| **v0.4** | **5** | **质量与稳定性（230 tests + 去重/恢复/认证限流/用户隔离/PostgreSQL 兼容）** | ✅ |
+| **v0.4** | **5** | **质量与稳定性（231 tests + 去重/恢复/认证限流/用户隔离/PostgreSQL 兼容）** | ✅ |
 | v0.5 | 6 | Web 前端 | 🔄 |
 | v0.6 | 7 | 事件深度集成 | ✅ |
 | v1.0 | 8-10 | 开发者体验 + 高级特性 + 生态 | [ ] |
