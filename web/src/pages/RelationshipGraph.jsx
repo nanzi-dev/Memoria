@@ -390,6 +390,7 @@ export default function RelationshipGraph() {
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editEdge, setEditEdge] = useState(null);
+  const [activeRelationType, setActiveRelationType] = useState(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
 
@@ -430,15 +431,22 @@ export default function RelationshipGraph() {
 
   // ── D3 渲染 ──
   useEffect(() => {
-    if (!network.nodes.length || !svgRef.current || !containerRef.current) return;
-    if (simulationRef.current) simulationRef.current.stop();
-
+    if (!svgRef.current || !containerRef.current) return;
     const svg = d3.select(svgRef.current);
     const container = containerRef.current;
     const W = container.clientWidth;
     const H = container.clientHeight;
+
+    if (simulationRef.current) {
+      simulationRef.current.stop();
+      simulationRef.current = null;
+    }
+
+    svg.on('.zoom', null).on('click', null);
     svg.selectAll('*').remove();
     svg.attr('viewBox', `0 0 ${W} ${H}`).attr('width', W).attr('height', H);
+
+    if (!network.nodes.length) return;
 
     const defs = svg.append('defs');
 
@@ -541,6 +549,7 @@ export default function RelationshipGraph() {
 
     // 边交互
     linkHit.on('mouseenter', function(event, d) {
+      setActiveRelationType(d.relationship_type || null);
       linkBase
         .attr('stroke-opacity', l => l === d ? 0.8 : 0.1)
         .attr('stroke-width', l => l === d ? getLinkHoverWidth(l) : getLinkWidth(l));
@@ -548,6 +557,7 @@ export default function RelationshipGraph() {
         .attr('stroke-opacity', l => l === d ? 0.95 : 0.04)
         .attr('stroke-width', l => l === d ? Math.max(1.6, getLinkHoverWidth(l) * 0.48) : Math.max(1, getLinkWidth(l) * 0.32));
     }).on('mouseleave', function() {
+      setActiveRelationType(null);
       linkBase.attr('stroke-opacity', 0.48).attr('stroke-width', getLinkWidth);
       linkFlow
         .attr('stroke-opacity', 0.72)
@@ -674,6 +684,7 @@ export default function RelationshipGraph() {
     return () => {
       flowStopped = true;
       linkFlow.interrupt();
+      setActiveRelationType(null);
       simulation.stop();
     };
   }, [network, navigate, relationTypes]);
@@ -840,7 +851,7 @@ export default function RelationshipGraph() {
           </div>
         )}
         {!loading && network.nodes.length === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center">
+          <div className="absolute inset-0 z-10 flex items-center justify-center">
             <div className="memoria-glass animate-fade-up text-center rounded-xl px-8 py-7">
               <Users size={56} className="mx-auto text-cyber-green/10 mb-5" />
               <p className="font-mono text-sm text-cyber-green/30 mb-2">暂无关系数据</p>
@@ -872,12 +883,29 @@ export default function RelationshipGraph() {
             </div>
             <div className="absolute bottom-6 left-6 z-10 animate-fade-up">
               <div className="memoria-glass rounded-lg px-3 py-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px]">
-                {relationTypes.map(rt => (
-                  <div key={rt.value} className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: rt.color }} />
-                    <span className="text-cyber-green/50">{rt.label}</span>
-                  </div>
-                ))}
+                {relationTypes.map(rt => {
+                  const active = activeRelationType === rt.value;
+                  const dimmed = activeRelationType && !active;
+                  return (
+                    <div
+                      key={rt.value}
+                      className={[
+                        'flex items-center gap-1.5 rounded-full border px-2 py-1 transition-all duration-200',
+                        active
+                          ? 'border-cyber-green/45 bg-cyber-green/10 text-cyber-green shadow-[0_0_18px_rgba(167,239,158,0.16)] scale-[1.03]'
+                          : 'border-transparent text-cyber-green/50',
+                        dimmed ? 'opacity-35' : 'opacity-100',
+                      ].join(' ')}
+                      style={active ? { borderColor: `${rt.color}99`, boxShadow: `0 0 18px ${rt.color}2b` } : undefined}
+                    >
+                      <span
+                        className="w-2.5 h-2.5 rounded-full transition-all duration-200"
+                        style={{ backgroundColor: rt.color, boxShadow: active ? `0 0 12px ${rt.color}` : 'none' }}
+                      />
+                      <span>{rt.label}</span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </>
