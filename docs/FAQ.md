@@ -136,6 +136,31 @@ PYTHONPATH=src uvicorn memoria.main:app --host 127.0.0.1 --port 8001
 
 ---
 
+### Q: 如何用 Docker 一键部署？
+
+**解决方案：** 使用仓库内置的 Compose 配置，默认启动 PostgreSQL、后端和前端 Nginx。
+
+```bash
+cd deploy/docker
+cp .env.example .env
+# 编辑 .env，至少填入 LLM_API_KEY；生产环境请修改 POSTGRES_PASSWORD
+docker compose up
+```
+
+默认访问地址：
+
+- Web 应用：http://127.0.0.1:8080
+- API 文档：http://127.0.0.1:8080/docs
+- 后端直连：http://127.0.0.1:8001
+
+如果首次向量检索较慢，通常是容器正在下载嵌入模型。已有本地模型时可在 `.env` 中设置：
+
+```bash
+EMBEDDING_MODEL=/app/models/sentence-transformers/all-MiniLM-L6-v2
+```
+
+---
+
 ### Q: 向量检索不返回结果
 
 **可能原因：** 向量数据库为空（尚未添加长期记忆），或查询文本与记忆内容语义差异过大。

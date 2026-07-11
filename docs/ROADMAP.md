@@ -92,7 +92,7 @@
 - [x] CLI 调试模式（`--debug` 标志：显示 LLM 原始请求/响应、Prompt 内容）
 - [x] 对话回放工具（加载历史 session，逐步重放查看状态变化）
 - [x] 性能分析端点（LLM 调用耗时分布、记忆检索耗时）
-- [ ] Docker 一键部署（`docker compose up`）
+- [x] Docker 一键部署（`docker compose up`）
 - [x] OpenTelemetry 追踪（LLM 调用链路 + 数据库查询）
 - [x] 对话质量评分 API（角色一致性、趣味性自动评估）
 

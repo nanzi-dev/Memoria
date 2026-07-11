@@ -1,0 +1,70 @@
+name: memoria
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-memoria}
+      POSTGRES_USER: ${POSTGRES_USER:-memoria}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-memoria_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/backend.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+      LLM_LIGHT_BASE_URL: ${LLM_LIGHT_BASE_URL:-}
+      LLM_LIGHT_API_KEY: ${LLM_LIGHT_API_KEY:-}
+      LLM_LIGHT_MODEL: ${LLM_LIGHT_MODEL:-}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-memoria}:${POSTGRES_PASSWORD:-memoria_password}@postgres:5432/${POSTGRES_DB:-memoria}
+      DATABASE_PATH: /app/data/sqlite_db/memoria.db
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+      SHORT_TERM_MEMORY_TURNS: ${SHORT_TERM_MEMORY_TURNS:-8}
+      MAX_OUTPUT_TOKENS: ${MAX_OUTPUT_TOKENS:-600}
+      VECTOR_DB_PATH: /app/data/chroma_db
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      VECTOR_SEARCH_TOP_K: ${VECTOR_SEARCH_TOP_K:-10}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - app_data:/app/data
+      - model_cache:/root/.cache
+      - ../../models:/app/models:ro
+    ports:
+      - "${API_PORT:-8001}:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/ready', timeout=5).read()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/web.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-8080}:80"
+
+volumes:
+  postgres_data:
+  app_data:
+  model_cache:

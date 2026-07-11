@@ -24,6 +24,7 @@
   - [系统架构](#系统架构)
   - [快速开始](#快速开始)
     - [环境要求](#环境要求)
+    - [Docker 一键部署](#docker-一键部署)
     - [安装步骤](#安装步骤)
   - [文档导航](#文档导航)
   - [环境变量](#环境变量)
@@ -174,6 +175,39 @@ Memoria/
 - Python 3.10+
 - Node.js 18+（运行 Web 前端时需要）
 - 支持 OpenAI 兼容接口的大模型 API（DeepSeek、Kimi、Qwen 等）
+- Docker / Docker Compose（使用一键部署时需要）
+
+### Docker 一键部署
+
+适合本地体验或生产前验证。默认启动 PostgreSQL、FastAPI 后端和 Nginx 前端：
+
+```bash
+cd deploy/docker
+cp .env.example .env
+# 编辑 .env，至少填入 LLM_API_KEY；生产环境请修改 POSTGRES_PASSWORD
+docker compose up
+```
+
+启动后访问：
+
+- Web 应用：http://127.0.0.1:8080
+- API 文档：http://127.0.0.1:8080/docs
+- 后端健康检查：http://127.0.0.1:8080/health
+
+Compose 默认使用 PostgreSQL，并通过 Docker volume 持久化数据库、ChromaDB 和模型缓存。本地 `models/` 会以只读方式挂载到容器；如需使用本地嵌入模型，在 `.env` 中设置：
+
+```bash
+EMBEDDING_MODEL=/app/models/sentence-transformers/all-MiniLM-L6-v2
+```
+
+常用命令：
+
+```bash
+docker compose up --build  # Dockerfile 或依赖变化后强制重建
+docker compose logs -f backend
+docker compose down
+docker compose down -v  # 同时删除 PostgreSQL/ChromaDB/模型缓存数据
+```
 
 ### 安装步骤
 
@@ -285,6 +319,8 @@ VECTOR_DB_PATH=./data/chroma_db                # 向量数据库路径
 EMBEDDING_MODEL=./models/sentence-transformers/all-MiniLM-L6-v2  # 嵌入模型
 VECTOR_SEARCH_TOP_K=10                         # 向量检索返回数量
 ```
+
+Docker 部署文件统一存放在 `deploy/docker/`。运行时 `deploy/docker/docker-compose.yml` 会自动生成容器内 PostgreSQL 连接串；通常只需要通过 `deploy/docker/.env` 配置 `POSTGRES_*`、`LLM_*`、端口和模型参数。
 
 ---
 
