@@ -13,6 +13,7 @@ import logging
 import sqlite3
 
 from memoria.core.config import configs
+from memoria.core import performance, tracing
 import re
 from difflib import SequenceMatcher
 
@@ -81,14 +82,15 @@ def get_conn():
     # WAL 模式（推荐用于并发读写）
     conn.execute("PRAGMA journal_mode=WAL;")
     
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    with tracing.start_span("db.transaction", **{"db.system": "sqlite", "db.name": configs.database_path}):
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
         
 # =========================
 # 初始化数据库
@@ -353,6 +355,15 @@ CREATE TABLE IF NOT EXISTS short_term_message (
     -- 多角色会话扩展
     character_id    TEXT,                   -- 发言角色ID（多角色会话时必填）
     character_name  TEXT,                   -- 发言角色显示名称
+
+    -- 回放/调试状态快照（旧消息可为空）
+    action          TEXT,
+    affinity_delta  REAL,
+    trust_delta     REAL,
+    current_affinity REAL,
+    current_trust   REAL,
+    current_mood    TEXT,
+    event_notification TEXT,
     
     created_at      TEXT
 );
@@ -544,6 +555,38 @@ def _migrate(conn):
     add_column("event_schedule_state", "status TEXT DEFAULT 'active'")
     add_column("event_schedule_state", "created_at TEXT")
     add_column("event_schedule_state", "updated_at TEXT")
+    add_column("short_term_message", "action TEXT")
+    add_column("short_term_message", "affinity_delta REAL")
+    add_column("short_term_message", "trust_delta REAL")
+    add_column("short_term_message", "current_affinity REAL")
+    add_column("short_term_message", "current_trust REAL")
+    add_column("short_term_message", "current_mood TEXT")
+    add_column("short_term_message", "event_notification TEXT")
+
+
+_SHORT_TERM_MESSAGE_STATE_COLUMNS = (
+    ("action", "action TEXT"),
+    ("affinity_delta", "affinity_delta REAL"),
+    ("trust_delta", "trust_delta REAL"),
+    ("current_affinity", "current_affinity REAL"),
+    ("current_trust", "current_trust REAL"),
+    ("current_mood", "current_mood TEXT"),
+    ("event_notification", "event_notification TEXT"),
+)
+
+
+def _ensure_short_term_message_state_columns(conn) -> None:
+    """补齐旧库里的回放/调试状态列。"""
+    existing = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(short_term_message)").fetchall()
+    }
+    if not existing:
+        return
+
+    for column_name, column_sql in _SHORT_TERM_MESSAGE_STATE_COLUMNS:
+        if column_name not in existing:
+            conn.execute(f"ALTER TABLE short_term_message ADD COLUMN {column_sql}")
 
 
 def init_db():
@@ -670,12 +713,14 @@ def get_long_term_facts(
             vector_store = get_vector_store()
             
             # 向量检索获取相关记忆
-            vector_results = vector_store.search_similar_memories(
-                character_id=character_id,
-                player_id=player_id,
-                query_text=query_context,
-                top_k=limit
-            )
+            with tracing.start_span("memory.vector_search", character_id=character_id):
+                with performance.measure("memory.vector_search"):
+                    vector_results = vector_store.search_similar_memories(
+                        character_id=character_id,
+                        player_id=player_id,
+                        query_text=query_context,
+                        top_k=limit
+                    )
             
             if vector_results:
                 logger.debug(f"向量检索返回 {len(vector_results)} 条记忆")
@@ -839,7 +884,18 @@ def get_latest_active_session(player_id: str, character_id: str | None = None) -
 # =========================
 # short term memory（对话历史）
 # =========================
-def append_short_term_message(session_id: str, role: str, content: str) -> int:
+def append_short_term_message(
+    session_id: str,
+    role: str,
+    content: str,
+    action: str | None = None,
+    affinity_delta: float | None = None,
+    trust_delta: float | None = None,
+    current_affinity: float | None = None,
+    current_trust: float | None = None,
+    current_mood: str | None = None,
+    event_notification: str | None = None,
+) -> int:
     """
     追加短期对话消息。
 
@@ -847,13 +903,27 @@ def append_short_term_message(session_id: str, role: str, content: str) -> int:
         int: 新消息的 id
     """
     with get_conn() as conn:
+        _ensure_short_term_message_state_columns(conn)
         cursor = conn.execute(
             """
             INSERT INTO short_term_message
-            (session_id, role, content, created_at)
-            VALUES (?, ?, ?, ?)
+            (session_id, role, content, action, affinity_delta, trust_delta,
+             current_affinity, current_trust, current_mood, event_notification, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (session_id, role, content, _now()),
+            (
+                session_id,
+                role,
+                content,
+                action,
+                affinity_delta,
+                trust_delta,
+                current_affinity,
+                current_trust,
+                current_mood,
+                event_notification,
+                _now(),
+            ),
         )
         return cursor.lastrowid
         
@@ -1112,6 +1182,26 @@ def get_messages_paginated(session_id: str, offset: int, limit: int) -> tuple[li
     messages = [dict(r) for r in reversed(rows[:limit])]
 
     return messages, has_more
+
+
+def get_session_messages(session_id: str, limit: int = 1000) -> list[dict]:
+    """按时间正序获取单个 session 的消息，用于回放和质量评分。"""
+    with get_conn() as conn:
+        _ensure_short_term_message_state_columns(conn)
+        rows = conn.execute(
+            """
+            SELECT id AS message_id, role, content, character_id, character_name,
+                   action, affinity_delta, trust_delta,
+                   current_affinity, current_trust, current_mood,
+                   event_notification, created_at
+            FROM short_term_message
+            WHERE session_id = ?
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            (session_id, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # 跨多个 Session 分页获取消息

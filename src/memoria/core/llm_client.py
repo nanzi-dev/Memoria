@@ -12,13 +12,16 @@ LLM 调用适配层
 import json
 import logging
 import re
-from typing import Optional
+from typing import Callable, Optional
 
 from openai import BadRequestError, OpenAI
 
+from memoria.core import performance, tracing
 from memoria.core.config import configs
 
 logger = logging.getLogger(__name__)
+
+DebugSink = Callable[[str], None]
 
 # =========================
 # OpenAI Client（懒加载单例）
@@ -262,7 +265,23 @@ def _local_role_turn_fallback(raw_text: str, default_action: str = "neutral") ->
 # =========================
 # JSON 修复请求（二次纠错）
 # =========================
-def _retry_as_json(raw_text: str, model: str) -> Optional[dict]:
+def _emit_debug(debug_sink: DebugSink | None, title: str, payload) -> None:
+    if debug_sink is None:
+        return
+    debug_sink(
+        "[LLM DEBUG] "
+        + title
+        + "\n"
+        + json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+    )
+
+
+def _retry_as_json(
+    raw_text: str,
+    model: str,
+    debug: bool = False,
+    debug_sink: DebugSink | None = None,
+) -> Optional[dict]:
     """
     当解析失败时，将模型输出重新转换为标准 JSON
     （将任务从“生成+格式”转为“纯格式转换”，成功率更高）
@@ -287,17 +306,30 @@ JSON 结构如下：
 
 原始内容：
 {raw_text}
-""".strip()
+    """.strip()
 
     try:
-        response = _retry_call(_get_client().chat.completions.create, 
-            model = model,
-            messages = [{"role": "user", "content": fix_prompt}],
-            max_tokens = 300,
-            temperature = 0.2,
-        )
+        request_payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": fix_prompt}],
+            "max_tokens": 300,
+            "temperature": 0.2,
+        }
+        if debug:
+            _emit_debug(debug_sink, "json_repair.request", request_payload)
+
+        with tracing.start_span("llm.json_repair", **{"llm.model": model}):
+            with performance.measure("llm.json_repair"):
+                response = _retry_call(_get_client().chat.completions.create,
+                    model = model,
+                    messages = request_payload["messages"],
+                    max_tokens = 300,
+                    temperature = 0.2,
+                )
         
         fix_text = response.choices[0].message.content or ""
+        if debug:
+            _emit_debug(debug_sink, "json_repair.raw_response", {"content": fix_text})
         return _extract_json(fix_text)
     except Exception:
         logger.warning("json修复请求失败",exc_info = True)
@@ -363,7 +395,10 @@ def _retry_call(fn, *args, **kwargs):
 def call_role_turn(
     system_prompt: str,
     history: list[dict],
-    model: str | None = None) -> dict:
+    model: str | None = None,
+    debug: bool = False,
+    debug_sink: DebugSink | None = None,
+) -> dict:
     """
     调用 LLM 生成 Role 一轮对话
 
@@ -375,38 +410,59 @@ def call_role_turn(
     
     model = model or configs.llm_model
     messages = [{"role": "system", "content": system_prompt}] + history
+    request_payload = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": configs.max_output_tokens,
+        "temperature": 0.8,
+        "response_format": {"type": "json_object"},
+    }
+    if debug:
+        _emit_debug(debug_sink, "role_turn.request", request_payload)
     
     # =========================
     # 1. 主请求
     # =========================
     try:
-        response = _retry_call(_get_client().chat.completions.create, 
-            model = model,
-            messages = messages,
-            max_tokens = configs.max_output_tokens,
-            temperature = 0.8,
-            
-            # 部分模型支持JSON强制模式
-            response_format = {"type": "json_object"},
-        )
+        with tracing.start_span("llm.role_turn", **{"llm.model": model, "llm.response_format": "json_object"}):
+            with performance.measure("llm.role_turn"):
+                response = _retry_call(_get_client().chat.completions.create,
+                    model = request_payload["model"],
+                    messages = request_payload["messages"],
+                    max_tokens = request_payload["max_tokens"],
+                    temperature = request_payload["temperature"],
+
+                    # 部分模型支持JSON强制模式
+                    response_format = request_payload["response_format"],
+                )
     except BadRequestError:
         # 某些厂商不支持 response_format
         logger.warning("模型不支持 response_format，已降级为普通调用")
-        
-        response = _retry_call(_get_client().chat.completions.create, 
-            model = model,
-            messages = messages,
-            max_tokens = configs.max_output_tokens,
-            temperature = 0.8,
-        )
+        fallback_request = dict(request_payload)
+        fallback_request.pop("response_format", None)
+        if debug:
+            _emit_debug(debug_sink, "role_turn.request_without_response_format", fallback_request)
+
+        with tracing.start_span("llm.role_turn", **{"llm.model": model, "llm.response_format": "none"}):
+            with performance.measure("llm.role_turn"):
+                response = _retry_call(_get_client().chat.completions.create,
+                    model = fallback_request["model"],
+                    messages = fallback_request["messages"],
+                    max_tokens = fallback_request["max_tokens"],
+                    temperature = fallback_request["temperature"],
+                )
     
     raw_text = response.choices[0].message.content or ""
+    if debug:
+        _emit_debug(debug_sink, "role_turn.raw_response", {"content": raw_text})
     
     # =========================
     # 2. JSON 解析
     # =========================
     result = _extract_json(raw_text)
     if result is not None:
+        if debug:
+            _emit_debug(debug_sink, "role_turn.parsed_response", result)
         return result
     
     logger.warning("首次 JSON 解析失败，尝试修复")
@@ -414,14 +470,19 @@ def call_role_turn(
     # =========================
     # 3. 修复重试
     # =========================
-    result = _retry_as_json(raw_text, model)
+    result = _retry_as_json(raw_text, model, debug=debug, debug_sink=debug_sink)
     if result is not None:
+        if debug:
+            _emit_debug(debug_sink, "role_turn.parsed_response", result)
         return result
     
     # =========================
     # 4. 兜底返回
     # =========================
-    return _plain_text_fallback(raw_text)
+    result = _plain_text_fallback(raw_text)
+    if debug:
+        _emit_debug(debug_sink, "role_turn.fallback_response", result)
+    return result
 
 # =========================
 # 轻量任务模型（记忆/摘要等）
@@ -434,12 +495,14 @@ def call_light_task(prompt: str) -> str:
     logger.debug(f"Calling light model: {configs.light_model}")
     
     try:
-        response = _retry_call(_get_light_client().chat.completions.create,
-            model = configs.light_model,
-            messages = [{"role": "user", "content": prompt}],
-            max_tokens = 800,
-            temperature = 0.3,
-        )
+        with tracing.start_span("llm.light_task", **{"llm.model": configs.light_model}):
+            with performance.measure("llm.light_task"):
+                response = _retry_call(_get_light_client().chat.completions.create,
+                    model = configs.light_model,
+                    messages = [{"role": "user", "content": prompt}],
+                    max_tokens = 800,
+                    temperature = 0.3,
+                )
         
         if not response.choices:
             logger.warning("No choices in LLM response")

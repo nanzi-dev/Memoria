@@ -13,6 +13,7 @@
   - [角色关系 API](#角色关系-api)
   - [多角色对话 API](#多角色对话-api)
   - [用户 API](#用户-api)
+  - [开发者体验 API](#开发者体验-api)
   - [系统管理 API](#系统管理-api)
   - [发言策略说明](#发言策略说明)
 ---
@@ -1198,6 +1199,49 @@ Content-Type: application/json
 
 ---
 
+
+## 开发者体验 API
+
+以下端点均需要登录态，路径前缀为 `/api/v1/developer`。
+
+### 1. 对话回放
+```http
+GET /api/v1/developer/replay/{session_id}?step=3&limit=1000
+Authorization: Bearer token-value
+```
+
+加载历史 session，按消息顺序返回可逐步查看的回放数据。`step` 为空时返回完整回放；传入数字时只返回前 N 条消息。新生成的单角色 assistant 消息会包含状态快照，旧消息可能没有状态字段。
+
+### 2. 性能分析
+```http
+GET /api/v1/developer/performance
+Authorization: Bearer token-value
+```
+
+返回最近 200 个样本窗口内的关键耗时分布，包括 `llm.role_turn`、`llm.light_task`、`llm.json_repair`、`memory.vector_search`。
+
+```http
+POST /api/v1/developer/performance/reset
+Authorization: Bearer token-value
+```
+
+清空当前进程内的性能采样。
+
+### 3. 对话质量评分
+```http
+POST /api/v1/developer/quality-score
+Authorization: Bearer token-value
+Content-Type: application/json
+
+{
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "use_llm": false
+}
+```
+
+也可以直接传入 `messages`。默认使用本地启发式评分，返回角色一致性、趣味性和综合分；`use_llm: true` 时会调用轻量模型评估，失败时自动回退到启发式评分。
+
+---
 
 ## 系统管理 API
 

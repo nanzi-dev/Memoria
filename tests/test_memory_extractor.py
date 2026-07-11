@@ -128,6 +128,49 @@ class TestLLMClient:
         assert _MAX_RETRIES == 3
         assert callable(_get_client)
 
+    def test_call_role_turn_debug_emits_request_and_raw_response(self, monkeypatch):
+        from types import SimpleNamespace
+        from memoria.core import llm_client
+
+        calls = []
+
+        class FakeCompletions:
+            def create(self, **kwargs):
+                calls.append(kwargs)
+                return SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(
+                                content='{"dialogue":"你好","action":"idle","affinity_delta":0}'
+                            )
+                        )
+                    ]
+                )
+
+        fake_client = SimpleNamespace(
+            chat=SimpleNamespace(completions=FakeCompletions())
+        )
+        debug_lines = []
+
+        monkeypatch.setattr(llm_client, "_get_client", lambda: fake_client)
+        monkeypatch.setattr(llm_client, "_retry_call", lambda fn, *args, **kwargs: fn(*args, **kwargs))
+
+        result = llm_client.call_role_turn(
+            "system prompt",
+            [{"role": "user", "content": "你好"}],
+            debug=True,
+            debug_sink=debug_lines.append,
+        )
+
+        assert result["dialogue"] == "你好"
+        assert calls[0]["messages"][0]["content"] == "system prompt"
+        debug_text = "\n".join(debug_lines)
+        assert "role_turn.request" in debug_text
+        assert "role_turn.raw_response" in debug_text
+        assert "system prompt" in debug_text
+        assert "dialogue" in debug_text
+        assert "你好" in debug_text
+
 class TestConfig:
     def test_defaults(self):
         from memoria.core.config import configs

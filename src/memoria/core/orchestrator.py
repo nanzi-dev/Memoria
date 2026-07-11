@@ -13,6 +13,7 @@ import logging
 import re
 import uuid
 from datetime import datetime, timezone
+from typing import Callable
 
 from memoria.core import character_loader, llm_client, prompt_builder
 from memoria.core.event_schema import EventContext
@@ -20,6 +21,7 @@ from memoria.core import event_runtime
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
+DebugSink = Callable[[str], None]
 
 
 # =========================
@@ -65,12 +67,41 @@ def _safe_float(value, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def _append_short_term_message(
+    session_id: str,
+    role: str,
+    content: str,
+    **state_snapshot,
+) -> int:
+    """写入短期消息；兼容只接受三参的测试替身。"""
+    if not state_snapshot:
+        return repository.append_short_term_message(session_id, role, content)
+
+    try:
+        return repository.append_short_term_message(
+            session_id,
+            role,
+            content,
+            **state_snapshot,
+        )
+    except TypeError as e:
+        if "unexpected keyword argument" not in str(e):
+            raise
+        return repository.append_short_term_message(session_id, role, content)
     
 
 # =========================
 # Session 创建
 # =========================
-def start_session(character_id: str, player_id: str, player_name: str) -> dict:
+def start_session(
+    character_id: str,
+    player_id: str,
+    player_name: str,
+    debug: bool = False,
+    debug_sink: DebugSink | None = None,
+) -> dict:
     """对应 /dialogue/session/start"""
     
     card = character_loader.load_character_card(character_id)
@@ -91,11 +122,23 @@ def start_session(character_id: str, player_id: str, player_name: str) -> dict:
     result = llm_client.call_role_turn(
         system_prompt = system_prompt + opening_instruction,
         history =  [],
+        debug = debug,
+        debug_sink = debug_sink,
     )
     
     dialogue = _safety_check(result.get("dialogue", ""))
     
-    assistant_msg_id = repository.append_short_term_message(session_id, "assistant", dialogue)
+    assistant_msg_id = _append_short_term_message(
+        session_id,
+        "assistant",
+        dialogue,
+        action=result.get("action", card.action_vocabulary.default_action),
+        affinity_delta=0,
+        trust_delta=0,
+        current_affinity=runtime_state.get("affection_level", 0),
+        current_trust=runtime_state.get("trust_level", 0),
+        current_mood=runtime_state.get("current_mood", "neutral"),
+    )
     
     return{
         "session_id": session_id,
@@ -110,7 +153,12 @@ def start_session(character_id: str, player_id: str, player_name: str) -> dict:
 # =========================
 # 主对话流程
 # =========================
-def run_dialogue_turn(session_id: str, player_message: str) -> dict:
+def run_dialogue_turn(
+    session_id: str,
+    player_message: str,
+    debug: bool = False,
+    debug_sink: DebugSink | None = None,
+) -> dict:
     """对应 /dialogue/turn"""
     
     session = repository.get_session(session_id)
@@ -156,6 +204,8 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
     result = llm_client.call_role_turn(
         system_prompt = system_prompt,
         history = messages,
+        debug = debug,
+        debug_sink = debug_sink,
     )
     
     # =========================
@@ -276,8 +326,19 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
             mood_after
         )
 
-        user_msg_id = repository.append_short_term_message(session_id, "user", player_message)
-        assistant_msg_id = repository.append_short_term_message(session_id, "assistant", dialogue)
+        user_msg_id = _append_short_term_message(session_id, "user", player_message)
+        assistant_msg_id = _append_short_term_message(
+            session_id,
+            "assistant",
+            dialogue,
+            action=action,
+            affinity_delta=affinity_delta,
+            trust_delta=trust_delta,
+            current_affinity=new_affinity,
+            current_trust=new_trust,
+            current_mood=mood_after,
+            event_notification=event_notification,
+        )
 
         if memory_fact and str(memory_fact).strip().lower() not in ("none", "null", ""):
             repository.save_long_term_fact(

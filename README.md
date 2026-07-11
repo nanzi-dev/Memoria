@@ -98,6 +98,7 @@ Memoria/
 │   │   ├── event_admin.py      # 事件管理 API
 │   │   ├── multi_dialogue.py   # 多角色对话 API
 │   │   ├── relationship.py     # 角色关系 API
+│   │   ├── developer.py        # 回放、性能指标、质量评分等开发者 API
 │   │   └── user.py             # 用户注册、登录、资料和头像 API
 │   ├── characters/             # 角色卡 JSON 配置文件
 │   │   ├── npc_luo_xiaohei.json
@@ -229,6 +230,7 @@ uvicorn memoria.main:app --reload --host 127.0.0.1 --port 8001
 - API 文档 (Swagger): http://127.0.0.1:8001/docs
 - API 文档 (ReDoc): http://127.0.0.1:8001/redoc
 - CLI 聊天: `python scripts/cli_chat.py`
+- CLI 调试: `python scripts/cli_chat.py --debug`（输出 LLM 请求、Prompt 与原始响应到 stderr）
 
 **7. 启动 Web 前端（可选）**
 ```bash

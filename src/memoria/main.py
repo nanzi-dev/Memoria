@@ -18,6 +18,7 @@ from memoria.api.dialogue import router as dialogue_router
 from memoria.api.character_admin import router as character_admin_router
 from memoria.api.event_admin import router as event_admin_router
 from memoria.api.relationship import router as relationship_router
+from memoria.api.developer import router as developer_router
 from memoria.api.multi_dialogue import router as multi_dialogue_router
 from memoria.api.user import (
     AUTH_COOKIE_NAME,
@@ -188,4 +189,5 @@ app.include_router(multi_dialogue_router, prefix="/api/v1")
 app.include_router(character_admin_router, prefix="/api/v1")
 app.include_router(event_admin_router, prefix="/api/v1")
 app.include_router(relationship_router, prefix="/api/v1")
+app.include_router(developer_router, prefix="/api/v1")
 app.include_router(user_router, prefix="/api/v1")
