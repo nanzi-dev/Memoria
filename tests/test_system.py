@@ -1,45 +1,69 @@
 """
 Phase 5 系统级测试：健康检查、配置校验、速率限制、懒加载
 """
-import pytest, sys, os
+import asyncio
+import logging
+from types import SimpleNamespace
+import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from unittest.mock import patch, MagicMock
 
 class TestHealthEndpoints:
     def test_health(self):
-        from fastapi.testclient import TestClient
-        from memoria.main import app
-        client = TestClient(app)
-        r = client.get("/health")
-        assert r.status_code == 200
-        data = r.json()
-        assert data["status"] == "ok"
-        assert "version" in data
+        from memoria.main import APP_VERSION, health
 
-    def test_ready_ok(self):
-        from fastapi.testclient import TestClient
-        from memoria.main import app
-        client = TestClient(app)
-        r = client.get("/ready")
-        assert r.status_code == 200
-        assert r.json()["status"] == "ready"
+        data = asyncio.run(health())
+        assert data == {"status": "ok", "version": APP_VERSION}
 
-    def test_ready_db_fail(self):
-        from fastapi.testclient import TestClient
-        from memoria.main import app
-        client = TestClient(app)
-        # Simulate DB failure by patching get_conn
-        with patch("memoria.main.init_db", side_effect=Exception("DB down")):
-            pass  # app is already initialized, so we test with a fresh app
-        r = client.get("/ready")
-        assert r.status_code == 200  # DB is already initialized
+    def test_ready_ok(self, monkeypatch):
+        from memoria.main import ready
+
+        class Conn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def execute(self, query):
+                assert query == "SELECT 1"
+
+        monkeypatch.setattr("memoria.db.repository.get_conn", lambda: Conn())
+
+        data = asyncio.run(ready())
+        assert data == {"status": "ready", "database": "ok"}
+
+    def test_ready_db_fail(self, monkeypatch):
+        from memoria.main import ready
+
+        def fail_conn():
+            raise Exception("DB down")
+
+        monkeypatch.setattr("memoria.db.repository.get_conn", fail_conn)
+
+        response = asyncio.run(ready())
+        assert response.status_code == 503
+
+
+class TestLogLevel:
+    def test_set_valid_level(self):
+        from memoria.main import set_log_level
+
+        data = asyncio.run(set_log_level("DEBUG", _current_user_id="usr_test"))
+        assert data["log_level"] == "DEBUG"
+        assert logging.getLogger("memoria").level == logging.DEBUG
+
+    def test_set_invalid_level(self):
+        from memoria.main import set_log_level
+
+        response = asyncio.run(set_log_level("TRACE", _current_user_id="usr_test"))
+        assert response.status_code == 400
+
 
 class TestConfigValidation:
     def test_validate_missing_key(self):
         from memoria.main import _validate_config
-        from memoria.core.config import configs
         # Config validation reports missing key as warning only
         errors = _validate_config()
         assert isinstance(errors, list)
@@ -72,35 +96,34 @@ class TestRateLimiting:
             _check_rate_limit(p1)
         assert _check_rate_limit(p2), "Different player should not be limited"
 
-class TestLogLevel:
-    def test_set_valid_level(self):
-        from fastapi.testclient import TestClient
-        from memoria.main import app
-        client = TestClient(app)
-        r = client.post("/admin/log-level?level=DEBUG")
-        assert r.status_code == 200
-        assert r.json()["log_level"] == "DEBUG"
+    def test_rate_limit_key_prefers_authenticated_user(self, monkeypatch):
+        from memoria.main import _get_rate_limit_key
 
-    def test_set_invalid_level(self):
-        from fastapi.testclient import TestClient
-        from memoria.main import app
-        client = TestClient(app)
-        r = client.post("/admin/log-level?level=TRACE")
-        assert r.status_code == 400
+        monkeypatch.setattr("memoria.main.get_current_user_id", lambda token: "usr_abc")
+        request = SimpleNamespace(
+            headers={"Authorization": "Bearer token-abc"},
+            cookies={},
+            client=SimpleNamespace(host="127.0.0.1"),
+        )
 
-    def test_set_warning_level(self):
-        from fastapi.testclient import TestClient
-        from memoria.main import app
-        client = TestClient(app)
-        r = client.post("/admin/log-level?level=ERROR")
-        assert r.status_code == 200
-        assert r.json()["log_level"] == "ERROR"
+        assert _get_rate_limit_key(request) == "user:usr_abc"
+
+    def test_rate_limit_key_ignores_spoofed_player_header(self, monkeypatch):
+        from memoria.main import _get_rate_limit_key
+
+        monkeypatch.setattr("memoria.main.get_current_user_id", lambda token: None)
+        request = SimpleNamespace(
+            headers={"X-Player-ID": "spoofed"},
+            cookies={},
+            client=SimpleNamespace(host="127.0.0.1"),
+        )
+
+        assert _get_rate_limit_key(request) == "ip:127.0.0.1"
 
 class TestLazyLLMClient:
     def test_lazy_init_no_instantiation(self):
         """LLM client should not instantiate OpenAI on import"""
         # If llm_client imported without error, lazy init works
-        import importlib
         try:
             from memoria.core import llm_client
             assert hasattr(llm_client, '_get_client'), "Should have _get_client function"
@@ -108,22 +131,3 @@ class TestLazyLLMClient:
             # Only fail if it's not a proxy/auth error
             if "socks" not in str(e).lower() and "api_key" not in str(e).lower():
                 raise
-
-class TestResponseModels:
-    def test_health_response_structure(self):
-        from fastapi.testclient import TestClient
-        from memoria.main import app
-        client = TestClient(app)
-        r = client.get("/health")
-        data = r.json()
-        required_keys = {"status", "version"}
-        assert required_keys.issubset(data.keys())
-
-    def test_ready_response_structure(self):
-        from fastapi.testclient import TestClient
-        from memoria.main import app
-        client = TestClient(app)
-        r = client.get("/ready")
-        data = r.json()
-        assert "status" in data
-        assert "database" in data

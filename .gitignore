@@ -30,6 +30,7 @@ __pycache__/
 *.sqlite3
 data/sqlite_db/
 data/chroma_db/
+web/dist/
 
 # =========================
 # ML / Model artifacts

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "memoria"
-version = "0.1.0"
+version = "0.4.0"
 description = "基于大语言模型的沉浸式角色扮演对话系统"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -34,3 +34,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "ignore:Please use `import python_multipart` instead.:PendingDeprecationWarning",
+]

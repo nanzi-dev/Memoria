@@ -35,7 +35,7 @@ class StartMultiSessionRequest(BaseModel):
     player_id: str = Field(..., description="玩家ID")
     player_name: str = Field(..., description="玩家名称")
     group_name: Optional[str] = Field(None, description="群聊名称")
-    character_ids: list[str] = Field(..., min_items=2, description="参与角色ID列表（至少2个）")
+    character_ids: list[str] = Field(..., min_length=2, description="参与角色ID列表（至少2个）")
 
 
 class StartMultiSessionResponse(BaseModel):

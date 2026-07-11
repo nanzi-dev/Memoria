@@ -1,13 +1,17 @@
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { useUser } from '../context/UserContext';
 import LoginModal from '../components/LoginModal';
 import UserSettingsModal from '../components/UserSettingsModal';
-import FaultyTerminal from '../components/FaultyTerminal';
 import PillNav from '../components/PillNav';
 import GlitchText from '../components/GlitchText';
-import CharacterBadge, { AddCharacterBadge } from '../components/CharacterBadge';
 import { characterAdmin } from '../api/memoria';
 import { Loader2, User } from 'lucide-react';
+
+const FaultyTerminal = lazy(() => import('../components/FaultyTerminal'));
+const CharacterBadge = lazy(() => import('../components/CharacterBadge'));
+const AddCharacterBadge = lazy(() =>
+  import('../components/CharacterBadge').then((module) => ({ default: module.AddCharacterBadge }))
+);
 
 export default function Home() {
   const [characters, setCharacters] = useState([]);
@@ -69,25 +73,27 @@ export default function Home() {
     <div className="relative min-h-screen bg-cyber-bg overflow-hidden">
       {/* FaultyTerminal 全屏背景 */}
       <div className="fixed inset-0 z-0">
-        <FaultyTerminal
-          scale={1.5}
-          gridMul={[2, 1]}
-          digitSize={1.2}
-          timeScale={0.5}
-          pause={false}
-          scanlineIntensity={0.5}
-          glitchAmount={1}
-          flickerAmount={1}
-          noiseAmp={1}
-          chromaticAberration={0}
-          dither={0}
-          curvature={0.1}
-          tint="#A7EF9E"
-          mouseReact
-          mouseStrength={0.5}
-          pageLoadAnimation
-          brightness={0.6}
-        />
+        <Suspense fallback={null}>
+          <FaultyTerminal
+            scale={1.5}
+            gridMul={[2, 1]}
+            digitSize={1.2}
+            timeScale={0.5}
+            pause={false}
+            scanlineIntensity={0.5}
+            glitchAmount={1}
+            flickerAmount={1}
+            noiseAmp={1}
+            chromaticAberration={0}
+            dither={0}
+            curvature={0.1}
+            tint="#A7EF9E"
+            mouseReact
+            mouseStrength={0.5}
+            pageLoadAnimation
+            brightness={0.6}
+          />
+        </Suspense>
       </div>
 
       {/* 内容 */}
@@ -141,16 +147,18 @@ export default function Home() {
         )}
 
         {!loading && (
-          <div className="flex flex-wrap justify-center gap-8 max-w-5xl pointer-events-auto">
-            {characters.map((char) => (
-              <CharacterBadge
-                key={char.character_id}
-                character={char}
-                isActive={!!char.is_active}
-              />
-            ))}
-            {user && <AddCharacterBadge />}
-          </div>
+          <Suspense fallback={null}>
+            <div className="flex flex-wrap justify-center gap-8 max-w-5xl pointer-events-auto">
+              {characters.map((char) => (
+                <CharacterBadge
+                  key={char.character_id}
+                  character={char}
+                  isActive={!!char.is_active}
+                />
+              ))}
+              {user && <AddCharacterBadge />}
+            </div>
+          </Suspense>
         )}
 
         {!loading && user && characters.length === 0 && (

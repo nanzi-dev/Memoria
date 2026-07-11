@@ -19,7 +19,12 @@ from memoria.api.character_admin import router as character_admin_router
 from memoria.api.event_admin import router as event_admin_router
 from memoria.api.relationship import router as relationship_router
 from memoria.api.multi_dialogue import router as multi_dialogue_router
-from memoria.api.user import router as user_router, require_current_user_id
+from memoria.api.user import (
+    AUTH_COOKIE_NAME,
+    get_current_user_id,
+    router as user_router,
+    require_current_user_id,
+)
 from memoria.db.repository import init_db
 from memoria.core.config import configs
 from memoria.core.event_runtime import ensure_default_event_templates
@@ -34,6 +39,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("memoria")
+APP_VERSION = "0.4.0"
 
 # =========================
 # 配置校验
@@ -70,6 +76,21 @@ def _check_rate_limit(player_id: str) -> bool:
     return True
 
 
+def _get_rate_limit_key(request: Request) -> str:
+    """优先使用认证用户做限流 key，避免客户端伪造 X-Player-ID 绕过。"""
+    authorization = request.headers.get("Authorization", "")
+    token = authorization[7:] if authorization.startswith("Bearer ") else None
+    token = token or request.cookies.get(AUTH_COOKIE_NAME)
+
+    if token:
+        user_id = get_current_user_id(token)
+        if user_id:
+            return f"user:{user_id}"
+
+    client_host = request.client.host if request.client else "unknown"
+    return f"ip:{client_host}"
+
+
 # =========================
 # 生命周期管理
 # =========================
@@ -89,7 +110,7 @@ async def lifespan(app: FastAPI):
         logger.error("数据库初始化失败: %s", e, exc_info=True)
         raise
 
-    logger.info("Memoria 服务已启动 (v0.4.0)")
+    logger.info("Memoria 服务已启动 (v%s)", APP_VERSION)
     yield
     # ---------- shutdown ----------
     logger.info("Memoria 服务正在关闭...")
@@ -100,7 +121,7 @@ async def lifespan(app: FastAPI):
 # =========================
 app = FastAPI(
     title="Memoria - 角色模拟系统",
-    version="0.4.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 
@@ -111,7 +132,7 @@ app = FastAPI(
 @app.get("/health", tags=["system"])
 async def health():
     """存活检查：服务是否在运行"""
-    return {"status": "ok", "version": "0.4.0"}
+    return {"status": "ok", "version": APP_VERSION}
 
 
 @app.get("/ready", tags=["system"])
@@ -150,8 +171,8 @@ async def rate_limit_middleware(request: Request, call_next):
     """per-player 速率限制中间件"""
     # 仅对 API 写操作应用限流；列表、详情、历史等读请求不消耗窗口。
     if request.url.path.startswith("/api/") and request.method not in {"GET", "HEAD", "OPTIONS"}:
-        player_id = request.headers.get("X-Player-ID", request.client.host if request.client else "unknown")
-        if not _check_rate_limit(player_id):
+        rate_limit_key = _get_rate_limit_key(request)
+        if not _check_rate_limit(rate_limit_key):
             return JSONResponse(
                 status_code=429,
                 content={"error": "请求过于频繁，请稍后再试", "retry_after": _RATE_LIMIT_WINDOW}
