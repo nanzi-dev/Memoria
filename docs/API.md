@@ -4,7 +4,7 @@
 
 访问 http://127.0.0.1:8001/docs 可查看 Swagger 交互式文档，http://127.0.0.1:8001/redoc 可查看 ReDoc 文档。
 
-除 `GET /api/v1/characters`、用户注册/登录，以及关系只读查询外，业务接口通常需要登录态。认证方式支持 `Authorization: Bearer <token>`、`?token=<token>` 或登录后写入的 `memoria-token` HttpOnly Cookie。带 `player_id` 的接口会校验 `player_id` 必须等于当前登录用户 ID。
+除用户注册/登录外，业务接口通常需要登录态。认证方式支持 `Authorization: Bearer <token>`、`?token=<token>` 或登录后写入的 `memoria-token` HttpOnly Cookie。带 `player_id` 的接口会校验 `player_id` 必须等于当前登录用户 ID。角色卡、事件定义和角色关系都按当前登录用户隔离；不同用户可以拥有相同的 `character_id` / `event_id`。
 
 ---
   - [对话系统 API](#对话系统-api)
@@ -36,6 +36,8 @@ GET /api/v1/characters
   }
 ]
 ```
+
+该列表只返回当前登录用户已创建或导入、且启用的角色卡。`src/memoria/characters/` 下的静态 JSON 是开发/导入模板，不会在用户第一次使用时自动复制为用户角色卡。
 
 ### 2. 开始新会话
 ```http
@@ -253,7 +255,7 @@ GET /api/v1/dialogue/session/latest?player_id=player_001&character_id=npc_luo_xi
 
 ## 角色卡管理 API
 
-本节接口均需要登录态。
+本节接口均需要登录态，且只操作当前登录用户拥有的角色卡。相同 `character_id` 可以被不同用户分别创建或导入。
 
 ### 1. 获取角色卡列表
 ```http
@@ -785,7 +787,7 @@ GET /api/v1/admin/event-context?character_id=&player_id=&status=&limit=100
 
 ## 角色关系 API
 
-创建、更新、删除和批量创建关系需要登录态；关系详情、角色关系列表和关系网络查询为只读接口，不强制登录。
+本节接口均需要登录态，且只读写当前登录用户的角色关系。相同角色 ID 组合可以在不同用户下保存不同关系。
 
 ### 1. 创建角色关系
 ```http

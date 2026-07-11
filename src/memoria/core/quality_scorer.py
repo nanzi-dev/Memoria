@@ -26,7 +26,11 @@ def _assistant_messages(messages: list[dict]) -> list[str]:
     ]
 
 
-def _heuristic_score(messages: list[dict], character_id: str | None = None) -> dict:
+def _heuristic_score(
+    messages: list[dict],
+    character_id: str | None = None,
+    owner_user_id: str | None = None,
+) -> dict:
     assistant_texts = _assistant_messages(messages)
     all_text = "\n".join(assistant_texts)
     reasons: list[str] = []
@@ -48,7 +52,7 @@ def _heuristic_score(messages: list[dict], character_id: str | None = None) -> d
 
     if character_id:
         try:
-            card = character_loader.load_character_card(character_id)
+            card = character_loader.load_character_card(character_id, owner_user_id)
             names = {card.meta.name, card.meta.display_name, character_id}
             if any(name and name in all_text for name in names):
                 consistency += 5
@@ -122,9 +126,10 @@ messages:
 def score_dialogue(
     messages: list[dict],
     character_id: str | None = None,
+    owner_user_id: str | None = None,
     use_llm: bool = False,
 ) -> dict:
-    fallback = _heuristic_score(messages, character_id)
+    fallback = _heuristic_score(messages, character_id, owner_user_id)
     if not use_llm:
         return fallback
     try:

@@ -179,6 +179,7 @@ class EventContextStateItem(BaseModel):
 def list_events(
     character_id: Optional[str] = None,
     only_active: bool = False,
+    current_user_id: str = Depends(require_current_user_id),
 ):
     """
     列出事件定义列表
@@ -188,6 +189,7 @@ def list_events(
     """
     try:
         rows = repository.list_event_definitions(
+            owner_user_id=current_user_id,
             character_id=character_id,
             only_active=only_active,
         )
@@ -225,9 +227,12 @@ def list_events(
 # =========================
 
 @router.get("/admin/events/{event_id}", response_model=EventDetail)
-def get_event(event_id: str):
+def get_event(
+    event_id: str,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """获取单个事件的完整定义"""
-    row = repository.get_event_definition(event_id)
+    row = repository.get_event_definition(current_user_id, event_id)
     if not row:
         raise HTTPException(status_code=404, detail=f"事件 '{event_id}' 不存在")
 
@@ -262,7 +267,10 @@ def get_event(event_id: str):
 # =========================
 
 @router.post("/admin/events", response_model=OperationResponse)
-def create_event(req: EventCreateRequest):
+def create_event(
+    req: EventCreateRequest,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """
     创建事件定义
 
@@ -270,7 +278,7 @@ def create_event(req: EventCreateRequest):
     以 JSON 字符串形式存储于数据库。
     """
     # 检查 ID 是否已存在
-    existing = repository.get_event_definition(req.event_id)
+    existing = repository.get_event_definition(current_user_id, req.event_id)
     if existing:
         raise HTTPException(
             status_code=400,
@@ -291,6 +299,7 @@ def create_event(req: EventCreateRequest):
     )
 
     success = repository.save_event_definition(
+        owner_user_id=current_user_id,
         event_id=req.event_id,
         event_name=req.event_name,
         trigger_config=trigger_json,
@@ -318,11 +327,15 @@ def create_event(req: EventCreateRequest):
 # =========================
 
 @router.put("/admin/events/{event_id}", response_model=OperationResponse)
-def update_event(event_id: str, req: EventUpdateRequest):
+def update_event(
+    event_id: str,
+    req: EventUpdateRequest,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """
     更新事件定义（仅更新传入的字段，未传入的保持原值）
     """
-    existing = repository.get_event_definition(event_id)
+    existing = repository.get_event_definition(current_user_id, event_id)
     if not existing:
         raise HTTPException(status_code=404, detail=f"事件 '{event_id}' 不存在")
 
@@ -356,6 +369,7 @@ def update_event(event_id: str, req: EventUpdateRequest):
         effects_json = existing["effects_config"]
 
     success = repository.save_event_definition(
+        owner_user_id=current_user_id,
         event_id=event_id,
         event_name=event_name,
         trigger_config=trigger_json,
@@ -383,13 +397,16 @@ def update_event(event_id: str, req: EventUpdateRequest):
 # =========================
 
 @router.delete("/admin/events/{event_id}", response_model=OperationResponse)
-def delete_event(event_id: str):
+def delete_event(
+    event_id: str,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """永久删除事件定义及其触发记录（不可恢复）"""
-    existing = repository.get_event_definition(event_id)
+    existing = repository.get_event_definition(current_user_id, event_id)
     if not existing:
         raise HTTPException(status_code=404, detail=f"事件 '{event_id}' 不存在")
 
-    success = repository.delete_event_definition(event_id)
+    success = repository.delete_event_definition(current_user_id, event_id)
     if not success:
         raise HTTPException(status_code=500, detail="删除事件失败")
 
@@ -405,18 +422,23 @@ def delete_event(event_id: str):
 # =========================
 
 @router.post("/admin/events/{event_id}/toggle", response_model=OperationResponse)
-def toggle_event(event_id: str, active: bool):
+def toggle_event(
+    event_id: str,
+    active: bool,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """
     切换事件启用状态
 
     - active=true  → 启用
     - active=false → 禁用（不删除数据，对话流程中自动跳过）
     """
-    existing = repository.get_event_definition(event_id)
+    existing = repository.get_event_definition(current_user_id, event_id)
     if not existing:
         raise HTTPException(status_code=404, detail=f"事件 '{event_id}' 不存在")
 
     success = repository.save_event_definition(
+        owner_user_id=current_user_id,
         event_id=event_id,
         event_name=existing["event_name"],
         trigger_config=existing["trigger_config"],
@@ -450,12 +472,15 @@ def get_trigger_history(
     character_id: Optional[str] = None,
     player_id: Optional[str] = None,
     limit: int = 50,
+    current_user_id: str = Depends(require_current_user_id),
 ):
     """查询指定事件的触发历史记录"""
+    if player_id and player_id != current_user_id:
+        raise HTTPException(status_code=403, detail="无权访问该玩家的事件历史")
     rows = repository.get_event_trigger_history(
         event_id=event_id,
         character_id=character_id,
-        player_id=player_id,
+        player_id=current_user_id,
         limit=limit,
     )
     return [TriggerLogItem(**r) for r in rows]
@@ -466,11 +491,14 @@ def get_all_trigger_history(
     character_id: Optional[str] = None,
     player_id: Optional[str] = None,
     limit: int = 100,
+    current_user_id: str = Depends(require_current_user_id),
 ):
     """查询所有事件的触发历史（可按角色/玩家过滤）"""
+    if player_id and player_id != current_user_id:
+        raise HTTPException(status_code=403, detail="无权访问该玩家的事件历史")
     rows = repository.get_event_trigger_history(
         character_id=character_id,
-        player_id=player_id,
+        player_id=current_user_id,
         limit=limit,
     )
     return [TriggerLogItem(**r) for r in rows]
@@ -485,6 +513,7 @@ def reset_trigger_history(
     event_id: str,
     character_id: str,
     player_id: str,
+    current_user_id: str = Depends(require_current_user_id),
 ):
     """
     删除指定事件对某玩家的触发记录
@@ -492,6 +521,8 @@ def reset_trigger_history(
     用途：开发调试时重置一次性事件的触发状态，使其可以再次触发。
     生产环境慎用。
     """
+    if player_id != current_user_id:
+        raise HTTPException(status_code=403, detail="无权访问该玩家的事件历史")
     count = repository.delete_trigger_history(event_id, character_id, player_id)
     return OperationResponse(
         success=True,
@@ -530,9 +561,14 @@ def list_event_templates(category: Optional[str] = None):
 
 
 @router.post("/admin/events/schedules", response_model=OperationResponse)
-def register_event_schedule(req: ScheduleRegisterRequest):
+def register_event_schedule(
+    req: ScheduleRegisterRequest,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """注册一个时间驱动事件调度。schedule 使用 5 字段 cron 表达式。"""
-    existing = repository.get_event_definition(req.event_id)
+    if req.player_id != current_user_id:
+        raise HTTPException(status_code=403, detail="无权访问该玩家的事件调度")
+    existing = repository.get_event_definition(current_user_id, req.event_id)
     if not existing:
         raise HTTPException(status_code=404, detail=f"事件 '{req.event_id}' 不存在")
 
@@ -554,10 +590,13 @@ def register_event_schedule(req: ScheduleRegisterRequest):
 
 
 @router.post("/admin/events/schedules/run-due", response_model=ScheduleRunResponse)
-def run_due_event_schedules(limit: int = 50):
+def run_due_event_schedules(
+    limit: int = 50,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """手动检查并执行到期的时间驱动事件。"""
     try:
-        results = event_runtime.run_due_time_events(limit=limit)
+        results = event_runtime.run_due_time_events(limit=limit, player_id=current_user_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"执行调度失败: {e}")
 
@@ -583,11 +622,14 @@ def list_event_context_states(
     player_id: Optional[str] = None,
     status: Optional[str] = None,
     limit: int = 100,
+    current_user_id: str = Depends(require_current_user_id),
 ):
     """查询跨会话持久化的事件上下文。"""
+    if player_id and player_id != current_user_id:
+        raise HTTPException(status_code=403, detail="无权访问该玩家的事件上下文")
     rows = repository.list_event_context_states(
         character_id=character_id,
-        player_id=player_id,
+        player_id=current_user_id,
         status=status,
         limit=limit,
     )

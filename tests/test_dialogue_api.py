@@ -19,8 +19,8 @@ def test_session_start_creates_session_without_llm_opening(monkeypatch):
 
     monkeypatch.setattr(dialogue.repository, "get_all_player_sessions", lambda player_id: [])
     monkeypatch.setattr(dialogue.repository, "get_latest_active_session", lambda player_id, character_id=None: None)
-    monkeypatch.setattr(dialogue.repository, "is_character_card_active", lambda character_id: True)
-    monkeypatch.setattr(dialogue.character_loader, "load_character_card", lambda character_id: SimpleNamespace())
+    monkeypatch.setattr(dialogue.repository, "is_character_card_active", lambda owner_user_id, character_id: True)
+    monkeypatch.setattr(dialogue.character_loader, "load_character_card", lambda character_id, owner_user_id=None: SimpleNamespace())
     monkeypatch.setattr(dialogue.repository, "get_runtime_state", lambda *args, **kwargs: {"affection_level": 12})
     monkeypatch.setattr(
         dialogue.repository,
@@ -56,7 +56,7 @@ def test_session_start_rejects_disabled_character_without_existing_session(monke
 
     monkeypatch.setattr(dialogue.repository, "get_all_player_sessions", lambda player_id: [])
     monkeypatch.setattr(dialogue.repository, "get_latest_active_session", lambda player_id, character_id=None: None)
-    monkeypatch.setattr(dialogue.repository, "is_character_card_active", lambda character_id: False)
+    monkeypatch.setattr(dialogue.repository, "is_character_card_active", lambda owner_user_id, character_id: False)
 
     with pytest.raises(HTTPException) as exc_info:
         dialogue.session_start(
@@ -82,7 +82,7 @@ def test_dialogue_turn_rejects_disabled_character(monkeypatch):
             "status": "active",
         },
     )
-    monkeypatch.setattr(dialogue.repository, "is_character_card_active", lambda character_id: False)
+    monkeypatch.setattr(dialogue.repository, "is_character_card_active", lambda owner_user_id, character_id: False)
 
     with pytest.raises(HTTPException) as exc_info:
         dialogue.dialogue_turn(

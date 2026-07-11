@@ -252,7 +252,8 @@ CREATE TABLE IF NOT EXISTS auth_token (
 -- 角色卡存储
 -- =========================
 CREATE TABLE IF NOT EXISTS character_card (
-    character_id    TEXT PRIMARY KEY,
+    owner_user_id   TEXT NOT NULL,
+    character_id    TEXT NOT NULL,
     
     card_data       TEXT NOT NULL,      -- 完整的角色卡 JSON 数据
     version         TEXT DEFAULT '1.0.0',
@@ -267,14 +268,18 @@ CREATE TABLE IF NOT EXISTS character_card (
     
     -- 状态标记
     is_active       INTEGER DEFAULT 1,  -- 1=启用, 0=禁用
-    source          TEXT DEFAULT 'db'   -- 'db'=数据库创建, 'file'=从文件导入
+    source          TEXT DEFAULT 'db',  -- 'db'=数据库创建, 'file'=从文件导入
+
+    PRIMARY KEY (owner_user_id, character_id),
+    FOREIGN KEY (owner_user_id) REFERENCES users(user_id)
 );
 
 -- =========================
 -- 事件定义表
 -- =========================
 CREATE TABLE IF NOT EXISTS event_definition (
-    event_id        TEXT PRIMARY KEY,
+    owner_user_id   TEXT NOT NULL,
+    event_id        TEXT NOT NULL,
     event_name      TEXT NOT NULL,
     description     TEXT,
     
@@ -291,7 +296,10 @@ CREATE TABLE IF NOT EXISTS event_definition (
     updated_at      TEXT,
     
     trigger_count   INTEGER DEFAULT 0,
-    last_triggered_at TEXT
+    last_triggered_at TEXT,
+
+    PRIMARY KEY (owner_user_id, event_id),
+    FOREIGN KEY (owner_user_id) REFERENCES users(user_id)
 );
 
 -- =========================
@@ -313,7 +321,7 @@ CREATE TABLE IF NOT EXISTS event_trigger_log (
     -- 应用的效果
     effects_applied  TEXT,              -- 效果列表 JSON
     
-    FOREIGN KEY (event_id) REFERENCES event_definition(event_id)
+    FOREIGN KEY (player_id, event_id) REFERENCES event_definition(owner_user_id, event_id)
 );
 
 -- =========================
@@ -377,6 +385,7 @@ CREATE TABLE IF NOT EXISTS event_template (
 -- =========================
 CREATE TABLE IF NOT EXISTS character_relationship (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id   TEXT NOT NULL,
     
     character_id_a  TEXT NOT NULL,      -- 角色 A
     character_id_b  TEXT NOT NULL,      -- 角色 B
@@ -393,7 +402,8 @@ CREATE TABLE IF NOT EXISTS character_relationship (
     updated_at      TEXT,
     
     -- 确保同一对角色只有一条关系记录（无向关系）
-    UNIQUE(character_id_a, character_id_b)
+    UNIQUE(owner_user_id, character_id_a, character_id_b),
+    FOREIGN KEY (owner_user_id) REFERENCES users(user_id)
 );
 
 -- =========================
@@ -551,10 +561,10 @@ CREATE INDEX IF NOT EXISTS idx_summary_player
 ON session_summary(character_id, player_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_character_active
-ON character_card(is_active, created_at DESC);
+ON character_card(owner_user_id, is_active, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_event_character
-ON event_definition(character_id, is_active);
+ON event_definition(owner_user_id, character_id, is_active);
 
 CREATE INDEX IF NOT EXISTS idx_event_trigger_log
 ON event_trigger_log(event_id, character_id, player_id, triggered_at DESC);
@@ -600,7 +610,7 @@ CREATE TABLE IF NOT EXISTS group_memory (
 );
 
 CREATE INDEX IF NOT EXISTS idx_relationship_lookup
-ON character_relationship(character_id_a, character_id_b);
+ON character_relationship(owner_user_id, character_id_a, character_id_b);
 """
 
 def _migrate(conn):
@@ -1181,7 +1191,9 @@ def get_sessions_by_player_and_character(character_id: str, player_id: str) -> l
                     )
                 END AS message_count
             FROM session s
-            LEFT JOIN character_card c ON c.character_id = s.character_id
+            LEFT JOIN character_card c
+              ON c.owner_user_id = s.player_id
+             AND c.character_id = s.character_id
             WHERE s.character_id = ? AND s.player_id = ? AND COALESCE(s.is_multi_character, 0) = 0
             ORDER BY COALESCE(last_message_at, s.created_at) DESC
             """,
@@ -1266,7 +1278,9 @@ def get_all_player_sessions(player_id: str) -> list[dict]:
                     )
                 END AS message_count
             FROM session s
-            LEFT JOIN character_card c ON c.character_id = s.character_id
+            LEFT JOIN character_card c
+              ON c.owner_user_id = s.player_id
+             AND c.character_id = s.character_id
             WHERE s.player_id = ?
             ORDER BY COALESCE(last_message_at, s.created_at) DESC
             """,
@@ -1588,6 +1602,7 @@ def get_character_group_memories(character_id: str, limit: int = 20) -> list[dic
 # 角色卡管理（CRUD）
 # =========================
 def save_character_card_to_db(
+    owner_user_id: str,
     character_id: str,
     card_data_json: str,
     version: str = "1.0.0",
@@ -1600,6 +1615,7 @@ def save_character_card_to_db(
     保存或更新角色卡到数据库
     
     Args:
+        owner_user_id: 角色卡归属用户 ID
         character_id: 角色 ID
         card_data_json: 完整的角色卡 JSON 字符串
         version: 版本号
@@ -1615,9 +1631,9 @@ def save_character_card_to_db(
             conn.execute(
                 """
                 INSERT INTO character_card
-                (character_id, card_data, version, name, display_name, avatar_url, created_at, updated_at, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(character_id)
+                (owner_user_id, character_id, card_data, version, name, display_name, avatar_url, created_at, updated_at, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(owner_user_id, character_id)
                 DO UPDATE SET
                     card_data=excluded.card_data,
                     version=excluded.version,
@@ -1626,19 +1642,20 @@ def save_character_card_to_db(
                     avatar_url=excluded.avatar_url,
                     updated_at=excluded.updated_at
                 """,
-                (character_id, card_data_json, version, name, display_name, avatar_url, _now(), _now(), source),
+                (owner_user_id, character_id, card_data_json, version, name, display_name, avatar_url, _now(), _now(), source),
             )
-        logger.info(f"角色卡已保存到数据库: {character_id}")
+        logger.info(f"角色卡已保存到数据库: owner={owner_user_id}, character_id={character_id}")
         return True
     except Exception as e:
         logger.error(f"保存角色卡失败: {e}")
         return False
 
-def get_character_card_from_db(character_id: str, include_inactive: bool = False) -> dict | None:
+def get_character_card_from_db(owner_user_id: str, character_id: str, include_inactive: bool = False) -> dict | None:
     """
     从数据库获取角色卡
     
     Args:
+        owner_user_id: 角色卡归属用户 ID
         character_id: 角色 ID
         include_inactive: 是否包含已禁用的角色卡（默认 False）
     
@@ -1648,55 +1665,60 @@ def get_character_card_from_db(character_id: str, include_inactive: bool = False
     with get_conn() as conn:
         if include_inactive:
             row = conn.execute(
-                "SELECT * FROM character_card WHERE character_id = ?",
-                (character_id,),
+                "SELECT * FROM character_card WHERE owner_user_id = ? AND character_id = ?",
+                (owner_user_id, character_id),
             ).fetchone()
         else:
             row = conn.execute(
                 """
                 SELECT * FROM character_card
-                WHERE character_id = ? AND is_active = 1
+                WHERE owner_user_id = ? AND character_id = ? AND is_active = 1
                 """,
-                (character_id,),
+                (owner_user_id, character_id),
             ).fetchone()
     
     return _row_to_dict(row)
 
 
-def is_character_card_active(character_id: str) -> bool:
+def is_character_card_active(owner_user_id: str, character_id: str) -> bool:
     """返回角色卡是否存在且启用。"""
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT is_active FROM character_card WHERE character_id = ?",
-            (character_id,),
+            "SELECT is_active FROM character_card WHERE owner_user_id = ? AND character_id = ?",
+            (owner_user_id, character_id),
         ).fetchone()
 
     if not row:
-        return True
+        return False
     data = _row_to_dict(row) or {}
     return bool(data.get("is_active"))
 
 
 
-def update_character_avatar(character_id: str, avatar_url: str | None) -> bool:
+def update_character_avatar(owner_user_id: str, character_id: str, avatar_url: str | None) -> bool:
     """更新角色头像 URL"""
     try:
         with get_conn() as conn:
             conn.execute(
-                "UPDATE character_card SET avatar_url = ?, updated_at = ? WHERE character_id = ?",
-                (avatar_url, _now(), character_id),
+                """
+                UPDATE character_card
+                SET avatar_url = ?, updated_at = ?
+                WHERE owner_user_id = ? AND character_id = ?
+                """,
+                (avatar_url, _now(), owner_user_id, character_id),
             )
-        logger.info(f"头像已更新: character_id={character_id}")
+        logger.info(f"头像已更新: owner={owner_user_id}, character_id={character_id}")
         return True
     except Exception as e:
         logger.error(f"更新头像失败: {e}")
         return False
 
-def list_character_cards_from_db(only_active: bool = True) -> list[dict]:
+def list_character_cards_from_db(owner_user_id: str, only_active: bool = True) -> list[dict]:
     """
     列出所有角色卡（仅返回元信息，不包含完整 card_data）
     
     Args:
+        owner_user_id: 角色卡归属用户 ID
         only_active: 是否仅返回启用的角色卡
     
     Returns:
@@ -1706,21 +1728,24 @@ def list_character_cards_from_db(only_active: bool = True) -> list[dict]:
         query = """
             SELECT character_id, name, display_name, version, avatar_url, created_at, updated_at, is_active, source
             FROM character_card
+            WHERE owner_user_id = ?
         """
+        params = [owner_user_id]
         if only_active:
-            query += " WHERE is_active = 1"
+            query += " AND is_active = 1"
         
         query += " ORDER BY created_at DESC"
         
-        rows = conn.execute(query).fetchall()
+        rows = conn.execute(query, params).fetchall()
     
     return [dict(r) for r in rows]
 
-def delete_character_card_from_db(character_id: str, soft_delete: bool = True) -> bool:
+def delete_character_card_from_db(owner_user_id: str, character_id: str, soft_delete: bool = True) -> bool:
     """
     删除角色卡
     
     Args:
+        owner_user_id: 角色卡归属用户 ID
         character_id: 角色 ID
         soft_delete: 是否软删除（仅标记为不活跃）
     
@@ -1735,27 +1760,28 @@ def delete_character_card_from_db(character_id: str, soft_delete: bool = True) -
                     """
                     UPDATE character_card
                     SET is_active = 0, updated_at = ?
-                    WHERE character_id = ?
+                    WHERE owner_user_id = ? AND character_id = ?
                     """,
-                    (_now(), character_id),
+                    (_now(), owner_user_id, character_id),
                 )
             else:
                 # 硬删除：真实删除记录
                 conn.execute(
-                    "DELETE FROM character_card WHERE character_id = ?",
-                    (character_id,),
+                    "DELETE FROM character_card WHERE owner_user_id = ? AND character_id = ?",
+                    (owner_user_id, character_id),
                 )
-        logger.info(f"角色卡已{'禁用' if soft_delete else '删除'}: {character_id}")
+        logger.info(f"角色卡已{'禁用' if soft_delete else '删除'}: owner={owner_user_id}, character_id={character_id}")
         return True
     except Exception as e:
         logger.error(f"删除角色卡失败: {e}")
         return False
 
-def activate_character_card(character_id: str) -> bool:
+def activate_character_card(owner_user_id: str, character_id: str) -> bool:
     """
     激活已禁用的角色卡
     
     Args:
+        owner_user_id: 角色卡归属用户 ID
         character_id: 角色 ID
     
     Returns:
@@ -1767,11 +1793,11 @@ def activate_character_card(character_id: str) -> bool:
                 """
                 UPDATE character_card
                 SET is_active = 1, updated_at = ?
-                WHERE character_id = ?
+                WHERE owner_user_id = ? AND character_id = ?
                 """,
-                (_now(), character_id),
+                (_now(), owner_user_id, character_id),
             )
-        logger.info(f"角色卡已激活: {character_id}")
+        logger.info(f"角色卡已激活: owner={owner_user_id}, character_id={character_id}")
         return True
     except Exception as e:
         logger.error(f"激活角色卡失败: {e}")
@@ -1782,6 +1808,7 @@ def activate_character_card(character_id: str) -> bool:
 # 事件系统 - 事件定义
 # =========================
 def save_event_definition(
+    owner_user_id: str,
     event_id: str,
     event_name: str,
     trigger_config: str,
@@ -1799,10 +1826,10 @@ def save_event_definition(
             conn.execute(
                 """
                 INSERT INTO event_definition
-                (event_id, event_name, description, character_id, trigger_config, 
+                (owner_user_id, event_id, event_name, description, character_id, trigger_config,
                  effects_config, priority, is_active, created_at, updated_at, schedule, template_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(event_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(owner_user_id, event_id)
                 DO UPDATE SET
                     event_name=excluded.event_name,
                     description=excluded.description,
@@ -1815,7 +1842,7 @@ def save_event_definition(
                     schedule=excluded.schedule,
                     template_id=excluded.template_id
                 """,
-                (event_id, event_name, description, character_id, trigger_config,
+                (owner_user_id, event_id, event_name, description, character_id, trigger_config,
                  effects_config, priority, 1 if is_active else 0, _now(), _now(), schedule, template_id),
             )
         return True
@@ -1823,23 +1850,24 @@ def save_event_definition(
         logger.error(f"保存事件定义失败: {e}")
         return False
 
-def get_event_definition(event_id: str) -> dict | None:
+def get_event_definition(owner_user_id: str, event_id: str) -> dict | None:
     """获取单个事件定义"""
     with get_conn() as conn:
         row = conn.execute(
-            "SELECT * FROM event_definition WHERE event_id = ?",
-            (event_id,),
+            "SELECT * FROM event_definition WHERE owner_user_id = ? AND event_id = ?",
+            (owner_user_id, event_id),
         ).fetchone()
     return _row_to_dict(row)
 
 def list_event_definitions(
+    owner_user_id: str,
     character_id: str = None,
     only_active: bool = True
 ) -> list[dict]:
     """列出事件定义"""
     with get_conn() as conn:
-        query = "SELECT * FROM event_definition WHERE 1=1"
-        params = []
+        query = "SELECT * FROM event_definition WHERE owner_user_id = ?"
+        params = [owner_user_id]
         
         if character_id is not None:
             query += " AND (character_id = ? OR character_id IS NULL)"
@@ -1854,20 +1882,20 @@ def list_event_definitions(
     
     return [dict(r) for r in rows]
 
-def delete_event_definition(event_id: str) -> bool:
+def delete_event_definition(owner_user_id: str, event_id: str) -> bool:
     """删除事件定义"""
     try:
         with get_conn() as conn:
             conn.execute(
-                "DELETE FROM event_definition WHERE event_id = ?",
-                (event_id,),
+                "DELETE FROM event_definition WHERE owner_user_id = ? AND event_id = ?",
+                (owner_user_id, event_id),
             )
         return True
     except Exception as e:
         logger.error(f"删除事件定义失败: {e}")
         return False
 
-def increment_event_trigger_count(event_id: str):
+def increment_event_trigger_count(owner_user_id: str, event_id: str):
     """增加事件触发计数"""
     with get_conn() as conn:
         conn.execute(
@@ -1875,9 +1903,9 @@ def increment_event_trigger_count(event_id: str):
             UPDATE event_definition
             SET trigger_count = trigger_count + 1,
                 last_triggered_at = ?
-            WHERE event_id = ?
+            WHERE owner_user_id = ? AND event_id = ?
             """,
-            (_now(), event_id),
+            (_now(), owner_user_id, event_id),
         )
 
 
@@ -2083,20 +2111,22 @@ def save_event_schedule_state(
         return False
 
 
-def list_due_event_schedules(now_iso: str, limit: int = 50) -> list[dict]:
+def list_due_event_schedules(now_iso: str, limit: int = 50, player_id: str | None = None) -> list[dict]:
     """列出到期的调度事件。"""
     with get_conn() as conn:
-        rows = conn.execute(
-            """
+        query = """
             SELECT * FROM event_schedule_state
             WHERE status = 'active'
               AND next_run_at IS NOT NULL
               AND next_run_at <= ?
-            ORDER BY next_run_at ASC
-            LIMIT ?
-            """,
-            (now_iso, limit),
-        ).fetchall()
+        """
+        params = [now_iso]
+        if player_id:
+            query += " AND player_id = ?"
+            params.append(player_id)
+        query += " ORDER BY next_run_at ASC LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(query, params).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -2164,6 +2194,7 @@ def get_event_template(template_id: str) -> dict | None:
 # 角色关系网络
 # =========================
 def save_character_relationship(
+    owner_user_id: str,
     character_id_a: str,
     character_id_b: str,
     relationship_type: str,
@@ -2180,17 +2211,17 @@ def save_character_relationship(
             conn.execute(
                 """
                 INSERT INTO character_relationship
-                (character_id_a, character_id_b, relationship_type, affinity, 
+                (owner_user_id, character_id_a, character_id_b, relationship_type, affinity,
                  description, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(character_id_a, character_id_b)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(owner_user_id, character_id_a, character_id_b)
                 DO UPDATE SET
                     relationship_type=excluded.relationship_type,
                     affinity=excluded.affinity,
                     description=excluded.description,
                     updated_at=excluded.updated_at
                 """,
-                (character_id_a, character_id_b, relationship_type, affinity,
+                (owner_user_id, character_id_a, character_id_b, relationship_type, affinity,
                  description, _now(), _now()),
             )
         return True
@@ -2198,7 +2229,7 @@ def save_character_relationship(
         logger.error(f"保存角色关系失败: {e}")
         return False
 
-def get_character_relationship(character_id_a: str, character_id_b: str) -> dict | None:
+def get_character_relationship(owner_user_id: str, character_id_a: str, character_id_b: str) -> dict | None:
     """获取两个角色之间的关系"""
     # 排序确保查询顺序一致
     if character_id_a > character_id_b:
@@ -2208,41 +2239,43 @@ def get_character_relationship(character_id_a: str, character_id_b: str) -> dict
         row = conn.execute(
             """
             SELECT * FROM character_relationship
-            WHERE character_id_a = ? AND character_id_b = ?
+            WHERE owner_user_id = ? AND character_id_a = ? AND character_id_b = ?
             """,
-            (character_id_a, character_id_b),
+            (owner_user_id, character_id_a, character_id_b),
         ).fetchone()
     
     return _row_to_dict(row)
 
-def list_character_relationships(character_id: str) -> list[dict]:
+def list_character_relationships(owner_user_id: str, character_id: str) -> list[dict]:
     """列出指定角色的所有关系"""
     with get_conn() as conn:
         rows = conn.execute(
             """
             SELECT * FROM character_relationship
-            WHERE character_id_a = ? OR character_id_b = ?
+            WHERE owner_user_id = ? AND (character_id_a = ? OR character_id_b = ?)
             ORDER BY affinity DESC, updated_at DESC
             """,
-            (character_id, character_id),
+            (owner_user_id, character_id, character_id),
         ).fetchall()
         
     return [dict(r) for r in rows]
 
-def list_all_character_relationships() -> list[dict]:
+def list_all_character_relationships(owner_user_id: str) -> list[dict]:
     """列出所有角色关系（用于关系网络可视化）"""
     with get_conn() as conn:
         rows = conn.execute(
             """
             SELECT * FROM character_relationship
+            WHERE owner_user_id = ?
             ORDER BY affinity DESC, updated_at DESC
-            """
+            """,
+            (owner_user_id,),
         ).fetchall()
     
     return [dict(r) for r in rows]
 
 
-def delete_character_relationship(character_id_a: str, character_id_b: str) -> bool:
+def delete_character_relationship(owner_user_id: str, character_id_a: str, character_id_b: str) -> bool:
     """删除角色关系"""
     try:
         if character_id_a > character_id_b:
@@ -2252,28 +2285,29 @@ def delete_character_relationship(character_id_a: str, character_id_b: str) -> b
             conn.execute(
                 """
                 DELETE FROM character_relationship
-                WHERE character_id_a = ? AND character_id_b = ?
+                WHERE owner_user_id = ? AND character_id_a = ? AND character_id_b = ?
                 """,
-                (character_id_a, character_id_b),
+                (owner_user_id, character_id_a, character_id_b),
             )
         return True
     except Exception as e:
         logger.error(f"删除角色关系失败: {e}")
         return False
     
-def delete_all_relationships_of_character(character_id: str) -> int:
+def delete_all_relationships_of_character(owner_user_id: str, character_id: str) -> int:
     """删除某个角色涉及的所有关系"""
     with get_conn() as conn:
         cur = conn.execute(
             """
             DELETE FROM character_relationship
-            WHERE character_id_a = ? OR character_id_b = ?
+            WHERE owner_user_id = ? AND (character_id_a = ? OR character_id_b = ?)
             """,
-            (character_id, character_id),
+            (owner_user_id, character_id, character_id),
         )
         return cur.rowcount
 
 def update_relationship_affinity(
+    owner_user_id: str,
     character_id_a: str,
     character_id_b: str,
     affinity_delta: float
@@ -2288,9 +2322,9 @@ def update_relationship_affinity(
             UPDATE character_relationship
             SET affinity = affinity + ?,
                 updated_at = ?
-            WHERE character_id_a = ? AND character_id_b = ?
+            WHERE owner_user_id = ? AND character_id_a = ? AND character_id_b = ?
             """,
-            (affinity_delta, _now(), character_id_a, character_id_b),
+            (affinity_delta, _now(), owner_user_id, character_id_a, character_id_b),
         )
 
 
@@ -2378,7 +2412,7 @@ def get_session_participants(session_id: str, only_active: bool = True) -> list[
                 p.join_order,
                 p.speak_frequency,
                 CASE
-                    WHEN p.is_active = 1 AND COALESCE(c.is_active, 1) = 1 THEN 1
+                    WHEN p.is_active = 1 AND c.is_active = 1 THEN 1
                     ELSE 0
                 END AS is_active,
                 p.created_at,
@@ -2388,12 +2422,15 @@ def get_session_participants(session_id: str, only_active: bool = True) -> list[
                 c.display_name,
                 c.avatar_url
             FROM multi_session_participant p
-            LEFT JOIN character_card c ON p.character_id = c.character_id
+            INNER JOIN session s ON s.session_id = p.session_id
+            LEFT JOIN character_card c
+              ON c.owner_user_id = s.player_id
+             AND c.character_id = p.character_id
             WHERE p.session_id = ?
         """
         
         if only_active:
-            query += " AND p.is_active = 1 AND COALESCE(c.is_active, 1) = 1"
+            query += " AND p.is_active = 1 AND c.is_active = 1"
         
         query += " ORDER BY p.join_order ASC"
         

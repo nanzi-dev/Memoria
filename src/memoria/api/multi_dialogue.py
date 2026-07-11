@@ -159,11 +159,11 @@ def _get_owned_multi_session(session_id: str, current_user_id: str) -> dict:
     return session
 
 
-def _inactive_character_ids(character_ids: list[str]) -> list[str]:
+def _inactive_character_ids(player_id: str, character_ids: list[str]) -> list[str]:
     return [
         character_id
         for character_id in character_ids
-        if not repository.is_character_card_active(character_id)
+        if not repository.is_character_card_active(player_id, character_id)
     ]
 
 
@@ -362,7 +362,7 @@ async def start_multi_session(
                 detail="多角色会话至少需要2个角色"
             )
 
-        inactive_ids = _inactive_character_ids(request.character_ids)
+        inactive_ids = _inactive_character_ids(request.player_id, request.character_ids)
         if inactive_ids:
             raise HTTPException(
                 status_code=400,

@@ -80,12 +80,13 @@ class OperationResponse(BaseModel):
 @router.post("/relationships", response_model=OperationResponse)
 def create_relationship(
     req: RelationshipCreateRequest,
-    _current_user_id: str = Depends(require_current_user_id),
+    current_user_id: str = Depends(require_current_user_id),
 ):
     """创建角色关系"""
     try:
         # 检查是否已存在关系
         existing = repository.get_character_relationship(
+            current_user_id,
             req.character_id_a,
             req.character_id_b
         )
@@ -98,6 +99,7 @@ def create_relationship(
         
         # 创建关系
         success = repository.save_character_relationship(
+            owner_user_id=current_user_id,
             character_id_a=req.character_id_a,
             character_id_b=req.character_id_b,
             relationship_type=req.relationship_type,
@@ -123,9 +125,14 @@ def create_relationship(
 # 获取关系详情
 # =========================
 @router.get("/relationships/pair/{character_id_a}/{character_id_b}", response_model=RelationshipInfo)
-def get_relationship(character_id_a: str, character_id_b: str):
+def get_relationship(
+    character_id_a: str,
+    character_id_b: str,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """获取两个角色之间的关系"""
     relationship = repository.get_character_relationship(
+        current_user_id,
         character_id_a,
         character_id_b
     )
@@ -147,12 +154,13 @@ def update_relationship(
     character_id_a: str,
     character_id_b: str,
     req: RelationshipUpdateRequest,
-    _current_user_id: str = Depends(require_current_user_id),
+    current_user_id: str = Depends(require_current_user_id),
 ):
     """更新角色关系"""
     try:
         # 检查关系是否存在
         existing = repository.get_character_relationship(
+            current_user_id,
             character_id_a,
             character_id_b
         )
@@ -165,6 +173,7 @@ def update_relationship(
         
         # 更新关系
         success = repository.save_character_relationship(
+            owner_user_id=current_user_id,
             character_id_a=character_id_a,
             character_id_b=character_id_b,
             relationship_type=req.relationship_type or existing["relationship_type"],
@@ -193,11 +202,12 @@ def update_relationship(
 def delete_relationship(
     character_id_a: str,
     character_id_b: str,
-    _current_user_id: str = Depends(require_current_user_id),
+    current_user_id: str = Depends(require_current_user_id),
 ):
     """删除角色关系"""
     try:
         success = repository.delete_character_relationship(
+            current_user_id,
             character_id_a,
             character_id_b
         )
@@ -220,9 +230,12 @@ def delete_relationship(
 # 获取角色的所有关系
 # =========================
 @router.get("/relationships/character/{character_id}", response_model=list[RelationshipInfo])
-def list_character_relationships(character_id: str):
+def list_character_relationships(
+    character_id: str,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """获取指定角色的所有关系"""
-    relationships = repository.list_character_relationships(character_id)
+    relationships = repository.list_character_relationships(current_user_id, character_id)
     return [RelationshipInfo(**rel) for rel in relationships]
 
 
@@ -230,7 +243,10 @@ def list_character_relationships(character_id: str):
 # 获取关系网络
 # =========================
 @router.get("/relationships/network", response_model=RelationshipNetwork)
-def get_relationship_network(character_ids: str | None = None):
+def get_relationship_network(
+    character_ids: str | None = None,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """
     获取关系网络（用于可视化）
     
@@ -248,7 +264,7 @@ def get_relationship_network(character_ids: str | None = None):
         if target_ids:
             # 获取指定角色的关系
             for char_id in target_ids:
-                rels = repository.list_character_relationships(char_id)
+                rels = repository.list_character_relationships(current_user_id, char_id)
                 all_relationships.extend(rels)
             
             # 去重
@@ -262,7 +278,7 @@ def get_relationship_network(character_ids: str | None = None):
             all_relationships = unique_rels
         else:
             # 获取所有角色的关系
-            all_relationships = repository.list_all_character_relationships()
+            all_relationships = repository.list_all_character_relationships(current_user_id)
         
         # 构建节点和边
         nodes_dict = {}
@@ -309,7 +325,7 @@ def get_relationship_network(character_ids: str | None = None):
 @router.post("/relationships/batch", response_model=OperationResponse)
 def batch_create_relationships(
     relationships: list[RelationshipCreateRequest],
-    _current_user_id: str = Depends(require_current_user_id),
+    current_user_id: str = Depends(require_current_user_id),
 ):
     """批量创建角色关系"""
     try:
@@ -319,6 +335,7 @@ def batch_create_relationships(
         for rel in relationships:
             try:
                 success = repository.save_character_relationship(
+                    owner_user_id=current_user_id,
                     character_id_a=rel.character_id_a,
                     character_id_b=rel.character_id_b,
                     relationship_type=rel.relationship_type,

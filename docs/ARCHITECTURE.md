@@ -174,11 +174,12 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ### 3. character_card（角色卡表）
 
-存储角色卡的完整 JSON 数据。
+存储角色卡的完整 JSON 数据。角色卡按用户隔离；`src/memoria/characters/` 下的静态 JSON 只作为开发和导入模板，不会在用户第一次使用时自动复制到 `character_card`。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| character_id | TEXT PRIMARY KEY | 角色 ID |
+| owner_user_id | TEXT NOT NULL | 拥有者用户 ID |
+| character_id | TEXT NOT NULL | 角色 ID |
 | card_data | TEXT NOT NULL | 完整角色卡 JSON |
 | version | TEXT DEFAULT '1.0.0' | 版本号 |
 | name | TEXT | 角色名称（冗余，便于查询）|
@@ -189,7 +190,9 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 | created_at | TEXT | 创建时间 |
 | updated_at | TEXT | 更新时间 |
 
-**索引：** `idx_character_active ON character_card(is_active, created_at DESC)`
+**主键：** `PRIMARY KEY(owner_user_id, character_id)`，因此不同用户可以拥有相同 `character_id`
+**外键：** `FOREIGN KEY (owner_user_id) REFERENCES users(user_id)`
+**索引：** `idx_character_active ON character_card(owner_user_id, is_active, created_at DESC)`
 
 **禁用语义：** `is_active=0` 是软禁用，不删除角色卡数据。禁用角色卡不能创建新的单聊或群聊；已有单聊历史仍可查看但不能继续发送；已有群聊保留该成员和历史消息，但编排器只加载当前启用的参与角色，因此禁用角色不会继续回复。
 
@@ -362,11 +365,12 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ### 12. event_definition（事件定义表）
 
-存储事件的配置和定义。`character_id` 为 NULL 时表示全局事件。
+存储事件的配置和定义。事件定义按用户隔离；`character_id` 为 NULL 时表示该用户下的全局事件。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| event_id | TEXT PRIMARY KEY | 事件 ID |
+| owner_user_id | TEXT NOT NULL | 拥有者用户 ID |
+| event_id | TEXT NOT NULL | 事件 ID |
 | event_name | TEXT NOT NULL | 事件名称 |
 | description | TEXT | 事件描述 |
 | character_id | TEXT | 角色专属事件（NULL=全局）|
@@ -381,7 +385,9 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 | trigger_count | INTEGER DEFAULT 0 | 触发次数统计 |
 | last_triggered_at | TEXT | 最后触发时间 |
 
-**索引：** `idx_event_character ON event_definition(character_id, is_active)`
+**主键：** `PRIMARY KEY(owner_user_id, event_id)`，因此不同用户可以拥有相同 `event_id`
+**外键：** `FOREIGN KEY (owner_user_id) REFERENCES users(user_id)`
+**索引：** `idx_event_character ON event_definition(owner_user_id, character_id, is_active)`
 
 ---
 
@@ -400,7 +406,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 | context_snapshot | TEXT | 触发时上下文快照（JSON）|
 | effects_applied | TEXT | 应用的效果列表（JSON）|
 
-**外键：** `FOREIGN KEY (event_id) REFERENCES event_definition(event_id)`
+**外键：** `FOREIGN KEY (player_id, event_id) REFERENCES event_definition(owner_user_id, event_id)`
 **索引：** `idx_event_trigger_log ON event_trigger_log(event_id, character_id, player_id, triggered_at DESC)`
 
 ---
@@ -469,11 +475,12 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ### 17. character_relationship（角色关系网络表）
 
-存储角色之间的相互关系，用于多角色互动和关系图谱。
+存储角色之间的相互关系，用于多角色互动和关系图谱。关系按用户隔离，同一对角色 ID 可以在不同用户下有不同关系。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | id | INTEGER | 自增主键 |
+| owner_user_id | TEXT NOT NULL | 拥有者用户 ID |
 | character_id_a | TEXT NOT NULL | 角色 A ID |
 | character_id_b | TEXT NOT NULL | 角色 B ID |
 | relationship_type | TEXT | 关系类型（friend/enemy/family/rival/mentor/lover 等）|
@@ -482,8 +489,9 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 | created_at | TEXT | 创建时间 |
 | updated_at | TEXT | 更新时间 |
 
-**唯一约束：** `UNIQUE(character_id_a, character_id_b)` — 无向关系，每对角色只有一条记录
-**索引：** `idx_relationship_lookup ON character_relationship(character_id_a, character_id_b)`
+**唯一约束：** `UNIQUE(owner_user_id, character_id_a, character_id_b)` — 同一用户下每对角色只有一条记录
+**外键：** `FOREIGN KEY (owner_user_id) REFERENCES users(user_id)`
+**索引：** `idx_relationship_lookup ON character_relationship(owner_user_id, character_id_a, character_id_b)`
 
 ---
 
@@ -502,13 +510,13 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 | `idx_fact_lookup` | long_term_fact | (character_id, player_id, importance DESC, last_referenced DESC) |
 | `idx_summary_lookup` | session_summary | (session_id, created_at DESC) |
 | `idx_summary_player` | session_summary | (character_id, player_id, created_at DESC) |
-| `idx_character_active` | character_card | (is_active, created_at DESC) |
-| `idx_event_character` | event_definition | (character_id, is_active) |
+| `idx_character_active` | character_card | (owner_user_id, is_active, created_at DESC) |
+| `idx_event_character` | event_definition | (owner_user_id, character_id, is_active) |
 | `idx_event_trigger_log` | event_trigger_log | (event_id, character_id, player_id, triggered_at DESC) |
 | `idx_event_context_lookup` | event_context_state | (character_id, player_id, status, updated_at DESC) |
 | `idx_event_schedule_due` | event_schedule_state | (status, next_run_at) |
 | `idx_auth_token_user` | auth_token | (user_id, expires_at) |
-| `idx_relationship_lookup` | character_relationship | (character_id_a, character_id_b) |
+| `idx_relationship_lookup` | character_relationship | (owner_user_id, character_id_a, character_id_b) |
 
 ---
 
@@ -518,9 +526,10 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 2. **显式列 + JSON 混合** — 高频读写字段（好感度、信任度）使用显式列以获得更好性能；复杂配置（角色卡、事件条件）使用 JSON 字段获得灵活性
 3. **软删除设计** — `is_active` 字段实现逻辑删除，支持数据恢复
 4. **多角色扩展** — `session.is_multi_character` + `multi_session_participant` 表支持群聊；`short_term_message` 扩展 `character_id` / `character_name` 列区分发言人；`shared_memory` 存储角色间互动记忆，`group_memory` 存储玩家轮次摘要形成的群体事件记忆
-5. **轻量迁移** — 启动时为旧库补齐 `character_card.avatar_url`、`session_summary.summary_status`、`session.group_name`、`session.group_thread_id`、`event_definition.schedule`、`event_definition.template_id`、`auth_token` 和事件上下文/调度/模板表等新增结构
-6. **完整索引覆盖** — 16 个精心设计的索引确保所有常用查询路径为 O(log n)
-7. **可迁移性** — Repository 层适配 SQLite/PostgreSQL 占位符、自增主键和少量 UPSERT 差异
+5. **用户资源隔离** — `character_card`、`event_definition`、`character_relationship` 都带 `owner_user_id`；API 只读写当前登录用户的数据
+6. **轻量迁移** — 启动时为旧库补齐 `character_card.avatar_url`、`session_summary.summary_status`、`session.group_name`、`session.group_thread_id`、`event_definition.schedule`、`event_definition.template_id`、`auth_token` 和事件上下文/调度/模板表等新增结构；`owner_user_id` 相关主键重建不做旧数据迁移，升级前需要删除旧 SQLite 数据库或手动重建表
+7. **完整索引覆盖** — 16 个精心设计的索引确保所有常用查询路径为 O(log n)
+8. **可迁移性** — Repository 层适配 SQLite/PostgreSQL 占位符、自增主键和少量 UPSERT 差异
 
 ## 角色卡规范
 

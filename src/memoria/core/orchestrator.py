@@ -104,7 +104,7 @@ def start_session(
 ) -> dict:
     """对应 /dialogue/session/start"""
     
-    card = character_loader.load_character_card(character_id)
+    card = character_loader.load_character_card(character_id, player_id)
     runtime_state = repository.get_runtime_state(character_id, player_id, card)
     
     session_id = str(uuid.uuid4())
@@ -171,7 +171,7 @@ def run_dialogue_turn(
     player_id = session["player_id"]
     player_name = session["player_name"]
     
-    card = character_loader.load_character_card(character_id)
+    card = character_loader.load_character_card(character_id, player_id)
     
     # 使用玩家消息作为查询上下文，进行向量检索
     runtime_state = repository.get_runtime_state(

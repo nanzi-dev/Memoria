@@ -151,8 +151,8 @@ def _messages_for_session(session_id: str, limit: int = 100) -> list[HistoryMess
     return [HistoryMessage(**m) for m in messages]
 
 
-def _ensure_character_can_chat(character_id: str) -> None:
-    if not repository.is_character_card_active(character_id):
+def _ensure_character_can_chat(character_id: str, player_id: str) -> None:
+    if not repository.is_character_card_active(player_id, character_id):
         raise HTTPException(status_code=400, detail="角色卡已禁用，不能新建或继续单聊")
 
 
@@ -161,7 +161,7 @@ def _current_character_state(character_id: str, player_id: str) -> tuple[int, in
     current_trust = 0
     current_mood = "neutral"
     try:
-        card = character_loader.load_character_card(character_id)
+        card = character_loader.load_character_card(character_id, player_id)
         runtime_state = repository.get_runtime_state(character_id, player_id, card)
         current_affinity = runtime_state.get("affection_level", 0)
         current_trust = runtime_state.get("trust_level", 0)
@@ -173,8 +173,8 @@ def _current_character_state(character_id: str, player_id: str) -> tuple[int, in
 
 def _start_empty_session(character_id: str, player_id: str, player_name: str) -> SessionStartResponse:
     """创建会话但不阻塞等待开场白生成。"""
-    _ensure_character_can_chat(character_id)
-    card = character_loader.load_character_card(character_id)
+    _ensure_character_can_chat(character_id, player_id)
+    card = character_loader.load_character_card(character_id, player_id)
     runtime_state = repository.get_runtime_state(character_id, player_id, card)
     session_id = str(uuid.uuid4())
     repository.create_session(session_id, character_id, player_id, player_name)
@@ -305,14 +305,14 @@ def _get_owned_session(session_id: str, current_user_id: str) -> dict:
 # Characters
 # =========================
 @router.get("/characters", response_model = list[CharacterSummary])
-def list_characters():
+def list_characters(current_user_id: str = Depends(require_current_user_id)):
     """获取所有角色摘要"""
     
     results = []
     
-    for cid in character_loader.list_character_ids():
+    for cid in character_loader.list_character_ids(current_user_id):
         try:
-            card = character_loader.load_character_card(cid)
+            card = character_loader.load_character_card(cid, current_user_id)
             
             results.append(CharacterSummary(
                 character_id = card.character_id,
@@ -364,7 +364,7 @@ def dialogue_turn(
 ):
     try:
         session = _get_owned_session(req.session_id, current_user_id)
-        _ensure_character_can_chat(session["character_id"])
+        _ensure_character_can_chat(session["character_id"], session["player_id"])
         result = orchestrator.run_dialogue_turn(
             req.session_id,
             req.player_message

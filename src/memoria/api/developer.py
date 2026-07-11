@@ -78,5 +78,6 @@ def quality_score(
     return quality_scorer.score_dialogue(
         messages=messages,
         character_id=character_id,
+        owner_user_id=current_user_id,
         use_llm=req.use_llm,
     )

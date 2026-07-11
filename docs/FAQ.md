@@ -134,6 +134,13 @@ PYTHONPATH=src uvicorn memoria.main:app --host 127.0.0.1 --port 8001
 
 首次启动会自动创建表并补齐轻量迁移。已有 SQLite 数据不会自动搬迁，需要单独导出导入。
 
+用户隔离版将 `character_card`、`event_definition`、`character_relationship` 改为带 `owner_user_id` 的复合主键/唯一约束；这类主键变化不会自动迁移旧 SQLite 表。升级到该版本前请先删除旧开发库，让系统按新 schema 重建：
+
+```bash
+rm -f data/sqlite_db/memoria.db data/sqlite_db/memoria.db-wal data/sqlite_db/memoria.db-shm
+PYTHONPATH=src uvicorn memoria.main:app --host 127.0.0.1 --port 8001
+```
+
 ---
 
 ### Q: 如何用 Docker 一键部署？
@@ -258,6 +265,8 @@ except Exception as e:
     print(f"加载失败: {e}")
 ```
 
+这段代码测试的是静态模板加载。业务 API 会按当前登录用户从数据库加载角色卡；如果该用户还没有创建或导入 `npc_luo_xiaohei`，对话页不会自动显示这个角色。
+
 ### 4. 检查数据库结构
 
 ```bash
@@ -302,11 +311,11 @@ REINDEX;
 ### 缓存优化
 
 ```python
-# 增加角色卡缓存大小（默认 maxsize=64）
+# 增加角色卡缓存大小（默认 maxsize=256）
 from functools import lru_cache
 
-@lru_cache(maxsize=128)
-def load_character_card(character_id: str) -> CharacterCard:
+@lru_cache(maxsize=512)
+def load_character_card(character_id: str, owner_user_id: str | None = None) -> CharacterCard:
     ...
 ```
 

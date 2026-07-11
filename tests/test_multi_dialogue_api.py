@@ -86,7 +86,7 @@ def _patch_multi_summary(monkeypatch, multi_dialogue, saved_summary):
 async def test_start_multi_session_rejects_duplicate_group_name(monkeypatch):
     from memoria.api import multi_dialogue
 
-    monkeypatch.setattr(multi_dialogue.repository, "is_character_card_active", lambda character_id: True)
+    monkeypatch.setattr(multi_dialogue.repository, "is_character_card_active", lambda owner_user_id, character_id: True)
     monkeypatch.setattr(multi_dialogue.repository, "player_group_name_exists", lambda player_id, group_name: True)
 
     with pytest.raises(HTTPException) as exc:
@@ -111,7 +111,7 @@ async def test_start_multi_session_rejects_disabled_character(monkeypatch):
     monkeypatch.setattr(
         multi_dialogue.repository,
         "is_character_card_active",
-        lambda character_id: character_id != "c2",
+        lambda owner_user_id, character_id: character_id != "c2",
     )
 
     with pytest.raises(HTTPException) as exc:

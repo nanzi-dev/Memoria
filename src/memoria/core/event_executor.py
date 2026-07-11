@@ -61,7 +61,7 @@ class EventExecutor:
         self._log_trigger(event, context, result)
         
         # 更新事件触发计数
-        repository.increment_event_trigger_count(event.event_id)
+        repository.increment_event_trigger_count(context.player_id, event.event_id)
         
         return result
     
@@ -239,6 +239,7 @@ class EventExecutor:
         if "affinity" in rel_changes:
             affinity_delta = rel_changes["affinity"]
             repository.update_relationship_affinity(
+                context.player_id,
                 context.character_id,
                 target_char_id,
                 affinity_delta

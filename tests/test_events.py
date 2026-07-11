@@ -269,13 +269,13 @@ class TestEventDeepIntegration:
             trigger_condition=TriggerCondition(trigger_type=TriggerType.TIME_BASED, schedule="*/5 * * * *"),
             effects=[],
         )
-        monkeypatch.setattr(event_runtime.repository, "list_due_event_schedules", lambda now_iso, limit=50: [{
+        monkeypatch.setattr(event_runtime.repository, "list_due_event_schedules", lambda now_iso, limit=50, player_id=None: [{
             "event_id": "sched_evt",
             "character_id": "sched_c",
             "player_id": "sched_p",
             "schedule": "*/5 * * * *",
         }])
-        monkeypatch.setattr(event_runtime.repository, "get_event_definition", lambda event_id: {
+        monkeypatch.setattr(event_runtime.repository, "get_event_definition", lambda owner_user_id, event_id: {
             "event_id": event.event_id,
             "event_name": event.event_name,
             "description": None,

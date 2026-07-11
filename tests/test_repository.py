@@ -72,30 +72,62 @@ class TestLongTermFact:
 class TestCharacterCard:
     def test_save_list_delete(self):
         import json
+        owner = f"user_{uuid.uuid4().hex[:8]}"
         cid = f"tc_{uuid.uuid4().hex[:8]}"
         card = json.dumps({"character_id":cid,"meta":{"name":"T","display_name":"T"}})
-        assert repository.save_character_card_to_db(cid,card,name="T",display_name="T")
-        cards = repository.list_character_cards_from_db(only_active=False)
+        assert repository.save_character_card_to_db(owner,cid,card,name="T",display_name="T")
+        cards = repository.list_character_cards_from_db(owner, only_active=False)
         assert any(c["character_id"]==cid for c in cards)
-        assert repository.delete_character_card_from_db(cid)
-        assert repository.activate_character_card(cid)
-        assert repository.delete_character_card_from_db(cid,soft_delete=False)
+        assert repository.delete_character_card_from_db(owner, cid)
+        assert repository.activate_character_card(owner, cid)
+        assert repository.delete_character_card_from_db(owner, cid, soft_delete=False)
+
+    def test_same_character_id_is_isolated_by_owner(self):
+        import json
+        cid = f"tc_shared_{uuid.uuid4().hex[:8]}"
+        owner_a = f"user_a_{uuid.uuid4().hex[:8]}"
+        owner_b = f"user_b_{uuid.uuid4().hex[:8]}"
+        card_a = json.dumps({"character_id":cid,"meta":{"name":"A","display_name":"A"}})
+        card_b = json.dumps({"character_id":cid,"meta":{"name":"B","display_name":"B"}})
+
+        assert repository.save_character_card_to_db(owner_a,cid,card_a,name="A",display_name="A")
+        assert repository.save_character_card_to_db(owner_b,cid,card_b,name="B",display_name="B")
+        assert repository.get_character_card_from_db(owner_a, cid)["name"] == "A"
+        assert repository.get_character_card_from_db(owner_b, cid)["name"] == "B"
+
+        assert repository.delete_character_card_from_db(owner_a, cid)
+        assert not repository.is_character_card_active(owner_a, cid)
+        assert repository.is_character_card_active(owner_b, cid)
 
 class TestEventDefinition:
     def test_crud(self):
+        owner = f"user_{uuid.uuid4().hex[:8]}"
         eid = f"ev_{uuid.uuid4().hex[:8]}"
-        assert repository.save_event_definition(eid,"Test Evt","{}","[]",priority=5)
-        evt = repository.get_event_definition(eid)
+        assert repository.save_event_definition(owner,eid,"Test Evt","{}","[]",priority=5)
+        evt = repository.get_event_definition(owner, eid)
         assert evt is not None
         assert evt["priority"] == 5
-        lst = repository.list_event_definitions(only_active=False)
+        lst = repository.list_event_definitions(owner, only_active=False)
         assert any(e["event_id"]==eid for e in lst)
-        repository.increment_event_trigger_count(eid)
-        repository.log_event_trigger(eid,"tc","tp","sess",'{}','[]')
+        repository.increment_event_trigger_count(owner, eid)
+        repository.log_event_trigger(eid,"tc",owner,"sess",'{}','[]')
         hist = repository.get_event_trigger_history(event_id=eid)
         assert len(hist) >= 1
-        assert repository.delete_trigger_history(eid,"tc","tp") >= 1
-        assert repository.delete_event_definition(eid)
+        assert repository.delete_trigger_history(eid,"tc",owner) >= 1
+        assert repository.delete_event_definition(owner, eid)
+
+    def test_same_event_id_is_isolated_by_owner(self):
+        owner_a = f"user_a_{uuid.uuid4().hex[:8]}"
+        owner_b = f"user_b_{uuid.uuid4().hex[:8]}"
+        eid = f"ev_shared_{uuid.uuid4().hex[:8]}"
+
+        assert repository.save_event_definition(owner_a,eid,"Evt A","{}","[]",priority=1)
+        assert repository.save_event_definition(owner_b,eid,"Evt B","{}","[]",priority=2)
+
+        assert repository.get_event_definition(owner_a, eid)["event_name"] == "Evt A"
+        assert repository.get_event_definition(owner_b, eid)["event_name"] == "Evt B"
+        assert repository.delete_event_definition(owner_a, eid)
+        assert repository.get_event_definition(owner_b, eid) is not None
 
 
 class TestEventDeepIntegrationRepository:
@@ -145,20 +177,34 @@ class TestEventDeepIntegrationRepository:
 
 class TestRelationship:
     def test_crud(self):
-        assert repository.save_character_relationship("rA","rB","friend",50.0,"friends")
-        rel = repository.get_character_relationship("rA","rB")
+        owner = f"user_{uuid.uuid4().hex[:8]}"
+        assert repository.save_character_relationship(owner,"rA","rB","friend",50.0,"friends")
+        rel = repository.get_character_relationship(owner,"rA","rB")
         assert rel is not None
         assert rel["relationship_type"] == "friend"
-        rels = repository.list_character_relationships("rA")
+        rels = repository.list_character_relationships(owner,"rA")
         assert len(rels) >= 1
-        repository.update_relationship_affinity("rA","rB",10.0)
-        rel2 = repository.get_character_relationship("rA","rB")
+        repository.update_relationship_affinity(owner,"rA","rB",10.0)
+        rel2 = repository.get_character_relationship(owner,"rA","rB")
         assert rel2["affinity"] == 60.0
-        assert repository.delete_character_relationship("rA","rB")
+        assert repository.delete_character_relationship(owner,"rA","rB")
+
+    def test_same_relationship_pair_is_isolated_by_owner(self):
+        owner_a = f"user_a_{uuid.uuid4().hex[:8]}"
+        owner_b = f"user_b_{uuid.uuid4().hex[:8]}"
+
+        assert repository.save_character_relationship(owner_a,"rA","rB","friend",50.0,"A")
+        assert repository.save_character_relationship(owner_b,"rA","rB","enemy",-20.0,"B")
+
+        assert repository.get_character_relationship(owner_a,"rA","rB")["relationship_type"] == "friend"
+        assert repository.get_character_relationship(owner_b,"rA","rB")["relationship_type"] == "enemy"
 
 class TestMultiSession:
     def test_create_and_participants(self):
         sid = str(uuid.uuid4())
+        for cid in ("c1", "c2"):
+            card = json.dumps({"character_id": cid, "meta": {"name": cid, "display_name": cid}})
+            assert repository.save_character_card_to_db("p1", cid, card, name=cid, display_name=cid)
         assert repository.create_multi_character_session(sid,"p1","Player",["c1","c2"])
         parts = repository.get_session_participants(sid)
         assert len(parts) == 2
@@ -174,10 +220,10 @@ class TestMultiSession:
         active_card = json.dumps({"character_id": active_id, "meta": {"name": "A", "display_name": "A"}})
         disabled_card = json.dumps({"character_id": disabled_id, "meta": {"name": "D", "display_name": "D"}})
 
-        assert repository.save_character_card_to_db(active_id, active_card, name="A", display_name="A")
-        assert repository.save_character_card_to_db(disabled_id, disabled_card, name="D", display_name="D")
+        assert repository.save_character_card_to_db("p1", active_id, active_card, name="A", display_name="A")
+        assert repository.save_character_card_to_db("p1", disabled_id, disabled_card, name="D", display_name="D")
         assert repository.create_multi_character_session(sid, "p1", "Player", [active_id, disabled_id])
-        assert repository.delete_character_card_from_db(disabled_id, soft_delete=True)
+        assert repository.delete_character_card_from_db("p1", disabled_id, soft_delete=True)
 
         visible_parts = repository.get_session_participants(sid, only_active=False)
         active_parts = repository.get_session_participants(sid, only_active=True)
@@ -438,6 +484,7 @@ class TestSessionListFields:
         sid = str(uuid.uuid4())
         card = json.dumps({"character_id": cid, "meta": {"name": "列表角色", "display_name": "列表"}})
         assert repository.save_character_card_to_db(
+            "slP",
             cid,
             card,
             name="列表角色",

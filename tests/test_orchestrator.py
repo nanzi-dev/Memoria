@@ -2,6 +2,7 @@
 编排器工具函数单元测试
 """
 import pytest, sys, uuid
+import json
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
@@ -50,8 +51,11 @@ class TestLoadRelationships:
         from memoria.core.multi_character_orchestrator import MultiCharacterOrchestrator
         from memoria.db import repository
         sid = str(uuid.uuid4())
+        for cid in ("a", "b", "c"):
+            card = json.dumps({"character_id": cid, "meta": {"name": cid, "display_name": cid}})
+            repository.save_character_card_to_db("p", cid, card, name=cid, display_name=cid)
         repository.create_multi_character_session(sid,"p","Player",["a","b","c"])
-        repository.save_character_relationship("a","b","friend",50.0)
+        repository.save_character_relationship("p","a","b","friend",50.0)
         orch = MultiCharacterOrchestrator(sid)
         rels = orch._load_all_relationships()
         assert len(rels) >= 1
@@ -61,6 +65,9 @@ class TestCharacterInteraction:
         from memoria.core.multi_character_orchestrator import MultiCharacterOrchestrator
         from memoria.db import repository
         sid = str(uuid.uuid4())
+        for cid in ("x", "y", "z"):
+            card = json.dumps({"character_id": cid, "meta": {"name": cid, "display_name": cid}})
+            repository.save_character_card_to_db("p", cid, card, name=cid, display_name=cid)
         repository.create_multi_character_session(sid,"p","Player",["x","y","z"])
         orch = MultiCharacterOrchestrator(sid)
         selected = orch._select_character_for_interaction()
@@ -282,7 +289,7 @@ class TestDialogueTurn:
             "created_at": None,
             "status": "active",
         })
-        monkeypatch.setattr(orchestrator.character_loader, "load_character_card", lambda character_id: card)
+        monkeypatch.setattr(orchestrator.character_loader, "load_character_card", lambda character_id, owner_user_id=None: card)
         monkeypatch.setattr(orchestrator.repository, "get_runtime_state", lambda *args, **kwargs: {
             "affection_level": 0,
             "trust_level": 0,
@@ -370,7 +377,7 @@ class TestDialogueTurn:
             "created_at": None,
             "status": "active",
         })
-        monkeypatch.setattr(orchestrator.character_loader, "load_character_card", lambda character_id: card)
+        monkeypatch.setattr(orchestrator.character_loader, "load_character_card", lambda character_id, owner_user_id=None: card)
         monkeypatch.setattr(orchestrator.repository, "get_runtime_state", lambda *args, **kwargs: {
             "affection_level": 0,
             "trust_level": 0,

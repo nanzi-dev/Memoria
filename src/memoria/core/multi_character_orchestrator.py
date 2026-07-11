@@ -84,7 +84,7 @@ class MultiCharacterOrchestrator:
         self.character_cards = {}
         for char_id in self.character_ids:
             try:
-                card = character_loader.load_character_card(char_id)
+                card = character_loader.load_character_card(char_id, self.player_id)
                 self.character_cards[char_id] = card
             except Exception as e:
                 logger.error(f"加载角色卡失败 {char_id}: {e}")
@@ -782,12 +782,12 @@ class MultiCharacterOrchestrator:
         """
         try:
             # 尝试正向查询
-            rel = repository.get_character_relationship(char_id_a, char_id_b)
+            rel = repository.get_character_relationship(self.player_id, char_id_a, char_id_b)
             if rel:
                 return rel
             
             # 尝试反向查询（关系是双向的）
-            rel = repository.get_character_relationship(char_id_b, char_id_a)
+            rel = repository.get_character_relationship(self.player_id, char_id_b, char_id_a)
             return rel
         
         except Exception as e:

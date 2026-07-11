@@ -29,10 +29,18 @@ logger = logging.getLogger(__name__)
 MAX_CHAIN_DEPTH = 5
 
 
-def load_event_definitions(character_id: str | None = None, only_active: bool = True) -> list[EventDefinition]:
+def load_event_definitions(
+    owner_user_id: str,
+    character_id: str | None = None,
+    only_active: bool = True,
+) -> list[EventDefinition]:
     """从数据库加载事件定义并转换为 schema 对象。"""
     event_definitions = []
-    rows = repository.list_event_definitions(character_id=character_id, only_active=only_active)
+    rows = repository.list_event_definitions(
+        owner_user_id=owner_user_id,
+        character_id=character_id,
+        only_active=only_active,
+    )
     for row in rows:
         try:
             event_definitions.append(_event_definition_from_row(row))
@@ -117,7 +125,10 @@ def execute_event_with_chain(
         return results
 
     if definitions_by_id is None:
-        definitions_by_id = {definition.event_id: definition for definition in load_event_definitions(context.character_id)}
+        definitions_by_id = {
+            definition.event_id: definition
+            for definition in load_event_definitions(context.player_id, context.character_id)
+        }
 
     for next_event_id in result.chained_events:
         next_event = definitions_by_id.get(next_event_id)
@@ -138,7 +149,7 @@ def execute_event_with_chain(
 
 def detect_and_execute_events(context: EventContext, event_definitions: list[EventDefinition] | None = None) -> list[EventTriggerResult]:
     """检测并执行当前上下文触发的事件。"""
-    definitions = event_definitions or load_event_definitions(context.character_id, only_active=True)
+    definitions = event_definitions or load_event_definitions(context.player_id, context.character_id, only_active=True)
     detector = get_event_detector()
     triggered_events = detector.check_events(context, definitions)
     definitions_by_id = {event.event_id: event for event in definitions}
@@ -297,14 +308,18 @@ def register_time_event_schedule(
     )
 
 
-def run_due_time_events(now: datetime | None = None, limit: int = 50) -> list[EventTriggerResult]:
+def run_due_time_events(
+    now: datetime | None = None,
+    limit: int = 50,
+    player_id: str | None = None,
+) -> list[EventTriggerResult]:
     """检查并执行到期的时间驱动事件。"""
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(second=0, microsecond=0)
-    rows = repository.list_due_event_schedules(now.isoformat(), limit=limit)
+    rows = repository.list_due_event_schedules(now.isoformat(), limit=limit, player_id=player_id)
     results: list[EventTriggerResult] = []
 
     for schedule_state in rows:
-        event_row = repository.get_event_definition(schedule_state["event_id"])
+        event_row = repository.get_event_definition(schedule_state["player_id"], schedule_state["event_id"])
         if not event_row:
             continue
         try:
