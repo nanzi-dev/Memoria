@@ -98,11 +98,6 @@ class TestMultiDialogueAPI:
         r = MultiTurnRequest(session_id="s",player_message="Hi")
         assert r.player_message == "Hi"
 
-    def test_participant_request(self):
-        from memoria.api.multi_dialogue import AddParticipantRequest
-        r = AddParticipantRequest(session_id="s",character_id="c",speak_frequency=1.5)
-        assert r.speak_frequency == 1.5
-
 class TestCodeReviewFixesAPI:
     """P0-2/P2-10: 新增 API 模型验证"""
 

@@ -4,7 +4,7 @@
 提供多角色群聊功能的 RESTful 接口
 """
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Optional
 import logging
@@ -35,20 +35,11 @@ class StartMultiSessionRequest(BaseModel):
     player_name: str = Field(..., description="玩家名称")
     group_name: Optional[str] = Field(None, description="群聊名称")
     character_ids: list[str] = Field(..., min_items=2, description="参与角色ID列表（至少2个）")
-    speak_frequencies: Optional[dict[str, float]] = Field(
-        None, 
-        description="角色发言频率配置 {character_id: frequency}"
-    )
-    strategy_type: str = Field(
-        "hybrid",
-        description="兼容旧客户端的发言策略字段，普通群聊固定使用默认策略"
-    )
 
 
 class StartMultiSessionResponse(BaseModel):
     """开始多角色会话响应"""
     session_id: str
-    strategy_type: str
     group_name: Optional[str] = None
     opening: dict = Field(..., description="开场白信息")
 
@@ -57,10 +48,6 @@ class MultiDialogueTurnRequest(BaseModel):
     """多角色对话轮次请求"""
     session_id: str = Field(..., description="会话ID")
     player_message: str = Field(..., description="玩家消息")
-    strategy_type: str = Field(
-        "hybrid",
-        description="发言策略类型"
-    )
     discussion_mode: bool = Field(
         True,
         description="是否启用群聊接话，普通群聊默认启用"
@@ -89,27 +76,6 @@ class MultiDialogueGroupResponse(BaseModel):
     responses: list[MultiDialogueTurnResponse] = Field(..., description="所有角色的回应列表")
     total_speakers: int = Field(..., description="发言角色数量")
     discussion_mode: bool = Field(True, description="群聊接话标识")
-
-
-class AddParticipantRequest(BaseModel):
-    """添加参与者请求"""
-    session_id: str
-    character_id: str
-    speak_frequency: float = Field(1.0, ge=0.0, le=2.0)
-
-
-class RemoveParticipantRequest(BaseModel):
-    """移除参与者请求"""
-    session_id: str
-    character_id: str
-
-
-class UpdateParticipantRequest(BaseModel):
-    """更新参与者配置请求"""
-    session_id: str
-    character_id: str
-    speak_frequency: Optional[float] = Field(None, ge=0.0, le=2.0)
-    is_active: Optional[bool] = None
 
 
 class TriggerInteractionRequest(BaseModel):
@@ -312,9 +278,6 @@ async def start_multi_session(
     - **player_id**: 玩家唯一标识
     - **player_name**: 玩家显示名称
     - **character_ids**: 参与的角色ID列表（至少2个）
-    - **speak_frequencies**: 兼容旧客户端的发言频率配置
-    - **strategy_type**: 兼容旧客户端的发言策略字段
-    
     返回会话ID和第一个角色的开场白。
     """
     try:
@@ -337,14 +300,11 @@ async def start_multi_session(
             player_id=request.player_id,
             player_name=request.player_name,
             character_ids=request.character_ids,
-            speak_frequencies=request.speak_frequencies,
-            strategy_type="hybrid",
             group_name=clean_group_name or request.group_name,
         )
         
         return StartMultiSessionResponse(
             session_id=result["session_id"],
-            strategy_type=result["strategy_type"],
             group_name=result.get("group_name"),
             opening=result["opening"]
         )
@@ -373,7 +333,6 @@ async def multi_dialogue_turn(
     
     - **session_id**: 会话ID
     - **player_message**: 玩家消息内容
-    - **strategy_type**: 兼容旧客户端的发言策略字段
     - **discussion_mode**: 是否启用群聊接话，默认启用
     - **max_responses**: 可选的人数上限；不传时按语境动态决定
     
@@ -392,7 +351,6 @@ async def multi_dialogue_turn(
         result = process_multi_character_turn(
             session_id=request.session_id,
             player_message=request.player_message,
-            strategy_type="hybrid",
             discussion_mode=request.discussion_mode,
             max_responses=request.max_responses
         )
@@ -545,177 +503,9 @@ async def get_multi_dialogue_history(
         raise HTTPException(status_code=500, detail="服务器内部错误")
 
 
-@router.post("/participant/add")
-async def add_participant(
-    request: AddParticipantRequest,
-    current_user_id: str = Depends(require_current_user_id),
-):
-    """
-    向会话添加新参与者
-    
-    动态向现有多角色会话中添加新的NPC。
-    
-    - **session_id**: 会话ID
-    - **character_id**: 要添加的角色ID
-    - **speak_frequency**: 发言频率（0.0-2.0，默认1.0）
-    """
-    try:
-        logger.info(f"添加参与者: session={request.session_id}, character={request.character_id}")
-        
-        # 验证会话
-        session = _get_owned_multi_session(request.session_id, current_user_id)
-        
-        if session.get("status") != "active":
-            raise HTTPException(status_code=400, detail="会话已结束，无法添加参与者")
-        
-        # 添加参与者
-        success = repository.add_participant_to_session(
-            session_id=request.session_id,
-            character_id=request.character_id,
-            speak_frequency=request.speak_frequency
-        )
-        
-        if not success:
-            raise HTTPException(status_code=500, detail="添加参与者失败")
-        
-        return {
-            "success": True,
-            "message": f"角色 {request.character_id} 已加入会话"
-        }
-    
-    except HTTPException:
-        raise
-    
-    except Exception as e:
-        logger.error(f"添加参与者异常: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="服务器内部错误")
-
-
-@router.post("/participant/remove")
-async def remove_participant(
-    request: RemoveParticipantRequest | None = Body(None),
-    session_id: str | None = Query(None),
-    character_id: str | None = Query(None),
-    current_user_id: str = Depends(require_current_user_id),
-):
-    """
-    从会话移除参与者
-    
-    将指定角色从多角色会话中移除（软删除，标记为不活跃）。
-    
-    - **session_id**: 会话ID
-    - **character_id**: 要移除的角色ID
-    """
-    try:
-        if request is not None:
-            session_id = request.session_id
-            character_id = request.character_id
-        if not session_id or not character_id:
-            raise HTTPException(status_code=422, detail="session_id 和 character_id 为必填项")
-        logger.info(f"移除参与者: session={session_id}, character={character_id}")
-        
-        # 验证会话
-        _get_owned_multi_session(session_id, current_user_id)
-        
-        # 检查是否至少保留2个活跃参与者
-        active_participants = repository.get_session_participants(session_id, only_active=True)
-        if len(active_participants) <= 2:
-            raise HTTPException(
-                status_code=400,
-                detail="多角色会话至少需要2个活跃参与者"
-            )
-        
-        # 移除参与者
-        success = repository.remove_participant_from_session(
-            session_id=session_id,
-            character_id=character_id
-        )
-        
-        if not success:
-            raise HTTPException(status_code=500, detail="移除参与者失败")
-        
-        return {
-            "success": True,
-            "message": f"角色 {character_id} 已从会话中移除"
-        }
-    
-    except HTTPException:
-        raise
-    
-    except Exception as e:
-        logger.error(f"移除参与者异常: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="服务器内部错误")
-
-
-@router.api_route("/participant/update", methods=["POST", "PUT"])
-async def update_participant(
-    request: UpdateParticipantRequest,
-    current_user_id: str = Depends(require_current_user_id),
-):
-    """
-    更新参与者配置
-    
-    修改参与者的发言频率或活跃状态。
-    
-    - **session_id**: 会话ID
-    - **character_id**: 角色ID
-    - **speak_frequency**: 新的发言频率（可选）
-    - **is_active**: 是否活跃（可选）
-    """
-    try:
-        logger.info(f"更新参与者: session={request.session_id}, character={request.character_id}")
-        
-        # 验证会话
-        _get_owned_multi_session(request.session_id, current_user_id)
-        
-        # 更新发言频率
-        if request.speak_frequency is not None:
-            success = repository.update_participant_frequency(
-                session_id=request.session_id,
-                character_id=request.character_id,
-                speak_frequency=request.speak_frequency
-            )
-            
-            if not success:
-                raise HTTPException(status_code=500, detail="更新发言频率失败")
-        
-        # 更新活跃状态
-        if request.is_active is not None:
-            if request.is_active:
-                # 激活参与者（从软删除状态恢复为活跃）
-                success = repository.activate_participant_in_session(
-                    session_id=request.session_id,
-                    character_id=request.character_id
-                )
-                
-                if not success:
-                    raise HTTPException(status_code=404, detail="参与者不存在，无法激活")
-            else:
-                # 停用参与者
-                success = repository.remove_participant_from_session(
-                    session_id=request.session_id,
-                    character_id=request.character_id
-                )
-                
-                if not success:
-                    raise HTTPException(status_code=500, detail="停用参与者失败")
-        return {
-            "success": True,
-            "message": "参与者配置已更新"
-        }
-    
-    except HTTPException:
-        raise
-    
-    except Exception as e:
-        logger.error(f"更新参与者异常: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="服务器内部错误")
-
-
 @router.post("/session/end")
 async def end_multi_session(
-    request: EndMultiSessionRequest | None = Body(None),
-    session_id: str | None = Query(None),
+    request: EndMultiSessionRequest,
     current_user_id: str = Depends(require_current_user_id),
 ):
     """
@@ -726,10 +516,7 @@ async def end_multi_session(
     - **session_id**: 会话ID
     """
     try:
-        if request is not None:
-            session_id = request.session_id
-        if not session_id:
-            raise HTTPException(status_code=422, detail="session_id 为必填项")
+        session_id = request.session_id
         logger.info(f"结束多角色会话: session={session_id}")
         _get_owned_multi_session(session_id, current_user_id)
         

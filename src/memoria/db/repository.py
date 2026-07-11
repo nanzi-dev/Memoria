@@ -81,10 +81,6 @@ def get_conn():
     # WAL 模式（推荐用于并发读写）
     conn.execute("PRAGMA journal_mode=WAL;")
     _migrate(conn)
-    try:
-        conn.execute("ALTER TABLE session ADD COLUMN group_name TEXT")
-    except Exception:
-        pass
     
     try:
         yield conn
@@ -2032,7 +2028,6 @@ def create_multi_character_session(
     player_id: str,
     player_name: str,
     character_ids: list[str],
-    speak_frequencies: dict[str, float] = None,
     group_name: str | None = None
 ) -> bool:
     """
@@ -2043,7 +2038,6 @@ def create_multi_character_session(
         player_id: 玩家 ID
         player_name: 玩家名称
         character_ids: 参与角色ID列表
-        speak_frequencies: 角色发言频率配置 {character_id: frequency}
     
     Returns:
         bool: 是否创建成功
@@ -2051,8 +2045,6 @@ def create_multi_character_session(
     if not character_ids:
         logger.error("多角色会话必须至少包含一个角色")
         return False
-    
-    speak_frequencies = speak_frequencies or {}
     
     try:
         with get_conn() as conn:
@@ -2069,14 +2061,13 @@ def create_multi_character_session(
             
             # 添加参与者
             for idx, char_id in enumerate(character_ids):
-                frequency = speak_frequencies.get(char_id, 1.0)
                 conn.execute(
                     """
                     INSERT INTO multi_session_participant
                     (session_id, character_id, join_order, speak_frequency, is_active, created_at)
                     VALUES (?, ?, ?, ?, 1, ?)
                     """,
-                    (session_id, char_id, idx, frequency, _now()),
+                    (session_id, char_id, idx, 1.0, _now()),
                 )
         
         logger.info(f"多角色会话已创建: {session_id}, 参与角色: {character_ids}")
@@ -2210,152 +2201,6 @@ def get_multi_character_history(
     messages.reverse()  # 按时间正序返回
     return messages
 
-
-def add_participant_to_session(
-    session_id: str,
-    character_id: str,
-    speak_frequency: float = 1.0
-) -> bool:
-    """
-    向现有会话添加新参与者
-    
-    Args:
-        session_id: 会话 ID
-        character_id: 要添加的角色 ID
-        speak_frequency: 发言频率权重
-    
-    Returns:
-        bool: 是否添加成功
-    """
-    try:
-        with get_conn() as conn:
-            # 获取当前最大加入顺序
-            max_order = conn.execute(
-                """
-                SELECT COALESCE(MAX(join_order), -1) as max_order
-                FROM multi_session_participant
-                WHERE session_id = ?
-                """,
-                (session_id,),
-            ).fetchone()["max_order"]
-            
-            # 添加新参与者
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO multi_session_participant
-                (session_id, character_id, join_order, speak_frequency, is_active, created_at)
-                VALUES (?, ?, ?, ?, 1, ?)
-                """,
-                (session_id, character_id, max_order + 1, speak_frequency, _now()),
-            )
-        
-        logger.info(f"角色 {character_id} 已加入会话 {session_id}")
-        return True
-    
-    except Exception as e:
-        logger.error(f"添加参与者失败: {e}")
-        return False
-
-
-def remove_participant_from_session(session_id: str, character_id: str) -> bool:
-    """
-    从会话中移除参与者（软删除，标记为不活跃）
-    
-    Args:
-        session_id: 会话 ID
-        character_id: 要移除的角色 ID
-    
-    Returns:
-        bool: 是否移除成功
-    """
-    try:
-        with get_conn() as conn:
-            conn.execute(
-                """
-                UPDATE multi_session_participant
-                SET is_active = 0
-                WHERE session_id = ? AND character_id = ?
-                """,
-                (session_id, character_id),
-            )
-        
-        logger.info(f"角色 {character_id} 已从会话 {session_id} 中移除")
-        return True
-    
-    except Exception as e:
-        logger.error(f"移除参与者失败: {e}")
-        return False
-
-
-def update_participant_frequency(
-    session_id: str,
-    character_id: str,
-    speak_frequency: float
-) -> bool:
-    """
-    更新参与者的发言频率
-    
-    Args:
-        session_id: 会话 ID
-        character_id: 角色 ID
-        speak_frequency: 新的发言频率权重
-    
-    Returns:
-        bool: 是否更新成功
-    """
-    try:
-        with get_conn() as conn:
-            conn.execute(
-                """
-                UPDATE multi_session_participant
-                SET speak_frequency = ?
-                WHERE session_id = ? AND character_id = ?
-                """,
-                (speak_frequency, session_id, character_id),
-            )
-        
-        return True
-    
-    except Exception as e:
-        logger.error(f"更新参与者频率失败: {e}")
-        return False
-    
-
-def activate_participant_in_session(session_id: str, character_id: str) -> bool:
-    """
-    重新激活会话中的参与者（从软删除状态恢复为活跃）
-    
-    与 remove_participant_from_session 对称：将 is_active 由 0 恢复为 1。
-    若参与者记录不存在则返回 False。
-    
-    Args:
-        session_id: 会话 ID
-        character_id: 要激活的角色 ID
-    
-    Returns:
-        bool: 是否激活成功（无匹配行时返回 False）
-    """
-    try:
-        with get_conn() as conn:
-            cursor = conn.execute(
-                """
-                UPDATE multi_session_participant
-                SET is_active = 1
-                WHERE session_id = ? AND character_id = ?
-                """,
-                (session_id, character_id),
-            )
-        
-        if cursor.rowcount == 0:
-            logger.warning(f"未找到要激活的参与者: session={session_id}, character={character_id}")
-            return False
-        
-        logger.info(f"角色 {character_id} 已在会话 {session_id} 中重新激活")
-        return True
-    
-    except Exception as e:
-        logger.error(f"激活参与者失败: {e}")
-        return False
 
 
 # =========================

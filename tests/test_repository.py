@@ -159,16 +159,13 @@ class TestRelationship:
 class TestMultiSession:
     def test_create_and_participants(self):
         sid = str(uuid.uuid4())
-        assert repository.create_multi_character_session(sid,"p1","Player",["c1","c2"],{"c1":1.2,"c2":0.8})
+        assert repository.create_multi_character_session(sid,"p1","Player",["c1","c2"])
         parts = repository.get_session_participants(sid)
         assert len(parts) == 2
-        assert repository.update_participant_frequency(sid,"c1",1.5)
         repository.append_multi_character_message(sid,"assistant","Hi","c1","Char1")
         repository.update_participant_speak_time(sid,"c1")
         hist = repository.get_multi_character_history(sid,5)
         assert len(hist) >= 1
-        assert repository.add_participant_to_session(sid,"c3",0.7)
-        assert repository.remove_participant_from_session(sid,"c3")
 
     def test_group_name_visible_in_player_sessions(self):
         sid = str(uuid.uuid4())

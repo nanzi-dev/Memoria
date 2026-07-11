@@ -880,12 +880,7 @@ Content-Type: application/json
   "player_id": "player_001",
   "player_name": "旅行者",
   "group_name": "森林小队",
-  "character_ids": ["npc_luo_xiaohei", "npc_wuxian"],
-  "speak_frequencies": {
-    "npc_luo_xiaohei": 1.2,
-    "npc_wuxian": 0.8
-  },
-  "strategy_type": "hybrid"
+  "character_ids": ["npc_luo_xiaohei", "npc_wuxian"]
 }
 ```
 
@@ -894,19 +889,11 @@ Content-Type: application/json
 - `player_name`: 玩家显示名称
 - `group_name` (可选): 群聊名称，会写入会话列表
 - `character_ids`: 参与角色ID列表（至少2个）
-- `speak_frequencies` (可选): 角色发言频率配置，默认1.0
-- `strategy_type` (可选): 发言策略类型
-  - `round_robin`: 轮询策略
-  - `weighted`: 权重随机
-  - `smart`: 智能选择
-  - `trigger`: 触发式
-  - `hybrid`: 混合策略（推荐，默认）
 
 **响应示例：**
 ```json
 {
   "session_id": "multi-session-uuid",
-  "strategy_type": "hybrid",
   "group_name": "森林小队",
   "opening": {
     "character_id": "npc_luo_xiaohei",
@@ -927,7 +914,6 @@ Content-Type: application/json
 {
   "session_id": "multi-session-uuid",
   "player_message": "大家好！",
-  "strategy_type": "hybrid",
   "discussion_mode": true,
   "max_responses": 4
 }
@@ -935,7 +921,7 @@ Content-Type: application/json
 
 每次玩家发起的多角色轮次会先保存玩家消息和角色回复，再把“玩家消息 + 本轮角色回复”生成摘要，并写入 `group_memory` 作为群体事件记忆。后续多角色 Prompt 会召回这些群体记忆，帮助参与角色延续共同经历。
 
-根据发言策略和讨论触发条件，响应可能是单角色回复，也可能是多角色连续讨论回复。`discussion_mode` 默认启用；`max_responses` 可传 1-5，但编排器会结合语境、参与人数和内部上限动态决定实际接话人数，当前最多 4 个角色发言。讨论模式下返回结构包含 `responses` 数组，每个元素对应一个角色发言。
+根据讨论触发条件，响应可能是单角色回复，也可能是多角色连续讨论回复。`discussion_mode` 默认启用；`max_responses` 可传 1-5，但编排器会结合语境、参与人数和内部上限动态决定实际接话人数，当前最多 4 个角色发言。讨论模式下返回结构包含 `responses` 数组，每个元素对应一个角色发言。
 
 **响应示例：**
 ```json
@@ -1078,49 +1064,7 @@ GET /api/v1/multi-dialogue/history/{session_id}?limit=50
 }
 ```
 
-### 6. 管理参与者
-
-**添加参与者：**
-```http
-POST /api/v1/multi-dialogue/participant/add
-Content-Type: application/json
-
-{
-  "session_id": "multi-session-uuid",
-  "character_id": "npc_luye",
-  "speak_frequency": 1.0
-}
-```
-
-**移除参与者：**
-```http
-POST /api/v1/multi-dialogue/participant/remove
-Content-Type: application/json
-
-{
-  "session_id": "multi-session-uuid",
-  "character_id": "npc_luye"
-}
-```
-
-为兼容旧客户端，也仍支持 `POST /api/v1/multi-dialogue/participant/remove?session_id=xxx&character_id=yyy`。
-
-**更新参与者配置：**
-```http
-POST /api/v1/multi-dialogue/participant/update
-Content-Type: application/json
-
-{
-  "session_id": "multi-session-uuid",
-  "character_id": "npc_luo_xiaohei",
-  "speak_frequency": 1.5,
-  "is_active": true
-}
-```
-
-该接口同时支持 `POST` 和 `PUT` 方法。`speak_frequency` 与 `is_active` 均为可选字段，可单独调整发言权重或临时启用/停用参与者。
-
-### 7. 结束会话
+### 6. 结束会话
 ```http
 POST /api/v1/multi-dialogue/session/end
 Content-Type: application/json
@@ -1129,8 +1073,6 @@ Content-Type: application/json
   "session_id": "multi-session-uuid"
 }
 ```
-
-为兼容旧客户端，也仍支持 `POST /api/v1/multi-dialogue/session/end?session_id=xxx`。
 
 ---
 
@@ -1328,23 +1270,7 @@ X-Player-ID: player_001
 
 ## 发言策略说明
 
-### 策略对比
-
-| 策略 | 类型值 | 特点 | 适用场景 |
-|------|--------|------|---------|
-| 轮询 | `round_robin` | 按顺序轮流发言 | 确保公平，每人都有机会 |
-| 权重随机 | `weighted` | 按频率权重随机选择 | 需要控制发言比例 |
-| 智能选择 | `smart` | 综合关键词、关系、频率等多因素 | 复杂场景，自然互动 |
-| 触发式 | `trigger` | 基于特定条件触发 | 事件驱动 |
-| 混合策略 | `hybrid` | 结合多种策略 | **默认推荐** |
-
-### 智能策略评分因素
-
-1. 关键词匹配 (30%)
-2. 角色关系亲密度 (25%)
-3. 发言频率配置 (20%)
-4. 发言均衡性 (15%)
-5. 最近发言时间 (10%)
+多角色对话使用固定的混合发言策略。编排器会结合关键词、角色关系、发言均衡性、最近发言时间和上下文语义选择下一位发言角色，客户端不再传入策略类型或角色发言权重。
 
 ---
 

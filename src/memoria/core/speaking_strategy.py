@@ -1,11 +1,7 @@
 """
 角色发言策略系统
 
-提供多种发言策略：
-1. 轮询策略（Round Robin）
-2. 权重策略（Weighted Random）
-3. 智能策略（Smart Selection）- 基于上下文和关系
-4. 触发策略（Trigger Based）- 基于关键词和事件
+提供默认混合发言策略，基于上下文、角色关系和显式提及选择接话角色。
 """
 
 import logging
@@ -120,99 +116,6 @@ class SpeakingStrategy(ABC):
             str: 选中的角色 ID
         """
         pass
-
-
-# =========================
-# 轮询策略
-# =========================
-
-class RoundRobinStrategy(SpeakingStrategy):
-    """
-    轮询策略：按顺序轮流发言
-    
-    适用场景：
-    - 需要确保每个角色都有机会发言
-    - 对话流程比较规整的场景
-    """
-    
-    def select_speaker(
-        self,
-        participants: list[dict],
-        character_cards: dict,
-        context: dict
-    ) -> str:
-        """按加入顺序轮流选择"""
-        if not participants:
-            raise ValueError("没有可用的参与者")
-        
-        # 获取最后发言的角色
-        last_speaker_id = context.get("last_speaker_id")
-        
-        if not last_speaker_id:
-            # 第一次发言，选择第一个参与者
-            return participants[0]["character_id"]
-        
-        # 找到最后发言者的索引
-        char_ids = [p["character_id"] for p in participants]
-        try:
-            last_index = char_ids.index(last_speaker_id)
-            # 选择下一个（循环）
-            next_index = (last_index + 1) % len(char_ids)
-            return char_ids[next_index]
-        except ValueError:
-            # 找不到，返回第一个
-            return char_ids[0]
-
-
-# =========================
-# 权重随机策略
-# =========================
-
-class WeightedRandomStrategy(SpeakingStrategy):
-    """
-    权重随机策略：根据speak_frequency权重随机选择
-    
-    适用场景：
-    - 需要控制某些角色的活跃度
-    - 希望保持一定的随机性
-    """
-    
-    def select_speaker(
-        self,
-        participants: list[dict],
-        character_cards: dict,
-        context: dict
-    ) -> str:
-        """根据权重随机选择"""
-        if not participants:
-            raise ValueError("没有可用的参与者")
-        
-        # 构建权重列表
-        weights = []
-        char_ids = []
-        
-        for p in participants:
-            char_id = p["character_id"]
-            frequency = p.get("speak_frequency", 1.0)
-            
-            # 如果是刚发言过的角色，降低权重
-            if char_id == context.get("last_speaker_id"):
-                frequency *= 0.3
-            
-            weights.append(max(frequency, 0.1))  # 确保最小权重
-            char_ids.append(char_id)
-        
-        # 加权随机选择
-        total_weight = sum(weights)
-        rand = random.uniform(0, total_weight)
-        
-        cumulative = 0
-        for char_id, weight in zip(char_ids, weights):
-            cumulative += weight
-            if rand <= cumulative:
-                return char_id
-        
-        return char_ids[0]
 
 
 # =========================
@@ -335,75 +238,6 @@ class SmartSelectionStrategy(SpeakingStrategy):
 
 
 # =========================
-# 触发策略
-# =========================
-
-class TriggerBasedStrategy(SpeakingStrategy):
-    """
-    触发策略：基于特定条件触发角色发言
-    
-    触发条件：
-    1. 关键词触发（强制）
-    2. 情绪触发（某角色状态适合发言）
-    3. 事件触发（特定事件发生）
-    
-    如果没有触发条件满足，回退到默认策略
-    
-    适用场景：
-    - 需要精确控制某些场景的发言
-    - 事件驱动的对话
-    """
-    
-    def __init__(self, fallback_strategy: SpeakingStrategy = None):
-        """
-        初始化触发策略
-        
-        Args:
-            fallback_strategy: 回退策略（无触发时使用）
-        """
-        self.fallback_strategy = fallback_strategy or WeightedRandomStrategy()
-        
-        # 触发规则配置（可以动态配置）
-        self.keyword_triggers = {}  # {keyword: character_id}
-        self.emotion_triggers = {}  # {emotion: character_id}
-    
-    def add_keyword_trigger(self, keyword: str, character_id: str):
-        """添加关键词触发规则"""
-        self.keyword_triggers[keyword] = character_id
-    
-    def add_emotion_trigger(self, emotion: str, character_id: str):
-        """添加情绪触发规则"""
-        self.emotion_triggers[emotion] = character_id
-    
-    def select_speaker(
-        self,
-        participants: list[dict],
-        character_cards: dict,
-        context: dict
-    ) -> str:
-        """基于触发条件选择发言者"""
-        if not participants:
-            raise ValueError("没有可用的参与者")
-        
-        player_message = context.get("player_message", "")
-        
-        # 1. 检查关键词触发
-        if player_message:
-            for keyword, char_id in self.keyword_triggers.items():
-                if keyword in player_message:
-                    # 检查该角色是否在参与者中
-                    if any(p["character_id"] == char_id for p in participants):
-                        logger.info(f"[触发策略] 关键词'{keyword}'触发 {char_id}")
-                        return char_id
-        
-        # 2. 检查情绪触发（TODO: 需要runtime_state支持）
-        
-        # 3. 没有触发，使用回退策略
-        logger.debug("[触发策略] 无触发条件，使用回退策略")
-        return self.fallback_strategy.select_speaker(participants, character_cards, context)
-
-
-# =========================
 # 混合策略
 # =========================
 
@@ -420,12 +254,12 @@ class HybridStrategy(SpeakingStrategy):
     """
     
     def __init__(self, balance_factor: float = 1.0):
-        self.trigger_strategy = TriggerBasedStrategy()
+        self.keyword_triggers = {}
         self.smart_strategy = SmartSelectionStrategy(balance_factor)
     
     def add_keyword_trigger(self, keyword: str, character_id: str):
         """添加关键词触发"""
-        self.trigger_strategy.add_keyword_trigger(keyword, character_id)
+        self.keyword_triggers[keyword] = character_id
     
     def select_speaker(
         self,
@@ -440,7 +274,7 @@ class HybridStrategy(SpeakingStrategy):
         player_message = context.get("player_message", "")
         
         # 1. 检查强关键词触发
-        for keyword, char_id in self.trigger_strategy.keyword_triggers.items():
+        for keyword, char_id in self.keyword_triggers.items():
             if keyword in player_message:
                 if any(p["character_id"] == char_id for p in participants):
                     logger.info(f"[混合策略] 关键词触发 {char_id}")
@@ -461,77 +295,3 @@ class HybridStrategy(SpeakingStrategy):
         # 3. 使用智能策略
         logger.debug("[混合策略] 使用智能选择")
         return self.smart_strategy.select_speaker(participants, character_cards, context)
-
-
-# =========================
-# 策略工厂
-# =========================
-
-class StrategyFactory:
-    """发言策略工厂"""
-    
-    @staticmethod
-    def create_strategy(strategy_type: str = "hybrid", **kwargs) -> SpeakingStrategy:
-        """
-        创建发言策略
-        
-        Args:
-            strategy_type: 策略类型
-                - "round_robin": 轮询
-                - "weighted": 权重随机
-                - "smart": 智能选择
-                - "trigger": 触发式
-                - "hybrid": 混合策略（推荐）
-            **kwargs: 策略特定参数
-        
-        Returns:
-            SpeakingStrategy: 策略实例
-        """
-        strategy_map = {
-            "round_robin": RoundRobinStrategy,
-            "weighted": WeightedRandomStrategy,
-            "smart": SmartSelectionStrategy,
-            "trigger": TriggerBasedStrategy,
-            "hybrid": HybridStrategy
-        }
-        
-        strategy_class = strategy_map.get(strategy_type)
-        if not strategy_class:
-            logger.warning(f"未知策略类型 {strategy_type}，使用默认混合策略")
-            strategy_class = HybridStrategy
-        
-        # 传递参数
-        if strategy_type == "smart" or strategy_type == "hybrid":
-            balance_factor = kwargs.get("balance_factor", 1.0)
-            return strategy_class(balance_factor=balance_factor)
-        elif strategy_type == "trigger":
-            fallback = kwargs.get("fallback_strategy")
-            return strategy_class(fallback_strategy=fallback)
-        else:
-            return strategy_class()
-
-
-# =========================
-# 便捷函数
-# =========================
-
-def select_next_speaker(
-    participants: list[dict],
-    character_cards: dict,
-    context: dict,
-    strategy_type: str = "hybrid"
-) -> str:
-    """
-    选择下一个发言者（便捷函数）
-    
-    Args:
-        participants: 参与者列表
-        character_cards: 角色卡字典
-        context: 上下文信息
-        strategy_type: 策略类型
-    
-    Returns:
-        str: 选中的角色 ID
-    """
-    strategy = StrategyFactory.create_strategy(strategy_type)
-    return strategy.select_speaker(participants, character_cards, context)

@@ -4,7 +4,7 @@
 测试范围：
 1. Character schema（Pydantic 模型验证）
 2. Event schema（事件数据模型）
-3. Speaking strategies（5种发言策略）
+3. Speaking strategy（默认混合发言策略）
 4. Event detector（事件检测引擎）
 5. Event executor（事件执行器）
 6. Multi-character memory（共享记忆、群体记忆）
@@ -317,7 +317,7 @@ class TestEventSchema:
 # ============================================================
 
 class TestSpeakingStrategies:
-    """测试所有发言策略"""
+    """测试默认混合发言策略"""
 
     def _make_participants(self):
         return [
@@ -348,54 +348,6 @@ class TestSpeakingStrategies:
         cards["char_c"].meta = MockMeta("角色C", "C君")
         cards["char_c"].identity = MockIdentity("牧师")
         return cards
-
-    def test_round_robin_strategy(self):
-        """测试轮询策略"""
-        from memoria.core.speaking_strategy import RoundRobinStrategy
-        strategy = RoundRobinStrategy()
-        participants = self._make_participants()
-        cards = self._make_mock_cards()
-        
-        # 第一次发言
-        speaker = strategy.select_speaker(participants, cards, {})
-        assert speaker == "char_a"
-        
-        # char_a 发言后，应该轮到 char_b
-        speaker = strategy.select_speaker(participants, cards, {"last_speaker_id": "char_a"})
-        assert speaker == "char_b"
-        
-        # char_b 发言后，轮到 char_c
-        speaker = strategy.select_speaker(participants, cards, {"last_speaker_id": "char_b"})
-        assert speaker == "char_c"
-        
-        # char_c 发言后，循环回到 char_a
-        speaker = strategy.select_speaker(participants, cards, {"last_speaker_id": "char_c"})
-        assert speaker == "char_a"
-
-    def test_round_robin_empty(self):
-        """测试轮询策略空参与者"""
-        from memoria.core.speaking_strategy import RoundRobinStrategy
-        strategy = RoundRobinStrategy()
-        with pytest.raises(ValueError, match="没有可用的参与者"):
-            strategy.select_speaker([], {}, {})
-
-    def test_weighted_random_strategy(self):
-        """测试权重随机策略"""
-        from memoria.core.speaking_strategy import WeightedRandomStrategy
-        strategy = WeightedRandomStrategy()
-        participants = self._make_participants()
-        cards = self._make_mock_cards()
-        
-        # 运行100次确保能返回有效结果
-        import random
-        random.seed(42)
-        results = set()
-        for _ in range(100):
-            speaker = strategy.select_speaker(participants, cards, {})
-            results.add(speaker)
-        
-        assert len(results) >= 1
-        assert all(r in ["char_a", "char_b", "char_c"] for r in results)
 
     def test_smart_strategy_keyword_mention(self):
         """测试智能策略的关键词提及功能"""
@@ -501,55 +453,12 @@ class TestSpeakingStrategies:
         speaker = strategy.select_speaker(participants, cards, context)
         assert speaker == "char_c"
 
-    def test_strategy_factory(self):
-        """测试策略工厂"""
-        from memoria.core.speaking_strategy import (
-            StrategyFactory, RoundRobinStrategy, WeightedRandomStrategy,
-            SmartSelectionStrategy, HybridStrategy, TriggerBasedStrategy
-        )
-        
-        assert isinstance(StrategyFactory.create_strategy("round_robin"), RoundRobinStrategy)
-        assert isinstance(StrategyFactory.create_strategy("weighted"), WeightedRandomStrategy)
-        assert isinstance(StrategyFactory.create_strategy("smart"), SmartSelectionStrategy)
-        assert isinstance(StrategyFactory.create_strategy("hybrid"), HybridStrategy)
-        assert isinstance(StrategyFactory.create_strategy("trigger"), TriggerBasedStrategy)
-        
-        # 未知策略回退到 hybrid
-        assert isinstance(StrategyFactory.create_strategy("unknown"), HybridStrategy)
-
-    def test_trigger_strategy_fallback(self):
-        """测试触发策略回退"""
-        from memoria.core.speaking_strategy import TriggerBasedStrategy, RoundRobinStrategy
-        strategy = TriggerBasedStrategy(fallback_strategy=RoundRobinStrategy())
-        participants = self._make_participants()
-        cards = self._make_mock_cards()
-        
-        # 没有注册任何触发条件，应回退到轮询
-        context = {"player_message": "你好", "last_speaker_id": None}
-        speaker = strategy.select_speaker(participants, cards, context)
-        assert speaker == "char_a"
-
-    def test_trigger_strategy_with_keyword(self):
-        """测试触发策略的关键词触发"""
-        from memoria.core.speaking_strategy import TriggerBasedStrategy
-        strategy = TriggerBasedStrategy()
-        strategy.add_keyword_trigger("秘密", "char_c")
-        
-        participants = self._make_participants()
-        cards = self._make_mock_cards()
-        
-        context = {"player_message": "告诉我你的秘密", "last_speaker_id": None}
-        speaker = strategy.select_speaker(participants, cards, context)
-        assert speaker == "char_c"
-
-    def test_convenience_function(self):
-        """测试便捷函数"""
-        from memoria.core.speaking_strategy import select_next_speaker
-        participants = self._make_participants()
-        cards = self._make_mock_cards()
-        
-        speaker = select_next_speaker(participants, cards, {}, "round_robin")
-        assert speaker == "char_a"
+    def test_hybrid_strategy_empty(self):
+        """测试混合策略空参与者"""
+        from memoria.core.speaking_strategy import HybridStrategy
+        strategy = HybridStrategy()
+        with pytest.raises(ValueError, match="没有可用的参与者"):
+            strategy.select_speaker([], {}, {})
 
 
 # ============================================================

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from memoria.core import character_loader, llm_client, multi_character_memory, prompt_builder
-from memoria.core.speaking_strategy import StrategyFactory, SpeakingStrategy
+from memoria.core.speaking_strategy import HybridStrategy, SpeakingStrategy
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
@@ -55,13 +55,12 @@ class MultiCharacterOrchestrator:
     - 管理发言轮次
     """
     
-    def __init__(self, session_id: str, strategy_type: str = "hybrid"):
+    def __init__(self, session_id: str):
         """
         初始化编排器
         
         Args:
             session_id: 会话 ID
-            strategy_type: 发言策略类型（round_robin/weighted/smart/trigger/hybrid）
         """
         self.session_id = session_id
         self.session = repository.get_session(session_id)
@@ -91,12 +90,12 @@ class MultiCharacterOrchestrator:
                 logger.error(f"加载角色卡失败 {char_id}: {e}")
         
         # 初始化发言策略
-        self.speaking_strategy = StrategyFactory.create_strategy(strategy_type)
+        self.speaking_strategy = HybridStrategy()
         
         # 缓存最后发言者
         self.last_speaker_id = None
         
-        logger.info(f"多角色编排器已初始化: session={session_id}, 参与角色={self.character_ids}, 策略={strategy_type}")
+        logger.info(f"多角色编排器已初始化: session={session_id}, 参与角色={self.character_ids}")
     
     
     def start_conversation(self) -> dict:
@@ -792,8 +791,6 @@ def start_multi_character_session(
     player_id: str,
     player_name: str,
     character_ids: list[str],
-    speak_frequencies: dict[str, float] = None,
-    strategy_type: str = "hybrid",
     group_name: str | None = None,
 ) -> dict:
     """
@@ -803,8 +800,6 @@ def start_multi_character_session(
         player_id: 玩家 ID
         player_name: 玩家名称
         character_ids: 参与角色 ID 列表
-        speak_frequencies: 角色发言频率配置
-        strategy_type: 发言策略类型（round_robin/weighted/smart/trigger/hybrid）
     
     Returns:
         dict: 包含 session_id 和开场白的结果
@@ -817,7 +812,6 @@ def start_multi_character_session(
         player_id=player_id,
         player_name=player_name,
         character_ids=character_ids,
-        speak_frequencies=speak_frequencies,
         group_name=group_name,
     )
     
@@ -825,7 +819,7 @@ def start_multi_character_session(
         raise ValueError("创建多角色会话失败")
     
     # 初始化编排器
-    orchestrator = MultiCharacterOrchestrator(session_id, strategy_type=strategy_type)
+    orchestrator = MultiCharacterOrchestrator(session_id)
     
     # 生成开场白
     opening_result = orchestrator.start_conversation()
@@ -833,7 +827,6 @@ def start_multi_character_session(
     return {
         "session_id": session_id,
         "opening": opening_result,
-        "strategy_type": strategy_type,
         "group_name": group_name,
     }
 
@@ -841,7 +834,6 @@ def start_multi_character_session(
 def process_multi_character_turn(
     session_id: str,
     player_message: str,
-    strategy_type: str = "hybrid",
     discussion_mode: bool = True,
     max_responses: int | None = None
 ) -> dict | list[dict]:
@@ -851,14 +843,13 @@ def process_multi_character_turn(
     Args:
         session_id: 会话 ID
         player_message: 玩家消息
-        strategy_type: 发言策略类型
         discussion_mode: 是否启用讨论模式（多角色连续发言）
         max_responses: 可选的人数上限；不传时按语境动态决定
     
     Returns:
         dict | list[dict]: 角色回应结果（单个或多个）
     """
-    orchestrator = MultiCharacterOrchestrator(session_id, strategy_type=strategy_type)
+    orchestrator = MultiCharacterOrchestrator(session_id)
     result = orchestrator.process_player_message(
         player_message, 
         allow_multiple_responses=discussion_mode,

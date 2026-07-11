@@ -98,10 +98,6 @@ export const characterAdmin = {
   activate(characterId) {
     return request(`/admin/characters/${characterId}/activate`, { method: 'POST' });
   },
-  // 头像
-  getAvatar(characterId) {
-    return request(`/admin/characters/${characterId}/avatar`);
-  },
   async uploadAvatar(characterId, file) {
     const formData = new FormData();
     formData.append('file', file);
@@ -120,11 +116,6 @@ export const characterAdmin = {
     return request(`/admin/characters/${characterId}/avatar/url`, {
       method: 'POST', body: JSON.stringify({ url }) });
   },
-};
-
-export const system = {
-  health() { return fetch('/health').then(r => r.json()); },
-  ready() { return fetch('/ready').then(r => r.json()); },
 };
 
 export const eventAdmin = {
@@ -208,10 +199,6 @@ export const relationshipAdmin = {
 // Dialogue API
 // ═══════════════════════════════════════════════
 export const dialogue = {
-  /** 获取可用角色列表 */
-  listCharacters() {
-    return request('/characters');
-  },
   /** 开始单角色对话会话 */
   startSession(characterId, playerId, playerName = '旅行者') {
     return request('/dialogue/session/start', {
@@ -250,27 +237,15 @@ export const dialogue = {
       keepalive: true,
     }).catch(() => {});
   },
-  latestSession(playerId, characterId = null) {
-    const params = `player_id=${playerId}` + (characterId ? `&character_id=${characterId}` : '');
-    return request(`/dialogue/session/latest?${params}`);
-  },
   /** 获取会话历史 */
   getHistory(characterId, playerId, offset = 0, limit = 20, excludeSessionId = null) {
     let url = `/dialogue/history?character_id=${characterId}&player_id=${playerId}&offset=${offset}&limit=${limit}`;
     if (excludeSessionId) url += `&exclude_session_id=${encodeURIComponent(excludeSessionId)}`;
     return request(url);
   },
-  /** 获取会话列表 */
-  listSessions(characterId, playerId) {
-    return request(`/dialogue/sessions?character_id=${characterId}&player_id=${playerId}`);
-  },
   /** 获取玩家所有会话（单聊 + 群聊） */
   listPlayerSessions(playerId) {
     return request(`/dialogue/sessions/player?player_id=${playerId}`);
-  },
-  /** 获取角色对玩家的长期记忆 */
-  getLongTermFacts(characterId, playerId, limit = 10) {
-    return request(`/dialogue/memory?character_id=${characterId}&player_id=${playerId}&limit=${limit}`);
   },
 };
 
@@ -287,17 +262,6 @@ export const multiDialogue = {
         player_name: playerName,
         group_name: groupName,
         character_ids: characterIds,
-      }),
-    });
-  },
-  /** 发送群聊消息 */
-  sendMessage(sessionId, playerMessage) {
-    return request('/multi-dialogue/turn', {
-      method: 'POST',
-      body: JSON.stringify({
-        session_id: sessionId,
-        player_message: playerMessage,
-        discussion_mode: true,
       }),
     });
   },
@@ -338,44 +302,12 @@ export const multiDialogue = {
       keepalive: true,
     }).catch(() => {});
   },
-  latestSession(playerId, characterId = null) {
-    const params = `player_id=${playerId}` + (characterId ? `&character_id=${characterId}` : '');
-    return request(`/dialogue/session/latest?${params}`);
-  },
   /** 获取多角色会话信息 */
   getSessionInfo(sessionId) {
     return request(`/multi-dialogue/session/${sessionId}`);
   },
-  /** 触发角色互动 */
-  triggerInteraction(sessionId, triggerCharacterId = null) {
-    return request('/multi-dialogue/interaction/trigger', {
-      method: 'POST',
-      body: JSON.stringify({ session_id: sessionId, trigger_character_id: triggerCharacterId }),
-    });
-  },
   /** 获取多角色对话历史 */
   getHistory(sessionId, limit = 50) {
     return request(`/multi-dialogue/history/${sessionId}?limit=${limit}`);
-  },
-  /** 添加参与者 */
-  addParticipant(sessionId, characterId, speakFrequency = 1.0) {
-    return request('/multi-dialogue/participant/add', {
-      method: 'POST',
-      body: JSON.stringify({ session_id: sessionId, character_id: characterId, speak_frequency: speakFrequency }),
-    });
-  },
-  /** 移除参与者 */
-  removeParticipant(sessionId, characterId) {
-    return request('/multi-dialogue/participant/remove', {
-      method: 'POST',
-      body: JSON.stringify({ session_id: sessionId, character_id: characterId }),
-    });
-  },
-  /** 更新参与者配置 */
-  updateParticipant(sessionId, characterId, data) {
-    return request('/multi-dialogue/participant/update', {
-      method: 'POST',
-      body: JSON.stringify({ session_id: sessionId, character_id: characterId, ...data }),
-    });
   },
 };

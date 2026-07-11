@@ -919,8 +919,8 @@ def chat_loop(session_id: str, character_id: str, player_id: str, player_name: s
 # =========================
 # 多角色对话循环
 # =========================
-def multi_character_chat_loop(session_id: str, character_ids: list[str], 
-                               player_id: str, player_name: str, strategy_type: str = "hybrid",
+def multi_character_chat_loop(session_id: str, character_ids: list[str],
+                               player_id: str, player_name: str,
                                discussion_mode: bool = False):
     """多角色对话循环"""
     config = ChatConfig()
@@ -933,11 +933,10 @@ def multi_character_chat_loop(session_id: str, character_ids: list[str],
             character_cards[cid] = card
         
         # 初始化编排器
-        orchestrator = MultiCharacterOrchestrator(session_id, strategy_type=strategy_type)
+        orchestrator = MultiCharacterOrchestrator(session_id)
         
         mode_text = "多角色讨论模式" if discussion_mode else "多角色群聊"
         print(colored(f"\n💬 {mode_text}开始（输入 'help' 查看命令帮助）", Colors.CYAN))
-        print(colored(f"   发言策略: {strategy_type}", Colors.DIM))
         if discussion_mode:
             print(colored(f"   讨论模式已启用: 每轮最多3个角色发言", Colors.YELLOW))
         print_separator("═", 60)
@@ -1084,7 +1083,6 @@ def multi_character_chat_loop(session_id: str, character_ids: list[str],
                     result = process_multi_character_turn(
                         session_id=session_id,
                         player_message=user_input,
-                        strategy_type=strategy_type,
                         discussion_mode=discussion_mode,
                         max_responses=3
                     )
@@ -1455,27 +1453,6 @@ def main():
             # 显示所有角色状态
             show_all_character_states(character_ids, player_id)
             
-            # 选择发言策略
-            print(colored("\n⚙️  选择发言策略：", Colors.CYAN + Colors.BOLD))
-            print_separator()
-            print(f"{colored('[1]', Colors.CYAN)} {colored('轮询策略', Colors.WHITE)} - 角色按顺序轮流发言")
-            print(f"{colored('[2]', Colors.CYAN)} {colored('权重随机', Colors.WHITE)} - 根据频率权重随机选择")
-            print(f"{colored('[3]', Colors.CYAN)} {colored('智能选择', Colors.WHITE)} - 综合多因素决策（推荐）")
-            print(f"{colored('[4]', Colors.CYAN)} {colored('混合策略', Colors.WHITE)} - 结合多种策略（默认）")
-            print_separator()
-            
-            strategy_choice = input(colored("请选择策略（1-4，默认4）: ", Colors.GREEN))
-            
-            strategy_map = {
-                "1": "round_robin",
-                "2": "weighted",
-                "3": "smart",
-                "4": "hybrid",
-                "": "hybrid"
-            }
-            
-            strategy_type = strategy_map.get(strategy_choice.strip(), "hybrid")
-            
             # 选择是否启用讨论模式
             print()
             print(colored("💬 选择对话模式：", Colors.CYAN + Colors.BOLD))
@@ -1499,8 +1476,7 @@ def main():
                 result = start_multi_character_session(
                     player_id=player_id,
                     player_name=player_name,
-                    character_ids=character_ids,
-                    strategy_type=strategy_type
+                    character_ids=character_ids
                 )
                 
                 session_id = result["session_id"]
@@ -1526,7 +1502,6 @@ def main():
                     character_ids=character_ids,
                     player_id=player_id,
                     player_name=player_name,
-                    strategy_type=strategy_type,
                     discussion_mode=discussion_mode
                 )
                 
