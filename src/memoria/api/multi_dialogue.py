@@ -327,6 +327,10 @@ async def start_multi_session(
                 status_code=400,
                 detail="多角色会话至少需要2个角色"
             )
+
+        clean_group_name = (request.group_name or "").strip()
+        if clean_group_name and repository.player_group_name_exists(request.player_id, clean_group_name):
+            raise HTTPException(status_code=400, detail="群聊名称已存在，请换一个名称")
         
         # 创建会话
         result = start_multi_character_session(
@@ -335,7 +339,7 @@ async def start_multi_session(
             character_ids=request.character_ids,
             speak_frequencies=request.speak_frequencies,
             strategy_type="hybrid",
-            group_name=request.group_name,
+            group_name=clean_group_name or request.group_name,
         )
         
         return StartMultiSessionResponse(
@@ -345,6 +349,9 @@ async def start_multi_session(
             opening=result["opening"]
         )
     
+    except HTTPException:
+        raise
+
     except ValueError as e:
         logger.error(f"创建多角色会话失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))

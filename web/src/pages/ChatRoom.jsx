@@ -237,6 +237,10 @@ export default function ChatRoom() {
   const [multiSessionStatus, setMultiSessionStatus] = useState('active');
 
   const [groupName, setGroupName] = useState('');
+  const cleanGroupName = groupName.trim();
+  const groupNameExists = cleanGroupName
+    ? chatItems.some(item => item.type === 'group' && (item.group_name || '').trim().toLowerCase() === cleanGroupName.toLowerCase())
+    : false;
 
 
 
@@ -751,6 +755,7 @@ export default function ChatRoom() {
     const cleanGroupName = groupName.trim();
 
     if (!cleanGroupName) { setError('请输入群聊名称'); return; }
+    if (groupNameExists) { setError('群聊名称已存在，请换一个名称'); return; }
     if (participants.length < 2) { setError('至少选择2个角色'); return; }
 
     setError(null); setView('single-loading');
@@ -1198,11 +1203,15 @@ export default function ChatRoom() {
               id="group-name"
               type="text"
               value={groupName}
-              onChange={e => setGroupName(e.target.value)}
+              onChange={e => { setGroupName(e.target.value); if (error) setError(null); }}
               maxLength={40}
               placeholder="输入唯一群名"
-              className="w-full bg-[#0b0b0c]/70 border border-cyber-green/10 rounded-lg px-3 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/12 focus:outline-none focus:border-cyber-green/35 focus:ring-2 focus:ring-cyber-green/10 transition-all"
+              aria-invalid={groupNameExists}
+              className={`w-full bg-[#0b0b0c]/70 border rounded-lg px-3 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/12 focus:outline-none focus:ring-2 transition-all ${groupNameExists ? 'border-red-400/35 focus:border-red-400/55 focus:ring-red-400/10' : 'border-cyber-green/10 focus:border-cyber-green/35 focus:ring-cyber-green/10'}`}
             />
+            {groupNameExists && (
+              <p className="mt-2 text-[12px] text-red-400/75">群聊名称已存在，请换一个名称</p>
+            )}
 
           </div>
 
@@ -1210,7 +1219,7 @@ export default function ChatRoom() {
 
           <div className="memoria-glass rounded-xl p-4">
 
-            <label className="text-[12px] text-cyber-green/40 uppercase tracking-wider mb-2 block">选择角色 ({participants.length}/5)</label>
+            <label className="text-[12px] text-cyber-green/40 uppercase tracking-wider mb-2 block">选择角色 ({participants.length})</label>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
 
@@ -1244,7 +1253,7 @@ export default function ChatRoom() {
 
           {participants.length>0 && <div className="flex flex-wrap gap-1.5">{participants.map(p=><div key={p.character_id} className="flex items-center gap-1 text-[12px] bg-cyber-green/5 border border-cyber-green/15 rounded-full px-2 py-0.5 text-cyber-green/50"><span className="font-character text-sm leading-none">{p.name}</span><button onClick={()=>toggleParticipant(p)} className="text-cyber-green/20 hover:text-red-400 ml-0.5"><X size={10}/></button></div>)}</div>}
 
-          <button onClick={startGroupChat} disabled={participants.length<2 || !groupName.trim()} className="w-full py-2.5 bg-cyber-green/10 hover:bg-cyber-green/20 border border-cyber-green/20 rounded-lg text-sm font-bold text-cyber-green disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"><Users size={16} />开始群聊 ({participants.length}人)</button>
+          <button onClick={startGroupChat} disabled={participants.length<2 || !groupName.trim() || groupNameExists} className="w-full py-2.5 bg-cyber-green/10 hover:bg-cyber-green/20 border border-cyber-green/20 rounded-lg text-sm font-bold text-cyber-green disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"><Users size={16} />开始群聊 ({participants.length}人)</button>
 
         </div>
 

@@ -117,6 +117,27 @@ async def test_update_participant_accepts_frontend_post(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_start_multi_session_rejects_duplicate_group_name(monkeypatch):
+    from memoria.api import multi_dialogue
+
+    monkeypatch.setattr(multi_dialogue.repository, "player_group_name_exists", lambda player_id, group_name: True)
+
+    with pytest.raises(HTTPException) as exc:
+        await multi_dialogue.start_multi_session(
+            multi_dialogue.StartMultiSessionRequest(
+                player_id="player-1",
+                player_name="Player",
+                group_name=" 小队 ",
+                character_ids=["c1", "c2"],
+            ),
+            current_user_id="player-1",
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "群聊名称已存在，请换一个名称"
+
+
+@pytest.mark.asyncio
 async def test_end_multi_session_accepts_json_body(monkeypatch):
     from memoria.api import multi_dialogue
 

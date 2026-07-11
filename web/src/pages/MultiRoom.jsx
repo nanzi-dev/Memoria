@@ -222,7 +222,7 @@ export default function MultiRoom() {
           {/* Character selection */}
           <div>
             <label className="text-[10px] text-cyber-green/50 uppercase tracking-wider mb-2 block">
-              选择角色 ({participants.length}/5)
+              选择角色 ({participants.length})
             </label>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {allChars.map(char => {

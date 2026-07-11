@@ -1034,6 +1034,27 @@ def get_all_player_sessions(player_id: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def player_group_name_exists(player_id: str, group_name: str) -> bool:
+    """检查玩家是否已有同名群聊。"""
+    clean_group_name = (group_name or "").strip()
+    if not clean_group_name:
+        return False
+
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM session
+            WHERE player_id = ?
+              AND COALESCE(is_multi_character, 0) = 1
+              AND LOWER(TRIM(group_name)) = LOWER(?)
+            LIMIT 1
+            """,
+            (player_id, clean_group_name),
+        ).fetchone()
+    return row is not None
+
+
 # =========================
 # 分页消息
 # =========================

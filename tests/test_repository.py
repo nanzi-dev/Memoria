@@ -185,6 +185,19 @@ class TestMultiSession:
         assert group["group_name"] == "旅团作战室"
         assert group["is_multi_character"]
 
+    def test_player_group_name_exists_matches_trimmed_names(self):
+        sid = str(uuid.uuid4())
+        player_id = f"pgn_{uuid.uuid4().hex[:8]}"
+        assert repository.create_multi_character_session(
+            sid,
+            player_id,
+            "Player",
+            ["gc1", "gc2"],
+            group_name="旅团作战室",
+        )
+        assert repository.player_group_name_exists(player_id, " 旅团作战室 ")
+        assert not repository.player_group_name_exists(player_id, "另一个群聊")
+
     def test_single_character_history_excludes_group_messages(self):
         character_id = f"mixc_{uuid.uuid4().hex[:8]}"
         player_id = f"mixp_{uuid.uuid4().hex[:8]}"
