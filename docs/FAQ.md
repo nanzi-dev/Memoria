@@ -237,20 +237,23 @@ sqlite3 data/sqlite_db/memoria.db \
 
 ### 1. 启用详细日志
 
-```python
-# 在 src/memoria/main.py 中修改日志级别
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
-)
+```bash
+LOG_LEVEL=DEBUG PYTHONPATH=src uvicorn memoria.main:app --host 127.0.0.1 --port 8001
 ```
 
 ### 2. 查看 LLM 调用详情
 
-在 `src/memoria/core/llm_client.py` 中添加：
-```python
-logger.debug(f"LLM 请求: {messages}")
-logger.debug(f"LLM 响应: {response}")
+CLI 调试模式会把 LLM 请求、Prompt 和原始响应输出到 stderr：
+
+```bash
+python scripts/cli_chat.py --debug
+```
+
+Web/API 调试可结合开发者端点查看历史回放、性能采样和质量评分：
+
+```bash
+curl -H "Authorization: Bearer <token>" http://127.0.0.1:8001/api/v1/developer/replay/<session_id>
+curl -H "Authorization: Bearer <token>" http://127.0.0.1:8001/api/v1/developer/performance
 ```
 
 ### 3. 测试角色卡加载

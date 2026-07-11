@@ -135,6 +135,112 @@ def _extract_character_specific_memories(
         return []
 
 
+def _parse_json_array_response(response: str) -> list:
+    """从轻量模型响应中提取 JSON 数组。"""
+    if not response:
+        return []
+    text = response.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("[")
+        end = text.rfind("]")
+        if start < 0 or end <= start:
+            return []
+        try:
+            data = json.loads(text[start:end + 1])
+        except json.JSONDecodeError:
+            return []
+
+    return data if isinstance(data, list) else []
+
+
+def extract_character_impressions(
+    session_id: str,
+    recent_messages: list[dict],
+    character_ids: list[str]
+) -> list[dict]:
+    """
+    从多角色对话中提取角色间印象。
+
+    返回结构：
+    [{"observer_id": "...", "target_id": "...", "impression": "...", "importance": 0.6}]
+    """
+    clean_character_ids = [cid for cid in character_ids if cid]
+    if len(clean_character_ids) < 2 or not recent_messages:
+        return []
+
+    dialogue_text = _format_messages_for_extraction(recent_messages)
+    if not dialogue_text.strip():
+        return []
+
+    prompt = f"""
+分析以下多角色群聊，只提取角色之间值得长期记住的印象、冲突、合作、承诺或共同经历。
+
+参与角色ID：
+{json.dumps(clean_character_ids, ensure_ascii=False)}
+
+对话内容：
+{dialogue_text}
+
+要求：
+- 只记录角色对其他角色的印象或角色之间的共同经历
+- 不要记录玩家个人信息，玩家相关记忆不属于本任务
+- 忽略寒暄、告别、无意义闲聊
+- observer_id 和 target_id 必须来自参与角色ID，且不能相同
+- impression 使用简短中文，不要带“分析”“原因”等说明
+- importance 为 0.0 到 1.0 的数字，默认 0.6
+- 没有值得记录的内容时返回 []
+- 只返回 JSON 数组，不要输出任何解释、前缀或 Markdown
+
+JSON 格式：
+[
+  {{"observer_id":"角色A","target_id":"角色B","impression":"角色A认为角色B在行动中很可靠","importance":0.7}}
+]
+"""
+
+    try:
+        response = llm_client.call_light_task(prompt, allow_reasoning_fallback=False)
+        rows = _parse_json_array_response(response)
+    except Exception as e:
+        logger.error(f"角色间印象提取失败: {e}")
+        return []
+
+    allowed = set(clean_character_ids)
+    impressions = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        observer_id = str(row.get("observer_id") or "").strip()
+        target_id = str(row.get("target_id") or "").strip()
+        impression = str(row.get("impression") or "").strip()
+        if not observer_id or not target_id or not impression:
+            continue
+        if observer_id == target_id or observer_id not in allowed or target_id not in allowed:
+            continue
+        try:
+            importance = float(row.get("importance", 0.6))
+        except (TypeError, ValueError):
+            importance = 0.6
+        importance = max(0.0, min(1.0, importance))
+        impressions.append({
+            "observer_id": observer_id,
+            "target_id": target_id,
+            "impression": impression,
+            "importance": importance,
+        })
+
+    return impressions
+
+
 # =========================
 # 角色间印象记忆（shared_memory）
 # =========================
@@ -204,6 +310,44 @@ def get_character_impressions(
         character_id_b=target_id,
         limit=limit
     )
+
+
+def process_character_impressions(
+    session_id: str,
+    recent_messages: list[dict],
+    character_ids: list[str],
+    player_id: str
+) -> int:
+    """提取并保存群聊中的角色间印象。"""
+    if not player_id:
+        raise ValueError("player_id is required for character impression processing")
+    if len(character_ids) < 2 or not recent_messages:
+        return 0
+
+    impressions = extract_character_impressions(
+        session_id=session_id,
+        recent_messages=recent_messages,
+        character_ids=character_ids,
+    )
+
+    saved_count = 0
+    for item in impressions:
+        try:
+            save_character_impression(
+                observer_id=item["observer_id"],
+                target_id=item["target_id"],
+                impression=item["impression"],
+                session_id=session_id,
+                player_id=player_id,
+                importance=item.get("importance", 0.6),
+            )
+            saved_count += 1
+        except Exception as e:
+            logger.error(f"保存角色间印象失败: session={session_id}, item={item}, error={e}")
+
+    if saved_count:
+        logger.info(f"保存角色间印象: session={session_id}, count={saved_count}")
+    return saved_count
 
 
 # =========================
@@ -502,8 +646,15 @@ def auto_process_multi_character_memories(
                 fact_text=memory,
                 importance=7
             )
+
+    impression_count = process_character_impressions(
+        session_id=session_id,
+        recent_messages=recent_messages,
+        character_ids=character_ids,
+        player_id=player_id,
+    )
     
-    logger.info(f"自动记忆处理完成: 为 {len(character_memories)} 个角色提取了记忆")
+    logger.info(f"自动记忆处理完成: 为 {len(character_memories)} 个角色提取了记忆，保存 {impression_count} 条角色间印象")
 
 
 # =========================

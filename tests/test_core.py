@@ -860,6 +860,103 @@ class TestMultiCharacterMemory:
         assert len(imps) >= 1
         assert any("可靠" in imp["memory_text"] for imp in imps)
 
+    def test_process_character_impressions_writes_shared_memory(self, monkeypatch):
+        """测试自动提取角色间印象并写入共享记忆"""
+        from memoria.core import multi_character_memory
+        from memoria.db import repository
+
+        monkeypatch.setattr(
+            multi_character_memory.llm_client,
+            "call_light_task",
+            lambda *args, **kwargs: (
+                '[{"observer_id":"npc_a","target_id":"npc_b",'
+                '"impression":"npc_a认为npc_b在侦查中很可靠","importance":0.8}]'
+            ),
+        )
+
+        count = multi_character_memory.process_character_impressions(
+            session_id="shared_auto_session",
+            recent_messages=[
+                {"role": "user", "content": "我们分头侦查"},
+                {"role": "assistant", "character_id": "npc_a", "character_name": "A", "content": "B刚才判断很准。"},
+                {"role": "assistant", "character_id": "npc_b", "character_name": "B", "content": "我会继续盯着出口。"},
+            ],
+            character_ids=["npc_a", "npc_b"],
+            player_id="user_shared_auto",
+        )
+
+        memories = repository.get_shared_memories("user_shared_auto", "npc_a", "npc_b", limit=5)
+        assert count == 1
+        assert any("侦查中很可靠" in item["memory_text"] for item in memories)
+
+    def test_process_character_impressions_skips_invalid_output(self, monkeypatch):
+        """测试无效或越界印象不会写入共享记忆"""
+        from memoria.core import multi_character_memory
+        from memoria.db import repository
+
+        monkeypatch.setattr(
+            multi_character_memory.llm_client,
+            "call_light_task",
+            lambda *args, **kwargs: (
+                '[{"observer_id":"npc_a","target_id":"npc_a","impression":"自言自语"},'
+                '{"observer_id":"npc_a","target_id":"npc_x","impression":"越界角色"}]'
+            ),
+        )
+
+        count = multi_character_memory.process_character_impressions(
+            session_id="shared_invalid_session",
+            recent_messages=[{"role": "assistant", "character_id": "npc_a", "content": "无效"}],
+            character_ids=["npc_a", "npc_b"],
+            player_id="user_shared_invalid",
+        )
+
+        memories = repository.get_shared_memories("user_shared_invalid", "npc_a", "npc_b", limit=5)
+        assert count == 0
+        assert memories == []
+
+    def test_auto_process_multi_character_memories_saves_impressions(self, monkeypatch):
+        """测试自动多角色记忆处理会写入角色间印象"""
+        from memoria.core import multi_character_memory
+
+        saved_facts = []
+        processed = []
+        monkeypatch.setattr(
+            multi_character_memory.repository,
+            "get_multi_character_history",
+            lambda session_id, limit_messages: [
+                {"role": "user", "content": "行动开始"},
+                {"role": "assistant", "character_id": "npc_a", "content": "B配合得很好。"},
+            ],
+        )
+        monkeypatch.setattr(
+            multi_character_memory,
+            "extract_multi_character_memories",
+            lambda **kwargs: {"npc_a": ["我记得这次行动开始了"]},
+        )
+        monkeypatch.setattr(
+            multi_character_memory.repository,
+            "save_long_term_fact",
+            lambda **kwargs: saved_facts.append(kwargs),
+        )
+        monkeypatch.setattr(
+            multi_character_memory,
+            "process_character_impressions",
+            lambda **kwargs: processed.append(kwargs) or 1,
+        )
+
+        multi_character_memory.auto_process_multi_character_memories(
+            session_id="auto_shared_session",
+            character_ids=["npc_a", "npc_b"],
+            player_id="user_auto_shared",
+            trigger_threshold=2,
+        )
+
+        assert saved_facts
+        assert processed
+        assert processed[0]["session_id"] == "auto_shared_session"
+        assert processed[0]["character_ids"] == ["npc_a", "npc_b"]
+        assert processed[0]["player_id"] == "user_auto_shared"
+
     def test_group_event_high_level(self):
         """测试高层群体事件函数"""
         from memoria.core.multi_character_memory import (

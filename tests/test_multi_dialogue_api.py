@@ -47,6 +47,7 @@ class FakeBackgroundTasks:
 
 def _patch_multi_summary(monkeypatch, multi_dialogue, saved_summary):
     placeholder_summaries = []
+    saved_impressions = []
     monkeypatch.setattr(multi_dialogue.repository, "get_session_summary", lambda session_id: None)
     monkeypatch.setattr(
         multi_dialogue.repository,
@@ -84,7 +85,12 @@ def _patch_multi_summary(monkeypatch, multi_dialogue, saved_summary):
         "save_multi_character_summary",
         lambda **kwargs: saved_summary.update(kwargs),
     )
-    return placeholder_summaries
+    monkeypatch.setattr(
+        multi_dialogue.multi_character_memory,
+        "process_character_impressions",
+        lambda **kwargs: saved_impressions.append(kwargs),
+    )
+    return placeholder_summaries, saved_impressions
 
 
 @pytest.mark.asyncio
@@ -142,7 +148,7 @@ async def test_end_multi_session_accepts_json_body(monkeypatch):
     saved_summary = {}
 
     monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: _multi_session(session_id))
-    _patch_multi_summary(monkeypatch, multi_dialogue, saved_summary)
+    _, saved_impressions = _patch_multi_summary(monkeypatch, multi_dialogue, saved_summary)
     monkeypatch.setattr(
         multi_dialogue.repository,
         "end_session",
@@ -170,6 +176,10 @@ async def test_end_multi_session_accepts_json_body(monkeypatch):
         "summary_text": "玩家和角色一制定了侦查计划。",
         "message_count": 7,
     }
+    assert saved_impressions
+    assert saved_impressions[0]["session_id"] == "session-1"
+    assert saved_impressions[0]["character_ids"] == ["c1", "c2"]
+    assert saved_impressions[0]["player_id"] == "player-1"
 
 
 def test_dialogue_end_routes_multi_session_to_group_summary(monkeypatch):

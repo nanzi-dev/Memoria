@@ -125,18 +125,18 @@ Memoria/
 │   │   └── repository.py       # SQLite / PostgreSQL 数据库操作
 │   └── main.py                 # 应用入口
 ├── tests/                      # 测试文件
-│   ├── test_core.py             # 核心模块测试（56 tests）
+│   ├── test_core.py             # 核心模块测试（60 tests）
 │   ├── test_repository.py       # 数据库层测试（39 tests）
-│   ├── test_events.py           # 事件系统测试（15 tests）
+│   ├── test_events.py           # 事件系统测试（16 tests）
 │   ├── test_orchestrator.py     # 编排器测试（15 tests）
-│   ├── test_multi_dialogue_api.py # 多角色 API 测试（12 tests）
-│   ├── test_dialogue_api.py     # 单角色 API 测试（4 tests）
+│   ├── test_multi_dialogue_api.py # 多角色 API 测试（13 tests）
+│   ├── test_dialogue_api.py     # 单角色 API 测试（7 tests）
 │   ├── test_api_models.py       # API 模型测试（19 tests）
-│   ├── test_memory_extractor.py # 记忆/提示测试（26 tests）
+│   ├── test_memory_extractor.py # 记忆/提示测试（28 tests）
 │   ├── test_cli_debug.py        # CLI debug 标志测试（1 test）
 │   ├── test_developer_experience.py # 开发者体验端点测试（5 tests）
 │   ├── test_postgres_compat.py  # PostgreSQL 兼容层测试（5 tests）
-│   ├── test_security_fixes.py   # 安全回归测试（5 tests）
+│   ├── test_security_fixes.py   # 安全回归测试（8 tests）
 │   ├── test_system.py           # 系统级测试（12 tests）
 │   ├── test_vector_memory.py    # 向量记忆测试（2 tests）
 ├── docs/                       # 项目文档
@@ -331,7 +331,7 @@ Docker 部署文件统一存放在 `deploy/docker/`。运行时 `deploy/docker/d
 # 安装开发依赖
 pip install -e ".[dev]"
 
-# 运行所有测试
+# 运行所有测试；如本地系统端点测试环境会卡住，可传 --ignore=tests/test_system.py
 bash scripts/run_tests.sh
 
 PYTHONPATH=src pytest tests/test_core.py -v              # 核心模块
