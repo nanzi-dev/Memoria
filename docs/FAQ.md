@@ -111,7 +111,7 @@ curl -X POST "https://api.deepseek.com/v1/chat/completions" \
 
 **解决方案：**
 1. Memoria 已启用 WAL 模式，支持并发读
-2. 如需高并发写入，考虑迁移到 PostgreSQL
+2. 如需高并发写入，配置 `DATABASE_URL=postgresql://...` 切换到 PostgreSQL
 
 ```bash
 # 检查数据库占用
@@ -120,6 +120,19 @@ lsof data/sqlite_db/memoria.db
 # 强制释放（谨慎使用）
 rm -f data/sqlite_db/memoria.db-shm data/sqlite_db/memoria.db-wal
 ```
+
+---
+
+### Q: 如何切换到 PostgreSQL？
+
+**解决方案：** 保留 `DATABASE_PATH` 作为 SQLite 开发模式；生产环境设置 `DATABASE_URL` 后，Repository 层会自动使用 PostgreSQL。
+
+```bash
+DATABASE_URL=postgresql://memoria:password@127.0.0.1:5432/memoria
+PYTHONPATH=src uvicorn memoria.main:app --host 127.0.0.1 --port 8001
+```
+
+首次启动会自动创建表并补齐轻量迁移。已有 SQLite 数据不会自动搬迁，需要单独导出导入。
 
 ---
 
@@ -237,6 +250,8 @@ SELECT * FROM session LIMIT 5;
 # 退出
 .quit
 ```
+
+PostgreSQL 模式下可使用 `psql "$DATABASE_URL"` 查看同名表结构。
 
 ### 5. 使用 FastAPI 交互式文档
 

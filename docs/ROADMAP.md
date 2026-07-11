@@ -50,10 +50,10 @@
 
 **目标：** 提升系统健壮性，为生产环境做准备。
 
-**当前进度：** 测试集合扩展到 196 tests；记忆去重、重试、认证限流、健康检查、懒加载、会话恢复和 API/安全回归测试已上线。
+**当前进度：** 测试集合扩展到 208 tests；记忆去重、重试、认证限流、健康检查、懒加载、会话恢复、PostgreSQL 兼容和 API/安全回归测试已上线。
 
-- [x] 单元测试覆盖（当前 196 tests，覆盖 schema/repository/orchestrator/events/API models/API endpoints/security/vector memory）
-- [ ] 数据库迁移到 PostgreSQL（保留 SQLite 开发模式）
+- [x] 单元测试覆盖（当前 208 tests，覆盖 schema/repository/orchestrator/events/API models/API endpoints/security/vector memory/developer experience/PostgreSQL compatibility）
+- [x] 数据库迁移到 PostgreSQL（保留 SQLite 开发模式）
 - [x] LLM 调用重试机制（指数退避 3 次，base_delay=1s，max 7s）
 - [x] 请求速率限制（60s 窗口 60 次，优先按认证用户限流，未登录回退 IP）
 - [x] 结构化日志（LOG_LEVEL 环境变量控制）+ 动态调整（POST /admin/log-level）
@@ -72,7 +72,7 @@
 - [x] 事件管理面板（事件列表 + 编辑器）
 - [x] 角色关系图谱（D3 力导引图）
 - [x] 用户登录/注册与资料设置（含用户头像）
-- [ ] 响应式设计完善（桌面端为主，移动端继续适配）
+- [x] 响应式设计完善（桌面端为主，移动端继续适配）
 
 ### 第七阶段 - 事件系统深度集成
 
@@ -126,13 +126,16 @@
 | `tests/test_orchestrator.py` | 15 | _clip/_safe_float, HistoryFormatting, LoadRelationships, CharInteraction, MultiCharacterGroupMemory, SessionLifecycle, DialogueTurn |
 | `tests/test_events.py` | 15 | EventExecutor 全部 8 种效果类型, EventDetector 边界, EventDeepIntegration |
 | `tests/test_api_models.py` | 19 | Dialogue, CharacterAdmin, EventAdmin, Relationship, MultiDialogue, message_id/recovery response models |
-| `tests/test_memory_extractor.py` | 25 | MemoryExtractor, PromptBuilder, Config, LLMClient, CharacterLoader, DedupHelpers |
+| `tests/test_memory_extractor.py` | 26 | MemoryExtractor, PromptBuilder, Config, LLMClient, CharacterLoader, DedupHelpers |
 | `tests/test_dialogue_api.py` | 2 | 单角色 session start API、跨玩家会话保护 |
 | `tests/test_multi_dialogue_api.py` | 10 | 多角色参与者 JSON body、POST update、session end、群体摘要、讨论响应包装、跨玩家会话保护 |
+| `tests/test_cli_debug.py` | 1 | CLI `--debug` 参数传递 |
+| `tests/test_developer_experience.py` | 5 | 对话回放、性能分析、追踪、质量评分 API |
+| `tests/test_postgres_compat.py` | 5 | PostgreSQL SQL/schema 兼容层 |
 | `tests/test_security_fixes.py` | 5 | 管理/写接口鉴权、头像下载私网拦截、密码哈希升级、持久化 token、轻量模型客户端 |
 | `tests/test_system.py` | 12 | 健康检查, 配置校验, 速率限制, 日志级别, 懒加载 |
 | `tests/test_vector_memory.py` | 2 | CUDA 失败回退 CPU、禁用嵌入跳过向量操作 |
-| **合计** | **196** | |
+| **合计** | **208** | |
 
 ## 版本规划
 
@@ -141,7 +144,7 @@
 | v0.1 | 1-2 | 单角色对话 + 记忆系统 + 记忆去重 | ✅ |
 | v0.2 | 3 | 事件系统 + 角色关系网络 | ✅ |
 | v0.3 | 4 | 多角色对话 + 讨论模式 + shared/group 记忆 | ✅ |
-| **v0.4** | **5** | **质量与稳定性（196 tests + 去重/恢复/认证限流）** | ✅ |
+| **v0.4** | **5** | **质量与稳定性（208 tests + 去重/恢复/认证限流/PostgreSQL 兼容）** | ✅ |
 | v0.5 | 6 | Web 前端 | 🔄 |
 | v0.6 | 7 | 事件深度集成 | ✅ |
 | v1.0 | 8-10 | 开发者体验 + 高级特性 + 生态 | [ ] |

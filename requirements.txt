@@ -14,8 +14,9 @@ pydantic-settings==2.6.1
 # LLM 客户端
 openai==1.54.3
 
-# 数据库（SQLite 内置，无需额外安装）
+# 数据库（默认 SQLite；配置 DATABASE_URL 后使用 PostgreSQL）
 # sqlite3 is built-in
+psycopg[binary]==3.2.3
 
 # 向量数据库
 chromadb==0.4.22

@@ -120,7 +120,7 @@ Memoria/
 │   │   ├── multi_character_memory.py        # 多角色记忆管理
 │   │   └── speaking_strategy.py             # 发言策略系统
 │   ├── db/                     # 数据持久化层
-│   │   └── repository.py       # SQLite 数据库操作
+│   │   └── repository.py       # SQLite / PostgreSQL 数据库操作
 │   └── main.py                 # 应用入口
 ├── tests/                      # 测试文件
 │   ├── test_core.py             # 核心模块测试（56 tests）
@@ -130,7 +130,10 @@ Memoria/
 │   ├── test_multi_dialogue_api.py # 多角色 API 测试（10 tests）
 │   ├── test_dialogue_api.py     # 单角色 API 测试（2 tests）
 │   ├── test_api_models.py       # API 模型测试（19 tests）
-│   ├── test_memory_extractor.py # 记忆/提示测试（25 tests）
+│   ├── test_memory_extractor.py # 记忆/提示测试（26 tests）
+│   ├── test_cli_debug.py        # CLI debug 标志测试（1 test）
+│   ├── test_developer_experience.py # 开发者体验端点测试（5 tests）
+│   ├── test_postgres_compat.py  # PostgreSQL 兼容层测试（5 tests）
 │   ├── test_security_fixes.py   # 安全回归测试（5 tests）
 │   ├── test_system.py           # 系统级测试（12 tests）
 │   ├── test_vector_memory.py    # 向量记忆测试（2 tests）
@@ -141,7 +144,7 @@ Memoria/
 │   ├── ROADMAP.md              # 开发路线图
 │   └── CONTRIBUTING.md         # 贡献指南
 ├── data/                       # 运行时数据
-│   ├── sqlite_db/              # SQLite 数据库
+│   ├── sqlite_db/              # SQLite 开发数据库
 │   └── chroma_db/              # 向量数据库 (ChromaDB)
 ├── scripts/                    # 工具脚本
 │   ├── chat.sh                 # CLI 聊天启动脚本
@@ -271,7 +274,8 @@ LLM_LIGHT_API_KEY=                             # 轻量 API 密钥
 LLM_LIGHT_MODEL=                               # 轻量模型名称
 
 # ====== 应用配置 ======
-DATABASE_PATH=./data/sqlite_db/memoria.db      # 数据库文件路径
+DATABASE_PATH=./data/sqlite_db/memoria.db      # SQLite 数据库文件路径（默认开发模式）
+DATABASE_URL=                                  # PostgreSQL 连接串；留空时使用 SQLite
 AUTH_COOKIE_SECURE=false                       # HTTPS 部署时可设为 true
 SHORT_TERM_MEMORY_TURNS=8                      # 短期记忆轮数
 MAX_OUTPUT_TOKENS=600                          # 单轮最大输出 token 数
@@ -301,7 +305,7 @@ PYTHONPATH=src pytest tests/test_multi_dialogue_api.py -v # 多角色 API
 PYTHONPATH=src pytest tests/test_system.py -v            # 系统端点与限流
 ```
 
-当前测试集合为 196 tests（`pytest --collect-only -q`）。
+当前测试集合以 `pytest --collect-only -q` 为准。
 
 ---
 

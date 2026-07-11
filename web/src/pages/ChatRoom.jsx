@@ -1106,8 +1106,8 @@ export default function ChatRoom() {
     return (
       <div className="min-h-screen memoria-page flex flex-col font-mono">
         <ChatBackdrop />
-        <header className="memoria-glass flex items-center gap-3 px-4 py-2.5 border-x-0 border-t-0 shrink-0">
-          <button onClick={() => navigate('/')} className="text-cyber-green/30 hover:text-cyber-green/70 hover:bg-cyber-green/5 rounded-lg p-2 transition-all"><ArrowLeft size={18} /></button>
+        <header className="memoria-glass flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 border-x-0 border-t-0 shrink-0">
+          <button onClick={() => navigate('/')} className="text-cyber-green/30 hover:text-cyber-green/70 hover:bg-cyber-green/5 rounded-lg p-2 min-w-[44px] min-h-[44px] flex items-center justify-center transition-all"><ArrowLeft size={18} /></button>
           <div className="flex items-center gap-2">
             <Activity size={14} className="text-cyber-green/40" />
             <span className="text-xs font-bold text-cyber-green/60 uppercase tracking-[0.15em]">Memoria</span>
@@ -1119,12 +1119,12 @@ export default function ChatRoom() {
               <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="搜索对话..." className="w-full bg-[#0b0b0c]/80 border border-cyber-green/10 rounded-full pl-9 pr-4 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/15 focus:outline-none focus:border-cyber-green/35 focus:ring-2 focus:ring-cyber-green/10 transition-all" />
             </div>
           </div>
-          <button onClick={enterGroupSetup} className="text-xs px-3 py-1.5 rounded-full border border-cyber-green/15 text-cyber-green/45 hover:text-cyber-green/80 hover:border-cyber-green/35 hover:bg-cyber-green/10 active:scale-95 transition-all flex items-center gap-1.5 shrink-0"><Plus size={14} />群聊</button>
+          <button onClick={enterGroupSetup} className="text-xs px-3 py-1.5 min-h-[40px] rounded-full border border-cyber-green/15 text-cyber-green/45 hover:text-cyber-green/80 hover:border-cyber-green/35 hover:bg-cyber-green/10 active:scale-95 transition-all flex items-center gap-1.5 shrink-0"><Plus size={14} />群聊</button>
         </header>
 
         <div className="flex items-center gap-1 px-4 py-2 border-b border-cyber-green/[0.06] bg-[#0d0d14]/50 backdrop-blur-md">
-          <button onClick={() => { setActiveTab('chat'); setSearchQuery(''); }} className={`text-xs px-4 py-1.5 rounded-full border transition-all ${activeTab === 'chat' ? 'border-cyber-green/30 bg-cyber-green/10 text-cyber-green' : 'border-transparent text-cyber-green/30 hover:text-cyber-green/50'}`}>对话</button>
-          <button onClick={() => { setActiveTab('contacts'); setSearchQuery(''); }} className={`text-xs px-4 py-1.5 rounded-full border transition-all ${activeTab === 'contacts' ? 'border-cyber-green/30 bg-cyber-green/10 text-cyber-green' : 'border-transparent text-cyber-green/30 hover:text-cyber-green/50'}`}>联系人</button>
+          <button onClick={() => { setActiveTab('chat'); setSearchQuery(''); }} className={`text-xs px-4 py-1.5 min-h-[40px] rounded-full border transition-all ${activeTab === 'chat' ? 'border-cyber-green/30 bg-cyber-green/10 text-cyber-green' : 'border-transparent text-cyber-green/30 hover:text-cyber-green/50'}`}>对话</button>
+          <button onClick={() => { setActiveTab('contacts'); setSearchQuery(''); }} className={`text-xs px-4 py-1.5 min-h-[40px] rounded-full border transition-all ${activeTab === 'contacts' ? 'border-cyber-green/30 bg-cyber-green/10 text-cyber-green' : 'border-transparent text-cyber-green/30 hover:text-cyber-green/50'}`}>联系人</button>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -1260,15 +1260,15 @@ export default function ChatRoom() {
       <div className="h-dvh max-h-dvh memoria-page flex flex-col overflow-hidden font-mono">
         <ChatBackdrop origin="bottom-left" tilt={8} />
 
-        <header className="memoria-glass flex items-center gap-4 px-6 py-3 border-x-0 border-t-0 shrink-0">
+        <header className="memoria-glass flex items-center gap-3 sm:gap-4 px-3 sm:px-6 py-3 border-x-0 border-t-0 shrink-0">
 
-          <button onClick={goToList} className="text-cyber-green/30 hover:text-cyber-green/50 p-1"><ArrowLeft size={18} /></button>
+          <button onClick={goToList} className="text-cyber-green/30 hover:text-cyber-green/50 p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg"><ArrowLeft size={18} /></button>
 
           <h1 className="text-xs font-bold text-cyber-green/70 uppercase tracking-wider flex items-center gap-2"><Users size={14} />创建群聊</h1>
 
         </header>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-6">
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-6 py-4 sm:py-6">
           <div className="max-w-2xl mx-auto w-full space-y-5">
 
           {error && (
@@ -1309,7 +1309,7 @@ export default function ChatRoom() {
 
             <label className="text-[12px] text-cyber-green/40 uppercase tracking-wider mb-2 block">选择角色 ({participants.length})</label>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
 
               {allChars.filter(c=>c.is_active).map((char, i)=>{
 
@@ -1317,7 +1317,7 @@ export default function ChatRoom() {
 
                 return (
 
-                  <div key={char.character_id} onClick={()=>toggleParticipant(char)} className={`memoria-card-hover animate-fade-up flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${sel ? 'border-cyber-green/40 bg-cyber-green/5 shadow-[0_0_22px_rgba(167,239,158,0.08)]' : 'border-white/5 bg-[#0d0d14]/80 hover:border-cyber-green/20'}`} style={{ animationDelay: `${Math.min(i, 12) * 20}ms` }}>
+                  <div key={char.character_id} onClick={()=>toggleParticipant(char)} className={`memoria-card-hover animate-fade-up flex items-center gap-2 p-2 min-h-[48px] rounded-lg border cursor-pointer transition-all ${sel ? 'border-cyber-green/40 bg-cyber-green/5 shadow-[0_0_22px_rgba(167,239,158,0.08)]' : 'border-white/5 bg-[#0d0d14]/80 hover:border-cyber-green/20'}`} style={{ animationDelay: `${Math.min(i, 12) * 20}ms` }}>
 
                     <div className="w-8 h-8 rounded-full overflow-hidden border border-white/10 bg-[#0d0d14] shrink-0">
 
@@ -1339,9 +1339,9 @@ export default function ChatRoom() {
 
           </div>
 
-          {participants.length>0 && <div className="flex flex-wrap gap-1.5">{participants.map(p=><div key={p.character_id} className="flex items-center gap-1 text-[12px] bg-cyber-green/5 border border-cyber-green/15 rounded-full px-2 py-0.5 text-cyber-green/50"><span className="font-character text-sm leading-none">{p.name}</span><button onClick={()=>toggleParticipant(p)} className="text-cyber-green/20 hover:text-red-400 ml-0.5"><X size={10}/></button></div>)}</div>}
+          {participants.length>0 && <div className="flex flex-wrap gap-1.5">{participants.map(p=><div key={p.character_id} className="flex items-center gap-1 text-[12px] bg-cyber-green/5 border border-cyber-green/15 rounded-full px-2 py-1 text-cyber-green/50"><span className="font-character text-sm leading-none">{p.name}</span><button onClick={()=>toggleParticipant(p)} className="text-cyber-green/20 hover:text-red-400 ml-0.5 min-w-[24px] min-h-[24px] flex items-center justify-center"><X size={10}/></button></div>)}</div>}
 
-          <button onClick={startGroupChat} disabled={participants.length<2 || !groupName.trim() || groupNameExists} className="w-full py-2.5 bg-cyber-green/10 hover:bg-cyber-green/20 border border-cyber-green/20 rounded-lg text-sm font-bold text-cyber-green disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"><Users size={16} />开始群聊 ({participants.length}人)</button>
+          <button onClick={startGroupChat} disabled={participants.length<2 || !groupName.trim() || groupNameExists} className="w-full min-h-[44px] py-2.5 bg-cyber-green/10 hover:bg-cyber-green/20 border border-cyber-green/20 rounded-lg text-sm font-bold text-cyber-green disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"><Users size={16} />开始群聊 ({participants.length}人)</button>
           </div>
 
         </div>
@@ -1408,8 +1408,8 @@ export default function ChatRoom() {
         <ChatBackdrop />
 
         {/* ═══ Top bar: 融合型 — 返回+名字+状态徽章 ═══ */}
-        <header className="memoria-glass flex items-center gap-2 px-3 py-2 border-x-0 border-t-0 shrink-0">
-          <button onClick={goToList} className="text-cyber-green/30 hover:text-cyber-green/50 p-1 shrink-0">
+        <header className="memoria-glass flex items-center gap-2 px-2.5 sm:px-3 py-2 border-x-0 border-t-0 shrink-0">
+          <button onClick={goToList} className="text-cyber-green/30 hover:text-cyber-green/50 p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg shrink-0">
             <ArrowLeft size={18} />
           </button>
 
@@ -1430,7 +1430,7 @@ export default function ChatRoom() {
               {sending && <span className="w-1.5 h-1.5 rounded-full bg-cyber-green/50 animate-pulse shrink-0" />}
             </div>
             {/* 第二行：好感度 | 情绪 | 信任星级 */}
-            <div className="flex items-center gap-2 text-[12px] mt-0.5">
+            <div className="flex items-center gap-1.5 sm:gap-2 text-[12px] mt-0.5 overflow-hidden">
               <span className={`flex items-center gap-0.5 ${affinityColor}`}>
                 <Heart size={10} fill={affinity > 30 ? 'currentColor' : 'none'} />
                 {affinity}
@@ -1511,7 +1511,7 @@ export default function ChatRoom() {
         )}
 
         {/* ═══ 消息气泡区 ═══ */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-3"
+        <div className="flex-1 min-h-0 overflow-y-auto px-2.5 sm:px-3 py-3 space-y-3"
           onScroll={(e) => { if (e.target.scrollTop < 60 && !loadingHistory && hasMoreHistory) loadMoreHistory(); }}>
 
           {loadingHistory && (
@@ -1547,7 +1547,7 @@ export default function ChatRoom() {
                 </div>
 
                 {/* 气泡内容 */}
-                <div className={`max-w-[75%] ${isUser ? 'items-end' : 'items-start'}`}>
+                <div className={`max-w-[82%] sm:max-w-[75%] ${isUser ? 'items-end' : 'items-start'}`}>
                   {/* 角色名 + action 标签 */}
                   {!isUser && (
                     <div className="flex items-center gap-1.5 mb-0.5 ml-1">
@@ -1596,7 +1596,7 @@ export default function ChatRoom() {
         </div>
 
         {/* ═══ 底部输入栏 — 功能型 ═══ */}
-        <div className="px-3 py-2 border-t border-white/5 bg-[#0d0d14]/60 backdrop-blur-md shrink-0">
+        <div className="px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] border-t border-white/5 bg-[#0d0d14]/60 backdrop-blur-md shrink-0">
           <div className="flex items-end gap-1.5">
             {/* 输入框 */}
             <textarea
@@ -1607,14 +1607,14 @@ export default function ChatRoom() {
               rows={1}
               placeholder="输入消息..."
               disabled={sending || sendingMulti}
-              className="flex-1 bg-[#0b0b0c] border border-white/10 rounded-xl px-3 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/10 resize-none focus:outline-none focus:border-cyber-green/30 transition-colors disabled:opacity-40 min-h-[36px] max-h-[100px]"
+              className="flex-1 bg-[#0b0b0c] border border-white/10 rounded-xl px-3 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/10 resize-none focus:outline-none focus:border-cyber-green/30 transition-colors disabled:opacity-40 min-h-[44px] max-h-[100px]"
             />
 
             {/* 发送按钮 */}
             <button
               onClick={sendMessage}
               disabled={!input.trim() || sending || sendingMulti}
-              className="px-3 py-2 bg-cyber-green/10 hover:bg-cyber-green/[0.18] active:scale-95 border border-cyber-green/20 rounded-xl text-cyber-green disabled:opacity-20 disabled:cursor-not-allowed disabled:active:scale-100 transition-all shrink-0"
+              className="px-3 py-2 min-w-[44px] min-h-[44px] bg-cyber-green/10 hover:bg-cyber-green/[0.18] active:scale-95 border border-cyber-green/20 rounded-xl text-cyber-green disabled:opacity-20 disabled:cursor-not-allowed disabled:active:scale-100 transition-all shrink-0 flex items-center justify-center"
             >
               <Send size={16} />
             </button>
@@ -1633,9 +1633,9 @@ export default function ChatRoom() {
 
         {/* Top bar */}
 
-        <header className="memoria-glass flex items-center gap-3 px-4 py-2.5 border-x-0 border-t-0 shrink-0">
+        <header className="memoria-glass flex items-center gap-2 sm:gap-3 px-2.5 sm:px-4 py-2.5 border-x-0 border-t-0 shrink-0">
 
-          <button onClick={goToList} className="text-cyber-green/30 hover:text-cyber-green/50 p-1"><ArrowLeft size={18} /></button>
+          <button onClick={goToList} className="text-cyber-green/30 hover:text-cyber-green/50 p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg"><ArrowLeft size={18} /></button>
 
           <div className="flex -space-x-2">
 
@@ -1781,7 +1781,7 @@ export default function ChatRoom() {
 
         {/* Messages */}
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3" onScroll={(e) => {
+        <div className="flex-1 min-h-0 overflow-y-auto px-2.5 sm:px-4 py-3 space-y-3" onScroll={(e) => {
 
           if (e.target.scrollTop < 60 && !loadingHistory && hasMoreHistory) loadMoreHistory();
 
@@ -1819,7 +1819,7 @@ export default function ChatRoom() {
 
               <div key={i} className={`animate-fade-up flex gap-2.5 ${isUser ? 'flex-row-reverse' : ''}`}>
 
-                <div className={`w-10 h-10 rounded-full overflow-hidden border-2 shrink-0 mt-0.5 ${isUser ? 'border-cyber-green/10 bg-cyber-green/[0.03] flex items-center justify-center' : 'border-purple-500/15'}`}>
+                <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full overflow-hidden border-2 shrink-0 mt-0.5 ${isUser ? 'border-cyber-green/10 bg-cyber-green/[0.03] flex items-center justify-center' : 'border-purple-500/15'}`}>
 
                   {isUser ? (
 
@@ -1853,7 +1853,7 @@ export default function ChatRoom() {
 
                 </div>
 
-                <div className={`max-w-[72%] ${isUser ? 'items-end' : 'items-start'}`}>
+                <div className={`max-w-[82%] sm:max-w-[72%] ${isUser ? 'items-end' : 'items-start'}`}>
 
                   {!isUser && (msg.charName || mode==='single') && (
 
@@ -1969,7 +1969,7 @@ export default function ChatRoom() {
 
         {/* Input */}
 
-        <div className="px-4 py-2.5 border-t border-white/5 bg-[#0d0d14]/60 backdrop-blur-md shrink-0">
+        <div className="px-3 sm:px-4 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] border-t border-white/5 bg-[#0d0d14]/60 backdrop-blur-md shrink-0">
 
           <div className="flex gap-2">
 
@@ -1989,7 +1989,7 @@ export default function ChatRoom() {
 
               disabled={sending || sendingMulti}
 
-              className="flex-1 bg-[#0b0b0c] border border-white/10 rounded-xl px-4 py-2.5 text-sm text-zinc-300 placeholder:text-cyber-green/10 resize-none focus:outline-none focus:border-cyber-green/30 transition-colors disabled:opacity-40 min-h-[42px] max-h-[96px]"
+              className="flex-1 bg-[#0b0b0c] border border-white/10 rounded-xl px-3 sm:px-4 py-2.5 text-sm text-zinc-300 placeholder:text-cyber-green/10 resize-none focus:outline-none focus:border-cyber-green/30 transition-colors disabled:opacity-40 min-h-[44px] max-h-[96px]"
 
             />
 
@@ -1999,7 +1999,7 @@ export default function ChatRoom() {
 
               disabled={!input.trim() || sending || sendingMulti}
 
-              className="px-4 py-2.5 bg-cyber-green/10 hover:bg-cyber-green/[0.18] active:scale-95 border border-cyber-green/20 rounded-xl text-cyber-green disabled:opacity-20 disabled:cursor-not-allowed disabled:active:scale-100 transition-all shrink-0 min-w-[44px]"
+              className="px-3 sm:px-4 py-2.5 bg-cyber-green/10 hover:bg-cyber-green/[0.18] active:scale-95 border border-cyber-green/20 rounded-xl text-cyber-green disabled:opacity-20 disabled:cursor-not-allowed disabled:active:scale-100 transition-all shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center"
 
             >
 
@@ -2009,7 +2009,7 @@ export default function ChatRoom() {
 
           </div>
 
-          <div className="text-[12px] text-cyber-green/10 mt-1.5 text-center">Enter 发送 · Shift+Enter 换行</div>
+          <div className="hidden sm:block text-[12px] text-cyber-green/10 mt-1.5 text-center">Enter 发送 · Shift+Enter 换行</div>
 
         </div>
 

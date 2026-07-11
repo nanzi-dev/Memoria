@@ -261,13 +261,13 @@ export default function CharacterEditor() {
   const StepComponent = [StepIdentity, StepPersonality, StepSpeechStyle, StepBackground, StepInteraction][currentStep];
 
   return (
-    <div className="min-h-screen character-editor-page">
+    <div className="min-h-dvh character-editor-page">
       {/* Header */}
       <div className="sticky top-0 z-20 bg-cyber-surface/90 backdrop-blur-xl border-b border-cyber-green/20 shadow-[0_10px_34px_rgba(0,0,0,0.22)]">
-        <div className="max-w-5xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="max-w-5xl mx-auto px-3 sm:px-4 py-3 flex flex-wrap items-center justify-between gap-3">
           <button
             onClick={() => navigate('/')}
-            className="flex items-center gap-1 text-cyber-green/60 hover:text-cyber-green transition-colors font-mono text-sm"
+            className="flex items-center gap-1 min-h-[40px] px-2 -ml-2 text-cyber-green/60 hover:text-cyber-green transition-colors font-mono text-sm"
           >
             <ArrowLeft size={16} />
             Back
@@ -279,7 +279,7 @@ export default function CharacterEditor() {
             {characterId ? (
               <button
                 onClick={handleExportFile}
-                className="flex items-center gap-1 px-3 py-1 text-xs font-mono text-cyber-green/70 hover:text-cyber-green border border-cyber-green/20 hover:border-cyber-green/40 rounded transition-colors"
+                className="flex items-center gap-1 min-h-[40px] px-3 py-1 text-xs font-mono text-cyber-green/70 hover:text-cyber-green border border-cyber-green/20 hover:border-cyber-green/40 rounded transition-colors"
               >
                 <Download size={14} />
                 <span className="hidden sm:inline">Export JSON</span>
@@ -295,7 +295,7 @@ export default function CharacterEditor() {
                 />
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-1 px-3 py-1 text-xs font-mono text-cyber-green/70 hover:text-cyber-green border border-cyber-green/20 hover:border-cyber-green/40 rounded transition-colors"
+                  className="flex items-center gap-1 min-h-[40px] px-3 py-1 text-xs font-mono text-cyber-green/70 hover:text-cyber-green border border-cyber-green/20 hover:border-cyber-green/40 rounded transition-colors"
                 >
                   <Upload size={14} />
                   <span className="hidden sm:inline">Import JSON</span>
@@ -306,7 +306,7 @@ export default function CharacterEditor() {
               <>
                 <button
                   onClick={handleToggleActive}
-                  className={`px-3 py-1 text-xs font-mono rounded transition-colors border ${
+                  className={`min-h-[40px] px-3 py-1 text-xs font-mono rounded transition-colors border ${
                     isActive
                       ? 'text-amber-400/70 hover:text-amber-400 border-amber-400/20 hover:border-amber-400/40'
                       : 'text-green-400/70 hover:text-green-400 border-green-400/20 hover:border-green-400/40'
@@ -316,7 +316,7 @@ export default function CharacterEditor() {
                 </button>
                 <button
                   onClick={handleDelete}
-                  className="px-3 py-1 text-xs font-mono text-red-400/60 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 rounded transition-colors"
+                  className="min-h-[40px] px-3 py-1 text-xs font-mono text-red-400/60 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 rounded transition-colors"
                 >
                   Delete
                 </button>
@@ -325,7 +325,7 @@ export default function CharacterEditor() {
             <button
               onClick={handleSave}
               disabled={saving}
-              className="flex items-center gap-1 px-4 py-1.5 bg-cyber-green/10 border border-cyber-green/30 text-cyber-green font-mono text-sm rounded hover:bg-cyber-green/20 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1 min-h-[40px] px-4 py-1.5 bg-cyber-green/10 border border-cyber-green/30 text-cyber-green font-mono text-sm rounded hover:bg-cyber-green/20 transition-colors disabled:opacity-50"
             >
               {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
               Save
@@ -340,7 +340,7 @@ export default function CharacterEditor() {
               <button
                 key={step.id}
                 onClick={() => setCurrentStep(idx)}
-                className={`shrink-0 flex items-center gap-2 px-3 py-1.5 rounded text-xs font-mono transition-all ${
+              className={`shrink-0 flex items-center gap-2 min-h-[40px] px-3 py-1.5 rounded text-xs font-mono transition-all ${
                   idx === currentStep
                     ? 'bg-cyber-green/12 text-cyber-green border border-cyber-green/35 shadow-[0_0_18px_rgba(167,239,158,0.08)]'
                     : idx < currentStep
@@ -364,7 +364,7 @@ export default function CharacterEditor() {
 
       {/* Save message */}
       {saveMessage && (
-        <div className={`fixed top-16 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded font-mono text-sm ${
+        <div className={`fixed top-16 left-1/2 -translate-x-1/2 z-30 max-w-[calc(100vw-2rem)] px-4 py-2 rounded font-mono text-sm text-center ${
           saveMessage.includes('Error') ? 'bg-red-900/80 text-red-300' : 'bg-cyber-green/20 text-cyber-green'
         }`}>
           {saveMessage}
@@ -372,7 +372,7 @@ export default function CharacterEditor() {
       )}
 
       {/* Form content - Paper folder style */}
-      <div className="relative z-10 max-w-4xl mx-auto px-4 py-8">
+      <div className="relative z-10 max-w-4xl mx-auto px-3 sm:px-4 py-5 sm:py-8">
         <div className="relative">
           {/* Paper folder background */}
           <div
@@ -385,14 +385,14 @@ export default function CharacterEditor() {
           >
             {/* Folder tab */}
             <div
-              className="relative mx-8 -mt-0.5"
+              className="relative mx-3 sm:mx-8 -mt-0.5"
               style={{
                 background: '#4A3B2C',
                 borderTopLeftRadius: 8,
                 borderTopRightRadius: 8,
                 border: '1px solid #5A4A38',
                 borderBottom: 'none',
-                padding: '8px 24px',
+                padding: '8px 16px',
                 display: 'inline-block',
               }}
             >
@@ -403,7 +403,7 @@ export default function CharacterEditor() {
 
             {/* Paper card */}
             <div
-              className="mx-6 mb-6 rounded-sm"
+              className="mx-3 sm:mx-6 mb-4 sm:mb-6 rounded-sm"
               style={{
                 background: 'linear-gradient(to bottom, #F5EDE0 0%, #EDE4D4 100%)',
                 border: '1px solid #C4B594',
@@ -411,10 +411,10 @@ export default function CharacterEditor() {
               }}
             >
               {/* Card header */}
-              <div className="p-6 pb-4 border-b" style={{ borderColor: '#C4B594' }}>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-xl font-bold text-cyber-ink font-mono tracking-wide">
+              <div className="p-4 sm:p-6 pb-4 border-b" style={{ borderColor: '#C4B594' }}>
+                <div className="flex items-start sm:items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="text-base sm:text-xl font-bold text-cyber-ink font-mono tracking-wide break-words">
                       CHARACTER RESUME / PROFILE CARD
                     </h2>
                     <p className="text-xs text-amber-700/60 font-mono mt-1">
@@ -422,7 +422,7 @@ export default function CharacterEditor() {
                     </p>
                   </div>
                   {/* Decorative compass/mark */}
-                  <div className="text-cyber-ink/20">
+                  <div className="hidden sm:block text-cyber-ink/20 shrink-0">
                     <svg width="40" height="40" viewBox="0 0 40 40">
                       <circle cx="20" cy="20" r="18" fill="none" stroke="currentColor" strokeWidth="1" />
                       <circle cx="20" cy="20" r="8" fill="none" stroke="currentColor" strokeWidth="0.5" />
@@ -437,12 +437,12 @@ export default function CharacterEditor() {
               </div>
 
               {/* Form body */}
-              <div className="p-6">
+              <div className="p-4 sm:p-6">
                 <StepComponent formData={formData} updateField={updateField} />
               </div>
 
               {/* Card footer - status + stamp */}
-              <div className="p-6 pt-4 border-t flex items-center justify-between" style={{ borderColor: '#C4B594' }}>
+              <div className="p-4 sm:p-6 pt-4 border-t flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4" style={{ borderColor: '#C4B594' }}>
                 <div className="flex items-center gap-4">
                   <div>
                     <span className="text-[10px] text-amber-700/60 font-mono uppercase">最后更新</span>
@@ -472,22 +472,22 @@ export default function CharacterEditor() {
           </div>
 
           {/* Step navigation */}
-          <div className="flex items-center justify-between mt-6">
+          <div className="flex items-center justify-between gap-2 mt-6">
             <button
               onClick={() => setCurrentStep(prev => Math.max(0, prev - 1))}
               disabled={currentStep === 0}
-              className="flex items-center gap-1 px-4 py-2 text-sm font-mono text-cyber-green/60 hover:text-cyber-green disabled:opacity-30 transition-colors"
+              className="flex items-center gap-1 min-h-[44px] px-3 sm:px-4 py-2 text-sm font-mono text-cyber-green/60 hover:text-cyber-green disabled:opacity-30 transition-colors"
             >
               <ChevronLeft size={16} />
               Previous
             </button>
-            <span className="text-xs font-mono text-cyber-green/40">
+            <span className="text-xs font-mono text-cyber-green/40 whitespace-nowrap">
               Step {currentStep + 1} of {STEPS.length}
             </span>
             {currentStep < STEPS.length - 1 ? (
               <button
                 onClick={() => setCurrentStep(prev => Math.min(STEPS.length - 1, prev + 1))}
-                className="flex items-center gap-1 px-4 py-2 text-sm font-mono text-cyber-green/60 hover:text-cyber-green transition-colors"
+                className="flex items-center gap-1 min-h-[44px] px-3 sm:px-4 py-2 text-sm font-mono text-cyber-green/60 hover:text-cyber-green transition-colors"
               >
                 Next
                 <ChevronRight size={16} />
@@ -496,7 +496,7 @@ export default function CharacterEditor() {
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="flex items-center gap-1 px-6 py-2 bg-cyber-green/10 border border-cyber-green/30 text-cyber-green font-mono text-sm rounded hover:bg-cyber-green/20 transition-colors"
+                className="flex items-center gap-1 min-h-[44px] px-4 sm:px-6 py-2 bg-cyber-green/10 border border-cyber-green/30 text-cyber-green font-mono text-sm rounded hover:bg-cyber-green/20 transition-colors"
               >
                 {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
                 Finish & Save

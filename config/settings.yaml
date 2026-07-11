@@ -20,6 +20,7 @@ memory:
   vector_search_top_k: 10
 database:
   sqlite_path: ./data/sqlite_db/memoria.db
+  database_url: ''
   vector_db_path: ./data/chroma_db
   embedding_model: ./models/sentence-transformers/all-MiniLM-L6-v2
 logging:

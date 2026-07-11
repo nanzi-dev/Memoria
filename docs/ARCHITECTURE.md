@@ -34,11 +34,11 @@ Memoria/
 │   │   ├── multi_character_memory.py        # 多角色记忆管理
 │   │   └── speaking_strategy.py             # 发言策略系统（5种策略）
 │   ├── db/                     # 数据持久化层
-│   │   └── repository.py       # SQLite 数据库操作（WAL模式）
+│   │   └── repository.py       # SQLite / PostgreSQL 数据库操作
 │   └── main.py                 # FastAPI 应用入口
 ├── tests/                      # 测试（pytest）
 ├── data/                       # 运行时数据
-│   ├── sqlite_db/memoria.db    # SQLite 数据库
+│   ├── sqlite_db/memoria.db    # SQLite 开发数据库
 │   └── chroma_db/              # ChromaDB 向量数据库
 ├── docs/                       # 项目文档
 ├── scripts/                    # 工具脚本
@@ -138,7 +138,7 @@ RAG 召回 (ChromaDB)            ← 余弦相似度搜索
 
 ## 数据库设计
 
-Memoria 使用 SQLite (WAL 模式)，共 17 张表。
+Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=postgresql://...` 切换 PostgreSQL。数据库共 17 张表。
 
 ### 1. users（用户表）
 
@@ -510,13 +510,13 @@ Memoria 使用 SQLite (WAL 模式)，共 17 张表。
 
 ### 数据库设计特点
 
-1. **WAL 模式** — 支持并发读写，避免 SQLite 锁竞争
+1. **双模式存储** — 默认 SQLite WAL 模式便于本地开发；配置 `DATABASE_URL` 后使用 PostgreSQL
 2. **显式列 + JSON 混合** — 高频读写字段（好感度、信任度）使用显式列以获得更好性能；复杂配置（角色卡、事件条件）使用 JSON 字段获得灵活性
 3. **软删除设计** — `is_active` 字段实现逻辑删除，支持数据恢复
 4. **多角色扩展** — `session.is_multi_character` + `multi_session_participant` 表支持群聊；`short_term_message` 扩展 `character_id` / `character_name` 列区分发言人；`shared_memory` 存储角色间互动记忆，`group_memory` 存储玩家轮次摘要形成的群体事件记忆
 5. **轻量迁移** — 启动时为旧库补齐 `character_card.avatar_url`、`session_summary.summary_status`、`session.group_name`、`session.group_thread_id`、`event_definition.schedule`、`event_definition.template_id`、`auth_token` 和事件上下文/调度/模板表等新增结构
 6. **完整索引覆盖** — 16 个精心设计的索引确保所有常用查询路径为 O(log n)
-7. **可迁移性** — 兼容 PostgreSQL 标准 SQL 语法，使用标准数据类型
+7. **可迁移性** — Repository 层适配 SQLite/PostgreSQL 占位符、自增主键和少量 UPSERT 差异
 
 ## 角色卡规范
 
@@ -651,7 +651,7 @@ Memoria 使用 SQLite (WAL 模式)，共 17 张表。
 | Web 框架 | FastAPI | 自动生成 OpenAPI 文档 |
 | ASGI 服务器 | Uvicorn | --reload 热重载 |
 | 数据验证 | Pydantic v2 | BaseSettings + SettingsConfigDict |
-| 数据库 | SQLite (WAL) | 支持迁移至 PostgreSQL |
+| 数据库 | SQLite (WAL) / PostgreSQL | SQLite 默认开发模式，PostgreSQL 用于生产部署 |
 | 向量数据库 | ChromaDB | 余弦相似度检索 |
 | 嵌入模型 | all-MiniLM-L6-v2 | ~80MB，HuggingFace 下载 |
 | LLM 客户端 | OpenAI SDK | 兼容接口，支持多供应商 |

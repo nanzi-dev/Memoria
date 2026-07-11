@@ -1,16 +1,18 @@
 """
-数据持久化层（SQLite）
+数据持久化层（SQLite / PostgreSQL）
 
 设计目标：
-- 单文件轻量数据库（适合 demo / MVP）
+- 默认单文件轻量数据库（适合 demo / MVP）
+- 生产部署可通过 DATABASE_URL 切换 PostgreSQL
 - 支持角色状态 + 记忆 + 会话管理
-- 后续可无缝迁移 PostgreSQL（SQL 层隔离）
+- SQL 层隔离，保留 SQLite 开发模式
 """
 
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import logging
 import sqlite3
+from urllib.parse import urlsplit
 
 from memoria.core.config import configs
 from memoria.core import performance, tracing
@@ -18,6 +20,13 @@ import re
 from difflib import SequenceMatcher
 
 logger = logging.getLogger(__name__)
+
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except ImportError:  # pragma: no cover - PostgreSQL 仅在生产配置启用
+    psycopg = None
+    dict_row = None
 
 # =========================
 # 工具函数
@@ -27,8 +36,120 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 def _row_to_dict(row):
-    """安全转换 sqlite Row -> dict"""
+    """安全转换 sqlite Row / psycopg dict row -> dict"""
     return dict(row) if row is not None else None
+
+
+def _is_postgres_enabled() -> bool:
+    database_url = (configs.database_url or "").strip().lower()
+    return database_url.startswith(("postgresql://", "postgres://"))
+
+
+def _database_name() -> str:
+    if not _is_postgres_enabled():
+        return configs.database_path
+    parsed = urlsplit(configs.database_url)
+    return f"{parsed.hostname or 'postgres'}{parsed.path or ''}"
+
+
+def _convert_qmark_placeholders(sql: str) -> str:
+    """将 sqlite3 的 ? 参数占位符转换为 psycopg 的 %s，跳过字符串字面量。"""
+    out = []
+    in_single = False
+    in_double = False
+    i = 0
+    while i < len(sql):
+        char = sql[i]
+        next_char = sql[i + 1] if i + 1 < len(sql) else ""
+
+        if char == "'" and not in_double:
+            out.append(char)
+            if in_single and next_char == "'":
+                out.append(next_char)
+                i += 2
+                continue
+            in_single = not in_single
+        elif char == '"' and not in_single:
+            out.append(char)
+            if in_double and next_char == '"':
+                out.append(next_char)
+                i += 2
+                continue
+            in_double = not in_double
+        elif char == "?" and not in_single and not in_double:
+            out.append("%s")
+        else:
+            out.append(char)
+        i += 1
+
+    return "".join(out)
+
+
+def _append_postgres_clause(sql: str, clause: str) -> str:
+    stripped = sql.rstrip()
+    if stripped.endswith(";"):
+        return f"{stripped[:-1]} {clause};"
+    return f"{stripped} {clause}"
+
+
+def _prepare_postgres_sql(sql: str) -> str:
+    converted = _convert_qmark_placeholders(sql)
+    had_insert_or_ignore = bool(re.search(r"\bINSERT\s+OR\s+IGNORE\s+INTO\b", converted, flags=re.IGNORECASE))
+    converted = re.sub(r"\bINSERT\s+OR\s+IGNORE\s+INTO\b", "INSERT INTO", converted, flags=re.IGNORECASE)
+
+    if re.search(r"\bINSERT\s+OR\s+REPLACE\s+INTO\s+auth_token\b", converted, flags=re.IGNORECASE):
+        converted = re.sub(
+            r"\bINSERT\s+OR\s+REPLACE\s+INTO\s+auth_token\b",
+            "INSERT INTO auth_token",
+            converted,
+            flags=re.IGNORECASE,
+        )
+        return _append_postgres_clause(
+            converted,
+            """
+            ON CONFLICT (token) DO UPDATE SET
+                user_id = EXCLUDED.user_id,
+                created_at = EXCLUDED.created_at,
+                expires_at = EXCLUDED.expires_at
+            """.strip(),
+        )
+
+    if had_insert_or_ignore and re.search(r"\bINSERT\s+INTO\s+session\b", converted, flags=re.IGNORECASE):
+        return _append_postgres_clause(converted, "ON CONFLICT DO NOTHING")
+
+    return converted
+
+
+def _schema_for_current_db() -> str:
+    if not _is_postgres_enabled():
+        return SCHEMA
+    return SCHEMA.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
+
+
+class _PostgresConnection:
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql, params=None):
+        return self._conn.execute(_prepare_postgres_sql(sql), params)
+
+    def executemany(self, sql, params_seq):
+        return self._conn.executemany(_prepare_postgres_sql(sql), params_seq)
+
+    def executescript(self, script: str):
+        for statement in script.split(";"):
+            statement = statement.strip()
+            if statement:
+                self.execute(statement)
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        self._conn.close()
 
 
 # =========================
@@ -64,25 +185,35 @@ def _dedup_check(conn, table, text_col, text, where_clause, params, threshold=0.
 
 
 # =========================
-# SQLite 连接管理
+# 数据库连接管理
 # =========================
 @contextmanager
 def get_conn():
     """
-    SQLite 连接上下文管理
+    数据库连接上下文管理。
+
+    默认使用 SQLite；设置 DATABASE_URL=postgresql://... 后切换 PostgreSQL。
     """
-    conn = sqlite3.connect(
-        configs.database_path,
-        timeout=30,
-        check_same_thread = False # 避免多线程问题
-    )
+    db_system = "postgresql" if _is_postgres_enabled() else "sqlite"
+
+    if _is_postgres_enabled():
+        if psycopg is None:
+            raise RuntimeError("PostgreSQL mode requires installing psycopg[binary].")
+        raw_conn = psycopg.connect(configs.database_url, row_factory=dict_row)
+        conn = _PostgresConnection(raw_conn)
+    else:
+        conn = sqlite3.connect(
+            configs.database_path,
+            timeout=30,
+            check_same_thread = False # 避免多线程问题
+        )
+
+        conn.row_factory = sqlite3.Row
+
+        # WAL 模式（推荐用于并发读写）
+        conn.execute("PRAGMA journal_mode=WAL;")
     
-    conn.row_factory = sqlite3.Row
-    
-    # WAL 模式（推荐用于并发读写）
-    conn.execute("PRAGMA journal_mode=WAL;")
-    
-    with tracing.start_span("db.transaction", **{"db.system": "sqlite", "db.name": configs.database_path}):
+    with tracing.start_span("db.transaction", **{"db.system": db_system, "db.name": _database_name()}):
         try:
             yield conn
             conn.commit()
@@ -474,8 +605,7 @@ ON character_relationship(character_id_a, character_id_b);
 
 def _migrate(conn):
     """数据库迁移：为已有数据库添加新列"""
-    conn.executescript(
-        """
+    migration_schema = """
         CREATE TABLE IF NOT EXISTS event_context_state (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             event_id        TEXT NOT NULL,
@@ -527,14 +657,15 @@ def _migrate(conn):
         CREATE INDEX IF NOT EXISTS idx_auth_token_user
         ON auth_token(user_id, expires_at);
         """
-    )
+    if _is_postgres_enabled():
+        migration_schema = migration_schema.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
+    conn.executescript(migration_schema)
 
     def add_column(table: str, column_sql: str) -> None:
-        try:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_sql}")
-        except sqlite3.OperationalError as e:
-            if "duplicate column name" not in str(e).lower():
-                raise
+        column_name = column_sql.split()[0]
+        if column_name in _table_columns(conn, table):
+            return
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_sql}")
 
     add_column("character_card", "avatar_url TEXT")
     add_column("session_summary", "summary_status TEXT DEFAULT 'completed'")
@@ -577,10 +708,7 @@ _SHORT_TERM_MESSAGE_STATE_COLUMNS = (
 
 def _ensure_short_term_message_state_columns(conn) -> None:
     """补齐旧库里的回放/调试状态列。"""
-    existing = {
-        row["name"]
-        for row in conn.execute("PRAGMA table_info(short_term_message)").fetchall()
-    }
+    existing = _table_columns(conn, "short_term_message")
     if not existing:
         return
 
@@ -589,10 +717,25 @@ def _ensure_short_term_message_state_columns(conn) -> None:
             conn.execute(f"ALTER TABLE short_term_message ADD COLUMN {column_sql}")
 
 
+def _table_columns(conn, table_name: str) -> set[str]:
+    if _is_postgres_enabled():
+        rows = conn.execute(
+            """
+            SELECT column_name AS name
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = ?
+            """,
+            (table_name,),
+        ).fetchall()
+    else:
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {row["name"] for row in rows}
+
+
 def init_db():
     """初始化数据库结构"""
     with get_conn() as conn:
-        conn.executescript(SCHEMA)
+        conn.executescript(_schema_for_current_db())
         _migrate(conn)
 
 
@@ -773,15 +916,18 @@ def save_long_term_fact(
             logger.debug(f"长期记忆去重: id={existing['id']}")
             return existing["id"]
 
-        cursor = conn.execute(
-            """
+        insert_sql = """
             INSERT INTO long_term_fact
             (character_id, player_id, fact_text, importance, created_at, last_referenced)
             VALUES (?, ?, ?, ?, ?, ?)
-            """,
+            """
+        if _is_postgres_enabled():
+            insert_sql += " RETURNING id"
+        cursor = conn.execute(
+            insert_sql,
             (character_id, player_id, fact_text, importance, _now(), _now()),
         )
-        fact_id = cursor.lastrowid
+        fact_id = cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
         
     # 同步到向量数据库
     try:
@@ -904,13 +1050,16 @@ def append_short_term_message(
     """
     with get_conn() as conn:
         _ensure_short_term_message_state_columns(conn)
-        cursor = conn.execute(
-            """
+        insert_sql = """
             INSERT INTO short_term_message
             (session_id, role, content, action, affinity_delta, trust_delta,
              current_affinity, current_trust, current_mood, event_notification, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
+            """
+        if _is_postgres_enabled():
+            insert_sql += " RETURNING id"
+        cursor = conn.execute(
+            insert_sql,
             (
                 session_id,
                 role,
@@ -925,7 +1074,7 @@ def append_short_term_message(
                 _now(),
             ),
         )
-        return cursor.lastrowid
+        return cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
         
 def get_short_term_history(session_id: str, limit_turns: int) -> list[dict]:
     """
