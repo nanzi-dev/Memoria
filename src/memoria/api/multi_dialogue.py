@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/multi-dialogue")
 
 SUMMARY_CHUNK_MESSAGE_LIMIT = 80
+SUMMARY_MIN_MESSAGE_COUNT = 6
 
 
 # =========================
@@ -225,8 +226,8 @@ def _save_session_summary_on_end(session_id: str, session: dict) -> None:
 
     messages = repository.get_multi_character_history(session_id, limit_messages=None)
     meaningful_messages = [m for m in messages if str(m.get("content") or "").strip()]
-    if not meaningful_messages:
-        logger.info(f"多角色会话无可摘要消息，跳过保存: session={session_id}")
+    if len(meaningful_messages) <= SUMMARY_MIN_MESSAGE_COUNT:
+        logger.info(f"多角色会话有效消息不超过 {SUMMARY_MIN_MESSAGE_COUNT} 条，跳过摘要保存: session={session_id}")
         return
 
     participants = repository.get_session_participants(session_id, only_active=False)
@@ -246,8 +247,10 @@ def _save_session_summary_on_end(session_id: str, session: dict) -> None:
         character_names=character_names,
         player_name=session.get("player_name") or "玩家",
     )
+    summary = str(summary or "").strip()
     if not summary:
-        raise RuntimeError("多角色会话摘要为空")
+        logger.info(f"多角色会话摘要为空，跳过保存: session={session_id}")
+        return
 
     multi_character_memory.save_multi_character_summary(
         session_id=session_id,
@@ -258,24 +261,10 @@ def _save_session_summary_on_end(session_id: str, session: dict) -> None:
     )
 
 
-def _save_multi_summary_placeholder(session_id: str, session: dict, summary_status: str) -> int:
-    """为后台群聊摘要写入占位状态，返回有效消息数。"""
+def _count_meaningful_multi_messages(session_id: str) -> int:
+    """返回有效群聊消息数。只有超过阈值才触发摘要任务。"""
     messages = repository.get_multi_character_history(session_id, limit_messages=None)
     meaningful_messages = [m for m in messages if str(m.get("content") or "").strip()]
-    if not meaningful_messages:
-        return 0
-
-    participants = repository.get_session_participants(session_id, only_active=False)
-    character_ids = [p["character_id"] for p in participants if p.get("character_id")]
-    for character_id in character_ids:
-        repository.save_session_summary(
-            session_id=session_id,
-            character_id=character_id,
-            player_id=session["player_id"],
-            summary_text="",
-            message_count=len(meaningful_messages),
-            summary_status=summary_status,
-        )
     return len(meaningful_messages)
 
 
@@ -285,10 +274,6 @@ def _generate_multi_session_summary_task(session_id: str, session: dict) -> None
         _save_session_summary_on_end(session_id, session)
     except Exception as e:
         logger.error(f"后台生成多角色摘要失败: session={session_id}, error={e}", exc_info=True)
-        try:
-            _save_multi_summary_placeholder(session_id, session, "failed")
-        except Exception as save_error:
-            logger.error(f"标记多角色摘要失败状态失败: session={session_id}, error={save_error}", exc_info=True)
 
 
 def finish_multi_character_session(
@@ -312,14 +297,14 @@ def finish_multi_character_session(
     )
     if not has_completed_summary:
         try:
-            message_count = _save_multi_summary_placeholder(session_id, session, "generating")
+            message_count = _count_meaningful_multi_messages(session_id)
         except Exception as e:
-            logger.error(f"写入多角色摘要占位失败: session={session_id}, error={e}", exc_info=True)
+            logger.error(f"统计多角色摘要消息失败: session={session_id}, error={e}", exc_info=True)
 
     if session.get("status") != "ended":
         repository.end_session(session_id)
 
-    if not has_completed_summary and message_count > 0:
+    if not has_completed_summary and message_count > SUMMARY_MIN_MESSAGE_COUNT:
         if background_tasks is not None:
             background_tasks.add_task(_generate_multi_session_summary_task, session_id, session)
         else:

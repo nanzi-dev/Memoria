@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException, Response
+from pydantic import SecretStr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
@@ -73,6 +74,35 @@ def test_avatar_downloader_rejects_private_ip(monkeypatch):
     assert "内网" in exc_info.value.detail
 
 
+def test_user_avatar_url_saves_original_url_when_remote_fetch_is_blocked(monkeypatch):
+    from memoria.api import user
+
+    saved = {}
+    url = "https://gips0.baidu.com/it/u=1370533637,1153028894&fm=3074&app=3074&f=PNG?w=2048&h=2048"
+
+    def fake_download_remote_image(*args, **kwargs):
+        raise HTTPException(400, "不允许访问内网或保留地址")
+
+    monkeypatch.setattr(user, "download_remote_image", fake_download_remote_image)
+    monkeypatch.setattr(user, "get_current_user_id", lambda token: "usr_1")
+    monkeypatch.setattr(
+        user.repository,
+        "update_user_profile",
+        lambda uid, **kwargs: saved.update(user_id=uid, **kwargs),
+    )
+
+    res = user.set_avatar_url(
+        user.SetAvatarUrlRequest(url=url),
+        token="token",
+        authorization=None,
+        cookie_token=None,
+    )
+
+    assert res.success is True
+    assert res.message == "头像 URL 已保存"
+    assert saved == {"user_id": "usr_1", "avatar_url": url}
+
+
 def test_legacy_password_login_upgrades_hash_and_persists_token(monkeypatch):
     from memoria.api import user
 
@@ -134,3 +164,51 @@ def test_call_light_task_uses_light_client(monkeypatch):
 
     assert llm_client.call_light_task("summarize") == "light result"
     assert called["messages"] == [{"role": "user", "content": "summarize"}]
+
+
+def test_get_light_client_uses_light_base_url(monkeypatch):
+    from memoria.core import llm_client
+
+    created = {}
+
+    class FakeOpenAI:
+        def __init__(self, base_url, api_key):
+            created["base_url"] = base_url
+            created["api_key"] = api_key
+
+    monkeypatch.setattr(llm_client.configs, "llm_base_url", "https://main.test/v1")
+    monkeypatch.setattr(llm_client.configs, "llm_api_key", SecretStr("main-key"))
+    monkeypatch.setattr(llm_client.configs, "llm_light_base_url", "https://light.test/v1")
+    monkeypatch.setattr(llm_client.configs, "llm_light_api_key", SecretStr("light-key"))
+    monkeypatch.setattr(llm_client, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(llm_client, "_client", None)
+    monkeypatch.setattr(llm_client, "_light_client", None)
+    monkeypatch.setattr(llm_client, "_light_client_signature", None)
+
+    client = llm_client._get_light_client()
+
+    assert isinstance(client, FakeOpenAI)
+    assert created == {"base_url": "https://light.test/v1", "api_key": "light-key"}
+
+
+def test_call_light_task_can_ignore_reasoning_content(monkeypatch):
+    from memoria.core import llm_client
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="",
+                            reasoning_content="这是一段推理过程，不是最终摘要。",
+                        )
+                    )
+                ]
+            )
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    monkeypatch.setattr(llm_client, "_get_light_client", lambda: fake_client)
+    monkeypatch.setattr(llm_client, "_retry_call", lambda fn, *args, **kwargs: fn(*args, **kwargs))
+
+    assert llm_client.call_light_task("summarize", allow_reasoning_fallback=False) == ""

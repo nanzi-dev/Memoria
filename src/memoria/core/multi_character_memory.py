@@ -13,6 +13,7 @@ import logging
 from typing import Optional
 
 from memoria.core import llm_client
+from memoria.core.memory_extractor import clean_summary_text
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
@@ -323,8 +324,8 @@ def generate_multi_character_summary(
 """
     
     try:
-        summary = llm_client.call_light_task(prompt)
-        summary = summary.strip()
+        summary = llm_client.call_light_task(prompt, allow_reasoning_fallback=False)
+        summary = clean_summary_text(summary) or ""
         logger.info(f"生成多角色会话摘要: session={session_id}, length={len(summary)}")
         return summary
     

@@ -27,6 +27,8 @@ DebugSink = Callable[[str], None]
 # OpenAI Client（懒加载单例）
 # =========================
 _client = None
+_light_client = None
+_light_client_signature = None
 
 def _get_client():
     global _client
@@ -37,21 +39,23 @@ def _get_client():
         )
     return _client
 
-# 轻量任务专用 Client（如果配置了则使用，否则使用主 Client）
-if configs.llm_light_base_url and configs.llm_light_api_key.get_secret_value():
-    _light_client = OpenAI(
-        base_url = configs.llm_light_base_url,
-        api_key = configs.llm_light_api_key.get_secret_value()
-    )
-    logger.info(f"Light task client initialized: {configs.llm_light_base_url}")
-else:
-    _light_client = _client
-    logger.info("Light task using main LLM client")
-
 
 def _get_light_client():
-    if configs.llm_light_base_url and configs.llm_light_api_key.get_secret_value():
+    """返回轻量任务专用 client；未完整配置时回退主 client。"""
+    global _light_client, _light_client_signature
+    light_api_key = configs.llm_light_api_key.get_secret_value()
+    if configs.llm_light_base_url and light_api_key:
+        signature = (configs.llm_light_base_url, light_api_key)
+        if _light_client is None or _light_client_signature != signature:
+            _light_client = OpenAI(
+                base_url=configs.llm_light_base_url,
+                api_key=light_api_key,
+            )
+            _light_client_signature = signature
+            logger.info("Light task client initialized: %s", configs.llm_light_base_url)
         return _light_client
+
+    logger.warning("Light task client is not fully configured; using main LLM client")
     return _get_client()
 
 # =========================
@@ -487,7 +491,7 @@ def call_role_turn(
 # =========================
 # 轻量任务模型（记忆/摘要等）
 # =========================
-def call_light_task(prompt: str) -> str:
+def call_light_task(prompt: str, allow_reasoning_fallback: bool = True) -> str:
     """
     使用轻量模型处理辅助任务（低成本）
     """
@@ -510,15 +514,15 @@ def call_light_task(prompt: str) -> str:
         
         message = response.choices[0].message
         
-        # 优先使用 content，如果为空则尝试 reasoning_content（推理模型）
+        # 优先使用 content。推理内容通常不是最终答案，只在调用方允许时兜底使用。
         content = message.content
         
         if not content or content.strip() == "":
-            if hasattr(message, 'reasoning_content') and message.reasoning_content:
+            if allow_reasoning_fallback and hasattr(message, 'reasoning_content') and message.reasoning_content:
                 logger.debug("Using reasoning_content instead of content")
                 content = message.reasoning_content
             else:
-                logger.warning("Both content and reasoning_content are empty")
+                logger.warning("Light task final content is empty")
                 return ""
         
         result = content.strip()

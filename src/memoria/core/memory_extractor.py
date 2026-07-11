@@ -6,6 +6,8 @@
 （让主模型在生成对话的同时顺带判断），这是更省成本的做法，已在 orchestrator.py 里使用。
 本模块提供的是"批量回顾多轮对话做摘要"的能力，用于会话结束时的摘要萃取（中期记忆），在对话轮次较多、单轮判断可能遗漏跨轮关联信息时补充使用。
 """
+import re
+
 from memoria.core.llm_client import call_light_task
 
 SUMMARY_PROMPT_TEMPLATE = """请阅读以下这段游戏NPC与玩家的对话，用1-3句话概括这次对话中发生的关键事情（比如玩家做了什么承诺、送了什么礼物、透露了什么个人信息、关系发生了什么变化等）。
@@ -21,6 +23,39 @@ SUMMARY_PROMPT_TEMPLATE = """请阅读以下这段游戏NPC与玩家的对话，
 摘要："""
 
 
+EMPTY_SUMMARY_VALUES = {"无", "无。", "none", "none.", "null", "null.", "没有", "没有。"}
+SUMMARY_META_MARKERS = (
+    "对话内容：",
+    "重要提示",
+    "现在，分析",
+    "现在分析",
+    "关键事情：",
+    "检查是否",
+    "最终决定",
+    "用户要求",
+    "玩家做了什么承诺",
+)
+
+
+def clean_summary_text(raw_text: str | None) -> str | None:
+    """只保留可写入 session_summary 的最终摘要文本。"""
+    text = str(raw_text or "").strip()
+    if not text:
+        return None
+
+    text = re.sub(r"^```(?:text|markdown)?\s*|\s*```$", "", text, flags=re.I).strip()
+    text = re.sub(r"^(?:摘要|最终摘要|最终答案|答案|总结)\s*[:：]\s*", "", text).strip()
+    text = text.strip(" \t\r\n\"'")
+
+    if text.lower() in EMPTY_SUMMARY_VALUES:
+        return None
+
+    if any(marker in text for marker in SUMMARY_META_MARKERS):
+        return None
+
+    return text
+
+
 def summarize_session(history: list[dict]) -> str | None:
     """对一段对话历史做摘要萃取，用于会话结束时写入 session_summary 表。"""
     if not history:
@@ -31,15 +66,5 @@ def summarize_session(history: list[dict]) -> str | None:
     )
     
     prompt = SUMMARY_PROMPT_TEMPLATE.format(transcript=transcript)
-    result = call_light_task(prompt)
-    
-    if not result:
-        return None
-    
-    result_stripped = result.strip()
-    
-    # 检查是否是无效回复
-    if result_stripped.lower() in ("无", "none", "null", "无。", "none.", "null."):
-        return None
-    
-    return result_stripped
+    result = call_light_task(prompt, allow_reasoning_fallback=False)
+    return clean_summary_text(result)

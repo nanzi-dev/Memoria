@@ -107,3 +107,77 @@ def test_session_start_rejects_other_player(monkeypatch):
         )
 
     assert exc_info.value.status_code == 403
+
+
+def test_generate_session_summary_skips_when_message_count_not_enough(monkeypatch):
+    from memoria.api import dialogue
+
+    summarize_called = False
+    saved = []
+    history = [{"role": "user", "content": f"消息 {i}"} for i in range(6)]
+
+    def fake_summarize_session(messages):
+        nonlocal summarize_called
+        summarize_called = True
+        return "摘要"
+
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_session",
+        lambda session_id: {"session_id": session_id, "character_id": "char-1", "player_id": "player-1"},
+    )
+    monkeypatch.setattr(dialogue.repository, "get_short_term_history", lambda session_id, limit_turns=1000: history)
+    monkeypatch.setattr(dialogue, "summarize_session", fake_summarize_session)
+    monkeypatch.setattr(dialogue.repository, "save_session_summary", lambda **kwargs: saved.append(kwargs))
+
+    dialogue._generate_session_summary("session-1")
+
+    assert summarize_called is False
+    assert saved == []
+
+
+def test_generate_session_summary_skips_empty_llm_summary(monkeypatch):
+    from memoria.api import dialogue
+
+    saved = []
+    history = [{"role": "user", "content": f"消息 {i}"} for i in range(7)]
+
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_session",
+        lambda session_id: {"session_id": session_id, "character_id": "char-1", "player_id": "player-1"},
+    )
+    monkeypatch.setattr(dialogue.repository, "get_short_term_history", lambda session_id, limit_turns=1000: history)
+    monkeypatch.setattr(dialogue, "summarize_session", lambda messages: "  ")
+    monkeypatch.setattr(dialogue.repository, "save_session_summary", lambda **kwargs: saved.append(kwargs))
+
+    dialogue._generate_session_summary("session-1")
+
+    assert saved == []
+
+
+def test_generate_session_summary_saves_completed_non_empty_summary(monkeypatch):
+    from memoria.api import dialogue
+
+    saved = {}
+    history = [{"role": "user", "content": f"消息 {i}"} for i in range(7)]
+
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_session",
+        lambda session_id: {"session_id": session_id, "character_id": "char-1", "player_id": "player-1"},
+    )
+    monkeypatch.setattr(dialogue.repository, "get_short_term_history", lambda session_id, limit_turns=1000: history)
+    monkeypatch.setattr(dialogue, "summarize_session", lambda messages: "  有效摘要  ")
+    monkeypatch.setattr(dialogue.repository, "save_session_summary", lambda **kwargs: saved.update(kwargs))
+
+    dialogue._generate_session_summary("session-1")
+
+    assert saved == {
+        "session_id": "session-1",
+        "character_id": "char-1",
+        "player_id": "player-1",
+        "summary_text": "有效摘要",
+        "message_count": 7,
+        "summary_status": "completed",
+    }

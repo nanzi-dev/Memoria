@@ -19,6 +19,7 @@ from memoria.api.user import require_current_user_id
 from memoria.db import repository
 
 router = APIRouter()
+SUMMARY_MIN_MESSAGE_COUNT = 6
 
 
 # =========================
@@ -197,26 +198,27 @@ def _generate_session_summary(session_id: str) -> None:
         return
 
     history = repository.get_short_term_history(session_id, limit_turns=1000)
-    if len(history) == 0:
+    if len(history) <= SUMMARY_MIN_MESSAGE_COUNT:
         return
 
-    summary_text = None
-    summary_status = "failed"
     try:
         summary_text = summarize_session(history)
-        if summary_text:
-            summary_status = "completed"
     except Exception as e:
         print(f"[ERROR] summarize_session failed: {e}")
+        return
+
+    summary_text = str(summary_text or "").strip()
+    if not summary_text:
+        return
 
     try:
         repository.save_session_summary(
             session_id=session_id,
             character_id=session["character_id"],
             player_id=session["player_id"],
-            summary_text=summary_text or "",
+            summary_text=summary_text,
             message_count=len(history),
-            summary_status=summary_status
+            summary_status="completed"
         )
     except Exception as e:
         print(f"[ERROR] Failed to save summary: {e}")
@@ -248,19 +250,9 @@ def _end_session(session_id: str, background_tasks: BackgroundTasks | None = Non
 
     history = repository.get_short_term_history(session_id, limit_turns=1000)
 
-    if len(history) > 0:
-        repository.save_session_summary(
-            session_id=session_id,
-            character_id=session["character_id"],
-            player_id=session["player_id"],
-            summary_text="",
-            message_count=len(history),
-            summary_status="generating"
-        )
-
     repository.end_session(session_id)
 
-    if len(history) > 0 and background_tasks is not None:
+    if len(history) > SUMMARY_MIN_MESSAGE_COUNT and background_tasks is not None:
         background_tasks.add_task(_generate_session_summary, session_id)
 
     return SessionEndResponse(

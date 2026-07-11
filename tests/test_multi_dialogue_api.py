@@ -52,8 +52,13 @@ def _patch_multi_summary(monkeypatch, multi_dialogue, saved_summary):
         multi_dialogue.repository,
         "get_multi_character_history",
         lambda session_id, limit_messages=None: [
-            {"role": "user", "content": "制定计划", "character_id": None, "character_name": None},
-            {"role": "assistant", "content": "我负责侦查。", "character_id": "c1", "character_name": "角色一"},
+            {
+                "role": "user" if i % 2 == 0 else "assistant",
+                "content": f"制定计划 {i}",
+                "character_id": None if i % 2 == 0 else "c1",
+                "character_name": None if i % 2 == 0 else "角色一",
+            }
+            for i in range(7)
         ] if limit_messages is None else [],
     )
     monkeypatch.setattr(
@@ -163,7 +168,7 @@ async def test_end_multi_session_accepts_json_body(monkeypatch):
         "character_ids": ["c1", "c2"],
         "player_id": "player-1",
         "summary_text": "玩家和角色一制定了侦查计划。",
-        "message_count": 2,
+        "message_count": 7,
     }
 
 
@@ -172,7 +177,6 @@ def test_dialogue_end_routes_multi_session_to_group_summary(monkeypatch):
 
     ended = {}
     saved_summary = {}
-    placeholder_summaries = []
 
     monkeypatch.setattr(dialogue.repository, "get_session", lambda session_id: _multi_session(session_id))
     monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: _multi_session(session_id))
@@ -183,24 +187,7 @@ def test_dialogue_end_routes_multi_session_to_group_summary(monkeypatch):
         lambda session_id: ended.update(session_id=session_id),
     )
 
-    def fake_save_session_summary(**kwargs):
-        placeholder_summaries.append(kwargs)
-
-    def fake_get_session_summary(session_id):
-        if placeholder_summaries:
-            return {
-                "summary_text": placeholder_summaries[-1].get("summary_text", ""),
-                "message_count": placeholder_summaries[-1].get("message_count", 0),
-                "summary_status": placeholder_summaries[-1].get("summary_status"),
-            }
-        return None
-
-    monkeypatch.setattr(
-        multi_dialogue.repository,
-        "save_session_summary",
-        fake_save_session_summary,
-    )
-    monkeypatch.setattr(dialogue.repository, "get_session_summary", fake_get_session_summary)
+    monkeypatch.setattr(dialogue.repository, "get_session_summary", lambda session_id: None)
 
     tasks = FakeBackgroundTasks()
     response = dialogue.session_end(
@@ -211,7 +198,7 @@ def test_dialogue_end_routes_multi_session_to_group_summary(monkeypatch):
 
     assert response.session_id == "session-1"
     assert response.summary is None
-    assert response.message_count == 2
+    assert response.message_count == 0
     assert ended == {"session_id": "session-1"}
     assert len(tasks.tasks) == 1
 
@@ -288,16 +275,53 @@ async def test_end_multi_session_summary_failure_does_not_block_end(monkeypatch)
     assert response["session_id"] == "session-1"
     assert end_called is True
     assert len(tasks.tasks) == 1
-    assert [s["summary_status"] for s in placeholder_summaries] == ["generating", "generating"]
+    assert placeholder_summaries == []
 
     func, args, kwargs = tasks.tasks[0]
     func(*args, **kwargs)
-    assert [s["summary_status"] for s in placeholder_summaries] == [
-        "generating",
-        "generating",
-        "failed",
-        "failed",
+    assert placeholder_summaries == []
+
+
+@pytest.mark.asyncio
+async def test_end_multi_session_skips_summary_when_message_count_not_enough(monkeypatch):
+    from memoria.api import multi_dialogue
+
+    ended = {}
+    saved_summary = {}
+    short_history = [
+        {"role": "user", "content": f"消息 {i}", "character_id": None, "character_name": None}
+        for i in range(6)
     ]
+
+    monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: _multi_session(session_id))
+    monkeypatch.setattr(multi_dialogue.repository, "get_session_summary", lambda session_id: None)
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_multi_character_history",
+        lambda session_id, limit_messages=None: short_history,
+    )
+    monkeypatch.setattr(
+        multi_dialogue.multi_character_memory,
+        "save_multi_character_summary",
+        lambda **kwargs: saved_summary.update(kwargs),
+    )
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "end_session",
+        lambda session_id: ended.update(session_id=session_id),
+    )
+
+    tasks = FakeBackgroundTasks()
+    response = await multi_dialogue.end_multi_session(
+        multi_dialogue.EndMultiSessionRequest(session_id="session-1"),
+        tasks,
+        current_user_id="player-1",
+    )
+
+    assert response["session_id"] == "session-1"
+    assert ended == {"session_id": "session-1"}
+    assert tasks.tasks == []
+    assert saved_summary == {}
 
 
 @pytest.mark.asyncio

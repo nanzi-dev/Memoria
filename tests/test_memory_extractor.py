@@ -36,6 +36,44 @@ class TestPromptBuilder:
         assert p_low != p_high
 
 class TestMemoryExtractor:
+    def test_clean_summary_text_rejects_prompt_and_analysis(self):
+        from memoria.core.memory_extractor import clean_summary_text
+
+        raw = """首先，用户要求我阅读游戏NPC与玩家的对话，然后用1-3句话概括这次对话中发生的关键事情。
+
+重要提示：
+- 忽略寒暄和不重要的细节。
+
+对话内容：
+- 玩家：拜拜啦
+- NPC：路上小心。
+
+现在，分析对话内容：
+- 双方进行了友好的告别。
+
+最终决定：对话中没有重大事件。"""
+
+        assert clean_summary_text(raw) is None
+
+    def test_summarize_session_uses_final_content_only(self, monkeypatch):
+        from memoria.core import memory_extractor
+
+        called = {}
+
+        def fake_call_light_task(prompt, allow_reasoning_fallback=True):
+            called["allow_reasoning_fallback"] = allow_reasoning_fallback
+            return "摘要：玩家表示任务尚未完成，NPC提醒玩家继续处理任务。"
+
+        monkeypatch.setattr(memory_extractor, "call_light_task", fake_call_light_task)
+
+        result = memory_extractor.summarize_session([
+            {"role": "user", "content": "没有啊"},
+            {"role": "assistant", "content": "嗯。那你该去忙了。"},
+        ])
+
+        assert called["allow_reasoning_fallback"] is False
+        assert result == "玩家表示任务尚未完成，NPC提醒玩家继续处理任务。"
+
     def test_format_messages_empty(self):
         from memoria.core.multi_character_memory import _format_messages_for_extraction as _format_messages
         assert _format_messages([]) == ""
