@@ -346,6 +346,25 @@ export default function ChatRoom() {
     return char?.is_active == null || char?.is_active === true || char?.is_active === 1;
   }
 
+  function getCharacterCard(char, charList = allChars) {
+    if (!char?.character_id) return null;
+    return charList.find(c => c.character_id === char.character_id) || null;
+  }
+
+  function normalizeParticipant(participant, charList = allChars) {
+    const card = getCharacterCard(participant, charList);
+    const participantActive = isCharacterActive(participant);
+    const cardActive = card ? isCharacterActive(card) : true;
+
+    return {
+      ...participant,
+      character_id: participant?.character_id || card?.character_id,
+      name: participant?.name || card?.name || participant?.character_id || '未知',
+      avatar_url: participant?.avatar_url || card?.avatar_url || null,
+      is_active: participantActive && cardActive,
+    };
+  }
+
 
 
   function clearIdleSessionEnd(sessionId = null) {
@@ -533,12 +552,7 @@ export default function ChatRoom() {
           let info = null;
           try {
             info = await multiDialogue.getSessionInfo(s.session_id);
-            groupParticipants = (info.participants || []).map(p => ({
-              character_id: p.character_id,
-              name: p.name || p.character_id,
-              avatar_url: p.avatar_url || null,
-              is_active: p.is_active,
-            }));
+            groupParticipants = (info.participants || []).map(p => normalizeParticipant(p, chars));
           } catch {}
 
           const resolvedGroupName = (s.group_name || info?.group_name || '').trim() || '未命名群聊';
@@ -873,13 +887,14 @@ export default function ChatRoom() {
     if (!cleanGroupName) { setError('请输入群聊名称'); return; }
     if (groupNameExists) { setError('群聊名称已存在，请换一个名称'); return; }
     if (participants.length < 2) { setError('至少选择2个角色'); return; }
-    if (participants.some(p => !isCharacterActive(p))) { setError('离线角色不能用于新建群聊'); return; }
+    const selectedParticipants = participants.map(p => normalizeParticipant(p));
+    if (selectedParticipants.some(p => !isCharacterActive(p))) { setError('离线角色不能用于新建群聊'); return; }
 
     setError(null); setView('single-loading');
 
     try {
 
-      const res = await multiDialogue.startSession(PLAYER_ID, PLAYER_NAME, participants.map(p => p.character_id), cleanGroupName);
+      const res = await multiDialogue.startSession(PLAYER_ID, PLAYER_NAME, selectedParticipants.map(p => p.character_id), cleanGroupName);
 
       setMultiSessionId(res.session_id);
       setMultiSessionStatus('active');
@@ -888,7 +903,7 @@ export default function ChatRoom() {
       clearIdleSessionEnd(res.session_id);
 
       if (res.opening?.dialogue) {
-        setMessages(sortMessagesChronologically([normalizeGroupMessage(res.opening, [...participants, ...allChars])]));
+        setMessages(sortMessagesChronologically([normalizeGroupMessage(res.opening, [...selectedParticipants, ...allChars])]));
       }
 
       setHasMoreHistory(false);
@@ -971,12 +986,7 @@ export default function ChatRoom() {
           setMultiSessionStatus('active');
           setGroupName(continued.group_name || groupName);
           if (continued.participants?.length) {
-            setParticipants(continued.participants.map(p => ({
-              character_id: p.character_id,
-              name: p.name,
-              avatar_url: p.avatar_url,
-              is_active: p.is_active,
-            })));
+            setParticipants(continued.participants.map(p => normalizeParticipant(p)));
           }
           activeSessionRef.current = continued.session_id;
           sessionKindRef.current.set(continued.session_id, 'group');
@@ -1193,7 +1203,7 @@ export default function ChatRoom() {
                   const displayTime = item.last_message_at;
                   const timeStr = formatChatTime(displayTime);
                   if (item.type === 'group') {
-                    const groupParts = item.participants || [];
+                    const groupParts = (item.participants || []).map(p => normalizeParticipant(p));
                     return (
                       <div key={`group-${item.group_name || item.session_id || i}`} onClick={async () => {
                         clearIdleSessionEnd(item.session_id);
@@ -1210,7 +1220,7 @@ export default function ChatRoom() {
                           const info = await multiDialogue.getSessionInfo(item.session_id);
                           setMultiSessionStatus(info.status || item.status || 'active');
                           setGroupName(info.group_name || item.group_name || '');
-                          loadedParticipants = info.participants?.map(p => ({ character_id: p.character_id, name: p.name, avatar_url: p.avatar_url, is_active: p.is_active })) || loadedParticipants;
+                          loadedParticipants = info.participants?.map(p => normalizeParticipant(p)) || loadedParticipants;
                           setParticipants(loadedParticipants);
                         } catch {
                           setParticipants(loadedParticipants);
@@ -1682,7 +1692,8 @@ export default function ChatRoom() {
   }
   function renderGroupChat() {
 
-    const activeParticipantCount = participants.filter(p => isCharacterActive(p)).length;
+    const resolvedParticipants = participants.map(p => normalizeParticipant(p));
+    const activeParticipantCount = resolvedParticipants.filter(p => isCharacterActive(p)).length;
 
     return (
 
@@ -1697,7 +1708,7 @@ export default function ChatRoom() {
 
           <div className="flex -space-x-2">
 
-            {participants.slice(0,3).map(p => (
+            {resolvedParticipants.slice(0,3).map(p => (
 
               <div key={p.character_id} className="memoria-avatar-ring w-9 h-9 rounded-full overflow-hidden border-2 border-[#0d0d14] bg-[#0b0b0c] transition-transform duration-200 hover:-translate-y-0.5">
 
@@ -1711,7 +1722,7 @@ export default function ChatRoom() {
 
           <div className="flex-1 min-w-0">
 
-            <h1 className="font-character text-lg leading-none text-zinc-200 truncate">{groupName || '群聊'} · {participants.length}人</h1>
+            <h1 className="font-character text-lg leading-none text-zinc-200 truncate">{groupName || '群聊'} · {resolvedParticipants.length}人</h1>
 
             <div className="flex items-center gap-1.5 text-[13px] text-cyber-green/30">
 
@@ -1737,9 +1748,9 @@ export default function ChatRoom() {
 
             <div className="p-4 space-y-3">
 
-              <h3 className="text-[13px] text-cyber-green/30 uppercase tracking-[0.2em] flex items-center gap-1.5"><Users size={10} />群成员 ({participants.length})</h3>
+              <h3 className="text-[13px] text-cyber-green/30 uppercase tracking-[0.2em] flex items-center gap-1.5"><Users size={10} />群成员 ({resolvedParticipants.length})</h3>
 
-              {participants.map((p, i) => (
+              {resolvedParticipants.map((p, i) => (
 
                 <div key={p.character_id} className="memoria-card-hover animate-fade-up flex items-center gap-2.5 p-2 rounded-lg hover:bg-white/[0.03] transition-colors" style={{ animationDelay: `${Math.min(i, 10) * 24}ms` }}>
 
@@ -1794,6 +1805,10 @@ export default function ChatRoom() {
   // ═══════════════════════════════════════════════
 
   function renderChatArea(mode) {
+
+    const renderedParticipants = mode === 'group'
+      ? participants.map(p => normalizeParticipant(p))
+      : participants;
 
     return (
 
@@ -2003,7 +2018,7 @@ export default function ChatRoom() {
 
           <div className="px-4 py-1.5 flex items-center gap-2 border-t border-white/[0.03] bg-[#0d0d14]/35 overflow-x-auto shrink-0">
 
-            {participants.map((p, i) => (
+            {renderedParticipants.map((p, i) => (
 
               <div key={p.character_id} className="animate-fade-up flex flex-col items-center gap-0.5 shrink-0" style={{ animationDelay: `${Math.min(i, 12) * 18}ms` }} title={p.name}>
 
