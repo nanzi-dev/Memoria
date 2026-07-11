@@ -18,7 +18,7 @@ function CharacterBadge({ character, onClick, isActive = true }) {
 
   return (
     <div
-      className="relative group animate-fade-up rounded-[28px]"
+      className={`relative animate-fade-up rounded-[28px] ${isActive ? 'group' : ''}`}
       style={{
         width: 320,
         height: 460,
@@ -28,13 +28,17 @@ function CharacterBadge({ character, onClick, isActive = true }) {
       }}
     >
       <div
-        className={`relative cursor-pointer rounded-[28px] transition-all duration-300 hover:z-10 hover:-translate-y-1 ${!isActive ? 'card-disabled' : ''}`}
+        className={`relative cursor-pointer rounded-[28px] transition-all duration-300 ${
+          isActive ? 'hover:z-10 hover:-translate-y-1' : 'card-disabled'
+        }`}
         style={{ width: 320, height: 460, pointerEvents: 'auto' }}
         onDoubleClick={handleClick}
       >
         <Lanyard
           characterInfo={characterInfo}
-          className="transition-[filter,transform] duration-300 group-hover:scale-[1.01] group-hover:drop-shadow-[0_0_28px_rgba(167,239,158,0.18)]"
+          className={`transition-[filter,transform] duration-300 ${
+            isActive ? 'group-hover:scale-[1.01] group-hover:drop-shadow-[0_0_28px_rgba(167,239,158,0.18)]' : ''
+          }`}
         />
       </div>
     </div>

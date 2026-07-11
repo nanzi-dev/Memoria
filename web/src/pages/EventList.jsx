@@ -319,13 +319,16 @@ export default function EventList() {
         </div>
       </div>
 
-      {notice && (
-        <div className="fixed left-1/2 top-20 z-30 -translate-x-1/2 rounded-lg border border-cyber-green/20 bg-[#0d0d14]/95 px-4 py-2 text-sm font-mono text-cyber-green shadow-[0_0_32px_rgba(167,239,158,0.12)]">
-          {notice}
-        </div>
-      )}
-
       <main className="relative z-10 mx-auto max-w-7xl px-4 py-5 sm:px-6">
+        {notice && (
+          <div
+            role="status"
+            className="mb-5 rounded-xl border border-cyber-green/20 bg-cyber-green/[0.055] px-4 py-3 text-sm font-mono text-cyber-green shadow-[0_0_32px_rgba(167,239,158,0.08)] animate-fade-up"
+          >
+            {notice}
+          </div>
+        )}
+
         <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
           <EventStat label="事件总数" value={events.length} />
           <EventStat label="启用中" value={activeCount} />
