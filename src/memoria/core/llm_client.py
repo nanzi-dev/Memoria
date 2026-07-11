@@ -45,6 +45,12 @@ else:
     _light_client = _client
     logger.info("Light task using main LLM client")
 
+
+def _get_light_client():
+    if configs.llm_light_base_url and configs.llm_light_api_key.get_secret_value():
+        return _light_client
+    return _get_client()
+
 # =========================
 # 自定义异常（保留扩展能力）
 # =========================
@@ -428,7 +434,7 @@ def call_light_task(prompt: str) -> str:
     logger.debug(f"Calling light model: {configs.light_model}")
     
     try:
-        response = _retry_call(_get_client().chat.completions.create, 
+        response = _retry_call(_get_light_client().chat.completions.create,
             model = configs.light_model,
             messages = [{"role": "user", "content": prompt}],
             max_tokens = 800,

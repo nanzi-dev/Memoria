@@ -287,6 +287,7 @@ def run_dialogue_turn(session_id: str, player_message: str) -> dict:
             )
     except Exception as e:
         logger.error(f"对话持久化失败: {e}", exc_info=True)
+        raise RuntimeError("对话持久化失败") from e
         
     # =========================
     # 返回结果

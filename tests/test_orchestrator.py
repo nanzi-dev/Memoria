@@ -341,3 +341,63 @@ class TestDialogueTurn:
         }
         assert saved_messages == [("sid", "user", "你好"), ("sid", "assistant", "你好")]
         assert saved_facts == [("char", "player", "玩家主动打招呼")]
+
+    def test_persistence_failure_raises(self, monkeypatch):
+        """核心对话持久化失败时不应返回成功响应"""
+        from types import SimpleNamespace
+        from memoria.core import orchestrator
+
+        card = SimpleNamespace(
+            action_vocabulary=SimpleNamespace(
+                default_action="idle",
+                greeting_actions=[],
+                farewell_actions=[],
+                agreement_actions=[],
+                disagreement_actions=[],
+                emotional_reactions=[],
+            ),
+            runtime_state_schema=SimpleNamespace(
+                current_mood=SimpleNamespace(emotions=["neutral"])
+            ),
+        )
+
+        monkeypatch.setattr(orchestrator.repository, "get_session", lambda session_id: {
+            "session_id": session_id,
+            "character_id": "char",
+            "player_id": "player",
+            "player_name": "Tester",
+            "created_at": None,
+            "status": "active",
+        })
+        monkeypatch.setattr(orchestrator.character_loader, "load_character_card", lambda character_id: card)
+        monkeypatch.setattr(orchestrator.repository, "get_runtime_state", lambda *args, **kwargs: {
+            "affection_level": 0,
+            "trust_level": 0,
+            "current_mood": "neutral",
+        })
+        monkeypatch.setattr(orchestrator.repository, "get_short_term_history", lambda *args, **kwargs: [])
+        monkeypatch.setattr(orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: [])
+        monkeypatch.setattr(orchestrator.prompt_builder, "build_system_prompt", lambda *args, **kwargs: "prompt")
+        monkeypatch.setattr(orchestrator.llm_client, "call_role_turn", lambda *args, **kwargs: {
+            "dialogue": "你好",
+            "action": "idle",
+            "affinity_delta": 0,
+            "trust_delta": 0,
+            "mood_after": "neutral",
+            "memory_worth_keeping": None,
+        })
+        monkeypatch.setattr(orchestrator.event_runtime, "detect_and_execute_events", lambda *args, **kwargs: [])
+        monkeypatch.setattr(
+            orchestrator.event_runtime,
+            "apply_event_results_to_dialogue_state",
+            lambda event_results, dialogue, affinity, trust, mood: (dialogue, affinity, trust, mood, [], None),
+        )
+        monkeypatch.setattr(orchestrator.repository, "save_runtime_state", lambda *args, **kwargs: None)
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "append_short_term_message",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("db write failed")),
+        )
+
+        with pytest.raises(RuntimeError, match="对话持久化失败"):
+            orchestrator.run_dialogue_turn("sid", "你好")

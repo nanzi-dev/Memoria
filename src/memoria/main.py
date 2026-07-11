@@ -10,7 +10,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -19,7 +19,7 @@ from memoria.api.character_admin import router as character_admin_router
 from memoria.api.event_admin import router as event_admin_router
 from memoria.api.relationship import router as relationship_router
 from memoria.api.multi_dialogue import router as multi_dialogue_router
-from memoria.api.user import router as user_router
+from memoria.api.user import router as user_router, require_current_user_id
 from memoria.db.repository import init_db
 from memoria.core.config import configs
 from memoria.core.event_runtime import ensure_default_event_templates
@@ -133,7 +133,7 @@ async def ready():
 # 日志级别动态调整
 # =========================
 @app.post("/admin/log-level", tags=["system"])
-async def set_log_level(level: str = "INFO"):
+async def set_log_level(level: str = "INFO", _current_user_id: str = Depends(require_current_user_id)):
     """动态调整日志级别（DEBUG/INFO/WARNING/ERROR）"""
     level = level.upper()
     if level not in ("DEBUG", "INFO", "WARNING", "ERROR"):

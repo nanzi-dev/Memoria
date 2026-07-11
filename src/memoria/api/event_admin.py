@@ -12,8 +12,9 @@ import logging
 from typing import Optional
 
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from memoria.api.user import require_current_user_id
 from memoria.core.event_schema import (
     EventDefinition,
     TriggerCondition,
@@ -25,7 +26,7 @@ from memoria.core import event_runtime
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_current_user_id)])
 
 
 # =========================

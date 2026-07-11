@@ -8,21 +8,22 @@
 """
 
 import base64
-import requests
 import json
 import logging
 import mimetypes
 import threading
 from pathlib import Path
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
+from memoria.api.avatar_fetcher import download_remote_image
+from memoria.api.user import require_current_user_id
 from memoria.core import character_loader
 from memoria.core.character_schema import CharacterCard
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_current_user_id)])
 
 
 # =========================
@@ -432,26 +433,18 @@ def _download_avatar_sync(avatar_url: str) -> str | None:
     """尝试下载远程头像 URL 并返回 base64 data URL，失败返回 None"""
     if not avatar_url or avatar_url.startswith("data:"):
         return None
-    if not (avatar_url.startswith("http://") or avatar_url.startswith("https://")):
-        return None
     try:
-        import requests as _r
-        resp = _r.get(avatar_url, timeout=AVATAR_DOWNLOAD_TIMEOUT,
-                      headers={"User-Agent": "Memoria/1.0"})
-        resp.raise_for_status()
-        ct = resp.headers.get("Content-Type", "image/png")
-        if not ct.startswith("image/"):
-            logger.warning(f"URL 不是图片: {ct}")
-            return None
-        data = resp.content
+        image = download_remote_image(avatar_url, timeout=AVATAR_DOWNLOAD_TIMEOUT)
+        data = image.data
+        content_type = image.content_type
         # 超过尺寸限制时用 PIL 等比压缩
         if len(data) > MAX_AVATAR_SIZE:
             data = _resize_image(data, MAX_AVATAR_DIMENSION)
             if data is None:
-                logger.warning(f"图片过大且压缩失败: {len(resp.content)}")
+                logger.warning("图片过大且压缩失败")
                 return None
-        b64 = base64.b64encode(data).decode("ascii")
-        return f"data:{ct};base64,{b64}"
+            content_type = "image/jpeg"
+        return f"data:{content_type};base64,{base64.b64encode(data).decode('ascii')}"
     except Exception as e:
         logger.warning(f"下载头像 URL 失败，保留原始 URL: {e}")
         return None
@@ -577,19 +570,9 @@ def set_character_avatar_url(character_id: str, req: AvatarUrlRequest):
                 success=True, message="头像已清除", character_id=character_id
             )
         
-        # 服务端下载图片，转为 data URL
-        import requests as _requests
-        try:
-            resp = _requests.get(url, timeout=10, headers={"User-Agent": "Memoria/1.0"})
-            resp.raise_for_status()
-        except Exception as fetch_err:
-            raise HTTPException(status_code=400, detail=f"无法获取图片: {str(fetch_err)}")
-        
-        content_type = resp.headers.get("Content-Type", "image/png")
-        if not content_type.startswith("image/"):
-            raise HTTPException(status_code=400, detail=f"URL 返回的不是图片: {content_type}")
-        
-        data = resp.content
+        image = download_remote_image(url, timeout=10)
+        data = image.data
+        content_type = image.content_type
         if len(data) > MAX_AVATAR_SIZE:
             data = _resize_image(data, MAX_AVATAR_DIMENSION)
             if data is None:

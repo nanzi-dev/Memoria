@@ -80,7 +80,6 @@ def get_conn():
     
     # WAL 模式（推荐用于并发读写）
     conn.execute("PRAGMA journal_mode=WAL;")
-    _migrate(conn)
     
     try:
         yield conn
@@ -106,6 +105,14 @@ CREATE TABLE IF NOT EXISTS users (
     avatar_url      TEXT,                  -- base64 data URL
     created_at      TEXT,
     updated_at      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS auth_token (
+    token           TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL,
+    created_at      TEXT NOT NULL,
+    expires_at      TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
 
 -- =========================
@@ -416,6 +423,9 @@ ON event_context_state(character_id, player_id, status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_event_schedule_due
 ON event_schedule_state(status, next_run_at);
 
+CREATE INDEX IF NOT EXISTS idx_auth_token_user
+ON auth_token(user_id, expires_at);
+
 
 -- =========================
 -- 多角色共享记忆（角色间）
@@ -494,27 +504,30 @@ def _migrate(conn):
             created_at      TEXT,
             updated_at      TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS auth_token (
+            token           TEXT PRIMARY KEY,
+            user_id         TEXT NOT NULL,
+            created_at      TEXT NOT NULL,
+            expires_at      TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_auth_token_user
+        ON auth_token(user_id, expires_at);
         """
     )
 
     def add_column(table: str, column_sql: str) -> None:
         try:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_sql}")
-        except Exception:
-            pass  # 列已存在，跳过
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
 
-    try:
-        conn.execute("ALTER TABLE character_card ADD COLUMN avatar_url TEXT")
-    except Exception:
-        pass  # 列已存在，跳过
-    try:
-        conn.execute("ALTER TABLE session_summary ADD COLUMN summary_status TEXT DEFAULT 'completed'")
-    except Exception:
-        pass  # 列已存在，跳过
-    try:
-        conn.execute("ALTER TABLE session ADD COLUMN group_name TEXT")
-    except Exception:
-        pass  # 列已存在，跳过
+    add_column("character_card", "avatar_url TEXT")
+    add_column("session_summary", "summary_status TEXT DEFAULT 'completed'")
+    add_column("session", "group_name TEXT")
     add_column("session", "group_thread_id TEXT")
     add_column("event_definition", "schedule TEXT")
     add_column("event_definition", "template_id TEXT")
@@ -2343,7 +2356,19 @@ def get_user_by_id(user_id: str) -> dict | None:
         return _row_to_dict(row)
 
 
-def update_user_profile(user_id: str, username: str = None, gender: str = None, avatar_url: str = None):
+def update_user_password_hash(user_id: str, password_hash: str):
+    """更新用户密码哈希。"""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE users SET password_hash = ?, updated_at = ? WHERE user_id = ?",
+            (password_hash, _now(), user_id),
+        )
+
+
+_UNSET = object()
+
+
+def update_user_profile(user_id: str, username: str = None, gender: str = None, avatar_url=_UNSET):
     """更新用户资料"""
     fields = []
     params = []
@@ -2353,7 +2378,7 @@ def update_user_profile(user_id: str, username: str = None, gender: str = None, 
     if gender is not None:
         fields.append("gender = ?")
         params.append(gender)
-    if avatar_url is not None:
+    if avatar_url is not _UNSET:
         fields.append("avatar_url = ?")
         params.append(avatar_url)
     if not fields:
@@ -2366,3 +2391,40 @@ def update_user_profile(user_id: str, username: str = None, gender: str = None, 
             f"UPDATE users SET {', '.join(fields)} WHERE user_id = ?",
             params,
         )
+
+
+def create_auth_token(token: str, user_id: str, expires_at: str):
+    """持久化登录 token。"""
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO auth_token (token, user_id, created_at, expires_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (token, user_id, _now(), expires_at),
+        )
+
+
+def get_user_id_for_auth_token(token: str) -> str | None:
+    """返回有效 token 对应的 user_id；过期或不存在返回 None。"""
+    if not token:
+        return None
+    now = _now()
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT user_id FROM auth_token
+            WHERE token = ? AND expires_at > ?
+            """,
+            (token, now),
+        ).fetchone()
+        if row:
+            return row["user_id"]
+        conn.execute("DELETE FROM auth_token WHERE token = ? OR expires_at <= ?", (token, now))
+    return None
+
+
+def delete_auth_token(token: str):
+    """删除登录 token。"""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM auth_token WHERE token = ?", (token,))

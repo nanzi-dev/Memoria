@@ -4,27 +4,64 @@
 
 import base64
 import hashlib
+import hmac
 import mimetypes
 import secrets
 import re
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Header, Response, Cookie
 from pydantic import BaseModel, Field
 
+from memoria.api.avatar_fetcher import download_remote_image
+from memoria.core.config import configs
 from memoria.db import repository
 
 router = APIRouter()
 
-# 简单的 token 存储（生产环境应使用 JWT）
+# 兼容旧测试/开发进程中的临时 token；新登录态持久化到数据库。
 _tokens: dict[str, str] = {}  # token -> user_id
 
 ALLOWED_MIME_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2MB
 AUTH_COOKIE_NAME = "memoria-token"
 AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 天
+PASSWORD_HASH_ALGORITHM = "pbkdf2_sha256"
+PASSWORD_HASH_ITERATIONS = 210_000
 
 def _hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        bytes.fromhex(salt),
+        PASSWORD_HASH_ITERATIONS,
+    ).hex()
+    return f"{PASSWORD_HASH_ALGORITHM}${PASSWORD_HASH_ITERATIONS}${salt}${digest}"
+
+
+def _legacy_sha256(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
+
+
+def _verify_password(password: str, stored_hash: str) -> bool:
+    if stored_hash.startswith(f"{PASSWORD_HASH_ALGORITHM}$"):
+        try:
+            _, iterations, salt, expected = stored_hash.split("$", 3)
+            digest = hashlib.pbkdf2_hmac(
+                "sha256",
+                password.encode("utf-8"),
+                bytes.fromhex(salt),
+                int(iterations),
+            ).hex()
+            return hmac.compare_digest(digest, expected)
+        except Exception:
+            return False
+    return hmac.compare_digest(_legacy_sha256(password), stored_hash)
+
+
+def _needs_password_rehash(stored_hash: str) -> bool:
+    return not stored_hash.startswith(f"{PASSWORD_HASH_ALGORITHM}${PASSWORD_HASH_ITERATIONS}$")
 
 def _gen_token() -> str:
     return secrets.token_hex(32)
@@ -42,9 +79,14 @@ def _set_auth_cookie(response: Response, token: str) -> None:
         max_age=AUTH_COOKIE_MAX_AGE,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=configs.auth_cookie_secure,
         path="/",
     )
+
+
+def _store_auth_token(token: str, user_id: str) -> None:
+    expires_at = (datetime.now(timezone.utc) + timedelta(seconds=AUTH_COOKIE_MAX_AGE)).isoformat()
+    repository.create_auth_token(token, user_id, expires_at)
 
 
 def _get_token_from_request(
@@ -95,6 +137,12 @@ def _resize_image(data: bytes, max_dim: int = 512) -> bytes | None:
 
 def get_current_user_id(token: str) -> str | None:
     """从 token 获取 user_id"""
+    try:
+        uid = repository.get_user_id_for_auth_token(token)
+        if uid:
+            return uid
+    except Exception:
+        pass
     return _tokens.get(token)
 
 
@@ -162,7 +210,7 @@ def register(req: RegisterRequest, response: Response):
 
     repository.create_user(uid, req.username, _hash_password(req.password), req.gender)
     token = _gen_token()
-    _tokens[token] = uid
+    _store_auth_token(token, uid)
     _set_auth_cookie(response, token)
     user = repository.get_user_by_id(uid)
     return AuthResponse(token=token, user=UserResponse(
@@ -176,11 +224,14 @@ def register(req: RegisterRequest, response: Response):
 @router.post("/user/login", response_model=AuthResponse)
 def login(req: LoginRequest, response: Response):
     user = repository.get_user_by_username(req.username)
-    if not user or user["password_hash"] != _hash_password(req.password):
+    if not user or not _verify_password(req.password, user["password_hash"]):
         raise HTTPException(401, "用户名或密码错误")
 
+    if _needs_password_rehash(user["password_hash"]):
+        repository.update_user_password_hash(user["user_id"], _hash_password(req.password))
+
     token = _gen_token()
-    _tokens[token] = user["user_id"]
+    _store_auth_token(token, user["user_id"])
     _set_auth_cookie(response, token)
     return AuthResponse(token=token, user=UserResponse(
         user_id=user["user_id"],
@@ -203,6 +254,7 @@ def logout(
     try:
         auth_token = _get_token_from_request(authorization, token, cookie_token)
         _tokens.pop(auth_token, None)
+        repository.delete_auth_token(auth_token)
     except HTTPException:
         pass
     response.delete_cookie(AUTH_COOKIE_NAME, path="/")
@@ -314,18 +366,9 @@ def set_avatar_url(
         repository.update_user_profile(uid, avatar_url=None)
         return OperationResponse(success=True, message="头像已清除")
 
-    import requests as _requests
-    try:
-        resp = _requests.get(url, timeout=10, headers={"User-Agent": "Memoria/1.0"})
-        resp.raise_for_status()
-    except Exception as e:
-        raise HTTPException(400, f"无法获取图片: {e}")
-
-    ct = resp.headers.get("Content-Type", "image/png")
-    if not ct.startswith("image/"):
-        raise HTTPException(400, f"URL 返回的不是图片: {ct}")
-
-    data = resp.content
+    image = download_remote_image(url, timeout=10)
+    data = image.data
+    ct = image.content_type
     if len(data) > MAX_AVATAR_SIZE:
         data = _resize_image(data)
         if data is None:

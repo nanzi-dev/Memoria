@@ -8,8 +8,9 @@
 """
 
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from memoria.api.user import require_current_user_id
 from memoria.db import repository
 
 router = APIRouter()
@@ -77,7 +78,10 @@ class OperationResponse(BaseModel):
 # 创建关系
 # =========================
 @router.post("/relationships", response_model=OperationResponse)
-def create_relationship(req: RelationshipCreateRequest):
+def create_relationship(
+    req: RelationshipCreateRequest,
+    _current_user_id: str = Depends(require_current_user_id),
+):
     """创建角色关系"""
     try:
         # 检查是否已存在关系
@@ -142,7 +146,8 @@ def get_relationship(character_id_a: str, character_id_b: str):
 def update_relationship(
     character_id_a: str,
     character_id_b: str,
-    req: RelationshipUpdateRequest
+    req: RelationshipUpdateRequest,
+    _current_user_id: str = Depends(require_current_user_id),
 ):
     """更新角色关系"""
     try:
@@ -185,7 +190,11 @@ def update_relationship(
 # 删除关系
 # =========================
 @router.delete("/relationships/{character_id_a}/{character_id_b}", response_model=OperationResponse)
-def delete_relationship(character_id_a: str, character_id_b: str):
+def delete_relationship(
+    character_id_a: str,
+    character_id_b: str,
+    _current_user_id: str = Depends(require_current_user_id),
+):
     """删除角色关系"""
     try:
         success = repository.delete_character_relationship(
@@ -298,7 +307,10 @@ def get_relationship_network(character_ids: str | None = None):
 # 批量创建关系
 # =========================
 @router.post("/relationships/batch", response_model=OperationResponse)
-def batch_create_relationships(relationships: list[RelationshipCreateRequest]):
+def batch_create_relationships(
+    relationships: list[RelationshipCreateRequest],
+    _current_user_id: str = Depends(require_current_user_id),
+):
     """批量创建角色关系"""
     try:
         success_count = 0
