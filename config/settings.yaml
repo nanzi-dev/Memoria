@@ -17,6 +17,7 @@ llm:
   light_api_key: ''
 memory:
   short_term_turns: 8
+  long_term_interval_turns: 5
   vector_search_top_k: 10
 database:
   sqlite_path: ./data/sqlite_db/memoria.db

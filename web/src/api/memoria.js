@@ -316,7 +316,7 @@ export const multiDialogue = {
     return request(`/multi-dialogue/session/${sessionId}`);
   },
   /** 获取多角色对话历史 */
-  getHistory(sessionId, limit = 50) {
-    return request(`/multi-dialogue/history/${sessionId}?limit=${limit}`);
+  getHistory(sessionId, offset = 0, limit = 20) {
+    return request(`/multi-dialogue/history/${sessionId}?offset=${offset}&limit=${limit}`);
   },
 };

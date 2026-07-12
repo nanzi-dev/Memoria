@@ -69,6 +69,74 @@ class TestLongTermFact:
         facts = repository.get_long_term_facts("fC","fP",5)
         assert any("猫" in f for f in facts)
 
+    @pytest.mark.parametrize(
+        "empty_value",
+        [None, "", "无", "无。", "暂无", "没有", "none", "null", "无值得记住的信息"],
+    )
+    def test_save_long_term_fact_skips_empty_values(self, empty_value):
+        character_id = f"empty_c_{uuid.uuid4().hex[:8]}"
+        player_id = f"empty_p_{uuid.uuid4().hex[:8]}"
+
+        fact_id = repository.save_long_term_fact(character_id, player_id, empty_value)
+
+        assert fact_id is None
+        assert repository.get_long_term_facts(character_id, player_id, 5) == []
+
+    def test_long_term_memory_saves_only_at_checkpoint(self):
+        session_id = str(uuid.uuid4())
+        character_id = f"checkpoint_c_{uuid.uuid4().hex[:8]}"
+        player_id = f"checkpoint_p_{uuid.uuid4().hex[:8]}"
+        repository.create_session(session_id, character_id, player_id, "Tester")
+
+        for turn in range(1, 5):
+            repository.append_short_term_message(session_id, "user", f"玩家消息 {turn}")
+            repository.append_short_term_message(session_id, "assistant", f"角色回复 {turn}")
+            fact_id = repository.save_long_term_fact_if_checkpoint(
+                session_id,
+                character_id,
+                player_id,
+                f"第 {turn} 轮候选记忆",
+                interval_turns=5,
+            )
+            assert fact_id is None
+
+        repository.append_short_term_message(session_id, "user", "玩家消息 5")
+        repository.append_short_term_message(session_id, "assistant", "角色回复 5")
+        fact_id = repository.save_long_term_fact_if_checkpoint(
+            session_id,
+            character_id,
+            player_id,
+            "玩家约定明天一起训练",
+            interval_turns=5,
+        )
+
+        assert fact_id is not None
+        assert repository.get_session_user_turn_count(session_id) == 5
+        assert repository.get_long_term_facts(character_id, player_id, 5) == [
+            "玩家约定明天一起训练"
+        ]
+
+    def test_long_term_memory_skips_empty_value_at_checkpoint(self):
+        session_id = str(uuid.uuid4())
+        character_id = f"empty_checkpoint_c_{uuid.uuid4().hex[:8]}"
+        player_id = f"empty_checkpoint_p_{uuid.uuid4().hex[:8]}"
+        repository.create_session(session_id, character_id, player_id, "Tester")
+
+        for turn in range(5):
+            repository.append_short_term_message(session_id, "user", f"玩家消息 {turn}")
+            repository.append_short_term_message(session_id, "assistant", f"角色回复 {turn}")
+
+        fact_id = repository.save_long_term_fact_if_checkpoint(
+            session_id,
+            character_id,
+            player_id,
+            "无",
+            interval_turns=5,
+        )
+
+        assert fact_id is None
+        assert repository.get_long_term_facts(character_id, player_id, 5) == []
+
     def test_get_long_term_facts_filters_created_after(self):
         character_id = f"lfc_{uuid.uuid4().hex[:8]}"
         player_id = f"lfp_{uuid.uuid4().hex[:8]}"
@@ -373,6 +441,56 @@ class TestMultiSession:
         history = repository.get_multi_character_thread_history(first_sid, limit_messages=None)
         assert [m["content"] for m in history] == ["第一段消息", "第二段消息"]
         assert [m["session_id"] for m in history] == [first_sid, second_sid]
+
+    def test_multi_character_thread_history_paginates_from_latest_messages(self):
+        thread_id = str(uuid.uuid4())
+        first_sid = str(uuid.uuid4())
+        second_sid = str(uuid.uuid4())
+        player_id = f"gthp_{uuid.uuid4().hex[:8]}"
+
+        assert repository.create_multi_character_session(
+            first_sid,
+            player_id,
+            "Player",
+            ["gc1", "gc2"],
+            group_name="分页群聊",
+            group_thread_id=thread_id,
+        )
+        assert repository.create_multi_character_session(
+            second_sid,
+            player_id,
+            "Player",
+            ["gc1", "gc2"],
+            group_name="分页群聊",
+            group_thread_id=thread_id,
+        )
+
+        for index in range(3):
+            repository.append_multi_character_message(first_sid, "user", f"旧消息-{index}")
+        for index in range(3):
+            repository.append_multi_character_message(
+                second_sid,
+                "assistant",
+                f"新消息-{index}",
+                "gc1",
+                "角色一",
+            )
+
+        latest, has_more = repository.get_multi_character_thread_history_paginated(
+            second_sid,
+            offset=0,
+            limit=2,
+        )
+        older, older_has_more = repository.get_multi_character_thread_history_paginated(
+            second_sid,
+            offset=2,
+            limit=4,
+        )
+
+        assert [m["content"] for m in latest] == ["新消息-1", "新消息-2"]
+        assert has_more is True
+        assert [m["content"] for m in older] == ["旧消息-0", "旧消息-1", "旧消息-2", "新消息-0"]
+        assert older_has_more is False
 
     def test_multi_character_thread_history_merges_same_name_sessions(self):
         first_sid = str(uuid.uuid4())

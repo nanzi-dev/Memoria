@@ -21,6 +21,7 @@ from memoria.core import (
     prompt_builder,
     relationship_context,
 )
+from memoria.core.config import configs
 from memoria.core.speaking_strategy import HybridStrategy, SpeakingStrategy
 from memoria.db import repository
 
@@ -729,13 +730,13 @@ class MultiCharacterOrchestrator:
         )
         
         # 记忆萃取
-        memory_fact = result.get("memory_worth_keeping")
-        if memory_fact and str(memory_fact).strip().lower() not in ("none", "null", ""):
-            repository.save_long_term_fact(
-                character_id,
-                self.player_id,
-                str(memory_fact).strip()
-            )
+        repository.save_long_term_fact_if_checkpoint(
+            self.session_id,
+            character_id,
+            self.player_id,
+            result.get("memory_worth_keeping"),
+            configs.long_term_memory_interval_turns,
+        )
         
         return {
             "character_id": character_id,

@@ -95,7 +95,7 @@ JSON 格式示例：
 - affinity_delta: 必填整数，-10到10之间
 - trust_delta: 必填整数，-10到10之间
 - mood_after: 必填字符串，必须是 {mood_values} 中的一个
-- memory_worth_keeping: 字符串或 null
+- memory_worth_keeping: 最近几轮对话中值得长期记住的一条稳定事实；没有则必须填 null，禁止填写“无”
 
 ⚠️ 最终强调：直接输出 JSON 对象，前后不要有任何其他内容！
 """
@@ -482,7 +482,7 @@ def build_multi_character_system_prompt(
         '  "affinity_delta": 好感度变化(-10到10),',
         '  "trust_delta": 信任度变化(-10到10),',
         '  "mood_after": "对话后的情绪",',
-        '  "memory_worth_keeping": "值得记住的信息（可选，无则填null）"',
+        '  "memory_worth_keeping": "最近几轮中值得长期记住的一条稳定事实（没有则填null，禁止填无）"',
         '}',
         "",
         f"可用情绪选项：{_join(mood_values)}",

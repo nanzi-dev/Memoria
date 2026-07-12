@@ -33,6 +33,7 @@ class Configs(BaseSettings):
     database_url: str = ""
     auth_cookie_secure: bool = False
     short_term_memory_turns: int = Field(default = 8, ge = 1, le = 50)
+    long_term_memory_interval_turns: int = Field(default = 5, ge = 1, le = 50)
     max_output_tokens: int = Field(default = 600, ge = 1, le = 4096)
     
     # 向量数据库配置

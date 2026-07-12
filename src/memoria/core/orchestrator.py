@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from memoria.core import character_loader, llm_client, multi_character_memory, prompt_builder
+from memoria.core.config import configs
 from memoria.core.event_schema import EventContext
 from memoria.core import event_runtime, relationship_context
 from memoria.db import repository
@@ -760,12 +761,13 @@ def run_dialogue_turn(
             event_notification=event_notification,
         )
 
-        if memory_fact and str(memory_fact).strip().lower() not in ("none", "null", ""):
-            repository.save_long_term_fact(
-                character_id,
-                player_id,
-                str(memory_fact).strip()
-            )
+        repository.save_long_term_fact_if_checkpoint(
+            session_id,
+            character_id,
+            player_id,
+            memory_fact,
+            configs.long_term_memory_interval_turns,
+        )
     except Exception as e:
         logger.error(f"对话持久化失败: {e}", exc_info=True)
         raise RuntimeError("对话持久化失败") from e

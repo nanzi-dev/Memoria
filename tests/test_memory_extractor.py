@@ -359,6 +359,7 @@ class TestConfig:
     def test_defaults(self):
         from memoria.core.config import configs
         assert configs.short_term_memory_turns >= 1
+        assert configs.long_term_memory_interval_turns >= 1
         assert configs.max_output_tokens > 0
         assert configs.vector_search_top_k >= 1
 

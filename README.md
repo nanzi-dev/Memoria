@@ -314,6 +314,7 @@ DATABASE_PATH=./data/sqlite_db/memoria.db      # SQLite 数据库文件路径（
 DATABASE_URL=                                  # PostgreSQL 连接串；留空时使用 SQLite
 AUTH_COOKIE_SECURE=false                       # HTTPS 部署时可设为 true
 SHORT_TERM_MEMORY_TURNS=8                      # 短期记忆轮数
+LONG_TERM_MEMORY_INTERVAL_TURNS=5              # 每隔多少个玩家回合保存一次长期记忆
 MAX_OUTPUT_TOKENS=600                          # 单轮最大输出 token 数
 
 # ====== 向量数据库配置 ======

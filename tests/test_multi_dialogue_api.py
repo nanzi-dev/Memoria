@@ -99,6 +99,62 @@ def _patch_multi_summary(monkeypatch, multi_dialogue, saved_summary):
 
 
 @pytest.mark.asyncio
+async def test_multi_dialogue_history_returns_paginated_thread_messages(monkeypatch):
+    from memoria.api import multi_dialogue
+
+    requested_page = {}
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session",
+        lambda session_id: _multi_session(session_id),
+    )
+
+    def fake_paginated_history(session_id, offset, limit):
+        requested_page.update(session_id=session_id, offset=offset, limit=limit)
+        return (
+            [
+                {
+                    "message_id": 21,
+                    "session_id": "older-session",
+                    "role": "user",
+                    "content": "更早的消息",
+                    "character_id": None,
+                    "character_name": None,
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                }
+            ],
+            True,
+        )
+
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_multi_character_thread_history_paginated",
+        fake_paginated_history,
+    )
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session_participants",
+        lambda session_id, only_active=False: [],
+    )
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_multi_character_thread_sessions",
+        lambda session_id: [],
+    )
+
+    response = await multi_dialogue.get_multi_dialogue_history(
+        "session-1",
+        offset=20,
+        limit=10,
+        current_user_id="player-1",
+    )
+
+    assert requested_page == {"session_id": "session-1", "offset": 20, "limit": 10}
+    assert response.has_more is True
+    assert [message["content"] for message in response.messages] == ["更早的消息"]
+
+
+@pytest.mark.asyncio
 async def test_start_multi_session_rejects_duplicate_group_name(monkeypatch):
     from memoria.api import multi_dialogue
 

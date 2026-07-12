@@ -135,6 +135,7 @@ class ContinueMultiSessionResponse(BaseModel):
 class MultiDialogueHistory(BaseModel):
     """多角色对话历史"""
     messages: list[dict]
+    has_more: bool
     session_info: dict
 
 
@@ -605,15 +606,17 @@ async def continue_multi_session(
 @router.get("/history/{session_id}", response_model=MultiDialogueHistory)
 async def get_multi_dialogue_history(
     session_id: str,
+    offset: int = Query(0, ge=0, description="已加载消息数量"),
     limit: int = Query(50, ge=1, le=200, description="消息数量限制"),
     current_user_id: str = Depends(require_current_user_id),
 ):
     """
     获取多角色对话历史
     
-    返回会话的完整对话记录，包含每条消息的发言者信息。
+    分页返回同一群聊线程的对话记录，包含每条消息的发言者信息。
     
     - **session_id**: 会话ID
+    - **offset**: 已加载的消息数量
     - **limit**: 返回的最大消息数（默认50，最多200）
     """
     try:
@@ -621,13 +624,18 @@ async def get_multi_dialogue_history(
         session = _get_owned_multi_session(session_id, current_user_id)
         
         # 获取同一逻辑群聊下的跨 session 历史
-        messages = repository.get_multi_character_thread_history(session_id, limit_messages=limit)
+        messages, has_more = repository.get_multi_character_thread_history_paginated(
+            session_id,
+            offset=offset,
+            limit=limit,
+        )
         
         # 获取参与者信息
         participants = repository.get_session_participants(session_id, only_active=False)
         
         return MultiDialogueHistory(
             messages=messages,
+            has_more=has_more,
             session_info={
                 "session_id": session["session_id"],
                 "current_session_id": session["session_id"],

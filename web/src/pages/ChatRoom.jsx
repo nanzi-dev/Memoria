@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
@@ -7,6 +7,8 @@ import { useUser } from '../context/UserContext';
 import { dialogue, multiDialogue, characterAdmin } from '../api/memoria';
 
 import SideRays from '../components/SideRays';
+
+import { splitAssistantReply } from '../utils/chatMessages';
 
 import {
 
@@ -44,6 +46,7 @@ const MOOD_BUBBLE = { happy: 'bg-emerald-950 border-emerald-400/20 text-zinc-200
 
 
 const IDLE_SESSION_END_MS = 5 * 60 * 1000;
+const HISTORY_PAGE_SIZE = 20;
 
 const CHAT_RAYS_PROPS = {
   speed: 2.1,
@@ -348,6 +351,8 @@ export default function ChatRoom() {
 
   const inputRef = useRef(null);
 
+  const messageScrollRef = useRef(null);
+
   const activeSessionRef = useRef(null);
 
   const idleEndTimersRef = useRef(new Map());
@@ -355,6 +360,10 @@ export default function ChatRoom() {
   const sessionKindRef = useRef(new Map());
 
   const skipAutoScrollRef = useRef(false);
+
+  const pendingInitialSingleScrollRef = useRef(false);
+
+  const pendingHistoryScrollRef = useRef(null);
 
 
 
@@ -644,7 +653,18 @@ export default function ChatRoom() {
 
   // ── Auto-scroll ──
 
+  useLayoutEffect(() => {
+    const pending = pendingHistoryScrollRef.current;
+    const container = messageScrollRef.current;
+    if (!pending || !container) return;
+
+    container.scrollTop = pending.scrollTop + (container.scrollHeight - pending.scrollHeight);
+    pendingHistoryScrollRef.current = null;
+  }, [messages]);
+
   useEffect(() => {
+
+    if (view !== 'single' && view !== 'group') return;
 
     if (skipAutoScrollRef.current) {
 
@@ -654,9 +674,18 @@ export default function ChatRoom() {
 
     }
 
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const isInitialSingleScroll = view === 'single' && pendingInitialSingleScrollRef.current;
+    const frame = requestAnimationFrame(() => {
+      bottomRef.current?.scrollIntoView({
+        behavior: isInitialSingleScroll ? 'auto' : 'smooth',
+        block: 'end',
+      });
+      if (isInitialSingleScroll) pendingInitialSingleScrollRef.current = false;
+    });
 
-  }, [messages]);
+    return () => cancelAnimationFrame(frame);
+
+  }, [messages, view]);
 
   useEffect(() => { if (view === 'single' || view === 'group') inputRef.current?.focus(); }, [view]);
 
@@ -716,6 +745,7 @@ export default function ChatRoom() {
     setCharacter(char);
     setMessages([]);
     setIsRecovered(false);
+    pendingInitialSingleScrollRef.current = true;
 
     try {
 
@@ -817,14 +847,21 @@ export default function ChatRoom() {
 
       try {
 
-        const hist = await dialogue.getHistory(character.character_id, PLAYER_ID, historyOffset, 20);
+        const hist = await dialogue.getHistory(character.character_id, PLAYER_ID, historyOffset, HISTORY_PAGE_SIZE);
         if (hist?.messages && hist.messages.length > 0) {
 
           skipAutoScrollRef.current = true;
+          const container = messageScrollRef.current;
+          if (container) {
+            pendingHistoryScrollRef.current = {
+              scrollTop: container.scrollTop,
+              scrollHeight: container.scrollHeight,
+            };
+          }
 
           setMessages(prev => [...sortMessagesChronologically(hist.messages.map(normalizeDialogueMessage)), ...prev]);
 
-          setHistoryOffset(historyOffset + hist.messages.length);
+          setHistoryOffset(prev => prev + hist.messages.length);
 
           setHasMoreHistory(hist.has_more);
 
@@ -844,18 +881,26 @@ export default function ChatRoom() {
 
       try {
 
-        const hist = await multiDialogue.getHistory(multiSessionId, 50);
+        const hist = await multiDialogue.getHistory(multiSessionId, historyOffset, HISTORY_PAGE_SIZE);
 
         if (hist?.messages && hist.messages.length > 0) {
 
           skipAutoScrollRef.current = true;
+          const container = messageScrollRef.current;
+          if (container) {
+            pendingHistoryScrollRef.current = {
+              scrollTop: container.scrollTop,
+              scrollHeight: container.scrollHeight,
+            };
+          }
 
           setMessages(prev => [
             ...sortMessagesChronologically(hist.messages.map(msg => normalizeGroupMessage(msg, [...participants, ...allChars]))),
             ...prev,
           ]);
 
-          setHasMoreHistory(false); // group history loads all at once
+          setHistoryOffset(prev => prev + hist.messages.length);
+          setHasMoreHistory(hist.has_more);
 
         } else {
 
@@ -922,6 +967,7 @@ export default function ChatRoom() {
         setMessages(sortMessagesChronologically([normalizeGroupMessage(res.opening, [...selectedParticipants, ...allChars])]));
       }
 
+      setHistoryOffset(res.opening?.dialogue ? 1 : 0);
       setHasMoreHistory(false);
 
       setView('group');
@@ -1029,6 +1075,7 @@ export default function ChatRoom() {
           ...prev,
           ...groupResponses.map(r => normalizeGroupMessage(r, [...participants, ...allChars], { showRelationshipDelta: true })),
         ]);
+        setHistoryOffset(prev => prev + 1 + groupResponses.length);
 
       }
 
@@ -1227,7 +1274,8 @@ export default function ChatRoom() {
                         setGroupName(item.group_name || '');
                         setMultiSessionId(item.session_id);
                         setMultiSessionStatus(item.status || 'active');
-                        setHasMoreHistory(false);
+                        setHistoryOffset(0);
+                        setHasMoreHistory(true);
                         activeSessionRef.current = item.session_id;
                         sessionKindRef.current.set(item.session_id, 'group');
                         setView('group');
@@ -1242,8 +1290,12 @@ export default function ChatRoom() {
                           setParticipants(loadedParticipants);
                         }
                         try {
-                          const hist = await multiDialogue.getHistory(item.session_id);
-                          if (hist?.messages) setMessages(sortMessagesChronologically(hist.messages.map(msg => normalizeGroupMessage(msg, [...loadedParticipants, ...allChars]))));
+                          const hist = await multiDialogue.getHistory(item.session_id, 0, HISTORY_PAGE_SIZE);
+                          if (hist?.messages) {
+                            setMessages(sortMessagesChronologically(hist.messages.map(msg => normalizeGroupMessage(msg, [...loadedParticipants, ...allChars]))));
+                            setHistoryOffset(hist.messages.length);
+                            setHasMoreHistory(hist.has_more);
+                          }
                         } catch {}
                       }} className="memoria-glass memoria-card-hover animate-fade-up flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer group relative overflow-hidden" style={{ animationDelay: `${Math.min(i, 12) * 24}ms` }}>
                         <div className="flex -space-x-2 shrink-0">
@@ -1593,12 +1645,8 @@ export default function ChatRoom() {
         )}
 
         {/* ═══ 消息气泡区 ═══ */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-2.5 sm:px-3 py-3 space-y-3"
+        <div ref={messageScrollRef} style={{ overflowAnchor: 'none' }} className="relative flex-1 min-h-0 overflow-y-auto px-2.5 sm:px-3 py-3 space-y-3"
           onScroll={(e) => { if (e.target.scrollTop < 60 && !loadingHistory && hasMoreHistory) loadMoreHistory(); }}>
-
-          {loadingHistory && (
-            <div className="flex justify-center py-2"><Loader2 className="animate-spin text-cyber-green/25" size={16} /></div>
-          )}
 
           {error && (
             <div className="text-center text-red-400/50 text-xs p-2 bg-red-500/5 rounded-lg border border-red-500/10">
@@ -1606,11 +1654,14 @@ export default function ChatRoom() {
             </div>
           )}
 
-          {messages.map((msg, i) => {
+          {messages.flatMap((msg, i) => {
             const isUser = msg.role === 'user';
             const charInfo = msg.charId ? getCharById(msg.charId) : null;
-            return (
-              <div key={msg.message_id || i} className={`animate-fade-up flex gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
+            const replyBubbles = isUser ? [msg.content] : splitAssistantReply(msg.content);
+            return replyBubbles.map((bubble, bubbleIndex) => {
+              const isLastBubble = bubbleIndex === replyBubbles.length - 1;
+              return (
+              <div key={`${msg.message_id || i}-${bubbleIndex}`} className={`animate-fade-up flex gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
                 {/* 头像 */}
                 <div className={`w-8 h-8 rounded-full overflow-hidden border-2 shrink-0 mt-0.5 ${
                   isUser ? 'border-cyber-green/10 bg-cyber-green/[0.03]' : moodBorder
@@ -1637,21 +1688,23 @@ export default function ChatRoom() {
                     </div>
                   )}
 
-                  {/* 气泡 — 角色消息用情绪颜色 */}
-                  <div className={`memoria-card-hover px-3 py-2 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words border backdrop-blur-sm ${
-                    isUser
-                      ? 'bg-cyber-green/10 border-cyber-green/15 rounded-br-sm text-cyber-green/85'
-                      : `${moodBubble} border rounded-bl-sm`
-                  }`}>
-                    <MessageContent content={msg.content} />
+                  <div
+                    className={`memoria-card-hover px-3 py-2 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words border backdrop-blur-sm ${
+                      isUser
+                        ? 'bg-cyber-green/10 border-cyber-green/15 rounded-br-sm text-cyber-green/85'
+                        : `${moodBubble} border rounded-bl-sm`
+                    }`}
+                  >
+                    <MessageContent content={bubble} />
                   </div>
 
-                  {msg.showRelationshipDelta && (
+                  {msg.showRelationshipDelta && isLastBubble && (
                     <RelationshipDeltaLine affinityDelta={msg.affinity_delta} trustDelta={msg.trust_delta} />
                   )}
                 </div>
               </div>
-            );
+              );
+            });
           })}
 
           {/* 思考中动画 */}
@@ -1677,6 +1730,12 @@ export default function ChatRoom() {
           )}
 
           <div ref={bottomRef} />
+
+          {loadingHistory && (
+            <div className="absolute top-2 inset-x-0 z-10 flex justify-center pointer-events-none">
+              <Loader2 className="animate-spin text-cyber-green/40" size={16} />
+            </div>
+          )}
         </div>
 
         {/* ═══ 底部输入栏 — 功能型 ═══ */}
@@ -1872,23 +1931,11 @@ export default function ChatRoom() {
 
         {/* Messages */}
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-2.5 sm:px-4 py-3 space-y-3" onScroll={(e) => {
+        <div ref={messageScrollRef} style={{ overflowAnchor: 'none' }} className="relative flex-1 min-h-0 overflow-y-auto px-2.5 sm:px-4 py-3 space-y-3" onScroll={(e) => {
 
           if (e.target.scrollTop < 60 && !loadingHistory && hasMoreHistory) loadMoreHistory();
 
         }}>
-
-          {/* Loading indicator for history */}
-
-          {loadingHistory && (
-
-            <div className="flex justify-center py-2">
-
-              <Loader2 className="animate-spin text-cyber-green/25" size={16} />
-
-            </div>
-
-          )}
 
           {error && (
 
@@ -1900,15 +1947,21 @@ export default function ChatRoom() {
 
           )}
 
-          {messages.map((msg, i) => {
+          {messages.flatMap((msg, i) => {
 
             const isUser = msg.role === 'user';
 
             const charInfo = msg.charId ? getCharById(msg.charId) : null;
 
-            return (
+            const replyBubbles = isUser ? [msg.content] : splitAssistantReply(msg.content);
 
-              <div key={i} className={`animate-fade-up flex gap-2.5 ${isUser ? 'flex-row-reverse' : ''}`}>
+            return replyBubbles.map((bubble, bubbleIndex) => {
+
+              const isLastBubble = bubbleIndex === replyBubbles.length - 1;
+
+              return (
+
+              <div key={`${msg.message_id || i}-${bubbleIndex}`} className={`animate-fade-up flex gap-2.5 ${isUser ? 'flex-row-reverse' : ''}`}>
 
                 <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full overflow-hidden border-2 shrink-0 mt-0.5 ${isUser ? 'border-cyber-green/10 bg-cyber-green/[0.03] flex items-center justify-center' : 'border-purple-500/15'}`}>
 
@@ -1966,15 +2019,15 @@ export default function ChatRoom() {
 
                   }`}>
 
-                    <MessageContent content={msg.content} />
+                    <MessageContent content={bubble} />
 
                     {/* Scan line on AI messages when sending */}
 
-                    {!isUser && sendingMulti && i === messages.length - 1 && <ScanLine />}
+                    {!isUser && sendingMulti && i === messages.length - 1 && isLastBubble && <ScanLine />}
 
                   </div>
 
-                  {msg.showRelationshipDelta && (
+                  {msg.showRelationshipDelta && isLastBubble && (
                     <RelationshipDeltaLine affinityDelta={msg.affinity_delta} trustDelta={msg.trust_delta} />
                   )}
 
@@ -1982,7 +2035,9 @@ export default function ChatRoom() {
 
               </div>
 
-            );
+              );
+
+            });
 
           })}
 
@@ -2027,6 +2082,16 @@ export default function ChatRoom() {
           )}
 
           <div ref={bottomRef} />
+
+          {loadingHistory && (
+
+            <div className="absolute top-2 inset-x-0 z-10 flex justify-center pointer-events-none">
+
+              <Loader2 className="animate-spin text-cyber-green/40" size={16} />
+
+            </div>
+
+          )}
 
         </div>
 

@@ -991,18 +991,51 @@ def get_long_term_fact_records(
         
     return [dict(r) for r in rows]
 
+_EMPTY_LONG_TERM_FACT_VALUES = {
+    "",
+    "无",
+    "暂无",
+    "没有",
+    "none",
+    "null",
+    "nil",
+    "n/a",
+    "无长期记忆",
+    "暂无长期记忆",
+    "没有长期记忆",
+    "无值得记住的信息",
+    "没有值得记住的信息",
+    "无值得记录的内容",
+    "没有值得记录的内容",
+}
+
+
+def normalize_long_term_fact_text(fact_text: str | None) -> str | None:
+    """清洗模型返回的长期记忆，过滤空值和“无”类占位文本。"""
+    text = str(fact_text or "").strip().strip("\"'")
+    normalized = text.lower().rstrip("。.!！").strip()
+    if normalized in _EMPTY_LONG_TERM_FACT_VALUES:
+        return None
+    return text
+
+
 def save_long_term_fact(
-    character_id: str, 
-    player_id: str, 
-    fact_text: str, 
+    character_id: str,
+    player_id: str,
+    fact_text: str | None,
     importance: int = 5
-) -> int:
+) -> int | None:
     """
     保存长期记忆（同时保存到 SQLite 和向量数据库）
     
     Returns:
-        int: 新插入的 fact_id
+        int | None: 新插入的 fact_id；空记忆不写入并返回 None
     """
+    fact_text = normalize_long_term_fact_text(fact_text)
+    if not fact_text:
+        logger.debug("跳过空长期记忆写入")
+        return None
+
     with get_conn() as conn:
         # 去重检查
         existing = _dedup_check(
@@ -1049,6 +1082,21 @@ def save_long_term_fact(
         logger.warning(f"向量数据库同步失败: {e}")
         
     return fact_id
+
+
+def save_long_term_fact_if_checkpoint(
+    session_id: str,
+    character_id: str,
+    player_id: str,
+    fact_text: str | None,
+    interval_turns: int,
+    importance: int = 5,
+) -> int | None:
+    """仅在指定玩家回合间隔保存有效长期记忆。"""
+    fact_text = normalize_long_term_fact_text(fact_text)
+    if not fact_text or not is_long_term_memory_checkpoint(session_id, interval_turns):
+        return None
+    return save_long_term_fact(character_id, player_id, fact_text, importance)
         
 
 # =========================
@@ -1204,6 +1252,26 @@ def get_short_term_history(session_id: str, limit_turns: int) -> list[dict]:
     messages = [{"role": r["role"], "content": r["content"]} for r in rows]
     messages.reverse()
     return messages
+
+
+def get_session_user_turn_count(session_id: str) -> int:
+    """获取当前会话已经写入的玩家回合数。"""
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS turn_count
+            FROM short_term_message
+            WHERE session_id = ? AND role = 'user'
+            """,
+            (session_id,),
+        ).fetchone()
+    return int(row["turn_count"]) if row else 0
+
+
+def is_long_term_memory_checkpoint(session_id: str, interval_turns: int) -> bool:
+    """当前会话是否到达长期记忆保存检查点。"""
+    turn_count = get_session_user_turn_count(session_id)
+    return turn_count > 0 and turn_count % max(1, interval_turns) == 0
 
 
 # =========================
@@ -2881,6 +2949,56 @@ def get_multi_character_thread_history(
     messages = [dict(r) for r in rows]
     messages.reverse()
     return messages
+
+
+def get_multi_character_thread_history_paginated(
+    session_id: str,
+    offset: int = 0,
+    limit: int = 20,
+) -> tuple[list[dict], bool]:
+    """
+    分页获取同一逻辑群聊下跨多个 session 的历史消息。
+
+    offset=0 返回最新一页，结果按时间正序排列；offset 增大时返回更早消息。
+    """
+    session = get_session(session_id)
+    if not session:
+        return [], False
+
+    thread_id = session.get("group_thread_id") or session["session_id"]
+    if not thread_id:
+        return [], False
+    group_name_key = (session.get("group_name") or "").strip().lower()
+
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT m.id AS message_id, m.session_id, m.role, m.content,
+                   m.character_id, m.character_name, m.created_at
+            FROM short_term_message m
+            INNER JOIN session s ON s.session_id = m.session_id
+            WHERE s.player_id = ?
+              AND COALESCE(s.is_multi_character, 0) = 1
+              AND (
+                COALESCE(s.group_thread_id, s.session_id) = ?
+                OR (? != '' AND LOWER(TRIM(COALESCE(s.group_name, ''))) = ?)
+              )
+            ORDER BY m.id DESC
+            LIMIT ?
+            OFFSET ?
+            """,
+            (
+                session["player_id"],
+                thread_id,
+                group_name_key,
+                group_name_key,
+                limit + 1,
+                offset,
+            ),
+        ).fetchall()
+
+    has_more = len(rows) > limit
+    return [dict(row) for row in reversed(rows[:limit])], has_more
 
 
 

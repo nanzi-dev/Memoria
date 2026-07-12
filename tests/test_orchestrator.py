@@ -502,8 +502,10 @@ class TestDialogueTurn:
         )
         monkeypatch.setattr(
             orchestrator.repository,
-            "save_long_term_fact",
-            lambda character_id, player_id, fact_text: saved_facts.append((character_id, player_id, fact_text)) or 1,
+            "save_long_term_fact_if_checkpoint",
+            lambda session_id, character_id, player_id, fact_text, interval_turns: saved_facts.append(
+                (character_id, player_id, fact_text, interval_turns)
+            ) or 1,
         )
 
         def fail_list_event_definitions(*args, **kwargs):
@@ -525,7 +527,14 @@ class TestDialogueTurn:
             "current_mood": "neutral",
         }
         assert saved_messages == [("sid", "user", "你好"), ("sid", "assistant", "你好")]
-        assert saved_facts == [("char", "player", "玩家主动打招呼")]
+        assert saved_facts == [
+            (
+                "char",
+                "player",
+                "玩家主动打招呼",
+                orchestrator.configs.long_term_memory_interval_turns,
+            )
+        ]
 
     def test_single_dialogue_prompt_uses_graph_and_cross_mode_memories(self, monkeypatch):
         """单聊 prompt 应读取当前关系图谱，并共享同角色的群聊/共享记忆。"""
