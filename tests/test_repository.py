@@ -1,13 +1,64 @@
 """
 数据库持久化层完整单元测试
 """
-import pytest, sys, json, uuid
+import pytest, sys, json, sqlite3, uuid
 from pathlib import Path
 from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from memoria.core.config import configs
 from memoria.db import repository
+
+
+class TestMigrations:
+    def test_init_db_adds_scheduler_lease_columns_before_index(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        database_path = tmp_path / "legacy_scheduler.db"
+        with sqlite3.connect(database_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE event_schedule_state (
+                    event_id TEXT NOT NULL,
+                    character_id TEXT NOT NULL,
+                    player_id TEXT NOT NULL,
+                    schedule TEXT NOT NULL,
+                    last_checked_at TEXT,
+                    last_run_at TEXT,
+                    next_run_at TEXT,
+                    status TEXT DEFAULT 'active',
+                    created_at TEXT,
+                    updated_at TEXT,
+                    PRIMARY KEY (event_id, character_id, player_id)
+                )
+                """
+            )
+
+        monkeypatch.setattr(configs, "database_url", "")
+        monkeypatch.setattr(configs, "database_path", str(database_path))
+
+        repository.init_db()
+
+        with sqlite3.connect(database_path) as conn:
+            columns = {
+                row[1]
+                for row in conn.execute(
+                    "PRAGMA table_info(event_schedule_state)"
+                ).fetchall()
+            }
+            indexes = {
+                row[1]
+                for row in conn.execute(
+                    "PRAGMA index_list(event_schedule_state)"
+                ).fetchall()
+            }
+
+        assert {"lease_owner", "lease_expires_at"} <= columns
+        assert "idx_event_schedule_lease" in indexes
+
 
 class TestRuntimeState:
     def test_get_state_new_player(self):

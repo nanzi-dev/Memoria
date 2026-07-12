@@ -7,6 +7,7 @@ import { useUser } from '../context/UserContext';
 import { dialogue, multiDialogue, characterAdmin } from '../api/memoria';
 
 import SideRays from '../components/SideRays';
+import { EventInboxBanner, WorldClockDisplay } from '../components/WorldClock';
 
 import { splitAssistantReply } from '../utils/chatMessages';
 
@@ -1583,6 +1584,8 @@ export default function ChatRoom() {
             </div>
           </div>
 
+          <WorldClockDisplay className="max-w-[150px]" />
+
           {/* 事件通知 */}
           {events.length > 0 && (
             <button onClick={() => setEvents([])} className="relative shrink-0" title="事件通知">
@@ -1591,6 +1594,11 @@ export default function ChatRoom() {
             </button>
           )}
         </header>
+
+        <EventInboxBanner
+          characterId={character?.character_id}
+          sessionId={singleSessionId}
+        />
 
         {/* ═══ 状态详情下拉面板 ═══ */}
         {showDetail && (
@@ -1811,6 +1819,8 @@ export default function ChatRoom() {
 
           </div>
 
+          <WorldClockDisplay className="max-w-[150px]" />
+
         </header>
 
 
@@ -1890,6 +1900,11 @@ export default function ChatRoom() {
     return (
 
       <div className="flex-1 min-h-0 flex flex-col min-w-0">
+
+        <EventInboxBanner
+          characterId={mode === 'single' ? character?.character_id : null}
+          sessionId={mode === 'group' ? multiSessionId : singleSessionId}
+        />
 
         {/* Mobile: compact character info */}
 

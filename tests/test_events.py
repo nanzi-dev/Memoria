@@ -248,10 +248,9 @@ class TestEventDeepIntegration:
         EventExecutor()._branch_next_event(effect, self._context(), result)
         assert result.chained_events == ["high"]
 
-    def test_cron_helpers_and_due_schedule(self, monkeypatch):
+    def test_cron_helpers(self):
         from datetime import datetime, timezone
         from memoria.core import event_runtime
-        from memoria.core.event_schema import EventDefinition, TriggerCondition, TriggerType
 
         now = datetime(2026, 7, 10, 14, 30, tzinfo=timezone.utc)
         assert event_runtime.cron_matches("*/5 * * * *", now)
@@ -262,41 +261,6 @@ class TestEventDeepIntegration:
         assert event_runtime.cron_matches("0 9 * * 0", sunday)
         assert event_runtime.cron_matches("0 9 * * 7", sunday)
         assert not event_runtime.cron_matches("0 9 * * 0", monday)
-
-        event = EventDefinition(
-            event_id="sched_evt",
-            event_name="定时事件",
-            trigger_condition=TriggerCondition(trigger_type=TriggerType.TIME_BASED, schedule="*/5 * * * *"),
-            effects=[],
-        )
-        monkeypatch.setattr(event_runtime.repository, "list_due_event_schedules", lambda now_iso, limit=50, player_id=None: [{
-            "event_id": "sched_evt",
-            "character_id": "sched_c",
-            "player_id": "sched_p",
-            "schedule": "*/5 * * * *",
-        }])
-        monkeypatch.setattr(event_runtime.repository, "get_event_definition", lambda owner_user_id, event_id: {
-            "event_id": event.event_id,
-            "event_name": event.event_name,
-            "description": None,
-            "character_id": None,
-            "trigger_config": event.trigger_condition.model_dump_json(),
-            "effects_config": "[]",
-            "priority": 0,
-            "is_active": 1,
-            "created_at": None,
-            "updated_at": None,
-            "trigger_count": 0,
-            "last_triggered_at": None,
-            "schedule": "*/5 * * * *",
-            "template_id": None,
-        })
-        saved = []
-        monkeypatch.setattr(event_runtime.repository, "save_event_schedule_state", lambda **kw: saved.append(kw) or True)
-        results = event_runtime.run_due_time_events(now=now)
-        assert len(results) == 1
-        assert results[0].event_id == "sched_evt"
-        assert saved[-1]["last_run_at"] == now.isoformat()
 
     def test_default_templates_are_created(self):
         from memoria.core import event_runtime

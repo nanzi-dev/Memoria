@@ -20,8 +20,11 @@ from memoria.core import (
     multi_character_memory,
     prompt_builder,
     relationship_context,
+    world_clock,
 )
 from memoria.core.config import configs
+from memoria.core.knowledge_retriever import retrieve_knowledge
+from memoria.core.memory_extractor import extract_player_memory
 from memoria.core.speaking_strategy import HybridStrategy, SpeakingStrategy
 from memoria.db import repository
 
@@ -43,6 +46,19 @@ def _safe_float(value, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def _clock_snapshot_for_player(player_id: str | None):
+    if player_id:
+        return world_clock.get_clock_snapshot(player_id)
+    now = world_clock.utc_now()
+    return world_clock.WorldClockSnapshot(
+        player_id="",
+        timezone="UTC",
+        time_scale=1,
+        real_now=now,
+        world_now=now,
+    )
 
 
 # =========================
@@ -99,6 +115,8 @@ class MultiCharacterOrchestrator:
         
         # 缓存最后发言者
         self.last_speaker_id = None
+        self._checkpoint_memory_fact = None
+        self._checkpoint_memory_ready = False
         
         logger.info(f"多角色编排器已初始化: session={session_id}, 参与角色={self.character_ids}")
 
@@ -122,7 +140,8 @@ class MultiCharacterOrchestrator:
         character_id = first_speaker["character_id"]
         
         # 生成开场白
-        result = self._generate_opening(character_id)
+        clock_snapshot = _clock_snapshot_for_player(getattr(self, "player_id", None))
+        result = self._generate_opening(character_id, clock_snapshot=clock_snapshot)
         
         return result
     
@@ -141,25 +160,60 @@ class MultiCharacterOrchestrator:
             dict | list[dict]: 单个角色回应或多个角色回应列表
         """
         # 记录玩家消息
+        clock_snapshot = _clock_snapshot_for_player(getattr(self, "player_id", None))
         repository.append_multi_character_message(
             self.session_id,
             role="user",
-            content=player_message
+            content=player_message,
+            world_created_at=clock_snapshot.world_now.isoformat(),
         )
+        self._prepare_checkpoint_memory()
         
         if not allow_multiple_responses:
             # 单角色回应模式（原有逻辑）
             self._ensure_has_active_participants()
             speaker_id = self._decide_next_speaker(player_message)
-            result = self._generate_character_response(speaker_id, player_message)
+            try:
+                result = self._generate_character_response(
+                    speaker_id,
+                    player_message,
+                    clock_snapshot=clock_snapshot,
+                )
+            except TypeError as exc:
+                if "unexpected keyword argument 'clock_snapshot'" not in str(exc):
+                    raise
+                result = self._generate_character_response(speaker_id, player_message)
             return result
         
         else:
             # 多角色讨论模式
             self._ensure_has_active_participants()
             response_count = self._decide_group_response_count(player_message, max_responses)
-            responses = self._generate_group_discussion(player_message, response_count)
+            try:
+                responses = self._generate_group_discussion(
+                    player_message,
+                    response_count,
+                    clock_snapshot=clock_snapshot,
+                )
+            except TypeError as exc:
+                if "unexpected keyword argument 'clock_snapshot'" not in str(exc):
+                    raise
+                responses = self._generate_group_discussion(player_message, response_count)
             return responses
+
+
+    def _prepare_checkpoint_memory(self) -> None:
+        self._checkpoint_memory_fact = None
+        self._checkpoint_memory_ready = True
+        if not repository.is_long_term_memory_checkpoint(
+            self.session_id, configs.long_term_memory_interval_turns
+        ):
+            return
+        history = repository.get_multi_character_thread_history(
+            self.session_id,
+            limit_messages=max(12, configs.long_term_memory_interval_turns * 4),
+        )
+        self._checkpoint_memory_fact = extract_player_memory(history)
 
 
     def _decide_group_response_count(self, player_message: str, max_responses: int | None = None) -> int:
@@ -267,7 +321,13 @@ class MultiCharacterOrchestrator:
         return sum(values) / len(values) if values else 0.0
     
     
-    def _generate_group_discussion(self, player_message: str, max_responses: int = 3) -> list[dict]:
+    def _generate_group_discussion(
+        self,
+        player_message: str,
+        max_responses: int = 3,
+        *,
+        clock_snapshot=None,
+    ) -> list[dict]:
         """
         生成多角色讨论（多个角色连续发言）
         
@@ -310,7 +370,11 @@ class MultiCharacterOrchestrator:
             )
             
             # 生成回应
-            result = self._generate_character_response(speaker_id, player_message)
+            result = self._generate_character_response(
+                speaker_id,
+                player_message,
+                clock_snapshot=clock_snapshot,
+            )
             responses.append(result)
             
             # 标记已使用
@@ -343,7 +407,12 @@ class MultiCharacterOrchestrator:
             trigger_character_id = self._select_character_for_interaction()
         
         # 生成角色间互动对话
-        result = self._generate_character_interaction(trigger_character_id, prompt=prompt)
+        clock_snapshot = world_clock.get_clock_snapshot(self.player_id)
+        result = self._generate_character_interaction(
+            trigger_character_id,
+            prompt=prompt,
+            clock_snapshot=clock_snapshot,
+        )
         
         return result
     
@@ -540,7 +609,7 @@ class MultiCharacterOrchestrator:
         return candidates[0][0]
     
     
-    def _generate_opening(self, character_id: str) -> dict:
+    def _generate_opening(self, character_id: str, *, clock_snapshot=None) -> dict:
         """
         生成多角色对话开场白
         
@@ -563,7 +632,13 @@ class MultiCharacterOrchestrator:
             relationship_history_cutoff=relationship_history_cutoff,
             character_relationships=character_relationships
         )
-        
+        clock_snapshot = clock_snapshot or world_clock.get_clock_snapshot(self.player_id)
+        time_context = clock_snapshot.prompt_context(
+            repository.get_last_character_interaction_world_at(
+                self.player_id,
+                character_id,
+            )
+        )
         # 准备其他角色信息
         other_characters = []
         for other_id in self.character_ids:
@@ -584,7 +659,8 @@ class MultiCharacterOrchestrator:
             player_name=self.player_name,
             other_characters=other_characters,
             character_relationships=character_relationships,
-            is_opening=True
+            is_opening=True,
+            time_context=time_context,
         )
         
         # 生成开场白
@@ -603,7 +679,8 @@ class MultiCharacterOrchestrator:
             role="assistant",
             content=dialogue,
             character_id=character_id,
-            character_name=character_name
+            character_name=character_name,
+            world_created_at=clock_snapshot.world_now.isoformat(),
         )
         
         return {
@@ -616,7 +693,13 @@ class MultiCharacterOrchestrator:
         }
     
     
-    def _generate_character_response(self, character_id: str, player_message: str) -> dict:
+    def _generate_character_response(
+        self,
+        character_id: str,
+        player_message: str,
+        *,
+        clock_snapshot=None,
+    ) -> dict:
         """
         生成角色对玩家的回应
         
@@ -642,6 +725,25 @@ class MultiCharacterOrchestrator:
             relationship_history_cutoff=relationship_history_cutoff,
             character_relationships=character_relationships
         )
+        clock_snapshot = clock_snapshot or world_clock.get_clock_snapshot(self.player_id)
+        time_context = clock_snapshot.prompt_context(
+            repository.get_last_character_interaction_world_at(
+                self.player_id,
+                character_id,
+            )
+        )
+        history = repository.get_multi_character_thread_history(
+            self.session_id,
+            limit_messages=20,
+            created_after=relationship_history_cutoff
+        )
+        knowledge = retrieve_knowledge(
+            owner_user_id=self.player_id,
+            character_id=character_id,
+            group_thread_id=repository.get_group_thread_id(self.session_id),
+            current_message=player_message,
+            recent_history=history,
+        )
         
         # 准备其他角色信息
         other_characters = []
@@ -666,14 +768,9 @@ class MultiCharacterOrchestrator:
             past_summaries=self._load_memory_context(
                 character_id,
                 character_relationships=character_relationships
-            )
-        )
-        
-        # 获取对话历史
-        history = repository.get_multi_character_thread_history(
-            self.session_id,
-            limit_messages=20,
-            created_after=relationship_history_cutoff
+            ),
+            time_context=time_context,
+            knowledge_context=knowledge.prompt_section,
         )
         
         # 转换为 LLM 格式
@@ -726,17 +823,19 @@ class MultiCharacterOrchestrator:
             role="assistant",
             content=dialogue,
             character_id=character_id,
-            character_name=character_name
+            character_name=character_name,
+            world_created_at=clock_snapshot.world_now.isoformat(),
+            knowledge_sources=knowledge.sources,
         )
         
-        # 记忆萃取
-        repository.save_long_term_fact_if_checkpoint(
-            self.session_id,
-            character_id,
-            self.player_id,
-            result.get("memory_worth_keeping"),
-            configs.long_term_memory_interval_turns,
-        )
+        if not getattr(self, "_checkpoint_memory_ready", False):
+            self._prepare_checkpoint_memory()
+        if getattr(self, "_checkpoint_memory_fact", None):
+            repository.save_long_term_fact(
+                character_id,
+                self.player_id,
+                self._checkpoint_memory_fact,
+            )
         
         return {
             "character_id": character_id,
@@ -747,11 +846,18 @@ class MultiCharacterOrchestrator:
             "trust_delta": trust_delta,
             "current_affinity": new_affinity,
             "current_trust": new_trust,
-            "current_mood": mood_after
+            "current_mood": mood_after,
+            "knowledge_sources": knowledge.sources,
         }
     
     
-    def _generate_character_interaction(self, trigger_character_id: str, prompt: str = None) -> dict:
+    def _generate_character_interaction(
+        self,
+        trigger_character_id: str,
+        prompt: str = None,
+        *,
+        clock_snapshot=None,
+    ) -> dict:
         """
         生成角色间互动（角色主动发言）
         
@@ -775,6 +881,26 @@ class MultiCharacterOrchestrator:
             card,
             relationship_history_cutoff=relationship_history_cutoff,
             character_relationships=character_relationships
+        )
+        clock_snapshot = clock_snapshot or world_clock.get_clock_snapshot(self.player_id)
+        time_context = clock_snapshot.prompt_context(
+            repository.get_last_character_interaction_world_at(
+                self.player_id,
+                trigger_character_id,
+            )
+        )
+        history = repository.get_multi_character_thread_history(
+            self.session_id,
+            limit_messages=20,
+            created_after=relationship_history_cutoff
+        )
+        interaction_prompt = prompt or "（现在可以主动说些什么，或者对其他角色的发言做出反应）"
+        knowledge = retrieve_knowledge(
+            owner_user_id=self.player_id,
+            character_id=trigger_character_id,
+            group_thread_id=repository.get_group_thread_id(self.session_id),
+            current_message=interaction_prompt,
+            recent_history=history,
         )
         
         # 准备其他角色信息
@@ -801,14 +927,9 @@ class MultiCharacterOrchestrator:
                 trigger_character_id,
                 character_relationships=character_relationships
             ),
-            is_interaction=True
-        )
-        
-        # 获取对话历史
-        history = repository.get_multi_character_thread_history(
-            self.session_id,
-            limit_messages=20,
-            created_after=relationship_history_cutoff
+            is_interaction=True,
+            time_context=time_context,
+            knowledge_context=knowledge.prompt_section,
         )
         
         messages = self._format_history_for_llm(
@@ -818,7 +939,6 @@ class MultiCharacterOrchestrator:
         )
         
         # 添加互动提示
-        interaction_prompt = prompt or "（现在可以主动说些什么，或者对其他角色的发言做出反应）"
         messages.append({"role": "user", "content": interaction_prompt})
         
         # 调用 LLM
@@ -837,14 +957,17 @@ class MultiCharacterOrchestrator:
             role="assistant",
             content=dialogue,
             character_id=trigger_character_id,
-            character_name=character_name
+            character_name=character_name,
+            world_created_at=clock_snapshot.world_now.isoformat(),
+            knowledge_sources=knowledge.sources,
         )
         
         return {
             "character_id": trigger_character_id,
             "character_name": character_name,
             "dialogue": dialogue,
-            "action": action
+            "action": action,
+            "knowledge_sources": knowledge.sources,
         }
     
     

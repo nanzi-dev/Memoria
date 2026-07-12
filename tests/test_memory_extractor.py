@@ -220,6 +220,37 @@ class TestMemoryExtractor:
         assert called["allow_reasoning_fallback"] is False
         assert result == "玩家表示任务尚未完成，NPC提醒玩家继续处理任务。"
 
+    def test_player_memory_uses_only_recent_player_messages(self, monkeypatch):
+        from memoria.core import memory_extractor
+
+        called = {}
+
+        def fake_call_light_task(prompt, allow_reasoning_fallback=True):
+            called["prompt"] = prompt
+            called["allow_reasoning_fallback"] = allow_reasoning_fallback
+            return "玩家长期偏好茉莉花茶"
+
+        monkeypatch.setattr(memory_extractor, "call_light_task", fake_call_light_task)
+        history = [
+            {"role": "system", "content": "SYSTEM SECRET"},
+            {"role": "assistant", "content": "【外部世界知识】RAG SECRET"},
+            *[
+                {"role": "user", "content": f"玩家消息 {index}"}
+                for index in range(8)
+            ],
+        ]
+
+        result = memory_extractor.extract_player_memory(history)
+
+        assert result == "玩家长期偏好茉莉花茶"
+        assert called["allow_reasoning_fallback"] is False
+        assert "SYSTEM SECRET" not in called["prompt"]
+        assert "RAG SECRET" not in called["prompt"]
+        assert "玩家消息 0" not in called["prompt"]
+        assert "玩家消息 1" not in called["prompt"]
+        assert "玩家消息 2" in called["prompt"]
+        assert "玩家消息 7" in called["prompt"]
+
     def test_format_messages_empty(self):
         from memoria.core.multi_character_memory import _format_messages_for_extraction as _format_messages
         assert _format_messages([]) == ""

@@ -127,6 +127,7 @@ export default function Home() {
               { label: "对话", href: "/chat" },
               { label: "事件", href: "/events" },
               { label: "图谱", href: "/graph" },
+              { label: "知识", href: "/knowledge" },
             ]}
             hoveredPillTextColor="#A7EF9E"
               pillTextColor="#A7EF9E"

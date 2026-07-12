@@ -6,11 +6,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
+from memoria.core import character_loader, world_clock
+from memoria.core.config import configs
 from memoria.core.event_detector import get_event_detector
 from memoria.core.event_executor import get_event_executor
 from memoria.core.event_schema import (
@@ -277,12 +282,18 @@ def cron_matches(schedule: str, when: datetime) -> bool:
     )
 
 
-def next_cron_run(schedule: str, after: datetime | None = None, max_minutes: int = 366 * 24 * 60) -> datetime:
-    """计算下一次 cron 命中时间，分钟级精度。"""
+def next_cron_run(
+    schedule: str,
+    after: datetime | None = None,
+    max_minutes: int = 366 * 24 * 60,
+    timezone_name: str = "UTC",
+) -> datetime:
+    """Return the next world-UTC instant matching a player's local cron."""
     cursor = after or datetime.now(timezone.utc)
     cursor = cursor.astimezone(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1)
+    local_timezone = ZoneInfo(timezone_name)
     for _ in range(max_minutes):
-        if cron_matches(schedule, cursor):
+        if cron_matches(schedule, cursor.astimezone(local_timezone)):
             return cursor
         cursor += timedelta(minutes=1)
     raise ValueError(f"无法在搜索窗口内计算下一次 cron: {schedule}")
@@ -295,16 +306,152 @@ def register_time_event_schedule(
     schedule: str,
     base_time: datetime | None = None,
 ) -> bool:
-    """注册或更新时间驱动事件调度。"""
-    next_run = next_cron_run(schedule, base_time)
+    """Register a cron schedule against the player's local world calendar."""
+    snapshot = world_clock.get_clock_snapshot(player_id)
+    world_base = world_clock.as_utc(base_time or snapshot.world_now)
+    next_run = next_cron_run(
+        schedule,
+        world_base,
+        timezone_name=snapshot.timezone,
+    )
     return repository.save_event_schedule_state(
         event_id=event_id,
         character_id=character_id,
         player_id=player_id,
         schedule=schedule,
         next_run_at=next_run.isoformat(),
-        last_checked_at=(base_time or datetime.now(timezone.utc)).isoformat(),
+        last_checked_at=world_base.isoformat(),
         status="active",
+    )
+
+
+def _load_scheduled_event_context(
+    event: EventDefinition,
+    schedule_state: dict[str, Any],
+    world_now: datetime,
+) -> EventContext:
+    player_id = schedule_state["player_id"]
+    character_id = schedule_state["character_id"]
+    card = character_loader.load_character_card(character_id, player_id)
+    runtime_state = repository.get_runtime_state(character_id, player_id, card)
+
+    stored_context = repository.get_event_context_state(
+        event.event_id,
+        character_id,
+        player_id,
+    )
+    context_data: dict[str, Any] = {}
+    if stored_context and stored_context.get("context_data"):
+        try:
+            context_data = json.loads(stored_context["context_data"])
+        except (TypeError, ValueError):
+            logger.warning(
+                "Ignoring invalid persisted event context",
+                extra={"event_id": event.event_id, "player_id": player_id},
+            )
+
+    persisted_session_id = (
+        (stored_context or {}).get("last_session_id")
+        or context_data.get("session_id")
+    )
+    session = repository.get_session(persisted_session_id) if persisted_session_id else None
+    if session and (
+        session.get("player_id") != player_id
+        or session.get("status") == "ended"
+    ):
+        session = None
+    if not session:
+        session = repository.get_latest_active_session(player_id, character_id)
+
+    active_multi_session = repository.get_latest_active_multi_session(player_id)
+    session_id = session["session_id"] if session else f"schedule:{event.event_id}"
+    messages = repository.get_session_messages(session_id) if session else []
+    dialogue_count = sum(1 for message in messages if message.get("role") == "user")
+
+    session_duration_minutes = 0.0
+    if session and session.get("created_at"):
+        created_at = _parse_iso(session["created_at"])
+        if created_at:
+            session_duration_minutes = max(
+                0.0,
+                (datetime.now(timezone.utc) - created_at).total_seconds() / 60.0,
+            )
+
+    event_data = dict(context_data.get("event_data") or {})
+    event_data.update({
+        "triggered_by": "schedule",
+        "scheduled_for": schedule_state["next_run_at"],
+        "world_now": world_now.isoformat(),
+    })
+    return EventContext(
+        character_id=character_id,
+        player_id=player_id,
+        session_id=session_id,
+        current_affinity=runtime_state.get("affection_level", 0),
+        current_trust=runtime_state.get("trust_level", 0),
+        current_mood=runtime_state.get("current_mood", "neutral"),
+        player_message=context_data.get("player_message", ""),
+        npc_response=context_data.get("npc_response"),
+        dialogue_count=dialogue_count,
+        total_dialogue_count=dialogue_count,
+        session_duration_minutes=session_duration_minutes,
+        unlocked_content=context_data.get("unlocked_content") or [],
+        character_relationships=context_data.get("character_relationships") or {},
+        event_data=event_data,
+        last_event_id=context_data.get("last_event_id"),
+        active_multi_session_id=(
+            active_multi_session["session_id"] if active_multi_session else None
+        ),
+    )
+
+
+def _persist_scheduled_event_results(
+    event: EventDefinition,
+    context: EventContext,
+    results: list[EventTriggerResult],
+    world_now: datetime,
+) -> None:
+    _, affinity, trust, mood, _, notification = apply_event_results_to_dialogue_state(
+        results,
+        "",
+        context.current_affinity,
+        context.current_trust,
+        context.current_mood,
+    )
+    repository.save_runtime_state(
+        context.character_id,
+        context.player_id,
+        affinity,
+        trust,
+        mood,
+    )
+
+    messages: list[str] = []
+    if notification:
+        messages.append(notification)
+    for result in results:
+        if result.dialogue_override:
+            messages.append(result.dialogue_override)
+        for proactive in result.proactive_dialogues:
+            if isinstance(proactive, dict):
+                text = proactive.get("dialogue") or proactive.get("content")
+                if text:
+                    messages.append(str(text))
+    content = "\n".join(dict.fromkeys(messages)) or f"{event.event_name} 已触发。"
+    repository.enqueue_player_event(
+        context.player_id,
+        content,
+        event_id=event.event_id,
+        character_id=context.character_id,
+        session_id=(
+            None if context.session_id.startswith("schedule:") else context.session_id
+        ),
+        title=event.event_name,
+        payload=json.dumps(
+            [result.model_dump(mode="json") for result in results],
+            ensure_ascii=False,
+        ),
+        world_created_at=world_now.isoformat(),
     )
 
 
@@ -312,50 +459,110 @@ def run_due_time_events(
     now: datetime | None = None,
     limit: int = 50,
     player_id: str | None = None,
+    lease_owner: str | None = None,
 ) -> list[EventTriggerResult]:
-    """检查并执行到期的时间驱动事件。"""
-    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(second=0, microsecond=0)
-    rows = repository.list_due_event_schedules(now.isoformat(), limit=limit, player_id=player_id)
+    """Execute each due player schedule once against that player's world clock."""
+    real_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    owner = lease_owner or f"scheduler:{uuid.uuid4().hex}"
+    lease_expires_at = real_now + timedelta(
+        seconds=configs.world_clock_scheduler_lease_seconds
+    )
+    rows = repository.list_active_event_schedules(
+        limit=limit,
+        player_id=player_id,
+    )
     results: list[EventTriggerResult] = []
 
     for schedule_state in rows:
-        event_row = repository.get_event_definition(schedule_state["player_id"], schedule_state["event_id"])
-        if not event_row:
+        snapshot = world_clock.get_clock_snapshot(
+            schedule_state["player_id"],
+            real_now=real_now,
+        )
+        if snapshot.paused:
             continue
+        next_run_at = _parse_iso(schedule_state.get("next_run_at"))
+        if not next_run_at or next_run_at > snapshot.world_now:
+            continue
+        if not repository.claim_event_schedule(
+            schedule_state["event_id"],
+            schedule_state["character_id"],
+            schedule_state["player_id"],
+            lease_owner=owner,
+            lease_expires_at=lease_expires_at.isoformat(),
+            real_now_iso=real_now.isoformat(),
+            expected_next_run_at=schedule_state["next_run_at"],
+        ):
+            continue
+
         try:
+            event_row = repository.get_event_definition(
+                schedule_state["player_id"],
+                schedule_state["event_id"],
+            )
+            if not event_row:
+                raise ValueError("event definition not found")
             event = _event_definition_from_row(event_row)
             if not event.is_active:
-                continue
-            context = EventContext(
-                character_id=schedule_state["character_id"],
-                player_id=schedule_state["player_id"],
-                session_id=schedule_state.get("last_session_id") or f"schedule:{event.event_id}",
-                current_affinity=0,
-                current_trust=0,
-                current_mood="neutral",
-                player_message="",
-                npc_response=None,
-                dialogue_count=0,
-                total_dialogue_count=0,
-                session_duration_minutes=0,
-                event_data={"triggered_by": "schedule"},
+                raise ValueError("event definition is inactive")
+            context = _load_scheduled_event_context(
+                event,
+                schedule_state,
+                snapshot.world_now,
             )
-            results.extend(execute_event_with_chain(event, context))
-            next_run = next_cron_run(schedule_state["schedule"], now)
-            repository.save_event_schedule_state(
-                event_id=schedule_state["event_id"],
-                character_id=schedule_state["character_id"],
-                player_id=schedule_state["player_id"],
-                schedule=schedule_state["schedule"],
-                last_checked_at=now.isoformat(),
-                last_run_at=now.isoformat(),
+            event_results = execute_event_with_chain(event, context)
+            _persist_scheduled_event_results(
+                event,
+                context,
+                event_results,
+                snapshot.world_now,
+            )
+            next_run = next_cron_run(
+                schedule_state["schedule"],
+                snapshot.world_now,
+                timezone_name=snapshot.timezone,
+            )
+            if not repository.complete_event_schedule(
+                schedule_state["event_id"],
+                schedule_state["character_id"],
+                schedule_state["player_id"],
+                lease_owner=owner,
+                last_checked_at=snapshot.world_now.isoformat(),
+                last_run_at=snapshot.world_now.isoformat(),
                 next_run_at=next_run.isoformat(),
-                status="active",
+            ):
+                raise RuntimeError("schedule lease was lost before completion")
+            results.extend(event_results)
+        except Exception:
+            repository.release_event_schedule(
+                schedule_state["event_id"],
+                schedule_state["character_id"],
+                schedule_state["player_id"],
+                lease_owner=owner,
             )
-        except Exception as e:
-            logger.error(f"执行定时事件失败: {schedule_state.get('event_id')}, 错误: {e}", exc_info=True)
+            logger.error(
+                "Scheduled event execution failed",
+                extra={
+                    "event_id": schedule_state.get("event_id"),
+                    "character_id": schedule_state.get("character_id"),
+                    "player_id": schedule_state.get("player_id"),
+                    "next_run_at": schedule_state.get("next_run_at"),
+                },
+                exc_info=True,
+            )
 
     return results
+
+
+async def run_world_clock_scheduler() -> None:
+    """Run the cancellable background scheduler loop."""
+    while True:
+        try:
+            await asyncio.to_thread(run_due_time_events)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.error("World-clock scheduler scan failed", exc_info=True)
+        await asyncio.sleep(configs.world_clock_scheduler_interval_seconds)
 
 
 DEFAULT_EVENT_TEMPLATES = [

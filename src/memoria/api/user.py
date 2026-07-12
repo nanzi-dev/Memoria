@@ -11,11 +11,12 @@ import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Header, Response, Cookie
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, UploadFile, File, Header, Response, Cookie, Depends, Query
+from pydantic import BaseModel, StrictInt
 
 from memoria.api.avatar_fetcher import download_remote_image
 from memoria.core.config import configs
+from memoria.core import world_clock
 from memoria.db import repository
 
 router = APIRouter()
@@ -187,11 +188,40 @@ class UpdateProfileRequest(BaseModel):
 class SetAvatarUrlRequest(BaseModel):
     url: str
 
+class WorldClockResponse(BaseModel):
+    world_now: str
+    real_now: str
+    timezone: str
+    time_scale: int
+    paused: bool
+
+class UpdateWorldClockRequest(BaseModel):
+    timezone: str | None = None
+    time_scale: StrictInt | None = None
+
 class UserResponse(BaseModel):
     user_id: str
     username: str
     gender: str
     avatar_url: str | None = None
+    timezone: str
+    time_scale: int
+    paused: bool
+    world_now: str
+    real_now: str
+
+class EventInboxItem(BaseModel):
+    id: int
+    event_id: str | None = None
+    character_id: str | None = None
+    session_id: str | None = None
+    event_type: str
+    title: str | None = None
+    content: str
+    payload: str | None = None
+    world_created_at: str | None = None
+    created_at: str
+    read_at: str | None = None
 
 class AuthResponse(BaseModel):
     token: str
@@ -200,6 +230,17 @@ class AuthResponse(BaseModel):
 class OperationResponse(BaseModel):
     success: bool
     message: str
+
+
+def _build_user_response(user: dict) -> UserResponse:
+    clock = world_clock.get_clock_snapshot(user["user_id"]).to_api_dict()
+    return UserResponse(
+        user_id=user["user_id"],
+        username=user["username"],
+        gender=user["gender"],
+        avatar_url=user.get("avatar_url"),
+        **clock,
+    )
 
 
 # =========================
@@ -222,9 +263,7 @@ def register(req: RegisterRequest, response: Response):
     _store_auth_token(token, uid)
     _set_auth_cookie(response, token)
     user = repository.get_user_by_id(uid)
-    return AuthResponse(token=token, user=UserResponse(
-        user_id=uid, username=req.username, gender=req.gender
-    ))
+    return AuthResponse(token=token, user=_build_user_response(user))
 
 
 # =========================
@@ -242,12 +281,7 @@ def login(req: LoginRequest, response: Response):
     token = _gen_token()
     _store_auth_token(token, user["user_id"])
     _set_auth_cookie(response, token)
-    return AuthResponse(token=token, user=UserResponse(
-        user_id=user["user_id"],
-        username=user["username"],
-        gender=user["gender"],
-        avatar_url=user.get("avatar_url"),
-    ))
+    return AuthResponse(token=token, user=_build_user_response(user))
 
 
 # =========================
@@ -286,12 +320,7 @@ def get_me(
     user = repository.get_user_by_id(uid)
     if not user:
         raise HTTPException(404, "用户不存在")
-    return UserResponse(
-        user_id=user["user_id"],
-        username=user["username"],
-        gender=user["gender"],
-        avatar_url=user.get("avatar_url"),
-    )
+    return _build_user_response(user)
 
 
 # =========================
@@ -317,12 +346,59 @@ def update_profile(
         raise HTTPException(400, "性别只能是 male/female/unknown")
     repository.update_user_profile(uid, username=req.username, gender=req.gender)
     user = repository.get_user_by_id(uid)
-    return UserResponse(
-        user_id=user["user_id"],
-        username=user["username"],
-        gender=user["gender"],
-        avatar_url=user.get("avatar_url"),
+    return _build_user_response(user)
+
+
+# =========================
+# 世界时钟与事件收件箱
+# =========================
+@router.get("/user/world-clock", response_model=WorldClockResponse)
+def get_world_clock(user_id: str = Depends(require_current_user_id)):
+    return WorldClockResponse(**world_clock.get_clock_snapshot(user_id).to_api_dict())
+
+
+@router.put("/user/world-clock", response_model=WorldClockResponse)
+def put_world_clock(
+    req: UpdateWorldClockRequest,
+    user_id: str = Depends(require_current_user_id),
+):
+    try:
+        snapshot = world_clock.update_clock(
+            user_id,
+            timezone_name=req.timezone,
+            time_scale=req.time_scale,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return WorldClockResponse(**snapshot.to_api_dict())
+
+
+@router.post("/user/world-clock/sync", response_model=WorldClockResponse)
+def sync_world_clock(user_id: str = Depends(require_current_user_id)):
+    return WorldClockResponse(**world_clock.sync_clock(user_id).to_api_dict())
+
+
+@router.get("/user/event-inbox", response_model=list[EventInboxItem])
+def get_event_inbox(
+    unread_only: bool = True,
+    limit: int = Query(default=50, ge=1, le=100),
+    user_id: str = Depends(require_current_user_id),
+):
+    return repository.list_player_event_inbox(
+        user_id,
+        unread_only=unread_only,
+        limit=limit,
     )
+
+
+@router.post("/user/event-inbox/{inbox_id}/read", response_model=OperationResponse)
+def read_event_inbox_item(
+    inbox_id: int,
+    user_id: str = Depends(require_current_user_id),
+):
+    if not repository.mark_player_event_read(user_id, inbox_id):
+        raise HTTPException(404, "事件通知不存在")
+    return OperationResponse(success=True, message="已读")
 
 
 # =========================

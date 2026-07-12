@@ -19,6 +19,17 @@ memory:
   short_term_turns: 8
   long_term_interval_turns: 5
   vector_search_top_k: 10
+knowledge:
+  storage_path: ./data/knowledge
+  query_max_chars: 4000
+  retrieval_top_k: 6
+  similarity_threshold: 0.35
+  injection_max_chars: 6000
+  upload_max_bytes: 10485760
+  pdf_max_pages: 300
+  extract_max_chars: 1000000
+  chunk_chars: 800
+  chunk_overlap_chars: 120
 database:
   sqlite_path: ./data/sqlite_db/memoria.db
   database_url: ''

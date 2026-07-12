@@ -19,6 +19,10 @@ SYSTEM_PROMPT_TEMPLATE = """你现在要完全代入并扮演游戏中的角色"
 
 {relationship_graph_context}
 
+{time_context_section}
+
+{knowledge_context}
+
 【角色身份】
 {core_identity_summary}
 年龄：{age}　性别：{gender}　身份：{occupation}
@@ -95,7 +99,7 @@ JSON 格式示例：
 - affinity_delta: 必填整数，-10到10之间
 - trust_delta: 必填整数，-10到10之间
 - mood_after: 必填字符串，必须是 {mood_values} 中的一个
-- memory_worth_keeping: 最近几轮对话中值得长期记住的一条稳定事实；没有则必须填 null，禁止填写“无”
+- memory_worth_keeping: 必须固定填 null；长期记忆由独立的玩家消息提取流程处理
 
 ⚠️ 最终强调：直接输出 JSON 对象，前后不要有任何其他内容！
 """
@@ -145,6 +149,22 @@ def _build_relationship_graph_lines(
     )
 
 
+def _format_time_context(time_context: dict | None, heading: str = "【世界时间】") -> str:
+    if not time_context:
+        return ""
+    scale_text = "已暂停（0x）" if time_context.get("paused") else f"{time_context.get('time_scale', 1)}x"
+    return "\n".join([
+        heading,
+        (
+            f"当前为 {time_context.get('local_date')} {time_context.get('weekday')} "
+            f"{time_context.get('local_time')}，{time_context.get('period')}。"
+        ),
+        f"玩家时区：{time_context.get('timezone')}；世界时间倍率：{scale_text}。",
+        f"距你与玩家上次互动已过：{time_context.get('last_interaction_elapsed')}。",
+        "自然遵循当前昼夜、日期和互动间隔；除非话题相关，不要机械报时或解释时间系统。",
+    ])
+
+
 # =========================
 # 主 Prompt 构建函数
 # =========================
@@ -153,7 +173,9 @@ def build_system_prompt(
     runtime_state: dict, 
     player_name: str,
     past_summaries: list[str] = None,
-    relationship_graph_lines: list[str] = None
+    relationship_graph_lines: list[str] = None,
+    time_context: dict | None = None,
+    knowledge_context: str = "",
 ):
     """
     构建 system prompt（核心函数）
@@ -209,6 +231,8 @@ def build_system_prompt(
     return SYSTEM_PROMPT_TEMPLATE.format(
         name = card.meta.name,
         relationship_graph_context=relationship_graph_context,
+        time_context_section=_format_time_context(time_context),
+        knowledge_context=knowledge_context,
         
         # identity
         core_identity_summary = identity.core_identity_summary,
@@ -278,7 +302,9 @@ def build_multi_character_system_prompt(
     character_relationships: dict = None,
     past_summaries: list[str] = None,
     is_opening: bool = False,
-    is_interaction: bool = False
+    is_interaction: bool = False,
+    time_context: dict | None = None,
+    knowledge_context: str = "",
 ) -> str:
     """
     构建多角色场景的系统提示
@@ -424,6 +450,15 @@ def build_multi_character_system_prompt(
         f"",
     ])
 
+    if time_context:
+        prompt_parts.extend([
+            _format_time_context(time_context, heading="# 世界时间"),
+            "",
+        ])
+
+    if knowledge_context:
+        prompt_parts.extend([knowledge_context, ""])
+
     if relationship_graph_lines:
         prompt_parts.extend([
             "# 关系执行规则",
@@ -482,10 +517,11 @@ def build_multi_character_system_prompt(
         '  "affinity_delta": 好感度变化(-10到10),',
         '  "trust_delta": 信任度变化(-10到10),',
         '  "mood_after": "对话后的情绪",',
-        '  "memory_worth_keeping": "最近几轮中值得长期记住的一条稳定事实（没有则填null，禁止填无）"',
+        '  "memory_worth_keeping": null',
         '}',
         "",
         f"可用情绪选项：{_join(mood_values)}",
+        "memory_worth_keeping 必须固定为 null；长期记忆由独立流程处理。",
         "",
         "⚠️ 直接输出 JSON 对象，前后不要有任何其他内容！"
     ])

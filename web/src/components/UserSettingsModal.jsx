@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useUser } from '../context/UserContext';
 import { userApi } from '../api/memoria';
-import { X, Loader2, Upload, Link, User, LogOut, AlertCircle, Check, Edit3 } from 'lucide-react';
+import { X, Loader2, Upload, Link, User, LogOut, AlertCircle, Check, Edit3, Pause, RotateCw } from 'lucide-react';
 
 const GENDERS = [
   { value: 'unknown', label: '保密' },
@@ -20,7 +20,14 @@ function validateUsername(name) {
 const GENDER_LABEL = { male: '男', female: '女', unknown: '保密' };
 
 export default function UserSettingsModal({ onClose }) {
-  const { user, logout, refresh } = useUser();
+  const {
+    user,
+    worldClock,
+    logout,
+    refresh,
+    updateWorldClock,
+    syncWorldClock,
+  } = useUser();
   const [username, setUsername] = useState(user?.username || '');
   const [gender, setGender] = useState(user?.gender || 'unknown');
   const [avatarUrl, setAvatarUrl] = useState('');
@@ -28,6 +35,7 @@ export default function UserSettingsModal({ onClose }) {
   const [apiError, setApiError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [submitted, setSubmitted] = useState(false);
+  const [clockLoading, setClockLoading] = useState(false);
   const fileRef = useRef(null);
   const usernameRef = useRef(null);
 
@@ -108,6 +116,32 @@ export default function UserSettingsModal({ onClose }) {
   const handleLogout = () => {
     logout();
     onClose();
+  };
+
+  const handleScaleChange = async (timeScale) => {
+    setApiError(null);
+    setClockLoading(true);
+    try {
+      await updateWorldClock({ timeScale });
+      setSuccess(timeScale === 0 ? '世界时间已暂停' : `世界时间已切换至 ${timeScale}x`);
+    } catch (err) {
+      setApiError(err.message);
+    } finally {
+      setClockLoading(false);
+    }
+  };
+
+  const handleClockSync = async () => {
+    setApiError(null);
+    setClockLoading(true);
+    try {
+      await syncWorldClock();
+      setSuccess('世界时间已同步至现实时间');
+    } catch (err) {
+      setApiError(err.message);
+    } finally {
+      setClockLoading(false);
+    }
   };
 
   return (
@@ -261,6 +295,50 @@ export default function UserSettingsModal({ onClose }) {
               {loading ? '保存中...' : '保存资料'}
             </button>
           </form>
+
+          <fieldset className="border border-cyan-300/10 rounded-lg px-4 py-4 space-y-3">
+            <legend className="text-[10px] text-cyan-200/50 uppercase tracking-wider px-1.5">世界时间</legend>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[11px] text-zinc-300">时间流速</div>
+                <div className="truncate text-[9px] text-zinc-600" title={worldClock?.timezone}>
+                  {worldClock?.timezone || 'UTC'}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleClockSync}
+                disabled={clockLoading}
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-cyan-300/15 text-cyan-200/60 hover:border-cyan-300/30 hover:bg-cyan-300/5 hover:text-cyan-100 disabled:opacity-30"
+                aria-label="同步现实时间"
+                title="同步现实时间"
+              >
+                {clockLoading ? <Loader2 size={14} className="animate-spin" /> : <RotateCw size={14} />}
+              </button>
+            </div>
+            <div className="grid grid-cols-5 overflow-hidden rounded-md border border-white/10 bg-black/20">
+              {[0, 1, 2, 5, 10].map(scale => {
+                const selected = Number(worldClock?.time_scale) === scale;
+                return (
+                  <button
+                    key={scale}
+                    type="button"
+                    onClick={() => handleScaleChange(scale)}
+                    disabled={clockLoading}
+                    className={`flex min-h-[44px] min-w-0 items-center justify-center gap-1 border-r border-white/10 px-1 text-[10px] last:border-r-0 disabled:opacity-30 ${
+                      selected
+                        ? 'bg-cyan-300/12 text-cyan-100'
+                        : 'text-zinc-500 hover:bg-white/[0.03] hover:text-zinc-300'
+                    }`}
+                    aria-pressed={selected}
+                    aria-label={scale === 0 ? '暂停世界时间' : `${scale}倍世界时间`}
+                  >
+                    {scale === 0 ? <Pause size={11} /> : `${scale}x`}
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
 
           {/* ── Account Info & Logout ── */}
           <div className="pt-2 border-t border-cyber-green/10 space-y-3">

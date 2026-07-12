@@ -16,10 +16,18 @@ import uuid
 from datetime import datetime, timezone
 from typing import Callable
 
-from memoria.core import character_loader, llm_client, multi_character_memory, prompt_builder
+from memoria.core import (
+    character_loader,
+    llm_client,
+    multi_character_memory,
+    prompt_builder,
+    world_clock,
+)
 from memoria.core.config import configs
 from memoria.core.event_schema import EventContext
 from memoria.core import event_runtime, relationship_context
+from memoria.core.knowledge_retriever import retrieve_knowledge
+from memoria.core.memory_extractor import extract_player_memory
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
@@ -92,6 +100,51 @@ def _append_short_term_message(
         if "unexpected keyword argument" not in str(e):
             raise
         return repository.append_short_term_message(session_id, role, content)
+
+
+def _build_system_prompt(
+    card,
+    runtime_state: dict,
+    player_name: str,
+    *,
+    past_summaries: list[str],
+    relationship_graph_lines: list[str],
+    time_context: dict,
+    knowledge_context: str = "",
+) -> str:
+    """Call the prompt builder while tolerating legacy test doubles."""
+    try:
+        return prompt_builder.build_system_prompt(
+            card,
+            runtime_state,
+            player_name,
+            past_summaries=past_summaries,
+            relationship_graph_lines=relationship_graph_lines,
+            time_context=time_context,
+            knowledge_context=knowledge_context,
+        )
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        try:
+            return prompt_builder.build_system_prompt(
+                card,
+                runtime_state,
+                player_name,
+                past_summaries=past_summaries,
+                relationship_graph_lines=relationship_graph_lines,
+                time_context=time_context,
+            )
+        except TypeError as legacy_exc:
+            if "unexpected keyword argument" not in str(legacy_exc):
+                raise
+            return prompt_builder.build_system_prompt(
+                card,
+                runtime_state,
+                player_name,
+                past_summaries=past_summaries,
+                relationship_graph_lines=relationship_graph_lines,
+            )
     
 
 def _aliases_for_card(character_id: str, card) -> list[str]:
@@ -497,6 +550,10 @@ def start_session(
     
     card = character_loader.load_character_card(character_id, player_id)
     runtime_state = repository.get_runtime_state(character_id, player_id, card)
+    clock_snapshot = world_clock.get_clock_snapshot(player_id)
+    time_context = clock_snapshot.prompt_context(
+        repository.get_last_character_interaction_world_at(player_id, character_id)
+    )
     
     session_id = str(uuid.uuid4())
     repository.create_session(session_id, character_id, player_id, player_name)
@@ -513,12 +570,13 @@ def start_session(
     runtime_state["known_player_facts"] = prompt_context["known_player_facts"]
     past_summaries.extend(prompt_context["cross_mode_memories"])
     
-    system_prompt = prompt_builder.build_system_prompt(
+    system_prompt = _build_system_prompt(
         card,
         runtime_state,
         player_name,
         past_summaries=past_summaries,
         relationship_graph_lines=prompt_context["relationship_graph_lines"],
+        time_context=time_context,
     )
     opening_instruction = prompt_builder.build_opening_line_prompt(card, runtime_state, player_name)
     
@@ -541,6 +599,7 @@ def start_session(
         current_affinity=runtime_state.get("affection_level", 0),
         current_trust=runtime_state.get("trust_level", 0),
         current_mood=runtime_state.get("current_mood", "neutral"),
+        world_created_at=clock_snapshot.world_now.isoformat(),
     )
     
     return{
@@ -573,6 +632,10 @@ def run_dialogue_turn(
     character_id = session["character_id"]
     player_id = session["player_id"]
     player_name = session["player_name"]
+    clock_snapshot = world_clock.get_clock_snapshot(player_id)
+    time_context = clock_snapshot.prompt_context(
+        repository.get_last_character_interaction_world_at(player_id, character_id)
+    )
     
     card = character_loader.load_character_card(character_id, player_id)
     
@@ -593,6 +656,12 @@ def run_dialogue_turn(
         session_id,
         limit_turns = 8
     )
+    knowledge = retrieve_knowledge(
+        owner_user_id=player_id,
+        character_id=character_id,
+        current_message=player_message,
+        recent_history=history,
+    )
     
     # 获取历史会话摘要（最近3次，用于上下文增强）
     past_summaries_raw = repository.get_recent_summaries(character_id, player_id, limit=3)
@@ -607,12 +676,14 @@ def run_dialogue_turn(
     runtime_state["known_player_facts"] = prompt_context["known_player_facts"]
     past_summaries.extend(prompt_context["cross_mode_memories"])
     
-    system_prompt = prompt_builder.build_system_prompt(
+    system_prompt = _build_system_prompt(
         card,
         runtime_state,
         player_name,
         past_summaries=past_summaries,
         relationship_graph_lines=prompt_context["relationship_graph_lines"],
+        time_context=time_context,
+        knowledge_context=knowledge.prompt_section,
     )
     
     messages = history + [
@@ -689,8 +760,6 @@ def run_dialogue_turn(
     # =========================
     # 暂缓持久化——先执行事件，成功后统一写入，避免事件失败时数据不一致
     # =========================
-    memory_fact = result.get("memory_worth_keeping")
-
     # =========================
     # 事件系统检测和执行
     # =========================
@@ -747,7 +816,12 @@ def run_dialogue_turn(
             mood_after
         )
 
-        user_msg_id = _append_short_term_message(session_id, "user", player_message)
+        user_msg_id = _append_short_term_message(
+            session_id,
+            "user",
+            player_message,
+            world_created_at=clock_snapshot.world_now.isoformat(),
+        )
         assistant_msg_id = _append_short_term_message(
             session_id,
             "assistant",
@@ -759,15 +833,22 @@ def run_dialogue_turn(
             current_trust=new_trust,
             current_mood=mood_after,
             event_notification=event_notification,
+            world_created_at=clock_snapshot.world_now.isoformat(),
+            knowledge_sources=knowledge.sources,
         )
 
-        repository.save_long_term_fact_if_checkpoint(
-            session_id,
-            character_id,
-            player_id,
-            memory_fact,
-            configs.long_term_memory_interval_turns,
-        )
+        if repository.is_long_term_memory_checkpoint(
+            session_id, configs.long_term_memory_interval_turns
+        ):
+            player_history = repository.get_short_term_history(
+                session_id,
+                limit_turns=configs.long_term_memory_interval_turns,
+            )
+            repository.save_long_term_fact(
+                character_id,
+                player_id,
+                extract_player_memory(player_history),
+            )
     except Exception as e:
         logger.error(f"对话持久化失败: {e}", exc_info=True)
         raise RuntimeError("对话持久化失败") from e
@@ -787,4 +868,5 @@ def run_dialogue_turn(
         "event_notification": event_notification,
         "user_message_id": user_msg_id,
         "assistant_message_id": assistant_msg_id,
+        "knowledge_sources": knowledge.sources,
     }

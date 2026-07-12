@@ -5,6 +5,7 @@
     uvicorn memoria.main:app --reload
 """
 
+import asyncio
 import os
 import logging
 from contextlib import asynccontextmanager
@@ -20,6 +21,7 @@ from memoria.api.event_admin import router as event_admin_router
 from memoria.api.relationship import router as relationship_router
 from memoria.api.developer import router as developer_router
 from memoria.api.multi_dialogue import router as multi_dialogue_router
+from memoria.api.knowledge import router as knowledge_router
 from memoria.api.user import (
     AUTH_COOKIE_NAME,
     get_current_user_id,
@@ -28,7 +30,10 @@ from memoria.api.user import (
 )
 from memoria.db.repository import init_db
 from memoria.core.config import configs
-from memoria.core.event_runtime import ensure_default_event_templates
+from memoria.core.event_runtime import (
+    ensure_default_event_templates,
+    run_world_clock_scheduler,
+)
 
 # =========================
 # 结构化日志配置
@@ -111,10 +116,21 @@ async def lifespan(app: FastAPI):
         logger.error("数据库初始化失败: %s", e, exc_info=True)
         raise
 
+    scheduler_task = asyncio.create_task(
+        run_world_clock_scheduler(),
+        name="memoria-world-clock-scheduler",
+    )
     logger.info("Memoria 服务已启动 (v%s)", APP_VERSION)
-    yield
-    # ---------- shutdown ----------
-    logger.info("Memoria 服务正在关闭...")
+    try:
+        yield
+    finally:
+        # ---------- shutdown ----------
+        scheduler_task.cancel()
+        try:
+            await scheduler_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Memoria 服务正在关闭...")
 
 
 # =========================
@@ -191,3 +207,4 @@ app.include_router(event_admin_router, prefix="/api/v1")
 app.include_router(relationship_router, prefix="/api/v1")
 app.include_router(developer_router, prefix="/api/v1")
 app.include_router(user_router, prefix="/api/v1")
+app.include_router(knowledge_router, prefix="/api/v1")

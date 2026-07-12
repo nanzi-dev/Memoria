@@ -10,12 +10,13 @@ API 路由层
 from datetime import datetime, timedelta, timezone
 import uuid
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from memoria.core import character_loader, orchestrator
 from memoria.core.memory_extractor import summarize_session
 from memoria.api.user import require_current_user_id
+from memoria.api.knowledge_models import KnowledgeSource
 from memoria.db import repository
 
 router = APIRouter()
@@ -50,6 +51,7 @@ class HistoryMessage(BaseModel):
     event_notification: str | None = None
     created_at: str | None = None
     message_id: int | None = None
+    knowledge_sources: list[KnowledgeSource] = Field(default_factory=list)
 
 
 class SessionStartResponse(BaseModel):
@@ -75,6 +77,7 @@ class DialogueTurnResponse(BaseModel):
     event_notification: str | None = None
     user_message_id: int | None = None
     assistant_message_id: int | None = None
+    knowledge_sources: list[KnowledgeSource] = Field(default_factory=list)
 
 class SessionEndRequest(BaseModel):
     session_id: str

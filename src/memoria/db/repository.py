@@ -10,8 +10,10 @@
 
 from contextlib import contextmanager
 from datetime import datetime, timezone
+import json
 import logging
 import sqlite3
+import uuid
 from urllib.parse import urlsplit
 
 from memoria.core.config import configs
@@ -38,6 +40,23 @@ def _now() -> str:
 def _row_to_dict(row):
     """安全转换 sqlite Row / psycopg dict row -> dict"""
     return dict(row) if row is not None else None
+
+
+def _encode_knowledge_sources(sources: list[dict] | None) -> str:
+    return json.dumps(sources or [], ensure_ascii=False)
+
+
+def _decode_message_row(row) -> dict:
+    message = dict(row)
+    raw_sources = message.get("knowledge_sources")
+    if isinstance(raw_sources, str):
+        try:
+            message["knowledge_sources"] = json.loads(raw_sources)
+        except (TypeError, ValueError):
+            message["knowledge_sources"] = []
+    elif raw_sources is None:
+        message["knowledge_sources"] = []
+    return message
 
 
 def _is_postgres_enabled() -> bool:
@@ -249,6 +268,19 @@ CREATE TABLE IF NOT EXISTS auth_token (
 );
 
 -- =========================
+-- 玩家世界时钟
+-- =========================
+CREATE TABLE IF NOT EXISTS player_world_clock (
+    player_id        TEXT PRIMARY KEY,
+    timezone         TEXT NOT NULL DEFAULT 'UTC',
+    anchor_real_utc  TEXT NOT NULL,
+    anchor_world_utc TEXT NOT NULL,
+    time_scale       REAL NOT NULL DEFAULT 1,
+    updated_at       TEXT NOT NULL,
+    FOREIGN KEY (player_id) REFERENCES users(user_id)
+);
+
+-- =========================
 -- 角色卡存储
 -- =========================
 CREATE TABLE IF NOT EXISTS character_card (
@@ -358,6 +390,8 @@ CREATE TABLE IF NOT EXISTS event_schedule_state (
     last_run_at     TEXT,
     next_run_at     TEXT,
     status          TEXT DEFAULT 'active',
+    lease_owner     TEXT,
+    lease_expires_at TEXT,
 
     created_at      TEXT,
     updated_at      TEXT,
@@ -514,8 +548,91 @@ CREATE TABLE IF NOT EXISTS short_term_message (
     current_trust   REAL,
     current_mood    TEXT,
     event_notification TEXT,
+    knowledge_sources TEXT,                 -- KnowledgeSource[] JSON
     
-    created_at      TEXT
+    created_at      TEXT,
+    world_created_at TEXT
+);
+
+-- =========================
+-- 世界观知识库
+-- =========================
+CREATE TABLE IF NOT EXISTS knowledge_base (
+    knowledge_base_id TEXT PRIMARY KEY,
+    owner_user_id     TEXT NOT NULL,
+    name              TEXT NOT NULL,
+    description       TEXT,
+    is_enabled        INTEGER NOT NULL DEFAULT 1,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    FOREIGN KEY (owner_user_id) REFERENCES users(user_id)
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_binding (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_user_id     TEXT NOT NULL,
+    knowledge_base_id TEXT NOT NULL,
+    target_type       TEXT NOT NULL,       -- global / character / group_thread
+    target_id         TEXT NOT NULL DEFAULT '',
+    created_at        TEXT NOT NULL,
+    UNIQUE(owner_user_id, knowledge_base_id, target_type, target_id),
+    FOREIGN KEY (owner_user_id) REFERENCES users(user_id),
+    FOREIGN KEY (knowledge_base_id) REFERENCES knowledge_base(knowledge_base_id)
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_document (
+    document_id       TEXT PRIMARY KEY,
+    owner_user_id     TEXT NOT NULL,
+    knowledge_base_id TEXT NOT NULL,
+    original_name     TEXT NOT NULL,
+    media_type        TEXT NOT NULL,
+    source_type       TEXT NOT NULL,       -- upload / pasted_text
+    storage_path      TEXT,
+    checksum          TEXT NOT NULL,
+    byte_size         INTEGER NOT NULL DEFAULT 0,
+    status            TEXT NOT NULL DEFAULT 'queued',
+    error_message     TEXT,
+    extracted_chars   INTEGER NOT NULL DEFAULT 0,
+    page_count        INTEGER,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    FOREIGN KEY (owner_user_id) REFERENCES users(user_id),
+    FOREIGN KEY (knowledge_base_id) REFERENCES knowledge_base(knowledge_base_id)
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_chunk (
+    chunk_id          TEXT PRIMARY KEY,
+    owner_user_id     TEXT NOT NULL,
+    knowledge_base_id TEXT NOT NULL,
+    document_id       TEXT NOT NULL,
+    chunk_index       INTEGER NOT NULL,
+    content           TEXT NOT NULL,
+    char_count        INTEGER NOT NULL,
+    source_metadata   TEXT,
+    created_at        TEXT NOT NULL,
+    UNIQUE(document_id, chunk_index),
+    FOREIGN KEY (owner_user_id) REFERENCES users(user_id),
+    FOREIGN KEY (knowledge_base_id) REFERENCES knowledge_base(knowledge_base_id),
+    FOREIGN KEY (document_id) REFERENCES knowledge_document(document_id)
+);
+
+-- =========================
+-- 玩家事件收件箱
+-- =========================
+CREATE TABLE IF NOT EXISTS player_event_inbox (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id        TEXT NOT NULL,
+    event_id         TEXT,
+    character_id     TEXT,
+    session_id       TEXT,
+    event_type       TEXT NOT NULL DEFAULT 'event',
+    title            TEXT,
+    content          TEXT NOT NULL,
+    payload          TEXT,
+    world_created_at TEXT,
+    created_at       TEXT NOT NULL,
+    read_at          TEXT,
+    FOREIGN KEY (player_id) REFERENCES users(user_id)
 );
 
 -- =========================
@@ -586,6 +703,21 @@ ON event_schedule_state(status, next_run_at);
 
 CREATE INDEX IF NOT EXISTS idx_auth_token_user
 ON auth_token(user_id, expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_player_event_inbox_unread
+ON player_event_inbox(player_id, read_at, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_base_owner
+ON knowledge_base(owner_user_id, is_enabled, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_binding_target
+ON knowledge_binding(owner_user_id, target_type, target_id, knowledge_base_id);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_document_base
+ON knowledge_document(owner_user_id, knowledge_base_id, status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunk_document
+ON knowledge_chunk(owner_user_id, document_id, chunk_index);
 
 
 -- =========================
@@ -680,6 +812,32 @@ def _migrate(conn):
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         );
 
+        CREATE TABLE IF NOT EXISTS player_world_clock (
+            player_id        TEXT PRIMARY KEY,
+            timezone         TEXT NOT NULL DEFAULT 'UTC',
+            anchor_real_utc  TEXT NOT NULL,
+            anchor_world_utc TEXT NOT NULL,
+            time_scale       REAL NOT NULL DEFAULT 1,
+            updated_at       TEXT NOT NULL,
+            FOREIGN KEY (player_id) REFERENCES users(user_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS player_event_inbox (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            player_id        TEXT NOT NULL,
+            event_id         TEXT,
+            character_id     TEXT,
+            session_id       TEXT,
+            event_type       TEXT NOT NULL DEFAULT 'event',
+            title            TEXT,
+            content          TEXT NOT NULL,
+            payload          TEXT,
+            world_created_at TEXT,
+            created_at       TEXT NOT NULL,
+            read_at          TEXT,
+            FOREIGN KEY (player_id) REFERENCES users(user_id)
+        );
+
         CREATE TABLE IF NOT EXISTS character_relationship_revision (
             owner_user_id   TEXT NOT NULL,
             character_id_a  TEXT NOT NULL,
@@ -689,11 +847,85 @@ def _migrate(conn):
             FOREIGN KEY (owner_user_id) REFERENCES users(user_id)
         );
 
+        CREATE TABLE IF NOT EXISTS knowledge_base (
+            knowledge_base_id TEXT PRIMARY KEY,
+            owner_user_id     TEXT NOT NULL,
+            name              TEXT NOT NULL,
+            description       TEXT,
+            is_enabled        INTEGER NOT NULL DEFAULT 1,
+            created_at        TEXT NOT NULL,
+            updated_at        TEXT NOT NULL,
+            FOREIGN KEY (owner_user_id) REFERENCES users(user_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS knowledge_binding (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_user_id     TEXT NOT NULL,
+            knowledge_base_id TEXT NOT NULL,
+            target_type       TEXT NOT NULL,
+            target_id         TEXT NOT NULL DEFAULT '',
+            created_at        TEXT NOT NULL,
+            UNIQUE(owner_user_id, knowledge_base_id, target_type, target_id),
+            FOREIGN KEY (owner_user_id) REFERENCES users(user_id),
+            FOREIGN KEY (knowledge_base_id) REFERENCES knowledge_base(knowledge_base_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS knowledge_document (
+            document_id       TEXT PRIMARY KEY,
+            owner_user_id     TEXT NOT NULL,
+            knowledge_base_id TEXT NOT NULL,
+            original_name     TEXT NOT NULL,
+            media_type        TEXT NOT NULL,
+            source_type       TEXT NOT NULL,
+            storage_path      TEXT,
+            checksum          TEXT NOT NULL,
+            byte_size         INTEGER NOT NULL DEFAULT 0,
+            status            TEXT NOT NULL DEFAULT 'queued',
+            error_message     TEXT,
+            extracted_chars   INTEGER NOT NULL DEFAULT 0,
+            page_count        INTEGER,
+            created_at        TEXT NOT NULL,
+            updated_at        TEXT NOT NULL,
+            FOREIGN KEY (owner_user_id) REFERENCES users(user_id),
+            FOREIGN KEY (knowledge_base_id) REFERENCES knowledge_base(knowledge_base_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS knowledge_chunk (
+            chunk_id          TEXT PRIMARY KEY,
+            owner_user_id     TEXT NOT NULL,
+            knowledge_base_id TEXT NOT NULL,
+            document_id       TEXT NOT NULL,
+            chunk_index       INTEGER NOT NULL,
+            content           TEXT NOT NULL,
+            char_count        INTEGER NOT NULL,
+            source_metadata   TEXT,
+            created_at        TEXT NOT NULL,
+            UNIQUE(document_id, chunk_index),
+            FOREIGN KEY (owner_user_id) REFERENCES users(user_id),
+            FOREIGN KEY (knowledge_base_id) REFERENCES knowledge_base(knowledge_base_id),
+            FOREIGN KEY (document_id) REFERENCES knowledge_document(document_id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_auth_token_user
         ON auth_token(user_id, expires_at);
 
         CREATE INDEX IF NOT EXISTS idx_relationship_revision_lookup
         ON character_relationship_revision(owner_user_id, character_id_a, character_id_b);
+
+        CREATE INDEX IF NOT EXISTS idx_player_event_inbox_unread
+        ON player_event_inbox(player_id, read_at, id DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_knowledge_base_owner
+        ON knowledge_base(owner_user_id, is_enabled, updated_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_knowledge_binding_target
+        ON knowledge_binding(owner_user_id, target_type, target_id, knowledge_base_id);
+
+        CREATE INDEX IF NOT EXISTS idx_knowledge_document_base
+        ON knowledge_document(owner_user_id, knowledge_base_id, status, created_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_knowledge_chunk_document
+        ON knowledge_chunk(owner_user_id, document_id, chunk_index);
         """
     if _is_postgres_enabled():
         migration_schema = migration_schema.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
@@ -722,6 +954,8 @@ def _migrate(conn):
     add_column("event_schedule_state", "last_run_at TEXT")
     add_column("event_schedule_state", "next_run_at TEXT")
     add_column("event_schedule_state", "status TEXT DEFAULT 'active'")
+    add_column("event_schedule_state", "lease_owner TEXT")
+    add_column("event_schedule_state", "lease_expires_at TEXT")
     add_column("event_schedule_state", "created_at TEXT")
     add_column("event_schedule_state", "updated_at TEXT")
     add_column("short_term_message", "action TEXT")
@@ -731,7 +965,15 @@ def _migrate(conn):
     add_column("short_term_message", "current_trust REAL")
     add_column("short_term_message", "current_mood TEXT")
     add_column("short_term_message", "event_notification TEXT")
+    add_column("short_term_message", "knowledge_sources TEXT")
+    add_column("short_term_message", "world_created_at TEXT")
     add_column("shared_memory", "owner_user_id TEXT")
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_event_schedule_lease
+        ON event_schedule_state(status, lease_expires_at)
+        """
+    )
 
 
 _SHORT_TERM_MESSAGE_STATE_COLUMNS = (
@@ -742,6 +984,8 @@ _SHORT_TERM_MESSAGE_STATE_COLUMNS = (
     ("current_trust", "current_trust REAL"),
     ("current_mood", "current_mood TEXT"),
     ("event_notification", "event_notification TEXT"),
+    ("knowledge_sources", "knowledge_sources TEXT"),
+    ("world_created_at", "world_created_at TEXT"),
 )
 
 
@@ -776,6 +1020,73 @@ def init_db():
     with get_conn() as conn:
         conn.executescript(_schema_for_current_db())
         _migrate(conn)
+
+
+# =========================
+# player world clock
+# =========================
+def get_or_create_player_world_clock(
+    player_id: str,
+    timezone_name: str,
+    real_now_iso: str,
+) -> dict:
+    """Return a player's clock row, creating a real-time 1x clock if absent."""
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO player_world_clock
+            (player_id, timezone, anchor_real_utc, anchor_world_utc, time_scale, updated_at)
+            VALUES (?, ?, ?, ?, 1, ?)
+            ON CONFLICT(player_id) DO NOTHING
+            """,
+            (player_id, timezone_name, real_now_iso, real_now_iso, real_now_iso),
+        )
+        row = conn.execute(
+            "SELECT * FROM player_world_clock WHERE player_id = ?",
+            (player_id,),
+        ).fetchone()
+    return dict(row)
+
+
+def get_player_world_clock(player_id: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM player_world_clock WHERE player_id = ?",
+            (player_id,),
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def save_player_world_clock(
+    player_id: str,
+    timezone_name: str,
+    anchor_real_utc: str,
+    anchor_world_utc: str,
+    time_scale: int,
+    updated_at: str,
+) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO player_world_clock
+            (player_id, timezone, anchor_real_utc, anchor_world_utc, time_scale, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(player_id) DO UPDATE SET
+                timezone=excluded.timezone,
+                anchor_real_utc=excluded.anchor_real_utc,
+                anchor_world_utc=excluded.anchor_world_utc,
+                time_scale=excluded.time_scale,
+                updated_at=excluded.updated_at
+            """,
+            (
+                player_id,
+                timezone_name,
+                anchor_real_utc,
+                anchor_world_utc,
+                time_scale,
+                updated_at,
+            ),
+        )
 
 
 # =========================
@@ -1193,6 +1504,8 @@ def append_short_term_message(
     current_trust: float | None = None,
     current_mood: str | None = None,
     event_notification: str | None = None,
+    world_created_at: str | None = None,
+    knowledge_sources: list[dict] | None = None,
 ) -> int:
     """
     追加短期对话消息。
@@ -1205,8 +1518,9 @@ def append_short_term_message(
         insert_sql = """
             INSERT INTO short_term_message
             (session_id, role, content, action, affinity_delta, trust_delta,
-             current_affinity, current_trust, current_mood, event_notification, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             current_affinity, current_trust, current_mood, event_notification,
+             knowledge_sources, created_at, world_created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """
         if _is_postgres_enabled():
             insert_sql += " RETURNING id"
@@ -1223,7 +1537,9 @@ def append_short_term_message(
                 current_trust,
                 current_mood,
                 event_notification,
+                _encode_knowledge_sources(knowledge_sources),
                 _now(),
+                world_created_at,
             ),
         )
         return cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
@@ -1497,7 +1813,7 @@ def get_messages_paginated(session_id: str, offset: int, limit: int) -> tuple[li
             SELECT id AS message_id, role, content, action,
                    affinity_delta, trust_delta,
                    current_affinity, current_trust, current_mood,
-                   event_notification, created_at
+                   event_notification, knowledge_sources, created_at
             FROM short_term_message
             WHERE session_id = ?
             ORDER BY id DESC
@@ -1508,7 +1824,7 @@ def get_messages_paginated(session_id: str, offset: int, limit: int) -> tuple[li
 
     has_more = len(rows) > limit
     # 取前 limit 条，并反转顺序（变回正序）
-    messages = [dict(r) for r in reversed(rows[:limit])]
+    messages = [_decode_message_row(r) for r in reversed(rows[:limit])]
 
     return messages, has_more
 
@@ -1522,7 +1838,7 @@ def get_session_messages(session_id: str, limit: int = 1000) -> list[dict]:
             SELECT id AS message_id, role, content, character_id, character_name,
                    action, affinity_delta, trust_delta,
                    current_affinity, current_trust, current_mood,
-                   event_notification, created_at
+                   event_notification, knowledge_sources, created_at
             FROM short_term_message
             WHERE session_id = ?
             ORDER BY id ASC
@@ -1530,7 +1846,7 @@ def get_session_messages(session_id: str, limit: int = 1000) -> list[dict]:
             """,
             (session_id, limit),
         ).fetchall()
-    return [dict(r) for r in rows]
+    return [_decode_message_row(r) for r in rows]
 
 
 # 跨多个 Session 分页获取消息
@@ -1572,6 +1888,7 @@ def get_messages_by_player_and_character(
                 m.current_trust,
                 m.current_mood,
                 m.event_notification,
+                m.knowledge_sources,
                 m.created_at,
                 m.session_id
             FROM short_term_message m
@@ -1593,9 +1910,35 @@ def get_messages_by_player_and_character(
     has_more = len(rows) > limit
 
     return (
-        [dict(r) for r in reversed(rows[:limit])],
+        [_decode_message_row(r) for r in reversed(rows[:limit])],
         has_more,
     )
+
+
+def get_last_character_interaction_world_at(
+    player_id: str,
+    character_id: str,
+) -> str | None:
+    """Return the latest world-semantic interaction timestamp for a character."""
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT COALESCE(m.world_created_at, m.created_at) AS interaction_at
+            FROM short_term_message m
+            INNER JOIN session s ON s.session_id = m.session_id
+            WHERE s.player_id = ?
+              AND (
+                (COALESCE(s.is_multi_character, 0) = 0 AND s.character_id = ?)
+                OR
+                (COALESCE(s.is_multi_character, 0) = 1 AND m.character_id = ?)
+              )
+            ORDER BY m.id DESC
+            LIMIT 1
+            """,
+            (player_id, character_id, character_id),
+        ).fetchone()
+    return row["interaction_at"] if row else None
+
 
 # =========================
 # 会话摘要（中期记忆）
@@ -2351,6 +2694,212 @@ def list_due_event_schedules(now_iso: str, limit: int = 50, player_id: str | Non
     return [dict(r) for r in rows]
 
 
+def list_active_event_schedules(
+    limit: int = 500,
+    player_id: str | None = None,
+) -> list[dict]:
+    """List active schedules for per-player world-time evaluation."""
+    with get_conn() as conn:
+        query = """
+            SELECT * FROM event_schedule_state
+            WHERE status = 'active' AND next_run_at IS NOT NULL
+        """
+        params: list[Any] = []
+        if player_id:
+            query += " AND player_id = ?"
+            params.append(player_id)
+        query += " ORDER BY next_run_at ASC LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(query, params).fetchall()
+    return [dict(row) for row in rows]
+
+
+def claim_event_schedule(
+    event_id: str,
+    character_id: str,
+    player_id: str,
+    *,
+    lease_owner: str,
+    lease_expires_at: str,
+    real_now_iso: str,
+    expected_next_run_at: str,
+) -> bool:
+    """Conditionally claim a schedule using a real-UTC lease."""
+    with get_conn() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE event_schedule_state
+            SET lease_owner = ?, lease_expires_at = ?, updated_at = ?
+            WHERE event_id = ? AND character_id = ? AND player_id = ?
+              AND status = 'active'
+              AND next_run_at = ?
+              AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+            """,
+            (
+                lease_owner,
+                lease_expires_at,
+                real_now_iso,
+                event_id,
+                character_id,
+                player_id,
+                expected_next_run_at,
+                real_now_iso,
+            ),
+        )
+    return cursor.rowcount == 1
+
+
+def complete_event_schedule(
+    event_id: str,
+    character_id: str,
+    player_id: str,
+    *,
+    lease_owner: str,
+    last_checked_at: str,
+    last_run_at: str,
+    next_run_at: str,
+) -> bool:
+    with get_conn() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE event_schedule_state
+            SET last_checked_at = ?, last_run_at = ?, next_run_at = ?,
+                lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+            WHERE event_id = ? AND character_id = ? AND player_id = ?
+              AND lease_owner = ?
+            """,
+            (
+                last_checked_at,
+                last_run_at,
+                next_run_at,
+                _now(),
+                event_id,
+                character_id,
+                player_id,
+                lease_owner,
+            ),
+        )
+    return cursor.rowcount == 1
+
+
+def release_event_schedule(
+    event_id: str,
+    character_id: str,
+    player_id: str,
+    *,
+    lease_owner: str,
+) -> bool:
+    with get_conn() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE event_schedule_state
+            SET lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+            WHERE event_id = ? AND character_id = ? AND player_id = ?
+              AND lease_owner = ?
+            """,
+            (_now(), event_id, character_id, player_id, lease_owner),
+        )
+    return cursor.rowcount == 1
+
+
+def get_latest_active_multi_session(player_id: str) -> dict | None:
+    """Return the player's most recently active group session."""
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                s.*,
+                (
+                    SELECT created_at
+                    FROM short_term_message
+                    WHERE session_id = s.session_id
+                    ORDER BY id DESC
+                    LIMIT 1
+                ) AS last_message_at
+            FROM session s
+            WHERE s.player_id = ?
+              AND s.status = 'active'
+              AND COALESCE(s.is_multi_character, 0) = 1
+            ORDER BY COALESCE(last_message_at, s.created_at) DESC
+            LIMIT 1
+            """,
+            (player_id,),
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def enqueue_player_event(
+    player_id: str,
+    content: str,
+    *,
+    event_id: str | None = None,
+    character_id: str | None = None,
+    session_id: str | None = None,
+    event_type: str = "event",
+    title: str | None = None,
+    payload: str | None = None,
+    world_created_at: str | None = None,
+) -> int:
+    with get_conn() as conn:
+        sql = """
+            INSERT INTO player_event_inbox
+            (player_id, event_id, character_id, session_id, event_type, title,
+             content, payload, world_created_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        if _is_postgres_enabled():
+            sql += " RETURNING id"
+        cursor = conn.execute(
+            sql,
+            (
+                player_id,
+                event_id,
+                character_id,
+                session_id,
+                event_type,
+                title,
+                content,
+                payload,
+                world_created_at,
+                _now(),
+            ),
+        )
+        return cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
+
+
+def list_player_event_inbox(
+    player_id: str,
+    *,
+    unread_only: bool = True,
+    limit: int = 50,
+) -> list[dict]:
+    with get_conn() as conn:
+        unread_clause = "AND read_at IS NULL" if unread_only else ""
+        rows = conn.execute(
+            f"""
+            SELECT * FROM player_event_inbox
+            WHERE player_id = ? {unread_clause}
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (player_id, limit),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def mark_player_event_read(player_id: str, inbox_id: int) -> bool:
+    with get_conn() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE player_event_inbox
+            SET read_at = COALESCE(read_at, ?)
+            WHERE id = ? AND player_id = ?
+            """,
+            (_now(), inbox_id, player_id),
+        )
+    return cursor.rowcount == 1
+
+
 def save_event_template(
     template_id: str,
     template_name: str,
@@ -2803,7 +3352,9 @@ def append_multi_character_message(
     role: str,
     content: str,
     character_id: str = None,
-    character_name: str = None
+    character_name: str = None,
+    world_created_at: str | None = None,
+    knowledge_sources: list[dict] | None = None,
 ):
     """
     添加多角色会话消息
@@ -2819,10 +3370,20 @@ def append_multi_character_message(
         conn.execute(
             """
             INSERT INTO short_term_message
-            (session_id, role, content, character_id, character_name, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (session_id, role, content, character_id, character_name, created_at,
+             knowledge_sources, world_created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (session_id, role, content, character_id, character_name, _now()),
+            (
+                session_id,
+                role,
+                content,
+                character_id,
+                character_name,
+                _now(),
+                _encode_knowledge_sources(knowledge_sources),
+                world_created_at,
+            ),
         )
     
     # 如果是角色发言，更新参与者统计
@@ -2856,7 +3417,8 @@ def get_multi_character_history(
         if limit_messages is None:
             rows = conn.execute(
                 f"""
-                SELECT role, content, character_id, character_name, created_at
+                SELECT role, content, character_id, character_name,
+                       knowledge_sources, created_at
                 FROM short_term_message
                 WHERE session_id = ?
                   {created_after_clause}
@@ -2864,12 +3426,13 @@ def get_multi_character_history(
                 """,
                 tuple(base_params),
             ).fetchall()
-            return [dict(r) for r in rows]
+            return [_decode_message_row(r) for r in rows]
 
         params = [*base_params, limit_messages]
         rows = conn.execute(
             f"""
-            SELECT role, content, character_id, character_name, created_at
+            SELECT role, content, character_id, character_name,
+                   knowledge_sources, created_at
             FROM short_term_message
             WHERE session_id = ?
               {created_after_clause}
@@ -2879,7 +3442,7 @@ def get_multi_character_history(
             tuple(params),
         ).fetchall()
 
-    messages = [dict(r) for r in rows]
+    messages = [_decode_message_row(r) for r in rows]
     messages.reverse()  # 按时间正序返回
     return messages
 
@@ -2910,7 +3473,8 @@ def get_multi_character_thread_history(
             rows = conn.execute(
                 f"""
                 SELECT m.id AS message_id, m.session_id, m.role, m.content,
-                       m.character_id, m.character_name, m.created_at
+                       m.character_id, m.character_name, m.knowledge_sources,
+                       m.created_at
                 FROM short_term_message m
                 INNER JOIN session s ON s.session_id = m.session_id
                 WHERE s.player_id = ?
@@ -2924,13 +3488,14 @@ def get_multi_character_thread_history(
                 """,
                 tuple(base_params),
             ).fetchall()
-            return [dict(r) for r in rows]
+            return [_decode_message_row(r) for r in rows]
 
         params = [*base_params, limit_messages]
         rows = conn.execute(
             f"""
             SELECT m.id AS message_id, m.session_id, m.role, m.content,
-                   m.character_id, m.character_name, m.created_at
+                   m.character_id, m.character_name, m.knowledge_sources,
+                   m.created_at
             FROM short_term_message m
             INNER JOIN session s ON s.session_id = m.session_id
             WHERE s.player_id = ?
@@ -2946,7 +3511,7 @@ def get_multi_character_thread_history(
             tuple(params),
         ).fetchall()
 
-    messages = [dict(r) for r in rows]
+    messages = [_decode_message_row(r) for r in rows]
     messages.reverse()
     return messages
 
@@ -2974,7 +3539,8 @@ def get_multi_character_thread_history_paginated(
         rows = conn.execute(
             """
             SELECT m.id AS message_id, m.session_id, m.role, m.content,
-                   m.character_id, m.character_name, m.created_at
+                   m.character_id, m.character_name, m.knowledge_sources,
+                   m.created_at
             FROM short_term_message m
             INNER JOIN session s ON s.session_id = m.session_id
             WHERE s.player_id = ?
@@ -2998,7 +3564,589 @@ def get_multi_character_thread_history_paginated(
         ).fetchall()
 
     has_more = len(rows) > limit
-    return [dict(row) for row in reversed(rows[:limit])], has_more
+    return [_decode_message_row(row) for row in reversed(rows[:limit])], has_more
+
+
+# =========================
+# 世界观知识库
+# =========================
+_KNOWLEDGE_BINDING_TYPES = {"global", "character", "group_thread"}
+_KNOWLEDGE_DOCUMENT_STATUSES = {"queued", "processing", "ready", "failed"}
+
+
+def create_knowledge_base(
+    owner_user_id: str,
+    name: str,
+    description: str | None = None,
+) -> dict:
+    knowledge_base_id = str(uuid.uuid4())
+    now = _now()
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO knowledge_base
+            (knowledge_base_id, owner_user_id, name, description,
+             is_enabled, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 1, ?, ?)
+            """,
+            (
+                knowledge_base_id,
+                owner_user_id,
+                name.strip(),
+                (description or "").strip() or None,
+                now,
+                now,
+            ),
+        )
+    return get_knowledge_base(owner_user_id, knowledge_base_id)
+
+
+def get_knowledge_base(owner_user_id: str, knowledge_base_id: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT kb.*,
+                   (SELECT COUNT(*) FROM knowledge_document d
+                    WHERE d.owner_user_id = kb.owner_user_id
+                      AND d.knowledge_base_id = kb.knowledge_base_id) AS document_count,
+                   (SELECT COUNT(*) FROM knowledge_document d
+                    WHERE d.owner_user_id = kb.owner_user_id
+                      AND d.knowledge_base_id = kb.knowledge_base_id
+                      AND d.status = 'ready') AS ready_document_count,
+                   (SELECT COUNT(*) FROM knowledge_chunk c
+                    WHERE c.owner_user_id = kb.owner_user_id
+                      AND c.knowledge_base_id = kb.knowledge_base_id) AS chunk_count
+            FROM knowledge_base kb
+            WHERE kb.owner_user_id = ? AND kb.knowledge_base_id = ?
+            """,
+            (owner_user_id, knowledge_base_id),
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def list_knowledge_bases(owner_user_id: str) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT kb.*,
+                   (SELECT COUNT(*) FROM knowledge_document d
+                    WHERE d.owner_user_id = kb.owner_user_id
+                      AND d.knowledge_base_id = kb.knowledge_base_id) AS document_count,
+                   (SELECT COUNT(*) FROM knowledge_document d
+                    WHERE d.owner_user_id = kb.owner_user_id
+                      AND d.knowledge_base_id = kb.knowledge_base_id
+                      AND d.status = 'ready') AS ready_document_count,
+                   (SELECT COUNT(*) FROM knowledge_chunk c
+                    WHERE c.owner_user_id = kb.owner_user_id
+                      AND c.knowledge_base_id = kb.knowledge_base_id) AS chunk_count
+            FROM knowledge_base kb
+            WHERE kb.owner_user_id = ?
+            ORDER BY kb.updated_at DESC, kb.name ASC
+            """,
+            (owner_user_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def update_knowledge_base(
+    owner_user_id: str,
+    knowledge_base_id: str,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    is_enabled: bool | None = None,
+) -> dict | None:
+    assignments = []
+    params: list = []
+    if name is not None:
+        assignments.append("name = ?")
+        params.append(name.strip())
+    if description is not None:
+        assignments.append("description = ?")
+        params.append(description.strip() or None)
+    if is_enabled is not None:
+        assignments.append("is_enabled = ?")
+        params.append(1 if is_enabled else 0)
+    if not assignments:
+        return get_knowledge_base(owner_user_id, knowledge_base_id)
+
+    assignments.append("updated_at = ?")
+    params.extend([_now(), owner_user_id, knowledge_base_id])
+    with get_conn() as conn:
+        conn.execute(
+            f"""
+            UPDATE knowledge_base
+            SET {", ".join(assignments)}
+            WHERE owner_user_id = ? AND knowledge_base_id = ?
+            """,
+            tuple(params),
+        )
+    return get_knowledge_base(owner_user_id, knowledge_base_id)
+
+
+def delete_knowledge_base(
+    owner_user_id: str,
+    knowledge_base_id: str,
+) -> dict | None:
+    existing = get_knowledge_base(owner_user_id, knowledge_base_id)
+    if not existing:
+        return None
+    with get_conn() as conn:
+        documents = conn.execute(
+            """
+            SELECT document_id, storage_path
+            FROM knowledge_document
+            WHERE owner_user_id = ? AND knowledge_base_id = ?
+            """,
+            (owner_user_id, knowledge_base_id),
+        ).fetchall()
+        conn.execute(
+            "DELETE FROM knowledge_chunk WHERE owner_user_id = ? AND knowledge_base_id = ?",
+            (owner_user_id, knowledge_base_id),
+        )
+        conn.execute(
+            "DELETE FROM knowledge_document WHERE owner_user_id = ? AND knowledge_base_id = ?",
+            (owner_user_id, knowledge_base_id),
+        )
+        conn.execute(
+            "DELETE FROM knowledge_binding WHERE owner_user_id = ? AND knowledge_base_id = ?",
+            (owner_user_id, knowledge_base_id),
+        )
+        conn.execute(
+            "DELETE FROM knowledge_base WHERE owner_user_id = ? AND knowledge_base_id = ?",
+            (owner_user_id, knowledge_base_id),
+        )
+    return {
+        "knowledge_base": existing,
+        "documents": [dict(row) for row in documents],
+    }
+
+
+def _normalize_knowledge_binding(binding: dict) -> tuple[str, str]:
+    target_type = str(binding.get("target_type") or "").strip()
+    target_id = str(binding.get("target_id") or "").strip()
+    if target_type not in _KNOWLEDGE_BINDING_TYPES:
+        raise ValueError(f"不支持的知识库绑定类型: {target_type}")
+    if target_type == "global":
+        return target_type, ""
+    if not target_id:
+        raise ValueError(f"{target_type} 绑定必须提供 target_id")
+    return target_type, target_id
+
+
+def _validate_knowledge_binding_target(
+    conn,
+    owner_user_id: str,
+    target_type: str,
+    target_id: str,
+) -> None:
+    if target_type == "global":
+        return
+    if target_type == "character":
+        row = conn.execute(
+            """
+            SELECT 1 FROM character_card
+            WHERE owner_user_id = ? AND character_id = ?
+            """,
+            (owner_user_id, target_id),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT 1 FROM session
+            WHERE player_id = ?
+              AND COALESCE(is_multi_character, 0) = 1
+              AND COALESCE(group_thread_id, session_id) = ?
+            LIMIT 1
+            """,
+            (owner_user_id, target_id),
+        ).fetchone()
+    if not row:
+        raise ValueError(f"绑定目标不存在或不属于当前用户: {target_type}/{target_id}")
+
+
+def replace_knowledge_bindings(
+    owner_user_id: str,
+    knowledge_base_id: str,
+    bindings: list[dict],
+) -> list[dict]:
+    normalized = list(dict.fromkeys(_normalize_knowledge_binding(item) for item in bindings))
+    with get_conn() as conn:
+        base = conn.execute(
+            """
+            SELECT 1 FROM knowledge_base
+            WHERE owner_user_id = ? AND knowledge_base_id = ?
+            """,
+            (owner_user_id, knowledge_base_id),
+        ).fetchone()
+        if not base:
+            raise ValueError("知识库不存在")
+
+        for target_type, target_id in normalized:
+            _validate_knowledge_binding_target(
+                conn, owner_user_id, target_type, target_id
+            )
+
+        conn.execute(
+            """
+            DELETE FROM knowledge_binding
+            WHERE owner_user_id = ? AND knowledge_base_id = ?
+            """,
+            (owner_user_id, knowledge_base_id),
+        )
+        if normalized:
+            conn.executemany(
+                """
+                INSERT INTO knowledge_binding
+                (owner_user_id, knowledge_base_id, target_type, target_id, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    (owner_user_id, knowledge_base_id, target_type, target_id, _now())
+                    for target_type, target_id in normalized
+                ],
+            )
+        conn.execute(
+            """
+            UPDATE knowledge_base SET updated_at = ?
+            WHERE owner_user_id = ? AND knowledge_base_id = ?
+            """,
+            (_now(), owner_user_id, knowledge_base_id),
+        )
+    return list_knowledge_bindings(owner_user_id, knowledge_base_id)
+
+
+def list_knowledge_bindings(
+    owner_user_id: str,
+    knowledge_base_id: str,
+) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT target_type, target_id, created_at
+            FROM knowledge_binding
+            WHERE owner_user_id = ? AND knowledge_base_id = ?
+            ORDER BY target_type ASC, target_id ASC
+            """,
+            (owner_user_id, knowledge_base_id),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_knowledge_binding_targets(owner_user_id: str) -> dict:
+    with get_conn() as conn:
+        characters = conn.execute(
+            """
+            SELECT character_id, COALESCE(display_name, name, character_id) AS name
+            FROM character_card
+            WHERE owner_user_id = ? AND is_active = 1
+            ORDER BY name ASC
+            """,
+            (owner_user_id,),
+        ).fetchall()
+        groups = conn.execute(
+            """
+            SELECT COALESCE(group_thread_id, session_id) AS group_thread_id,
+                   MAX(COALESCE(group_name, '未命名群聊')) AS name,
+                   MAX(created_at) AS last_active_at
+            FROM session
+            WHERE player_id = ? AND COALESCE(is_multi_character, 0) = 1
+            GROUP BY COALESCE(group_thread_id, session_id)
+            ORDER BY last_active_at DESC
+            """,
+            (owner_user_id,),
+        ).fetchall()
+    return {
+        "characters": [dict(row) for row in characters],
+        "group_threads": [dict(row) for row in groups],
+    }
+
+
+def create_knowledge_document(
+    owner_user_id: str,
+    knowledge_base_id: str,
+    *,
+    original_name: str,
+    media_type: str,
+    source_type: str,
+    storage_path: str | None,
+    checksum: str,
+    byte_size: int,
+) -> dict:
+    if not get_knowledge_base(owner_user_id, knowledge_base_id):
+        raise ValueError("知识库不存在")
+    document_id = str(uuid.uuid4())
+    now = _now()
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO knowledge_document
+            (document_id, owner_user_id, knowledge_base_id, original_name,
+             media_type, source_type, storage_path, checksum, byte_size,
+             status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+            """,
+            (
+                document_id,
+                owner_user_id,
+                knowledge_base_id,
+                original_name,
+                media_type,
+                source_type,
+                storage_path,
+                checksum,
+                byte_size,
+                now,
+                now,
+            ),
+        )
+    return get_knowledge_document(owner_user_id, document_id)
+
+
+def get_knowledge_document(owner_user_id: str, document_id: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT d.*,
+                   (SELECT COUNT(*) FROM knowledge_chunk c
+                    WHERE c.owner_user_id = d.owner_user_id
+                      AND c.document_id = d.document_id) AS chunk_count
+            FROM knowledge_document d
+            WHERE d.owner_user_id = ? AND d.document_id = ?
+            """,
+            (owner_user_id, document_id),
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def list_knowledge_documents(
+    owner_user_id: str,
+    knowledge_base_id: str,
+) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT d.*,
+                   (SELECT COUNT(*) FROM knowledge_chunk c
+                    WHERE c.owner_user_id = d.owner_user_id
+                      AND c.document_id = d.document_id) AS chunk_count
+            FROM knowledge_document d
+            WHERE d.owner_user_id = ? AND d.knowledge_base_id = ?
+            ORDER BY d.created_at DESC
+            """,
+            (owner_user_id, knowledge_base_id),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def update_knowledge_document_status(
+    owner_user_id: str,
+    document_id: str,
+    status: str,
+    *,
+    error_message: str | None = None,
+    extracted_chars: int | None = None,
+    page_count: int | None = None,
+) -> dict | None:
+    if status not in _KNOWLEDGE_DOCUMENT_STATUSES:
+        raise ValueError(f"无效文档状态: {status}")
+    assignments = ["status = ?", "error_message = ?", "updated_at = ?"]
+    params: list = [status, error_message, _now()]
+    if extracted_chars is not None:
+        assignments.append("extracted_chars = ?")
+        params.append(extracted_chars)
+    if page_count is not None:
+        assignments.append("page_count = ?")
+        params.append(page_count)
+    params.extend([owner_user_id, document_id])
+    with get_conn() as conn:
+        conn.execute(
+            f"""
+            UPDATE knowledge_document
+            SET {", ".join(assignments)}
+            WHERE owner_user_id = ? AND document_id = ?
+            """,
+            tuple(params),
+        )
+    return get_knowledge_document(owner_user_id, document_id)
+
+
+def replace_knowledge_chunks(
+    owner_user_id: str,
+    document_id: str,
+    chunks: list[dict],
+) -> list[dict]:
+    document = get_knowledge_document(owner_user_id, document_id)
+    if not document:
+        raise ValueError("知识文档不存在")
+    now = _now()
+    prepared = []
+    for index, chunk in enumerate(chunks):
+        content = str(chunk.get("content") or "").strip()
+        if not content:
+            continue
+        prepared.append(
+            (
+                str(chunk.get("chunk_id") or uuid.uuid4()),
+                owner_user_id,
+                document["knowledge_base_id"],
+                document_id,
+                int(chunk.get("chunk_index", index)),
+                content,
+                len(content),
+                json.dumps(chunk.get("source_metadata") or {}, ensure_ascii=False),
+                now,
+            )
+        )
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM knowledge_chunk WHERE owner_user_id = ? AND document_id = ?",
+            (owner_user_id, document_id),
+        )
+        if prepared:
+            conn.executemany(
+                """
+                INSERT INTO knowledge_chunk
+                (chunk_id, owner_user_id, knowledge_base_id, document_id,
+                 chunk_index, content, char_count, source_metadata, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                prepared,
+            )
+    return list_knowledge_chunks(owner_user_id, document_id)
+
+
+def list_knowledge_chunks(owner_user_id: str, document_id: str) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM knowledge_chunk
+            WHERE owner_user_id = ? AND document_id = ?
+            ORDER BY chunk_index ASC
+            """,
+            (owner_user_id, document_id),
+        ).fetchall()
+    result = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["source_metadata"] = json.loads(item.get("source_metadata") or "{}")
+        except (TypeError, ValueError):
+            item["source_metadata"] = {}
+        result.append(item)
+    return result
+
+
+def clear_knowledge_document_chunks(owner_user_id: str, document_id: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM knowledge_chunk WHERE owner_user_id = ? AND document_id = ?",
+            (owner_user_id, document_id),
+        )
+
+
+def delete_knowledge_document(
+    owner_user_id: str,
+    document_id: str,
+) -> dict | None:
+    document = get_knowledge_document(owner_user_id, document_id)
+    if not document:
+        return None
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM knowledge_chunk WHERE owner_user_id = ? AND document_id = ?",
+            (owner_user_id, document_id),
+        )
+        conn.execute(
+            "DELETE FROM knowledge_document WHERE owner_user_id = ? AND document_id = ?",
+            (owner_user_id, document_id),
+        )
+    return document
+
+
+def get_authorized_knowledge_chunks(
+    owner_user_id: str,
+    chunk_ids: list[str],
+    *,
+    character_id: str | None = None,
+    group_thread_id: str | None = None,
+) -> list[dict]:
+    """Revalidate vector hits against current SQL ownership, status and bindings."""
+    if not chunk_ids:
+        return []
+    visibility = ["b.target_type = 'global'"]
+    visibility_params: list = []
+    if character_id:
+        visibility.append("(b.target_type = 'character' AND b.target_id = ?)")
+        visibility_params.append(character_id)
+    if group_thread_id:
+        visibility.append("(b.target_type = 'group_thread' AND b.target_id = ?)")
+        visibility_params.append(group_thread_id)
+
+    placeholders = ", ".join("?" for _ in chunk_ids)
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT c.*, d.original_name AS document_name,
+                   kb.name AS knowledge_base_name
+            FROM knowledge_chunk c
+            INNER JOIN knowledge_document d
+              ON d.owner_user_id = c.owner_user_id
+             AND d.document_id = c.document_id
+            INNER JOIN knowledge_base kb
+              ON kb.owner_user_id = c.owner_user_id
+             AND kb.knowledge_base_id = c.knowledge_base_id
+            WHERE c.owner_user_id = ?
+              AND c.chunk_id IN ({placeholders})
+              AND d.status = 'ready'
+              AND kb.is_enabled = 1
+              AND EXISTS (
+                  SELECT 1 FROM knowledge_binding b
+                  WHERE b.owner_user_id = c.owner_user_id
+                    AND b.knowledge_base_id = c.knowledge_base_id
+                    AND ({" OR ".join(visibility)})
+              )
+            """,
+            tuple([owner_user_id, *chunk_ids, *visibility_params]),
+        ).fetchall()
+    by_id = {row["chunk_id"]: dict(row) for row in rows}
+    return [by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_id]
+
+
+def has_authorized_knowledge_bases(
+    owner_user_id: str,
+    *,
+    character_id: str | None = None,
+    group_thread_id: str | None = None,
+) -> bool:
+    visibility = ["b.target_type = 'global'"]
+    params: list = [owner_user_id]
+    if character_id:
+        visibility.append("(b.target_type = 'character' AND b.target_id = ?)")
+        params.append(character_id)
+    if group_thread_id:
+        visibility.append("(b.target_type = 'group_thread' AND b.target_id = ?)")
+        params.append(group_thread_id)
+    with get_conn() as conn:
+        row = conn.execute(
+            f"""
+            SELECT 1
+            FROM knowledge_base kb
+            INNER JOIN knowledge_binding b
+              ON b.owner_user_id = kb.owner_user_id
+             AND b.knowledge_base_id = kb.knowledge_base_id
+            INNER JOIN knowledge_document d
+              ON d.owner_user_id = kb.owner_user_id
+             AND d.knowledge_base_id = kb.knowledge_base_id
+            WHERE kb.owner_user_id = ?
+              AND kb.is_enabled = 1
+              AND d.status = 'ready'
+              AND ({" OR ".join(visibility)})
+            LIMIT 1
+            """,
+            tuple(params),
+        ).fetchone()
+    return row is not None
 
 
 

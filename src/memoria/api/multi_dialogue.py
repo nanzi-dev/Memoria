@@ -17,6 +17,7 @@ from memoria.core.multi_character_orchestrator import (
     MultiCharacterOrchestrator
 )
 from memoria.api.user import require_current_user_id
+from memoria.api.knowledge_models import KnowledgeSource
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ class MultiDialogueTurnResponse(BaseModel):
     current_affinity: Optional[float] = None
     current_trust: Optional[float] = None
     current_mood: Optional[str] = None
+    knowledge_sources: list[KnowledgeSource] = Field(default_factory=list)
 
 
 class MultiDialogueGroupResponse(BaseModel):

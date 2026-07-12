@@ -472,7 +472,14 @@ class TestDialogueTurn:
             "trust_level": 0,
             "current_mood": "neutral",
         })
-        monkeypatch.setattr(orchestrator.repository, "get_short_term_history", lambda *args, **kwargs: [])
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_short_term_history",
+            lambda *args, **kwargs: [
+                {"role": role, "content": content}
+                for _, role, content in saved_messages
+            ],
+        )
         monkeypatch.setattr(orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: [])
         monkeypatch.setattr(orchestrator.prompt_builder, "build_system_prompt", lambda *args, **kwargs: "prompt")
         monkeypatch.setattr(orchestrator.llm_client, "call_role_turn", lambda *args, **kwargs: {
@@ -502,9 +509,20 @@ class TestDialogueTurn:
         )
         monkeypatch.setattr(
             orchestrator.repository,
-            "save_long_term_fact_if_checkpoint",
-            lambda session_id, character_id, player_id, fact_text, interval_turns: saved_facts.append(
-                (character_id, player_id, fact_text, interval_turns)
+            "is_long_term_memory_checkpoint",
+            lambda session_id, interval_turns: True,
+        )
+        extracted_histories = []
+        monkeypatch.setattr(
+            orchestrator,
+            "extract_player_memory",
+            lambda history: extracted_histories.append(history) or "玩家喜欢茉莉花茶",
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "save_long_term_fact",
+            lambda character_id, player_id, fact_text: saved_facts.append(
+                (character_id, player_id, fact_text)
             ) or 1,
         )
 
@@ -527,14 +545,11 @@ class TestDialogueTurn:
             "current_mood": "neutral",
         }
         assert saved_messages == [("sid", "user", "你好"), ("sid", "assistant", "你好")]
-        assert saved_facts == [
-            (
-                "char",
-                "player",
-                "玩家主动打招呼",
-                orchestrator.configs.long_term_memory_interval_turns,
-            )
-        ]
+        assert extracted_histories == [[
+            {"role": "user", "content": "你好"},
+            {"role": "assistant", "content": "你好"},
+        ]]
+        assert saved_facts == [("char", "player", "玩家喜欢茉莉花茶")]
 
     def test_single_dialogue_prompt_uses_graph_and_cross_mode_memories(self, monkeypatch):
         """单聊 prompt 应读取当前关系图谱，并共享同角色的群聊/共享记忆。"""
@@ -836,3 +851,60 @@ class TestDialogueTurn:
 
         with pytest.raises(RuntimeError, match="对话持久化失败"):
             orchestrator.run_dialogue_turn("sid", "你好")
+
+
+def test_group_dialogue_prepares_player_memory_checkpoint_once(monkeypatch):
+    from types import SimpleNamespace
+    from memoria.core import multi_character_orchestrator as module
+
+    orchestrator = module.MultiCharacterOrchestrator.__new__(
+        module.MultiCharacterOrchestrator
+    )
+    orchestrator.session_id = "group-session"
+    orchestrator.player_id = "player"
+    orchestrator.participants = [{"character_id": "char-a"}, {"character_id": "char-b"}]
+
+    clock_snapshot = SimpleNamespace(
+        world_now=SimpleNamespace(isoformat=lambda: "2026-07-12T12:00:00+08:00")
+    )
+    extracted_histories = []
+    observed_facts = []
+
+    monkeypatch.setattr(module, "_clock_snapshot_for_player", lambda player_id: clock_snapshot)
+    monkeypatch.setattr(
+        module.repository,
+        "append_multi_character_message",
+        lambda *args, **kwargs: 1,
+    )
+    monkeypatch.setattr(
+        module.repository,
+        "is_long_term_memory_checkpoint",
+        lambda *args, **kwargs: True,
+    )
+    monkeypatch.setattr(
+        module.repository,
+        "get_multi_character_thread_history",
+        lambda *args, **kwargs: [{"role": "user", "content": "我喜欢茉莉花茶"}],
+    )
+
+    def extract_player_memory(history):
+        extracted_histories.append(history)
+        return "玩家喜欢茉莉花茶"
+
+    def generate_group_discussion(player_message, response_count, *, clock_snapshot=None):
+        observed_facts.append(orchestrator._checkpoint_memory_fact)
+        return [{"dialogue": "记住了"}]
+
+    monkeypatch.setattr(module, "extract_player_memory", extract_player_memory)
+    monkeypatch.setattr(orchestrator, "_ensure_has_active_participants", lambda: None)
+    monkeypatch.setattr(orchestrator, "_decide_group_response_count", lambda *args: 2)
+    monkeypatch.setattr(orchestrator, "_generate_group_discussion", generate_group_discussion)
+
+    result = orchestrator.process_player_message(
+        "我喜欢茉莉花茶",
+        allow_multiple_responses=True,
+    )
+
+    assert result == [{"dialogue": "记住了"}]
+    assert len(extracted_histories) == 1
+    assert observed_facts == ["玩家喜欢茉莉花茶"]

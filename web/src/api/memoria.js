@@ -4,7 +4,10 @@
 const API_BASE = '/api/v1';
 
 async function request(url, options = {}) {
-  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  const headers = { ...options.headers };
+  if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
   const token = localStorage.getItem('memoria-token');
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
@@ -68,6 +71,27 @@ export const userApi = {
       method: 'POST',
       body: JSON.stringify({ url }),
     });
+  },
+  getWorldClock() {
+    return request('/user/world-clock');
+  },
+  updateWorldClock({ timezone, timeScale } = {}) {
+    return request('/user/world-clock', {
+      method: 'PUT',
+      body: JSON.stringify({
+        ...(timezone != null ? { timezone } : {}),
+        ...(timeScale != null ? { time_scale: timeScale } : {}),
+      }),
+    });
+  },
+  syncWorldClock() {
+    return request('/user/world-clock/sync', { method: 'POST' });
+  },
+  getEventInbox(unreadOnly = true, limit = 50) {
+    return request(`/user/event-inbox?unread_only=${unreadOnly}&limit=${limit}`);
+  },
+  markEventRead(inboxId) {
+    return request(`/user/event-inbox/${inboxId}/read`, { method: 'POST' });
   },
 };
 
@@ -198,6 +222,77 @@ export const relationshipAdmin = {
   /** 删除关系 */
   remove(charIdA, charIdB) {
     return request(`/relationships/${charIdA}/${charIdB}`, { method: 'DELETE' });
+  },
+};
+
+// ═══════════════════════════════════════════════
+// Knowledge Base API
+// ═══════════════════════════════════════════════
+export const knowledgeApi = {
+  listBases() {
+    return request('/knowledge/bases');
+  },
+  createBase(data) {
+    return request('/knowledge/bases', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  getBase(knowledgeBaseId) {
+    return request(`/knowledge/bases/${knowledgeBaseId}`);
+  },
+  updateBase(knowledgeBaseId, data) {
+    return request(`/knowledge/bases/${knowledgeBaseId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+  setEnabled(knowledgeBaseId, isEnabled) {
+    return request(`/knowledge/bases/${knowledgeBaseId}/enabled`, {
+      method: 'PATCH',
+      body: JSON.stringify({ is_enabled: isEnabled }),
+    });
+  },
+  deleteBase(knowledgeBaseId) {
+    return request(`/knowledge/bases/${knowledgeBaseId}`, { method: 'DELETE' });
+  },
+  setBindings(knowledgeBaseId, bindings) {
+    return request(`/knowledge/bases/${knowledgeBaseId}/bindings`, {
+      method: 'PUT',
+      body: JSON.stringify({ bindings }),
+    });
+  },
+  getBindingTargets() {
+    return request('/knowledge/binding-targets');
+  },
+  listDocuments(knowledgeBaseId) {
+    return request(`/knowledge/bases/${knowledgeBaseId}/documents`);
+  },
+  uploadDocument(knowledgeBaseId, file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    return request(`/knowledge/bases/${knowledgeBaseId}/documents/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+  },
+  pasteDocument(knowledgeBaseId, data) {
+    return request(`/knowledge/bases/${knowledgeBaseId}/documents/paste`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  deleteDocument(documentId) {
+    return request(`/knowledge/documents/${documentId}`, { method: 'DELETE' });
+  },
+  retryDocument(documentId) {
+    return request(`/knowledge/documents/${documentId}/retry`, { method: 'POST' });
+  },
+  preview(data) {
+    return request('/knowledge/preview', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
 };
 
