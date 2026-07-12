@@ -315,6 +315,27 @@ def test_document_validation_rejects_empty_spoofed_scanned_and_oversized(monkeyp
         extract_document("large.txt", b"four")
 
 
+def test_pdf_validation_rejects_encrypted_and_too_many_pages(monkeypatch):
+    from pypdf import PdfWriter
+
+    encrypted_writer = PdfWriter()
+    encrypted_writer.add_blank_page(width=100, height=100)
+    encrypted_writer.encrypt("secret")
+    encrypted_buffer = BytesIO()
+    encrypted_writer.write(encrypted_buffer)
+    with pytest.raises(KnowledgeDocumentError, match="加密 PDF"):
+        extract_document("secret.pdf", encrypted_buffer.getvalue())
+
+    monkeypatch.setattr(configs, "knowledge_pdf_max_pages", 1)
+    oversized_writer = PdfWriter()
+    oversized_writer.add_blank_page(width=100, height=100)
+    oversized_writer.add_blank_page(width=100, height=100)
+    oversized_buffer = BytesIO()
+    oversized_writer.write(oversized_buffer)
+    with pytest.raises(KnowledgeDocumentError, match="300 页"):
+        extract_document("too-many-pages.pdf", oversized_buffer.getvalue())
+
+
 def test_chunking_is_paragraph_first_and_overlaps():
     extracted = ExtractedDocument(
         [
@@ -501,6 +522,48 @@ def test_retrieval_filters_similarity_reauthorizes_sql_and_formats_sources(
             "similarity": 0.92,
         }
     ]
+
+
+def test_retrieval_sorts_reauthorized_chunks_by_similarity(monkeypatch):
+    class FakeStore:
+        def search(self, owner_user_id, query_text, *, top_k):
+            return [
+                {"chunk_id": "highest", "similarity": 0.94},
+                {"chunk_id": "middle", "similarity": 0.82},
+                {"chunk_id": "lowest", "similarity": 0.71},
+            ]
+
+    def chunk(chunk_id):
+        return {
+            "chunk_id": chunk_id,
+            "knowledge_base_id": "kb-1",
+            "knowledge_base_name": "World",
+            "document_id": "doc-1",
+            "document_name": "world.md",
+            "content": f"{chunk_id} fact",
+        }
+
+    monkeypatch.setattr(
+        knowledge_retriever.repository,
+        "has_authorized_knowledge_bases",
+        lambda *args, **kwargs: True,
+    )
+    monkeypatch.setattr(
+        knowledge_retriever.repository,
+        "get_authorized_knowledge_chunks",
+        lambda *args, **kwargs: [chunk("lowest"), chunk("highest"), chunk("middle")],
+    )
+    monkeypatch.setattr(configs, "knowledge_retrieval_top_k", 2)
+
+    result = knowledge_retriever.retrieve_knowledge(
+        owner_user_id="owner",
+        character_id="character-a",
+        current_message="question",
+        vector_store=FakeStore(),
+    )
+
+    assert [item["chunk_id"] for item in result.chunks] == ["highest", "middle"]
+    assert [item["similarity"] for item in result.sources] == [0.94, 0.82]
 
 
 def test_knowledge_prompt_guard_has_priority_rules_and_character_cap(monkeypatch):

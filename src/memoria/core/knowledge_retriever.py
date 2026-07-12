@@ -114,7 +114,12 @@ def retrieve_knowledge(
             list(similarities),
             character_id=character_id,
             group_thread_id=group_thread_id,
-        )[: configs.knowledge_retrieval_top_k]
+        )
+        authorized.sort(
+            key=lambda chunk: similarities.get(chunk["chunk_id"], 0.0),
+            reverse=True,
+        )
+        authorized = authorized[: configs.knowledge_retrieval_top_k]
     except Exception as exc:
         logger.warning("世界知识检索失败，继续生成无 RAG 回复: %s", exc)
         return KnowledgeRetrieval([], [], "", query_text)
