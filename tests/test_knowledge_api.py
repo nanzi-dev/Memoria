@@ -258,7 +258,7 @@ def test_preview_forwards_authenticated_context_and_returns_sources(
 
     def fake_retrieve(**kwargs):
         calls.append(kwargs)
-        return SimpleNamespace(query_text="当前查询：城门几点关", sources=[source])
+        return SimpleNamespace(query_text="城门几点关", sources=[source])
 
     monkeypatch.setattr(knowledge_api, "retrieve_knowledge", fake_retrieve)
     response = knowledge_api.preview_knowledge(
@@ -276,6 +276,6 @@ def test_preview_forwards_authenticated_context_and_returns_sources(
             "group_thread_id": None,
             "current_message": "城门几点关",
             "recent_history": [],
-            "knowledge_base_ids": [knowledge_base_id],
+            "preauthorized_knowledge_base_ids": [knowledge_base_id],
         }
     ]

@@ -405,7 +405,7 @@ def preview_knowledge(
         group_thread_id=request.group_thread_id,
         current_message=_clean_required(request.query, "检索内容"),
         recent_history=[],
-        knowledge_base_ids=(
+        preauthorized_knowledge_base_ids=(
             [request.knowledge_base_id] if request.knowledge_base_id else None
         ),
     )

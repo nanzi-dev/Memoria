@@ -48,7 +48,7 @@ class Configs(BaseSettings):
     knowledge_storage_path: str = "./data/knowledge"
     knowledge_query_max_chars: int = Field(default=4000, ge=100, le=20000)
     knowledge_retrieval_top_k: int = Field(default=6, ge=1, le=50)
-    knowledge_similarity_threshold: float = Field(default=0.35, ge=0.0, le=1.0)
+    knowledge_similarity_threshold: float = Field(default=0.60, ge=0.0, le=1.0)
     knowledge_injection_max_chars: int = Field(default=6000, ge=500, le=50000)
     knowledge_upload_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024)
     knowledge_pdf_max_pages: int = Field(default=300, ge=1, le=2000)

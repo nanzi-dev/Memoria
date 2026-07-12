@@ -4115,6 +4115,41 @@ def get_authorized_knowledge_chunks(
     return [by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_id]
 
 
+def get_owned_knowledge_chunks(
+    owner_user_id: str,
+    chunk_ids: list[str],
+    *,
+    knowledge_base_ids: list[str],
+) -> list[dict]:
+    """Load ready, enabled chunks from owner-validated knowledge bases."""
+    if not chunk_ids or not knowledge_base_ids:
+        return []
+    chunk_placeholders = ", ".join("?" for _ in chunk_ids)
+    base_placeholders = ", ".join("?" for _ in knowledge_base_ids)
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT c.*, d.original_name AS document_name,
+                   kb.name AS knowledge_base_name
+            FROM knowledge_chunk c
+            INNER JOIN knowledge_document d
+              ON d.owner_user_id = c.owner_user_id
+             AND d.document_id = c.document_id
+            INNER JOIN knowledge_base kb
+              ON kb.owner_user_id = c.owner_user_id
+             AND kb.knowledge_base_id = c.knowledge_base_id
+            WHERE c.owner_user_id = ?
+              AND c.chunk_id IN ({chunk_placeholders})
+              AND c.knowledge_base_id IN ({base_placeholders})
+              AND d.status = 'ready'
+              AND kb.is_enabled = 1
+            """,
+            tuple([owner_user_id, *chunk_ids, *knowledge_base_ids]),
+        ).fetchall()
+    by_id = {row["chunk_id"]: dict(row) for row in rows}
+    return [by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_id]
+
+
 def get_authorized_knowledge_base_ids(
     owner_user_id: str,
     *,

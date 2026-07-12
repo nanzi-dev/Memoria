@@ -219,6 +219,30 @@ def test_authorized_chunks_follow_global_character_group_and_owner_visibility():
     assert visible == []
 
 
+def test_owned_chunks_allow_unbound_admin_preview_but_preserve_owner_checks():
+    owner = _create_user()
+    other = _create_user()
+    knowledge_base = repository.create_knowledge_base(owner, "Unbound")
+    chunk = _ready_document(
+        owner,
+        knowledge_base["knowledge_base_id"],
+        "unbound",
+    )
+
+    visible = repository.get_owned_knowledge_chunks(
+        owner,
+        [chunk["chunk_id"]],
+        knowledge_base_ids=[knowledge_base["knowledge_base_id"]],
+    )
+
+    assert [item["chunk_id"] for item in visible] == [chunk["chunk_id"]]
+    assert repository.get_owned_knowledge_chunks(
+        other,
+        [chunk["chunk_id"]],
+        knowledge_base_ids=[knowledge_base["knowledge_base_id"]],
+    ) == []
+
+
 def test_knowledge_sources_round_trip_in_single_and_group_history():
     owner = _create_user()
     source = {
@@ -507,23 +531,35 @@ def test_indexing_cleans_vectors_when_document_is_deleted_during_upsert(tmp_path
     assert repository.get_knowledge_document(owner, document["document_id"]) is None
 
 
-def test_knowledge_query_uses_recent_six_messages_and_respects_cap(monkeypatch):
+def test_knowledge_query_keeps_direct_question_free_from_history(monkeypatch):
     history = [
         {"role": "user", "content": f"message-{index}"}
         for index in range(8)
     ]
     monkeypatch.setattr(configs, "knowledge_query_max_chars", 4000)
-    query = knowledge_retriever.build_knowledge_query("current", history)
+    query = knowledge_retriever.build_knowledge_query(
+        "北区有轨电车几点开始运营？",
+        history,
+    )
 
-    assert "message-1" not in query
-    assert "message-2" in query
-    assert "message-7" in query
-    assert query.endswith("当前查询：current")
+    assert query == "北区有轨电车几点开始运营？"
 
-    monkeypatch.setattr(configs, "knowledge_query_max_chars", 40)
-    capped = knowledge_retriever.build_knowledge_query("current", history)
-    assert len(capped) == 40
-    assert capped.endswith("当前查询：current")
+
+def test_knowledge_query_adds_two_messages_for_short_follow_up(monkeypatch):
+    history = [
+        {"role": "user", "content": f"message-{index}"}
+        for index in range(8)
+    ]
+    monkeypatch.setattr(configs, "knowledge_query_max_chars", 4000)
+    query = knowledge_retriever.build_knowledge_query("那几点开始？", history)
+
+    assert "message-5" not in query
+    assert query == "message-6\nmessage-7\n那几点开始？"
+
+    monkeypatch.setattr(configs, "knowledge_query_max_chars", 20)
+    capped = knowledge_retriever.build_knowledge_query("那几点开始？", history)
+    assert len(capped) == 20
+    assert capped.endswith("那几点开始？")
 
 
 def test_retrieval_filters_similarity_reauthorizes_sql_and_formats_sources(
@@ -653,6 +689,62 @@ def test_retrieval_sorts_reauthorized_chunks_by_similarity(monkeypatch):
     assert [item["similarity"] for item in result.sources] == [0.94, 0.82]
 
 
+def test_retrieval_uses_lexical_match_to_correct_vector_misranking(monkeypatch):
+    class FakeStore:
+        def search(
+            self,
+            owner_user_id,
+            query_text,
+            *,
+            top_k,
+            knowledge_base_ids=None,
+        ):
+            return [
+                {"chunk_id": "festival", "similarity": 0.58},
+                {"chunk_id": "guild", "similarity": 0.52},
+            ]
+
+    chunks = [
+        {
+            "chunk_id": "festival",
+            "knowledge_base_id": "kb-1",
+            "knowledge_base_name": "World",
+            "document_id": "doc-1",
+            "document_name": "灯火节.txt",
+            "content": "灯火节在每年冬至举行，居民会沿河放置蓝色纸灯。",
+        },
+        {
+            "chunk_id": "guild",
+            "knowledge_base_id": "kb-1",
+            "knowledge_base_name": "World",
+            "document_id": "doc-2",
+            "document_name": "白塔议会.txt",
+            "content": "白塔议会由七名长老组成，总部设在王城北门附近。",
+        },
+    ]
+    monkeypatch.setattr(
+        knowledge_retriever.repository,
+        "get_authorized_knowledge_base_ids",
+        lambda *args, **kwargs: ["kb-1"],
+    )
+    monkeypatch.setattr(
+        knowledge_retriever.repository,
+        "get_authorized_knowledge_chunks",
+        lambda *args, **kwargs: chunks,
+    )
+    monkeypatch.setattr(configs, "knowledge_similarity_threshold", 0.6)
+
+    result = knowledge_retriever.retrieve_knowledge(
+        owner_user_id="owner",
+        character_id="character-a",
+        current_message="议会有多少位长老？",
+        vector_store=FakeStore(),
+    )
+
+    assert [item["chunk_id"] for item in result.chunks] == ["guild"]
+    assert result.sources[0]["similarity"] == 0.52
+
+
 def test_retrieval_can_limit_preview_to_requested_authorized_base(monkeypatch):
     searched = []
 
@@ -676,6 +768,46 @@ def test_retrieval_can_limit_preview_to_requested_authorized_base(monkeypatch):
     )
 
     assert searched == [["kb-2"]]
+
+
+def test_retrieval_can_preview_an_owner_validated_unbound_base(monkeypatch):
+    searched = []
+
+    class FakeStore:
+        def search(self, owner_user_id, query_text, *, top_k, knowledge_base_ids=None):
+            searched.append(knowledge_base_ids)
+            return [{"chunk_id": "chunk-1", "similarity": 0.8}]
+
+    monkeypatch.setattr(
+        knowledge_retriever.repository,
+        "get_authorized_knowledge_base_ids",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        knowledge_retriever.repository,
+        "get_owned_knowledge_chunks",
+        lambda *args, **kwargs: [
+            {
+                "chunk_id": "chunk-1",
+                "knowledge_base_id": "kb-unbound",
+                "knowledge_base_name": "World",
+                "document_id": "doc-1",
+                "document_name": "world.md",
+                "content": "城门每天午夜关闭。",
+            }
+        ],
+    )
+
+    result = knowledge_retriever.retrieve_knowledge(
+        owner_user_id="owner",
+        character_id="",
+        current_message="城门几点关闭？",
+        preauthorized_knowledge_base_ids=["kb-unbound"],
+        vector_store=FakeStore(),
+    )
+
+    assert searched == [["kb-unbound"]]
+    assert [item["chunk_id"] for item in result.chunks] == ["chunk-1"]
 
 
 def test_knowledge_prompt_guard_has_priority_rules_and_character_cap(monkeypatch):
