@@ -13,6 +13,7 @@ class TestPromptBuilder:
         assert "罗小黑" in prompt or "小黑" in prompt
         assert "好感度" in prompt
         assert "信任度" in prompt
+        assert '"trust_delta"' in prompt
         assert "测试者" in prompt
 
     def test_build_multi_character_prompt(self):

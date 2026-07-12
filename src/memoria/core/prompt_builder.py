@@ -81,6 +81,7 @@ JSON 格式示例：
 {{"dialogue": "角色对话内容（可含[动作描述]）",
   "action": "从上述动作列表原文选择一个",
   "affinity_delta": 0,
+  "trust_delta": 0,
   "mood_after": "从 {mood_values} 列表中选择",
   "memory_worth_keeping": null
 }}
@@ -89,6 +90,7 @@ JSON 格式示例：
 - dialogue: 必填字符串，角色说的话
 - action: 必填字符串，从上面5类动作中选择原始字符串（不要修改）
 - affinity_delta: 必填整数，-10到10之间
+- trust_delta: 必填整数，-10到10之间
 - mood_after: 必填字符串，必须是 {mood_values} 中的一个
 - memory_worth_keeping: 字符串或 null
 
