@@ -67,7 +67,13 @@ def process_knowledge_document(
         stored_chunks = repository.replace_knowledge_chunks(
             owner_user_id, document_id, chunks
         )
+        if not repository.get_knowledge_document(owner_user_id, document_id):
+            vector_store.delete_document(owner_user_id, document_id)
+            return {}
         vector_store.upsert_chunks(stored_chunks)
+        if not repository.get_knowledge_document(owner_user_id, document_id):
+            vector_store.delete_document(owner_user_id, document_id)
+            return {}
         return repository.update_knowledge_document_status(
             owner_user_id,
             document_id,
@@ -82,6 +88,8 @@ def process_knowledge_document(
         except Exception:
             logger.exception("清理失败知识文档的部分向量时出错")
         repository.clear_knowledge_document_chunks(owner_user_id, document_id)
+        if not repository.get_knowledge_document(owner_user_id, document_id):
+            return {}
         logger.warning("知识文档处理失败: document=%s error=%s", document_id, exc)
         return repository.update_knowledge_document_status(
             owner_user_id,

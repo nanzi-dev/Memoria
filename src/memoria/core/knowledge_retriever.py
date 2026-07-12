@@ -80,6 +80,7 @@ def retrieve_knowledge(
     current_message: str,
     recent_history: list[dict] | None = None,
     group_thread_id: str | None = None,
+    knowledge_base_ids: list[str] | None = None,
     vector_store=None,
 ) -> KnowledgeRetrieval:
     query_text = build_knowledge_query(current_message, recent_history)
@@ -87,17 +88,24 @@ def retrieve_knowledge(
         return KnowledgeRetrieval([], [], "", "")
 
     try:
-        if not repository.has_authorized_knowledge_bases(
+        authorized_base_ids = repository.get_authorized_knowledge_base_ids(
             owner_user_id,
             character_id=character_id,
             group_thread_id=group_thread_id,
-        ):
+        )
+        if knowledge_base_ids is not None:
+            requested_ids = set(knowledge_base_ids)
+            authorized_base_ids = [
+                base_id for base_id in authorized_base_ids if base_id in requested_ids
+            ]
+        if not authorized_base_ids:
             return KnowledgeRetrieval([], [], "", query_text)
         store = vector_store or get_knowledge_vector_store()
         vector_hits = store.search(
             owner_user_id,
             query_text,
             top_k=max(configs.knowledge_retrieval_top_k * 4, 12),
+            knowledge_base_ids=authorized_base_ids,
         )
         filtered_hits = [
             hit

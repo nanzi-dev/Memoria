@@ -35,6 +35,14 @@ _ALLOWED_SUFFIXES = {".txt", ".md", ".pdf", ".docx"}
 _UNSUPPORTED_SUFFIXES = {".doc", ".xlsx", ".xls", ".pptx", ".ppt"}
 
 
+def validate_document_filename(filename: str) -> None:
+    suffix = Path(filename or "").suffix.lower()
+    if suffix in _UNSUPPORTED_SUFFIXES:
+        raise KnowledgeDocumentError(f"不支持 {suffix or '该'} 格式")
+    if suffix not in _ALLOWED_SUFFIXES:
+        raise KnowledgeDocumentError("仅支持 TXT、Markdown、PDF 和 DOCX")
+
+
 def validate_document_size(data: bytes) -> None:
     if not data:
         raise KnowledgeDocumentError("文档为空")
@@ -44,11 +52,8 @@ def validate_document_size(data: bytes) -> None:
 
 def extract_document(filename: str, data: bytes) -> ExtractedDocument:
     validate_document_size(data)
+    validate_document_filename(filename)
     suffix = Path(filename or "").suffix.lower()
-    if suffix in _UNSUPPORTED_SUFFIXES:
-        raise KnowledgeDocumentError(f"不支持 {suffix or '该'} 格式")
-    if suffix not in _ALLOWED_SUFFIXES:
-        raise KnowledgeDocumentError("仅支持 TXT、Markdown、PDF 和 DOCX")
 
     if suffix in {".txt", ".md"}:
         extracted = _extract_utf8_text(data)

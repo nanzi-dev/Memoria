@@ -18,7 +18,11 @@ from pydantic import BaseModel, Field
 from memoria.api.knowledge_models import KnowledgeSource
 from memoria.api.user import require_current_user_id
 from memoria.core.config import configs
-from memoria.core.knowledge_documents import KnowledgeDocumentError, validate_document_size
+from memoria.core.knowledge_documents import (
+    KnowledgeDocumentError,
+    validate_document_filename,
+    validate_document_size,
+)
 from memoria.core.knowledge_retriever import retrieve_knowledge
 from memoria.core.knowledge_service import (
     process_knowledge_document,
@@ -69,6 +73,7 @@ class KnowledgePreviewRequest(BaseModel):
     query: str = Field(min_length=1, max_length=4000)
     character_id: str | None = None
     group_thread_id: str | None = None
+    knowledge_base_id: str | None = None
 
 
 class KnowledgePreviewResponse(BaseModel):
@@ -130,7 +135,16 @@ def _queue_document(
 def list_knowledge_bases(
     current_user_id: str = Depends(require_current_user_id),
 ):
-    return repository.list_knowledge_bases(current_user_id)
+    knowledge_bases = repository.list_knowledge_bases(current_user_id)
+    return [
+        {
+            **knowledge_base,
+            "bindings": repository.list_knowledge_bindings(
+                current_user_id, knowledge_base["knowledge_base_id"]
+            ),
+        }
+        for knowledge_base in knowledge_bases
+    ]
 
 
 @router.post("/bases", status_code=201)
@@ -197,15 +211,18 @@ def delete_knowledge_base(
 ):
     _require_base(current_user_id, knowledge_base_id)
     try:
-        get_knowledge_vector_store().delete_knowledge_base(
-            current_user_id, knowledge_base_id
-        )
         deleted = repository.delete_knowledge_base(
             current_user_id, knowledge_base_id
         )
     except Exception as exc:
         logger.exception("删除知识库失败: %s", knowledge_base_id)
         raise HTTPException(status_code=500, detail="删除知识库失败") from exc
+    try:
+        get_knowledge_vector_store().delete_knowledge_base(
+            current_user_id, knowledge_base_id
+        )
+    except Exception:
+        logger.exception("知识库已删除，但向量清理失败: %s", knowledge_base_id)
     for document in (deleted or {}).get("documents", []):
         remove_stored_knowledge_file(document.get("storage_path"))
     return OperationResponse()
@@ -255,6 +272,10 @@ async def upload_knowledge_document(
     original_name = Path(file.filename or "").name
     if not original_name:
         raise HTTPException(status_code=400, detail="缺少文件名")
+    try:
+        validate_document_filename(original_name)
+    except KnowledgeDocumentError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     data = await file.read(configs.knowledge_upload_max_bytes + 1)
     try:
         validate_document_size(data)
@@ -330,11 +351,14 @@ def delete_knowledge_document(
 ):
     document = _require_document(current_user_id, document_id)
     try:
-        get_knowledge_vector_store().delete_document(current_user_id, document_id)
         repository.delete_knowledge_document(current_user_id, document_id)
     except Exception as exc:
         logger.exception("删除知识文档失败: %s", document_id)
         raise HTTPException(status_code=500, detail="删除知识文档失败") from exc
+    try:
+        get_knowledge_vector_store().delete_document(current_user_id, document_id)
+    except Exception:
+        logger.exception("知识文档已删除，但向量清理失败: %s", document_id)
     remove_stored_knowledge_file(document.get("storage_path"))
     return OperationResponse()
 
@@ -363,6 +387,8 @@ def preview_knowledge(
     request: KnowledgePreviewRequest,
     current_user_id: str = Depends(require_current_user_id),
 ):
+    if request.knowledge_base_id:
+        _require_base(current_user_id, request.knowledge_base_id)
     targets = repository.list_knowledge_binding_targets(current_user_id)
     if request.character_id and request.character_id not in {
         item["character_id"] for item in targets["characters"]
@@ -379,6 +405,9 @@ def preview_knowledge(
         group_thread_id=request.group_thread_id,
         current_message=_clean_required(request.query, "检索内容"),
         recent_history=[],
+        knowledge_base_ids=(
+            [request.knowledge_base_id] if request.knowledge_base_id else None
+        ),
     )
     return KnowledgePreviewResponse(
         query_text=result.query_text,

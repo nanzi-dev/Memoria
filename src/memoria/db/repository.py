@@ -23,6 +23,8 @@ from difflib import SequenceMatcher
 
 logger = logging.getLogger(__name__)
 
+_UNSET = object()
+
 try:
     import psycopg
     from psycopg.rows import dict_row
@@ -3653,7 +3655,7 @@ def update_knowledge_base(
     knowledge_base_id: str,
     *,
     name: str | None = None,
-    description: str | None = None,
+    description: str | None | object = _UNSET,
     is_enabled: bool | None = None,
 ) -> dict | None:
     assignments = []
@@ -3661,9 +3663,9 @@ def update_knowledge_base(
     if name is not None:
         assignments.append("name = ?")
         params.append(name.strip())
-    if description is not None:
+    if description is not _UNSET:
         assignments.append("description = ?")
-        params.append(description.strip() or None)
+        params.append(str(description or "").strip() or None)
     if is_enabled is not None:
         assignments.append("is_enabled = ?")
         params.append(1 if is_enabled else 0)
@@ -4113,12 +4115,12 @@ def get_authorized_knowledge_chunks(
     return [by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_id]
 
 
-def has_authorized_knowledge_bases(
+def get_authorized_knowledge_base_ids(
     owner_user_id: str,
     *,
     character_id: str | None = None,
     group_thread_id: str | None = None,
-) -> bool:
+) -> list[str]:
     visibility = ["b.target_type = 'global'"]
     params: list = [owner_user_id]
     if character_id:
@@ -4128,9 +4130,9 @@ def has_authorized_knowledge_bases(
         visibility.append("(b.target_type = 'group_thread' AND b.target_id = ?)")
         params.append(group_thread_id)
     with get_conn() as conn:
-        row = conn.execute(
+        rows = conn.execute(
             f"""
-            SELECT 1
+            SELECT DISTINCT kb.knowledge_base_id
             FROM knowledge_base kb
             INNER JOIN knowledge_binding b
               ON b.owner_user_id = kb.owner_user_id
@@ -4142,11 +4144,26 @@ def has_authorized_knowledge_bases(
               AND kb.is_enabled = 1
               AND d.status = 'ready'
               AND ({" OR ".join(visibility)})
-            LIMIT 1
+            ORDER BY kb.knowledge_base_id
             """,
             tuple(params),
-        ).fetchone()
-    return row is not None
+        ).fetchall()
+    return [row["knowledge_base_id"] for row in rows]
+
+
+def has_authorized_knowledge_bases(
+    owner_user_id: str,
+    *,
+    character_id: str | None = None,
+    group_thread_id: str | None = None,
+) -> bool:
+    return bool(
+        get_authorized_knowledge_base_ids(
+            owner_user_id,
+            character_id=character_id,
+            group_thread_id=group_thread_id,
+        )
+    )
 
 
 

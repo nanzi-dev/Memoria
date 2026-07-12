@@ -13,6 +13,7 @@ from memoria.core.knowledge_documents import (
     TextSection,
     chunk_document,
     extract_document,
+    validate_document_filename,
 )
 from memoria.core.knowledge_service import process_knowledge_document
 from memoria.core.knowledge_vector_store import KnowledgeVectorStore
@@ -163,6 +164,23 @@ def test_authorized_chunks_follow_global_character_group_and_owner_visibility():
     ]
     chunk_ids = [chunk["chunk_id"] for chunk in chunks]
 
+    assert set(
+        repository.get_authorized_knowledge_base_ids(
+            owner,
+            character_id=character_a,
+            group_thread_id=group_thread_id,
+        )
+    ) == {
+        global_base["knowledge_base_id"],
+        char_base["knowledge_base_id"],
+        group_base["knowledge_base_id"],
+    }
+    assert repository.get_authorized_knowledge_base_ids(
+        other,
+        character_id=character_a,
+        group_thread_id=group_thread_id,
+    ) == []
+
     single_a = repository.get_authorized_knowledge_chunks(
         owner, chunk_ids, character_id=character_a
     )
@@ -298,6 +316,8 @@ def test_txt_markdown_pdf_and_docx_extraction():
 
 
 def test_document_validation_rejects_empty_spoofed_scanned_and_oversized(monkeypatch):
+    with pytest.raises(KnowledgeDocumentError, match="仅支持"):
+        validate_document_filename("notes.csv")
     with pytest.raises(KnowledgeDocumentError, match="为空"):
         extract_document("empty.txt", b"")
     with pytest.raises(KnowledgeDocumentError, match="不匹配"):
@@ -359,11 +379,13 @@ class _FakeCollection:
     def __init__(self):
         self.upserted = None
         self.deleted = []
+        self.query_kwargs = None
 
     def upsert(self, **kwargs):
         self.upserted = kwargs
 
     def query(self, **kwargs):
+        self.query_kwargs = kwargs
         return {"ids": [["near", "far"]], "distances": [[0.1, 0.8]]}
 
     def delete(self, **kwargs):
@@ -389,11 +411,22 @@ def test_independent_vector_store_upsert_search_and_delete():
     )
     assert store.collection_name == "knowledge_base_chunks"
     assert collection.upserted["metadatas"][0]["knowledge_base_id"] == "kb"
-    hits = store.search("owner", "query", top_k=2)
+    hits = store.search(
+        "owner",
+        "query",
+        top_k=2,
+        knowledge_base_ids=["kb", "kb-2"],
+    )
     assert hits == [
         {"chunk_id": "near", "similarity": 0.9},
         {"chunk_id": "far", "similarity": pytest.approx(0.2)},
     ]
+    assert collection.query_kwargs["where"] == {
+        "$and": [
+            {"owner_user_id": "owner"},
+            {"knowledge_base_id": {"$in": ["kb", "kb-2"]}},
+        ]
+    }
     store.delete_document("owner", "doc")
     assert collection.deleted
 
@@ -436,6 +469,44 @@ def test_failed_indexing_removes_partial_sql_and_vectors(tmp_path):
     assert vector_store.delete_calls == 2
 
 
+def test_indexing_cleans_vectors_when_document_is_deleted_during_upsert(tmp_path):
+    owner = _create_user()
+    knowledge_base = repository.create_knowledge_base(owner, "Lore")
+    path = tmp_path / "world.txt"
+    path.write_text("A useful world fact.", encoding="utf-8")
+    document = repository.create_knowledge_document(
+        owner,
+        knowledge_base["knowledge_base_id"],
+        original_name="world.txt",
+        media_type="text/plain",
+        source_type="upload",
+        storage_path=str(path),
+        checksum="sum",
+        byte_size=path.stat().st_size,
+    )
+
+    class DeletingVectorStore:
+        def __init__(self):
+            self.delete_calls = 0
+
+        def delete_document(self, owner_user_id, document_id):
+            self.delete_calls += 1
+
+        def upsert_chunks(self, chunks):
+            repository.delete_knowledge_document(owner, document["document_id"])
+
+    vector_store = DeletingVectorStore()
+    result = process_knowledge_document(
+        owner,
+        document["document_id"],
+        vector_store=vector_store,
+    )
+
+    assert result == {}
+    assert vector_store.delete_calls == 2
+    assert repository.get_knowledge_document(owner, document["document_id"]) is None
+
+
 def test_knowledge_query_uses_recent_six_messages_and_respects_cap(monkeypatch):
     history = [
         {"role": "user", "content": f"message-{index}"}
@@ -459,10 +530,18 @@ def test_retrieval_filters_similarity_reauthorizes_sql_and_formats_sources(
     monkeypatch,
 ):
     class FakeStore:
-        def search(self, owner_user_id, query_text, *, top_k):
+        def search(
+            self,
+            owner_user_id,
+            query_text,
+            *,
+            top_k,
+            knowledge_base_ids=None,
+        ):
             assert owner_user_id == "owner"
             assert "current question" in query_text
             assert top_k >= 12
+            assert knowledge_base_ids == ["kb-1"]
             return [
                 {"chunk_id": "authorized", "similarity": 0.92},
                 {"chunk_id": "stale", "similarity": 0.81},
@@ -472,8 +551,8 @@ def test_retrieval_filters_similarity_reauthorizes_sql_and_formats_sources(
     authorized_calls = []
     monkeypatch.setattr(
         knowledge_retriever.repository,
-        "has_authorized_knowledge_bases",
-        lambda *args, **kwargs: True,
+        "get_authorized_knowledge_base_ids",
+        lambda *args, **kwargs: ["kb-1"],
     )
 
     def fake_authorized(owner_user_id, chunk_ids, **context):
@@ -526,7 +605,15 @@ def test_retrieval_filters_similarity_reauthorizes_sql_and_formats_sources(
 
 def test_retrieval_sorts_reauthorized_chunks_by_similarity(monkeypatch):
     class FakeStore:
-        def search(self, owner_user_id, query_text, *, top_k):
+        def search(
+            self,
+            owner_user_id,
+            query_text,
+            *,
+            top_k,
+            knowledge_base_ids=None,
+        ):
+            assert knowledge_base_ids == ["kb-1"]
             return [
                 {"chunk_id": "highest", "similarity": 0.94},
                 {"chunk_id": "middle", "similarity": 0.82},
@@ -545,8 +632,8 @@ def test_retrieval_sorts_reauthorized_chunks_by_similarity(monkeypatch):
 
     monkeypatch.setattr(
         knowledge_retriever.repository,
-        "has_authorized_knowledge_bases",
-        lambda *args, **kwargs: True,
+        "get_authorized_knowledge_base_ids",
+        lambda *args, **kwargs: ["kb-1"],
     )
     monkeypatch.setattr(
         knowledge_retriever.repository,
@@ -564,6 +651,31 @@ def test_retrieval_sorts_reauthorized_chunks_by_similarity(monkeypatch):
 
     assert [item["chunk_id"] for item in result.chunks] == ["highest", "middle"]
     assert [item["similarity"] for item in result.sources] == [0.94, 0.82]
+
+
+def test_retrieval_can_limit_preview_to_requested_authorized_base(monkeypatch):
+    searched = []
+
+    class FakeStore:
+        def search(self, owner_user_id, query_text, *, top_k, knowledge_base_ids=None):
+            searched.append(knowledge_base_ids)
+            return []
+
+    monkeypatch.setattr(
+        knowledge_retriever.repository,
+        "get_authorized_knowledge_base_ids",
+        lambda *args, **kwargs: ["kb-1", "kb-2"],
+    )
+
+    knowledge_retriever.retrieve_knowledge(
+        owner_user_id="owner",
+        character_id="",
+        current_message="question",
+        knowledge_base_ids=["kb-2"],
+        vector_store=FakeStore(),
+    )
+
+    assert searched == [["kb-2"]]
 
 
 def test_knowledge_prompt_guard_has_priority_rules_and_character_cap(monkeypatch):

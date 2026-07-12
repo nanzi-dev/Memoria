@@ -78,6 +78,13 @@ def test_knowledge_base_crud_bindings_and_owner_isolation(
     )
     assert updated["name"] == "新港设定"
 
+    cleared = knowledge_api.update_knowledge_base(
+        knowledge_base_id,
+        knowledge_api.KnowledgeBaseUpdate(description=None),
+        current_user_id=owner_user_id,
+    )
+    assert cleared["description"] is None
+
     disabled = knowledge_api.set_knowledge_base_enabled(
         knowledge_base_id,
         knowledge_api.KnowledgeBaseEnabledUpdate(is_enabled=False),
@@ -97,6 +104,8 @@ def test_knowledge_base_crud_bindings_and_owner_isolation(
         current_user_id=owner_user_id,
     )
     assert bindings[0]["target_id"] == ""
+    listing = knowledge_api.list_knowledge_bases(current_user_id=owner_user_id)
+    assert listing[0]["bindings"] == bindings
 
     foreign = repository.create_knowledge_base("another-owner", "Foreign")
     with pytest.raises(HTTPException) as exc_info:
@@ -121,6 +130,14 @@ class _Upload:
 
     async def read(self, size):
         return b"# District\nOpen at dawn."
+
+
+class _UnsupportedUpload:
+    filename = "district.csv"
+    content_type = "text/csv"
+
+    async def read(self, size):
+        raise AssertionError("unsupported files must be rejected before reading")
 
 
 def test_paste_upload_retry_and_delete_document(knowledge_owner, monkeypatch):
@@ -189,13 +206,48 @@ def test_paste_upload_retry_and_delete_document(knowledge_owner, monkeypatch):
     ]
 
 
+def test_upload_rejects_unsupported_suffix_before_storage_or_queue(
+    knowledge_owner, monkeypatch
+):
+    knowledge_base_id = knowledge_api.create_knowledge_base(
+        knowledge_api.KnowledgeBaseCreate(name="文档库"),
+        current_user_id=knowledge_owner,
+    )["knowledge_base_id"]
+    monkeypatch.setattr(
+        knowledge_api,
+        "store_knowledge_file",
+        lambda *args: (_ for _ in ()).throw(AssertionError("must not store")),
+    )
+    monkeypatch.setattr(
+        knowledge_api,
+        "_queue_document",
+        lambda *args: (_ for _ in ()).throw(AssertionError("must not queue")),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            knowledge_api.upload_knowledge_document(
+                knowledge_base_id,
+                BackgroundTasks(),
+                _UnsupportedUpload(),
+                current_user_id=knowledge_owner,
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "仅支持" in exc_info.value.detail
+
+
 def test_preview_forwards_authenticated_context_and_returns_sources(
     knowledge_owner, monkeypatch
 ):
     owner_user_id = knowledge_owner
+    knowledge_base_id = repository.create_knowledge_base(
+        owner_user_id, "World"
+    )["knowledge_base_id"]
     calls = []
     source = {
-        "knowledge_base_id": "kb-1",
+        "knowledge_base_id": knowledge_base_id,
         "knowledge_base_name": "World",
         "document_id": "doc-1",
         "document_name": "world.md",
@@ -210,7 +262,9 @@ def test_preview_forwards_authenticated_context_and_returns_sources(
 
     monkeypatch.setattr(knowledge_api, "retrieve_knowledge", fake_retrieve)
     response = knowledge_api.preview_knowledge(
-        knowledge_api.KnowledgePreviewRequest(query="城门几点关"),
+        knowledge_api.KnowledgePreviewRequest(
+            query="城门几点关", knowledge_base_id=knowledge_base_id
+        ),
         current_user_id=owner_user_id,
     )
 
@@ -222,5 +276,6 @@ def test_preview_forwards_authenticated_context_and_returns_sources(
             "group_thread_id": None,
             "current_message": "城门几点关",
             "recent_history": [],
+            "knowledge_base_ids": [knowledge_base_id],
         }
     ]

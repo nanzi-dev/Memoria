@@ -158,6 +158,36 @@
   transition: transform 220ms ease, border-color 220ms ease, background-color 220ms ease, box-shadow 220ms ease, opacity 220ms ease;
 }
 
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.4s ease-out;
+}
+
 .memoria-card-hover:hover {
   transform: translateY(-2px);
   box-shadow: 0 14px 36px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(167, 239, 158, 0.08);
@@ -188,6 +218,7 @@
 @media (prefers-reduced-motion: reduce) {
   .animate-scan,
   .animate-fade-up,
+  .animate-slide-in-right,
   .animate-soft-pulse,
   .animate-bounce,
   .animate-pulse,

@@ -70,11 +70,22 @@ class KnowledgeVectorStore:
         query_text: str,
         *,
         top_k: int,
+        knowledge_base_ids: list[str] | None = None,
     ) -> list[dict]:
+        where = {"owner_user_id": owner_user_id}
+        if knowledge_base_ids is not None:
+            if not knowledge_base_ids:
+                return []
+            where = {
+                "$and": [
+                    {"owner_user_id": owner_user_id},
+                    {"knowledge_base_id": {"$in": knowledge_base_ids}},
+                ]
+            }
         result = self.collection.query(
             query_embeddings=self._encode([query_text]),
             n_results=max(1, top_k),
-            where={"owner_user_id": owner_user_id},
+            where=where,
         )
         hits = []
         ids = (result.get("ids") or [[]])[0]
