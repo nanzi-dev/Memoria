@@ -391,10 +391,10 @@ CREATE TABLE IF NOT EXISTS character_relationship (
     character_id_b  TEXT NOT NULL,      -- 角色 B
     
     -- 关系类型
-    relationship_type TEXT,             -- friend, enemy, family, rival, mentor, etc.
+    relationship_type TEXT,             -- 用户自定义关系类型文本
     
     -- 关系强度和描述
-    affinity        REAL DEFAULT 0.0,   -- 关系亲密度（-100 ~ 100）
+    affinity        REAL DEFAULT 0.0,   -- 关系强度（-100 ~ 100）
     description     TEXT,               -- 关系描述
     
     -- 元数据
@@ -913,7 +913,7 @@ def get_long_term_fact_records(
     """
     获取长期记忆记录，包含创建时间等元数据。
 
-    `get_long_term_facts` 保持只返回文本；多角色关系图谱过滤需要
+    `get_long_term_facts` 保持只返回文本；关系图谱过滤需要
     `created_at` 来区分图谱修订前后的关系事实。
     """
     # 如果提供了查询上下文，使用向量检索
@@ -1728,18 +1728,26 @@ def get_session_group_memories(
 def get_character_group_memories(
     character_id: str,
     limit: int = 20,
-    created_after: str | None = None
+    created_after: str | None = None,
+    owner_user_id: str | None = None
 ) -> list[dict]:
     """获取某个角色参与过的群体记忆"""
+    table_clause = "group_memory"
+    prefix = ""
     where_clause = "participants LIKE ?"
     params = [f"%{character_id}%"]
+    if owner_user_id:
+        table_clause = "group_memory gm JOIN session s ON s.session_id = gm.session_id"
+        prefix = "gm."
+        where_clause = "gm.participants LIKE ? AND s.player_id = ?"
+        params.append(owner_user_id)
     if created_after:
-        where_clause += " AND created_at >= ?"
+        where_clause += f" AND {prefix}created_at >= ?"
         params.append(created_after)
     params.append(limit)
     with get_conn() as conn:
         rows = conn.execute(
-            f"SELECT id, session_id, memory_text, participants, context, importance, created_at FROM group_memory WHERE {where_clause} ORDER BY importance DESC, last_referenced DESC LIMIT ?",
+            f"SELECT {prefix}id, {prefix}session_id, {prefix}memory_text, {prefix}participants, {prefix}context, {prefix}importance, {prefix}created_at FROM {table_clause} WHERE {where_clause} ORDER BY {prefix}importance DESC, {prefix}last_referenced DESC LIMIT ?",
             tuple(params)).fetchall()
     return [dict(r) for r in rows]
 
@@ -2537,7 +2545,7 @@ def update_relationship_affinity(
     character_id_b: str,
     affinity_delta: float
 ):
-    """更新关系亲密度"""
+    """更新关系强度"""
     character_id_a, character_id_b = _normalize_relationship_pair(character_id_a, character_id_b)
     now = _now()
     

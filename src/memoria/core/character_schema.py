@@ -74,7 +74,7 @@ class KeyEvent(BaseModel):
 class Relationship(BaseModel):
     """角色关系"""
     target: str                   # 目标角色ID
-    relationship_type: str        # 关系类型（如朋友、敌人、恋人等）
+    relationship_type: str        # 关系类型（用户自定义文本）
     description: str = ""         # 关系描述
     emotional_weight: int = 0     # 情感权重，正数为积极，负数为消极
 

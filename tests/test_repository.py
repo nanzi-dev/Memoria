@@ -282,6 +282,49 @@ class TestMultiSession:
         assert group["group_thread_id"] == sid
         assert group["is_multi_character"]
 
+    def test_character_group_memories_are_isolated_by_owner(self):
+        character_id = f"gmiso_{uuid.uuid4().hex[:8]}"
+        other_id = f"gmiso_other_{uuid.uuid4().hex[:8]}"
+        player_a = f"gma_{uuid.uuid4().hex[:8]}"
+        player_b = f"gmb_{uuid.uuid4().hex[:8]}"
+        sid_a = str(uuid.uuid4())
+        sid_b = str(uuid.uuid4())
+
+        assert repository.create_multi_character_session(
+            sid_a,
+            player_a,
+            "Player A",
+            [character_id, other_id],
+            group_name="A 的群聊",
+        )
+        assert repository.create_multi_character_session(
+            sid_b,
+            player_b,
+            "Player B",
+            [character_id, other_id],
+            group_name="B 的群聊",
+        )
+        repository.save_group_memory(
+            sid_a,
+            "A 用户的群体记忆",
+            participants=[character_id, other_id],
+        )
+        repository.save_group_memory(
+            sid_b,
+            "B 用户的群体记忆",
+            participants=[character_id, other_id],
+        )
+
+        results = repository.get_character_group_memories(
+            character_id,
+            owner_user_id=player_a,
+            limit=10,
+        )
+        memory_text = "\n".join(row["memory_text"] for row in results)
+
+        assert "A 用户的群体记忆" in memory_text
+        assert "B 用户的群体记忆" not in memory_text
+
     def test_multi_character_session_defaults_group_thread_id_to_session_id(self):
         sid = str(uuid.uuid4())
         player_id = f"gtd_{uuid.uuid4().hex[:8]}"

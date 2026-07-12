@@ -14,7 +14,13 @@ import logging
 import random
 import uuid
 
-from memoria.core import character_loader, llm_client, multi_character_memory, prompt_builder
+from memoria.core import (
+    character_loader,
+    llm_client,
+    multi_character_memory,
+    prompt_builder,
+    relationship_context,
+)
 from memoria.core.speaking_strategy import HybridStrategy, SpeakingStrategy
 from memoria.db import repository
 
@@ -36,110 +42,6 @@ def _safe_float(value, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
-
-
-_RELATIONSHIP_TERM_GROUPS = {
-    "friend": frozenset(("friend", "朋友", "好友", "挚友", "友人")),
-    "enemy": frozenset(("enemy", "敌人", "仇人", "死敌", "敌对", "敌手")),
-    "rival": frozenset(("rival", "宿敌", "对手", "竞争者")),
-    "family": frozenset(("family", "家人", "亲人", "父子", "父女", "母子", "母女", "兄弟", "姐妹", "兄妹", "姐弟")),
-    "mentor": frozenset(("mentor", "master", "apprentice", "teacher", "student", "师徒", "师父", "师傅", "徒弟", "导师", "老师", "学生", "师生")),
-    "lover": frozenset(("lover", "love", "恋人", "情侣", "爱人", "夫妻", "伴侣", "亲密", "暧昧")),
-    "partner": frozenset(("partner", "companion", "ally", "伙伴", "同伴", "队友", "盟友")),
-    "colleague": frozenset(("colleague", "同事", "同僚")),
-    "stranger": frozenset(("stranger", "neutral", "陌生人", "陌生", "中立", "不熟")),
-}
-
-_ALL_RELATIONSHIP_TERMS = frozenset(
-    term
-    for terms in _RELATIONSHIP_TERM_GROUPS.values()
-    for term in terms
-)
-
-_RELATIONSHIP_CONTEXT_MARKERS = (
-    "关系", "我们", "咱们", "你们", "他们", "她们", "二人", "两人",
-    "彼此", "对方", "互相", "之间", "称呼", "叫", "只是", "已经是", "算是",
-)
-
-_HIGH_SIGNAL_RELATIONSHIP_TERMS = frozenset((
-    "师徒", "师父", "师傅", "徒弟", "导师", "老师", "学生", "师生",
-    "情侣", "恋人", "爱人", "夫妻", "伴侣",
-    "敌人", "仇人", "死敌", "宿敌",
-    "家人", "亲人", "父子", "父女", "母子", "母女", "兄弟", "姐妹", "兄妹", "姐弟",
-))
-
-
-def _text_contains_term(text: str, term: str) -> bool:
-    if not text or not term:
-        return False
-    if term.isascii():
-        return term.lower() in text.lower()
-    return term in text
-
-
-def _relationship_terms_for_type(relationship_type: str | None) -> set[str]:
-    raw = str(relationship_type or "").strip()
-    if not raw:
-        return set()
-
-    raw_lower = raw.lower()
-    terms = {raw}
-    for key, group_terms in _RELATIONSHIP_TERM_GROUPS.items():
-        if raw_lower == key or key in raw_lower:
-            terms.update(group_terms)
-            continue
-        if any(_text_contains_term(raw, term) for term in group_terms):
-            terms.update(group_terms)
-    return terms
-
-
-def _relationship_for_pair(
-    character_relationships: dict | None,
-    character_id_a: str,
-    character_id_b: str
-) -> dict | None:
-    if not character_relationships:
-        return None
-    return (
-        character_relationships.get(f"{character_id_a}_{character_id_b}")
-        or character_relationships.get(f"{character_id_b}_{character_id_a}")
-    )
-
-
-def _relationship_terms_in_text(text: str) -> set[str]:
-    return {
-        term
-        for term in _ALL_RELATIONSHIP_TERMS
-        if _text_contains_term(text, term)
-    }
-
-
-def _has_relationship_context(text: str, aliases: list[str] | None = None) -> bool:
-    if any(marker in text for marker in _RELATIONSHIP_CONTEXT_MARKERS):
-        return True
-    aliases = aliases or []
-    return any(alias and _text_contains_term(text, alias) for alias in aliases)
-
-
-def _relationship_text_conflicts_with_graph(
-    text: str,
-    relationship: dict | None,
-    aliases: list[str] | None = None
-) -> bool:
-    found_terms = _relationship_terms_in_text(text)
-    if not found_terms:
-        return False
-
-    allowed_terms = _relationship_terms_for_type(
-        relationship.get("relationship_type") if relationship else None
-    )
-    disallowed_terms = found_terms - allowed_terms
-    if not disallowed_terms:
-        return False
-
-    if any(term in _HIGH_SIGNAL_RELATIONSHIP_TERMS for term in disallowed_terms):
-        return True
-    return _has_relationship_context(text, aliases)
 
 
 # =========================
@@ -354,7 +256,7 @@ class MultiCharacterOrchestrator:
 
 
     def _relationship_pressure_for_group(self) -> float:
-        """估算当前群聊关系张力，越高越适合多人接话。"""
+        """估算当前群聊关系强度，越高越适合多人接话。"""
         relationships = self._load_all_relationships()
         if not relationships:
             return 0.0
@@ -989,7 +891,10 @@ class MultiCharacterOrchestrator:
 
         for pair in self._participant_pairs():
             aliases = self._aliases_for_pair(*pair)
-            if any(alias and _text_contains_term(text, alias) for alias in aliases):
+            if any(
+                alias and relationship_context.text_contains_term(text, alias)
+                for alias in aliases
+            ):
                 alias_matched_pairs.append(pair)
 
         if alias_matched_pairs:
@@ -1002,7 +907,7 @@ class MultiCharacterOrchestrator:
                 if other_id != speaker_id
             ], False
 
-        if _has_relationship_context(text):
+        if relationship_context.has_relationship_context(text):
             return self._participant_pairs(), False
 
         return [], False
@@ -1028,14 +933,18 @@ class MultiCharacterOrchestrator:
 
         conflicts = []
         for character_id_a, character_id_b in pairs:
-            relationship = _relationship_for_pair(
+            relationship = relationship_context.relationship_between(
                 character_relationships,
                 character_id_a,
                 character_id_b
             )
             aliases = self._aliases_for_pair(character_id_a, character_id_b)
             conflicts.append(
-                _relationship_text_conflicts_with_graph(text, relationship, aliases)
+                relationship_context.relationship_text_conflicts_with_graph(
+                    text,
+                    relationship,
+                    aliases,
+                )
             )
 
         if has_alias_match or len(conflicts) == 1:

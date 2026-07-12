@@ -9,15 +9,16 @@
 5. 检测和执行事件
 """
 
+import json
 import logging
 import re
 import uuid
 from datetime import datetime, timezone
 from typing import Callable
 
-from memoria.core import character_loader, llm_client, prompt_builder
+from memoria.core import character_loader, llm_client, multi_character_memory, prompt_builder
 from memoria.core.event_schema import EventContext
-from memoria.core import event_runtime
+from memoria.core import event_runtime, relationship_context
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
@@ -92,6 +93,395 @@ def _append_short_term_message(
         return repository.append_short_term_message(session_id, role, content)
     
 
+def _aliases_for_card(character_id: str, card) -> list[str]:
+    aliases = [character_id]
+    meta = getattr(card, "meta", None)
+    if meta:
+        aliases.extend([
+            getattr(meta, "name", ""),
+            getattr(meta, "display_name", ""),
+        ])
+        aliases.extend(getattr(meta, "aliases", []) or [])
+    return relationship_context.normalize_aliases(aliases)
+
+
+def _character_name_and_aliases(player_id: str, character_id: str) -> tuple[str, list[str]]:
+    aliases = [character_id]
+    name = character_id
+    row = None
+    try:
+        row = repository.get_character_card_from_db(
+            player_id,
+            character_id,
+            include_inactive=True,
+        )
+    except Exception as e:
+        logger.debug("读取关联角色卡失败: %s", e)
+
+    if row:
+        name = row.get("display_name") or row.get("name") or character_id
+        aliases.extend([row.get("name"), row.get("display_name")])
+        try:
+            card_data = json.loads(row.get("card_data") or "{}")
+            meta = card_data.get("meta") or {}
+            aliases.extend([
+                meta.get("name"),
+                meta.get("display_name"),
+                *(meta.get("aliases") or []),
+            ])
+        except (TypeError, ValueError):
+            pass
+
+    return name, relationship_context.normalize_aliases(aliases)
+
+
+def _other_character_id(character_id: str, memory: dict) -> str | None:
+    char_a = memory.get("character_a_id")
+    char_b = memory.get("character_b_id")
+    if char_a == character_id:
+        return char_b
+    if char_b == character_id:
+        return char_a
+    return None
+
+
+def _parse_group_memory_participants(raw_participants) -> list[str]:
+    if not raw_participants:
+        return []
+    if isinstance(raw_participants, list):
+        return [str(pid) for pid in raw_participants if pid]
+    try:
+        parsed = json.loads(raw_participants)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(pid) for pid in parsed if pid]
+
+
+def _relationship_updated_at_for_pair(
+    player_id: str,
+    character_id_a: str,
+    character_id_b: str,
+    character_relationships: dict | None,
+) -> str | None:
+    relationship = relationship_context.relationship_between(
+        character_relationships,
+        character_id_a,
+        character_id_b,
+    )
+    updated_at = relationship.get("updated_at") if relationship else None
+    revision_updated_at = repository.get_character_relationship_updated_at(
+        player_id,
+        character_id_a,
+        character_id_b,
+    )
+    return relationship_context.latest_timestamp(updated_at, revision_updated_at)
+
+
+def _single_text_conflicts_with_relationship_graph(
+    text: str,
+    character_id: str,
+    related_character_ids: list[str],
+    character_relationships: dict | None,
+    aliases_by_character: dict[str, list[str]],
+) -> bool:
+    if character_relationships is None or not text:
+        return False
+
+    for other_id in related_character_ids:
+        relationship = relationship_context.relationship_between(
+            character_relationships,
+            character_id,
+            other_id,
+        )
+        pair_aliases = relationship_context.normalize_aliases(
+            [
+                *aliases_by_character.get(character_id, [character_id]),
+                *aliases_by_character.get(other_id, [other_id]),
+            ]
+        )
+        if relationship_context.relationship_text_conflicts_with_graph(
+            text,
+            relationship,
+            pair_aliases,
+        ):
+            return True
+    return False
+
+
+def _get_character_group_memories_for_player(
+    character_id: str,
+    player_id: str,
+    limit: int = 20,
+) -> list[dict]:
+    try:
+        return repository.get_character_group_memories(
+            character_id=character_id,
+            owner_user_id=player_id,
+            limit=limit,
+        )
+    except TypeError:
+        return repository.get_character_group_memories(character_id, limit=limit)
+
+
+def _format_cross_mode_memories(
+    character_id: str,
+    player_id: str,
+    shared_records: list[dict],
+    group_records: list[dict],
+    related_character_ids: list[str],
+    character_names: dict[str, str],
+    aliases_by_character: dict[str, list[str]],
+    relationship_aliases: list[str],
+    relationship_cutoff: str | None,
+    character_relationships: dict,
+) -> list[str]:
+    memory_lines = []
+    seen = set()
+
+    for memory in shared_records:
+        other_id = _other_character_id(character_id, memory)
+        if not other_id:
+            continue
+        relationship = relationship_context.relationship_between(
+            character_relationships,
+            character_id,
+            other_id,
+        )
+        pair_aliases = relationship_context.normalize_aliases(
+            [
+                *aliases_by_character.get(character_id, [character_id]),
+                *aliases_by_character.get(other_id, [other_id]),
+            ]
+        )
+        relationship_updated_at = _relationship_updated_at_for_pair(
+            player_id,
+            character_id,
+            other_id,
+            character_relationships,
+        )
+        filtered = relationship_context.filter_stale_relationship_memory_records(
+            [memory],
+            relationship_updated_at,
+            participant_aliases=pair_aliases,
+            text_key="memory_text",
+            relationship_context=True,
+            relationship=relationship,
+        )
+        if not filtered:
+            continue
+        text = str(memory.get("memory_text") or "").strip()
+        if not text or _single_text_conflicts_with_relationship_graph(
+            text,
+            character_id,
+            related_character_ids,
+            character_relationships,
+            aliases_by_character,
+        ):
+            continue
+        line = f"共享记忆（与{character_names.get(other_id) or other_id}）：{text}"
+        if line not in seen:
+            memory_lines.append(line)
+            seen.add(line)
+        if len(memory_lines) >= 6:
+            break
+
+    group_records = relationship_context.filter_stale_relationship_memory_records(
+        group_records,
+        relationship_cutoff,
+        participant_aliases=relationship_aliases,
+        text_key="memory_text",
+        relationship_context=True,
+    )
+    group_count = 0
+    for memory in group_records:
+        text = str(memory.get("memory_text") or "").strip()
+        if not text or _single_text_conflicts_with_relationship_graph(
+            text,
+            character_id,
+            related_character_ids,
+            character_relationships,
+            aliases_by_character,
+        ):
+            continue
+        line = f"群体记忆：{text}"
+        if line not in seen:
+            memory_lines.append(line)
+            seen.add(line)
+            group_count += 1
+        if group_count >= 5:
+            break
+
+    return memory_lines
+
+
+def _build_single_character_memory_query_context(
+    query_context: str | None,
+    character_names: dict[str, str],
+    relationship_graph_lines: list[str],
+) -> str | None:
+    parts = []
+    if query_context:
+        parts.append(str(query_context).strip())
+
+    names = relationship_context.normalize_aliases([
+        name
+        for name in character_names.values()
+        if name
+    ])
+    if names:
+        parts.append("相关角色：" + "、".join(names))
+
+    if relationship_graph_lines:
+        parts.append("当前关系图谱：\n" + "\n".join(relationship_graph_lines))
+
+    return "\n".join(part for part in parts if part) or None
+
+
+def _load_single_character_prompt_context(
+    character_id: str,
+    player_id: str,
+    card,
+    query_context: str | None = None,
+    fallback_known_player_facts=None,
+) -> dict:
+    relationship_records = repository.list_character_relationships(player_id, character_id)
+    character_relationships = relationship_context.relationship_map_from_records(
+        relationship_records
+    )
+
+    shared_records = repository.get_character_shared_memories(
+        owner_user_id=player_id,
+        character_id=character_id,
+        limit=20,
+    )
+    group_records = _get_character_group_memories_for_player(
+        character_id,
+        player_id,
+        limit=20,
+    )
+
+    related_character_ids = []
+    seen_related = set()
+
+    def add_related(other_id: str | None) -> None:
+        if not other_id or other_id == character_id or other_id in seen_related:
+            return
+        seen_related.add(other_id)
+        related_character_ids.append(other_id)
+
+    for relationship in relationship_records:
+        char_a = relationship.get("character_id_a")
+        char_b = relationship.get("character_id_b")
+        add_related(char_b if char_a == character_id else char_a)
+
+    for memory in shared_records:
+        add_related(_other_character_id(character_id, memory))
+
+    for memory in group_records:
+        for participant_id in _parse_group_memory_participants(memory.get("participants")):
+            add_related(participant_id)
+
+    current_name = getattr(getattr(card, "meta", None), "display_name", None)
+    current_name = current_name or getattr(getattr(card, "meta", None), "name", None) or character_id
+    character_names = {character_id: current_name}
+    aliases_by_character = {character_id: _aliases_for_card(character_id, card)}
+
+    for other_id in related_character_ids:
+        name, aliases = _character_name_and_aliases(player_id, other_id)
+        character_names[other_id] = name
+        aliases_by_character[other_id] = aliases
+
+    relationship_aliases = relationship_context.normalize_aliases(
+        [
+            alias
+            for aliases in aliases_by_character.values()
+            for alias in aliases
+        ]
+    )
+    relationship_cutoff = None
+    if related_character_ids:
+        relationship_cutoff = multi_character_memory.get_relationship_history_cutoff(
+            player_id,
+            [character_id, *related_character_ids],
+            character_relationships,
+        )
+
+    relationship_graph_lines = relationship_context.build_relationship_graph_lines_for_pairs(
+        [(character_id, other_id) for other_id in related_character_ids],
+        character_names,
+        character_relationships,
+    )
+    memory_query_context = _build_single_character_memory_query_context(
+        query_context,
+        character_names,
+        relationship_graph_lines,
+    )
+
+    try:
+        fact_records = repository.get_long_term_fact_records(
+            character_id=character_id,
+            player_id=player_id,
+            limit=20,
+            query_context=memory_query_context,
+        )
+    except Exception as e:
+        logger.warning("加载长期记忆记录失败，使用 runtime_state 默认记忆: %s", e)
+        if isinstance(fallback_known_player_facts, dict):
+            fallback_facts = [
+                f"{key}:{value}" for key, value in fallback_known_player_facts.items()
+            ]
+        elif isinstance(fallback_known_player_facts, list):
+            fallback_facts = fallback_known_player_facts
+        elif fallback_known_player_facts:
+            fallback_facts = [str(fallback_known_player_facts)]
+        else:
+            fallback_facts = []
+        fact_records = [
+            {"fact_text": str(fact), "created_at": None}
+            for fact in fallback_facts
+            if str(fact).strip()
+        ]
+
+    fact_records = relationship_context.filter_stale_relationship_memory_records(
+        fact_records,
+        relationship_cutoff,
+        participant_aliases=relationship_aliases,
+        text_key="fact_text",
+        relationship_context=False,
+    )
+    known_player_facts = [
+        record["fact_text"]
+        for record in fact_records
+        if not _single_text_conflicts_with_relationship_graph(
+            str(record.get("fact_text") or ""),
+            character_id,
+            related_character_ids,
+            character_relationships,
+            aliases_by_character,
+        )
+    ]
+
+    return {
+        "relationship_graph_lines": relationship_graph_lines,
+        "character_relationships": character_relationships,
+        "known_player_facts": known_player_facts,
+        "cross_mode_memories": _format_cross_mode_memories(
+            character_id=character_id,
+            player_id=player_id,
+            shared_records=shared_records,
+            group_records=group_records,
+            related_character_ids=related_character_ids,
+            character_names=character_names,
+            aliases_by_character=aliases_by_character,
+            relationship_aliases=relationship_aliases,
+            relationship_cutoff=relationship_cutoff,
+            character_relationships=character_relationships,
+        ),
+    }
+
+
 # =========================
 # Session 创建
 # =========================
@@ -113,9 +503,21 @@ def start_session(
     # 获取历史会话摘要（最近3次）
     past_summaries_raw = repository.get_recent_summaries(character_id, player_id, limit=3)
     past_summaries = [s["summary_text"] for s in past_summaries_raw] if past_summaries_raw else []
+    prompt_context = _load_single_character_prompt_context(
+        character_id,
+        player_id,
+        card,
+        fallback_known_player_facts=runtime_state.get("known_player_facts"),
+    )
+    runtime_state["known_player_facts"] = prompt_context["known_player_facts"]
+    past_summaries.extend(prompt_context["cross_mode_memories"])
     
     system_prompt = prompt_builder.build_system_prompt(
-        card, runtime_state, player_name, past_summaries=past_summaries
+        card,
+        runtime_state,
+        player_name,
+        past_summaries=past_summaries,
+        relationship_graph_lines=prompt_context["relationship_graph_lines"],
     )
     opening_instruction = prompt_builder.build_opening_line_prompt(card, runtime_state, player_name)
     
@@ -194,9 +596,22 @@ def run_dialogue_turn(
     # 获取历史会话摘要（最近3次，用于上下文增强）
     past_summaries_raw = repository.get_recent_summaries(character_id, player_id, limit=3)
     past_summaries = [s["summary_text"] for s in past_summaries_raw] if past_summaries_raw else []
+    prompt_context = _load_single_character_prompt_context(
+        character_id,
+        player_id,
+        card,
+        query_context=player_message,
+        fallback_known_player_facts=runtime_state.get("known_player_facts"),
+    )
+    runtime_state["known_player_facts"] = prompt_context["known_player_facts"]
+    past_summaries.extend(prompt_context["cross_mode_memories"])
     
     system_prompt = prompt_builder.build_system_prompt(
-        card, runtime_state, player_name, past_summaries=past_summaries
+        card,
+        runtime_state,
+        player_name,
+        past_summaries=past_summaries,
+        relationship_graph_lines=prompt_context["relationship_graph_lines"],
     )
     
     messages = history + [
@@ -301,7 +716,7 @@ def run_dialogue_turn(
             total_dialogue_count=len(history) // 2 + 1,  # 简化实现，后续可扩展
             session_duration_minutes=session_duration,
             unlocked_content=[],
-            character_relationships={}
+            character_relationships=prompt_context.get("character_relationships", {})
         )
         
         event_results = event_runtime.detect_and_execute_events(event_context)

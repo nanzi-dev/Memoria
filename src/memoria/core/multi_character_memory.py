@@ -12,120 +12,11 @@ import json
 import logging
 from typing import Optional
 
-from memoria.core import llm_client
+from memoria.core import llm_client, relationship_context
 from memoria.core.memory_extractor import clean_summary_text
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
-
-
-def _relationship_for_pair(
-    character_relationships: dict | None,
-    character_id_a: str,
-    character_id_b: str
-) -> dict | None:
-    if not character_relationships:
-        return None
-    return (
-        character_relationships.get(f"{character_id_a}_{character_id_b}")
-        or character_relationships.get(f"{character_id_b}_{character_id_a}")
-    )
-
-
-def _latest_timestamp(*values: str | None) -> str | None:
-    latest = None
-    for value in values:
-        if value and (latest is None or value > latest):
-            latest = value
-    return latest
-
-
-_STRONG_RELATIONSHIP_MEMORY_TERMS = (
-    "关系", "师徒", "师父", "徒弟", "老师", "学生", "情侣", "恋人", "爱人",
-    "夫妻", "伴侣", "朋友", "好友", "挚友", "敌人", "仇人", "家人", "亲人",
-    "兄弟", "姐妹", "兄妹", "姐弟", "父子", "父女", "母子", "母女", "队友",
-    "伙伴", "同伴", "盟友", "宿敌", "陌生", "未定义", "中立", "暧昧",
-    "亲密", "疏远", "背叛"
-)
-
-_WEAK_RELATIONSHIP_MEMORY_TERMS = (
-    "喜欢", "讨厌"
-)
-
-_RELATIONSHIP_CONTEXT_MARKERS = (
-    "关系", "之间", "互相", "彼此", "对方", "他们", "她们", "二人", "两人",
-    "称呼", "承诺", "只是", "已经是"
-)
-
-
-def _normalize_memory_aliases(values: list[str] | None) -> list[str]:
-    aliases = []
-    seen = set()
-    for value in values or []:
-        alias = str(value or "").strip()
-        if not alias:
-            continue
-        lowered = alias.lower()
-        if lowered not in seen:
-            aliases.append(alias)
-            seen.add(lowered)
-    return aliases
-
-
-def _memory_created_before_or_unknown(created_at: str | None, cutoff: str | None) -> bool:
-    if not cutoff:
-        return False
-    if not created_at:
-        return True
-    return created_at < cutoff
-
-
-def _text_mentions_alias(text: str, aliases: list[str]) -> bool:
-    lowered = text.lower()
-    return any(alias.lower() in lowered for alias in aliases if alias)
-
-
-def _is_relationship_memory_text(
-    text: str,
-    participant_aliases: list[str] | None = None,
-    relationship_context: bool = False
-) -> bool:
-    if not text:
-        return False
-
-    has_strong_term = any(term in text for term in _STRONG_RELATIONSHIP_MEMORY_TERMS)
-    has_weak_term = any(term in text for term in _WEAK_RELATIONSHIP_MEMORY_TERMS)
-    if not has_strong_term and not has_weak_term:
-        return False
-
-    if relationship_context and has_strong_term:
-        return True
-
-    aliases = _normalize_memory_aliases(participant_aliases)
-    has_relationship_marker = any(marker in text for marker in _RELATIONSHIP_CONTEXT_MARKERS)
-    return _text_mentions_alias(text, aliases) or has_relationship_marker
-
-
-def _filter_stale_relationship_memory_records(
-    records: list[dict],
-    relationship_updated_at: str | None,
-    participant_aliases: list[str] | None = None,
-    text_key: str = "memory_text",
-    relationship_context: bool = False
-) -> list[dict]:
-    if not relationship_updated_at:
-        return records
-
-    filtered = []
-    for record in records:
-        text = str(record.get(text_key) or "")
-        if (
-            _memory_created_before_or_unknown(record.get("created_at"), relationship_updated_at)
-            and _is_relationship_memory_text(text, participant_aliases, relationship_context)
-        ):
-            continue
-        filtered.append(record)
-    return filtered
 
 
 def _relationship_updated_at_for_pair(
@@ -134,7 +25,7 @@ def _relationship_updated_at_for_pair(
     character_id_a: str,
     character_id_b: str
 ) -> str | None:
-    relationship = _relationship_for_pair(
+    relationship = relationship_context.relationship_between(
         character_relationships,
         character_id_a,
         character_id_b
@@ -145,7 +36,7 @@ def _relationship_updated_at_for_pair(
         character_id_a,
         character_id_b
     )
-    return _latest_timestamp(updated_at, revision_updated_at)
+    return relationship_context.latest_timestamp(updated_at, revision_updated_at)
 
 
 def get_relationship_history_cutoff(
@@ -164,7 +55,7 @@ def get_relationship_history_cutoff(
                 character_id_a,
                 character_id_b
             )
-            latest = _latest_timestamp(latest, updated_at)
+            latest = relationship_context.latest_timestamp(latest, updated_at)
     return latest
 
 
@@ -183,7 +74,7 @@ def load_player_memories_for_relationship_graph(
     关系图谱修订只隔离旧的角色关系事实；普通玩家事实、经历事实和世界事实
     不应因为图谱更新而从长期记忆上下文中消失。
     """
-    participant_aliases = _normalize_memory_aliases(
+    participant_aliases = relationship_context.normalize_aliases(
         [character_id, *other_character_ids, *(relationship_aliases or [])]
     )
     records = repository.get_long_term_fact_records(
@@ -192,7 +83,7 @@ def load_player_memories_for_relationship_graph(
         limit=max(limit * 3, 20),
         query_context=query_context,
     )
-    records = _filter_stale_relationship_memory_records(
+    records = relationship_context.filter_stale_relationship_memory_records(
         records,
         relationship_history_cutoff,
         participant_aliases=participant_aliases,
@@ -784,12 +675,18 @@ def integrate_multi_character_context(
                 character_id_b=other_id,
                 limit=10,
             )
-            impressions = _filter_stale_relationship_memory_records(
+            relationship = relationship_context.relationship_between(
+                character_relationships,
+                character_id,
+                other_id,
+            )
+            impressions = relationship_context.filter_stale_relationship_memory_records(
                 impressions,
                 relationship_updated_at,
                 participant_aliases=[character_id, other_id, *(relationship_aliases or [])],
                 text_key="memory_text",
                 relationship_context=True,
+                relationship=relationship,
             )
             if impressions:
                 # 提取 memory_text 用于 prompt 构建
@@ -802,7 +699,7 @@ def integrate_multi_character_context(
         session_id=session_id,
         limit=10,
     )
-    group_memories = _filter_stale_relationship_memory_records(
+    group_memories = relationship_context.filter_stale_relationship_memory_records(
         group_memories,
         relationship_context_updated_at,
         participant_aliases=[*participant_ids, *(relationship_aliases or [])],
@@ -934,7 +831,8 @@ def query_multi_character_memories(
     if include_group:
         group_memories = repository.get_character_group_memories(
             character_id=character_id,
-            limit=5
+            limit=5,
+            owner_user_id=player_id,
         )
         results["group_memories"] = [gm["memory_text"] for gm in group_memories]
     

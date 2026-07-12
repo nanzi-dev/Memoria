@@ -235,7 +235,7 @@ class EventExecutor:
         target_char_id = effect.target_character_id
         rel_changes = effect.relationship_change
         
-        # 更新关系亲密度
+        # 更新关系强度
         if "affinity" in rel_changes:
             affinity_delta = rel_changes["affinity"]
             repository.update_relationship_affinity(
@@ -244,7 +244,7 @@ class EventExecutor:
                 target_char_id,
                 affinity_delta
             )
-            logger.info(f"角色关系已修改: {context.character_id} <-> {target_char_id}, 亲密度变化: {affinity_delta}")
+            logger.info(f"角色关系已修改: {context.character_id} <-> {target_char_id}, 关系强度变化: {affinity_delta}")
 
     def _trigger_next_event(self, effect: EventEffect, result: EventTriggerResult):
         """记录事件链中的下一个事件。"""

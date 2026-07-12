@@ -36,12 +36,12 @@
 - [x] 多角色群聊（2-5 个 NPC，MultiCharacterOrchestrator）
 - [x] 5 种发言策略（RoundRobin / WeightedRandom / SmartSelection / TriggerBased / Hybrid）
 - [x] 讨论模式（角色连续发言，每轮按上下文动态选择回应人数，最多 4 个角色回应）
-- [x] 智能策略评分（关键词匹配 30% + 关系亲密度 25% + 频率配置 20% + 均衡性 15% + 发言时间 10%）
+- [x] 智能策略评分（关键词匹配 30% + 关系强度 25% + 频率配置 20% + 均衡性 15% + 发言时间 10%）
 - [x] 角色间互动（主动发言触发 + 对话历史上下文注入）
 - [x] 三层多角色记忆 — long_term_fact（个人）+ shared_memory（角色间）+ group_memory（群体），含 DDL、CRUD、去重
 - [x] 动态参与者管理（添加/移除/更新频率）
 - [x] 群聊结束整场摘要记忆（有效消息数大于 6 且摘要非空时写入 session_summary 和 group_memory）
-- [x] 关系图谱权威链路（关系创建/更新/删除记录修订时间；多角色上下文只过滤图谱变更前的旧关系事实，结束摘要过滤旧关系历史）
+- [x] 关系图谱权威链路（关系创建/更新/删除记录修订时间；单聊和多角色上下文只过滤图谱变更前的旧关系事实，结束摘要过滤旧关系历史）
 
 ---
 
@@ -51,9 +51,9 @@
 
 **目标：** 提升系统健壮性，为生产环境做准备。
 
-**当前进度：** 测试集合扩展到 240 tests；记忆去重、重试、认证限流、健康检查、懒加载、会话恢复、用户资源隔离、关系图谱修订过滤、PostgreSQL 兼容和 API/安全回归测试已上线。
+**当前进度：** 测试集合扩展到 249 tests；记忆去重、重试、认证限流、健康检查、懒加载、会话恢复、用户资源隔离、关系图谱修订过滤、PostgreSQL 兼容和 API/安全回归测试已上线。
 
-- [x] 单元测试覆盖（当前 240 tests，覆盖 schema/repository/orchestrator/events/API models/API endpoints/security/vector memory/developer experience/PostgreSQL compatibility）
+- [x] 单元测试覆盖（当前 249 tests，覆盖 schema/repository/orchestrator/events/API models/API endpoints/security/vector memory/developer experience/PostgreSQL compatibility）
 - [x] 数据库迁移到 PostgreSQL（保留 SQLite 开发模式）
 - [x] LLM 调用重试机制（指数退避 3 次，base_delay=1s，max 7s）
 - [x] 请求速率限制（60s 窗口 60 次，优先按认证用户限流，未登录回退 IP）
@@ -124,11 +124,11 @@
 | 文件 | 测试数 | 覆盖范围 |
 |------|--------|---------|
 | `tests/test_core.py` | 62 | CharacterSchema, EventSchema, SpeakingStrategies, EventDetector, MultiCharMemory, EdgeCases, 关系修订截止过滤 |
-| `tests/test_repository.py` | 43 | RuntimeState, Session, Memory CRUD, CharacterCard, EventDef, EventDeepIntegrationRepository, Relationship, RelationshipRevision, MultiSession, Dedup, MessageId, SummaryStatus, LatestActiveSession, SessionListFields |
-| `tests/test_orchestrator.py` | 16 | _clip/_safe_float, HistoryFormatting, LoadRelationships, CharInteraction, MultiCharacterGroupMemory, SessionLifecycle, DialogueTurn |
+| `tests/test_repository.py` | 44 | RuntimeState, Session, Memory CRUD, CharacterCard, EventDef, EventDeepIntegrationRepository, Relationship, RelationshipRevision, MultiSession, Dedup, MessageId, SummaryStatus, LatestActiveSession, SessionListFields |
+| `tests/test_orchestrator.py` | 21 | _clip/_safe_float, HistoryFormatting, LoadRelationships, CharInteraction, MultiCharacterGroupMemory, SessionLifecycle, DialogueTurn |
 | `tests/test_events.py` | 16 | EventExecutor 全部 8 种效果类型, EventDetector 边界, EventDeepIntegration |
 | `tests/test_api_models.py` | 19 | Dialogue, CharacterAdmin, EventAdmin, Relationship, MultiDialogue, message_id/recovery response models |
-| `tests/test_memory_extractor.py` | 30 | MemoryExtractor, PromptBuilder, 关系图谱权威提示词, Config, LLMClient, CharacterLoader, DedupHelpers |
+| `tests/test_memory_extractor.py` | 33 | MemoryExtractor, PromptBuilder, 关系图谱权威提示词, Config, LLMClient, CharacterLoader, DedupHelpers |
 | `tests/test_dialogue_api.py` | 7 | 单角色 session start API、跨玩家会话保护、禁用角色保护、会话摘要保存条件 |
 | `tests/test_multi_dialogue_api.py` | 14 | 多角色参与者 JSON body、POST update、session end、群体摘要、讨论响应包装、跨玩家会话保护、禁用角色保护、空摘要仍提取角色间印象 |
 | `tests/test_cli_debug.py` | 1 | CLI `--debug` 参数传递 |
@@ -137,7 +137,7 @@
 | `tests/test_security_fixes.py` | 8 | 管理/写接口鉴权、头像下载私网拦截、密码哈希升级、持久化 token、轻量模型客户端 |
 | `tests/test_system.py` | 12 | 健康检查, 配置校验, 速率限制, 日志级别, 懒加载 |
 | `tests/test_vector_memory.py` | 2 | CUDA 失败回退 CPU、禁用嵌入跳过向量操作 |
-| **合计** | **240** | |
+| **合计** | **249** | |
 
 ## 版本规划
 
@@ -146,7 +146,7 @@
 | v0.1 | 1-2 | 单角色对话 + 记忆系统 + 记忆去重 | ✅ |
 | v0.2 | 3 | 事件系统 + 角色关系网络 | ✅ |
 | v0.3 | 4 | 多角色对话 + 讨论模式 + shared/group 记忆 | ✅ |
-| **v0.4** | **5** | **质量与稳定性（240 tests + 去重/恢复/认证限流/用户隔离/关系图谱修订过滤/PostgreSQL 兼容）** | ✅ |
+| **v0.4** | **5** | **质量与稳定性（249 tests + 去重/恢复/认证限流/用户隔离/关系图谱修订过滤/PostgreSQL 兼容）** | ✅ |
 | v0.5 | 6 | Web 前端 | 🔄 |
 | v0.6 | 7 | 事件深度集成 | ✅ |
 | v1.0 | 8-10 | 开发者体验 + 高级特性 + 生态 | [ ] |

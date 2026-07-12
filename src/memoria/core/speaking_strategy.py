@@ -32,7 +32,7 @@ def _relationship_turn_score(relationship: dict | None) -> float:
     """
     根据关系强度和文本语义计算接话倾向。
 
-    关系类型允许用户自定义，因此亲密度是主信号；类型和描述只作为语义提示。
+    关系类型允许用户自定义，因此关系强度是主信号；类型和描述只作为语义提示。
     """
     if not relationship:
         return 0.0

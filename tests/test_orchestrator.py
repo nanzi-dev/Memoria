@@ -527,6 +527,171 @@ class TestDialogueTurn:
         assert saved_messages == [("sid", "user", "你好"), ("sid", "assistant", "你好")]
         assert saved_facts == [("char", "player", "玩家主动打招呼")]
 
+    def test_single_dialogue_prompt_uses_graph_and_cross_mode_memories(self, monkeypatch):
+        """单聊 prompt 应读取当前关系图谱，并共享同角色的群聊/共享记忆。"""
+        from types import SimpleNamespace
+        from memoria.core import orchestrator
+
+        captured = {}
+        saved_messages = []
+        card = SimpleNamespace(
+            meta=SimpleNamespace(name="甲", display_name="甲", aliases=[]),
+            action_vocabulary=SimpleNamespace(
+                default_action="idle",
+                greeting_actions=[],
+                farewell_actions=[],
+                agreement_actions=[],
+                disagreement_actions=[],
+                emotional_reactions=[],
+            ),
+            runtime_state_schema=SimpleNamespace(
+                current_mood=SimpleNamespace(emotions=["neutral"])
+            ),
+        )
+
+        monkeypatch.setattr(orchestrator.repository, "get_session", lambda session_id: {
+            "session_id": session_id,
+            "character_id": "char_a",
+            "player_id": "player",
+            "player_name": "Tester",
+            "created_at": None,
+            "status": "active",
+        })
+        monkeypatch.setattr(orchestrator.character_loader, "load_character_card", lambda *args, **kwargs: card)
+        monkeypatch.setattr(orchestrator.repository, "get_runtime_state", lambda *args, **kwargs: {
+            "affection_level": 0,
+            "trust_level": 10,
+            "current_mood": "neutral",
+            "known_player_facts": ["未过滤的默认记忆"],
+        })
+        monkeypatch.setattr(orchestrator.repository, "get_short_term_history", lambda *args, **kwargs: [])
+        monkeypatch.setattr(orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: [
+            {"summary_text": "单聊旧摘要"}
+        ])
+        monkeypatch.setattr(orchestrator.repository, "list_character_relationships", lambda *args, **kwargs: [
+            {
+                "character_id_a": "char_a",
+                "character_id_b": "char_b",
+                "relationship_type": "血盟契约",
+                "affinity": 80,
+                "description": "当前图谱确认的自定义关系",
+                "updated_at": "2026-01-03T00:00:00+00:00",
+            }
+        ])
+        monkeypatch.setattr(orchestrator.repository, "get_character_relationship_updated_at", lambda *args, **kwargs: "2026-01-03T00:00:00+00:00")
+        monkeypatch.setattr(orchestrator.repository, "get_character_card_from_db", lambda *args, **kwargs: {
+            "name": "乙",
+            "display_name": "乙",
+            "card_data": json.dumps({"meta": {"name": "乙", "display_name": "乙", "aliases": ["小乙"]}}),
+        })
+        monkeypatch.setattr(orchestrator.repository, "get_character_shared_memories", lambda *args, **kwargs: [
+            {
+                "character_a_id": "char_a",
+                "character_b_id": "char_b",
+                "memory_text": "甲和乙是师徒。",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
+            {
+                "character_a_id": "char_a",
+                "character_b_id": "char_b",
+                "memory_text": "甲和乙一起巡逻。",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
+            {
+                "character_a_id": "char_a",
+                "character_b_id": "char_b",
+                "memory_text": "一起调查旧仓库",
+                "created_at": "2026-01-04T00:00:00+00:00",
+            }
+        ])
+
+        def fake_group_memories(character_id, limit=20, created_after=None, owner_user_id=None):
+            captured["group_owner"] = owner_user_id
+            return [
+                {
+                    "memory_text": "甲和乙是师徒。",
+                    "participants": json.dumps(["char_a", "char_b"]),
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                },
+                {
+                    "memory_text": "甲和乙一起调查仓库。",
+                    "participants": json.dumps(["char_a", "char_b"]),
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                },
+                {
+                    "memory_text": "群聊里约好保管钥匙",
+                    "participants": json.dumps(["char_a", "char_b"]),
+                    "created_at": "2026-01-04T00:00:00+00:00",
+                }
+            ]
+
+        monkeypatch.setattr(orchestrator.repository, "get_character_group_memories", fake_group_memories)
+
+        def fake_get_long_term_fact_records(*args, **kwargs):
+            captured["memory_query_context"] = kwargs.get("query_context")
+            return [
+                {
+                    "fact_text": "甲和乙是师徒。",
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                },
+                {
+                    "fact_text": "玩家喜欢猫。",
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                },
+                {
+                    "fact_text": "甲喜欢猫。",
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                },
+            ]
+
+        monkeypatch.setattr(orchestrator.repository, "get_long_term_fact_records", fake_get_long_term_fact_records)
+
+        def fake_build_system_prompt(card_arg, runtime_state, player_name, past_summaries=None, relationship_graph_lines=None):
+            captured["runtime_state"] = runtime_state
+            captured["past_summaries"] = past_summaries
+            captured["relationship_graph_lines"] = relationship_graph_lines
+            return "prompt"
+
+        monkeypatch.setattr(orchestrator.prompt_builder, "build_system_prompt", fake_build_system_prompt)
+        monkeypatch.setattr(orchestrator.llm_client, "call_role_turn", lambda *args, **kwargs: {
+            "dialogue": "记得。",
+            "action": "idle",
+            "affinity_delta": 0,
+            "trust_delta": 0,
+            "mood_after": "neutral",
+            "memory_worth_keeping": None,
+        })
+        monkeypatch.setattr(orchestrator.event_runtime, "detect_and_execute_events", lambda *args, **kwargs: [])
+        monkeypatch.setattr(
+            orchestrator.event_runtime,
+            "apply_event_results_to_dialogue_state",
+            lambda event_results, dialogue, affinity, trust, mood: (dialogue, affinity, trust, mood, [], None),
+        )
+        monkeypatch.setattr(orchestrator.repository, "save_runtime_state", lambda *args, **kwargs: None)
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "append_short_term_message",
+            lambda session_id, role, content, **kwargs: saved_messages.append((role, content, kwargs)) or len(saved_messages),
+        )
+
+        result = orchestrator.run_dialogue_turn("sid", "你还记得群聊的事吗？")
+
+        assert result["dialogue"] == "记得。"
+        assert captured["group_owner"] == "player"
+        graph_text = "\n".join(captured["relationship_graph_lines"])
+        assert "当前关系类型 = 血盟契约" in graph_text
+        assert "关系强度 = 80/100" in graph_text
+        assert "你还记得群聊的事吗？" in captured["memory_query_context"]
+        assert "当前关系类型 = 血盟契约" in captured["memory_query_context"]
+        assert not any("甲和乙是师徒" in fact for fact in captured["runtime_state"]["known_player_facts"])
+        assert "玩家喜欢猫。" in captured["runtime_state"]["known_player_facts"]
+        assert "甲喜欢猫。" in captured["runtime_state"]["known_player_facts"]
+        assert not any("师徒" in summary for summary in captured["past_summaries"])
+        assert "共享记忆（与乙）：甲和乙一起巡逻。" in captured["past_summaries"]
+        assert "共享记忆（与乙）：一起调查旧仓库" in captured["past_summaries"]
+        assert "群体记忆：甲和乙一起调查仓库。" in captured["past_summaries"]
+        assert "群体记忆：群聊里约好保管钥匙" in captured["past_summaries"]
+
     def test_event_state_changes_are_included_in_relationship_delta(self, monkeypatch):
         """事件改变信任/好感时，返回和保存的 delta 应反映最终总变化。"""
         from types import SimpleNamespace

@@ -51,7 +51,9 @@ class TestPromptBuilder:
         assert "唯一权威事实" in prompt
         assert "覆盖角色卡背景" in prompt
         assert "回答“你们是什么关系”" in prompt
-        assert "当前关系 = 情侣，亲密度 100/100" in prompt
+        assert "当前关系类型 = 情侣" in prompt
+        assert "关系强度 = 100/100" in prompt
+        assert "说明 = 当前已经确认的亲密关系" in prompt
 
     def test_multi_character_prompt_treats_missing_graph_edge_as_authoritative(self):
         from memoria.core import prompt_builder, character_loader
@@ -68,7 +70,7 @@ class TestPromptBuilder:
         assert "当前关系 = 未定义" in prompt
         assert "不得从角色卡背景、长期记忆或历史发言恢复旧关系" in prompt
 
-    def test_multi_character_prompt_renders_enemy_affinity_as_tension(self):
+    def test_multi_character_prompt_preserves_custom_relationship_type(self):
         from memoria.core import prompt_builder, character_loader
         c1 = character_loader.load_character_card("npc_wuxian")
         prompt = prompt_builder.build_multi_character_system_prompt(
@@ -90,7 +92,7 @@ class TestPromptBuilder:
             ],
             character_relationships={
                 "npc_wanjiji_npc_wuxian": {
-                    "relationship_type": "enemy",
+                    "relationship_type": "死对头plus",
                     "affinity": 100,
                     "description": "当前图谱确认双方敌对",
                     "updated_at": "2026-07-12T04:30:31+00:00",
@@ -100,11 +102,77 @@ class TestPromptBuilder:
         )
 
         assert "当前关系图谱（最高优先级，覆盖角色卡背景）" in prompt
-        assert "敌人（enemy）" in prompt
-        assert "关系张力 100/100" in prompt
-        assert "数值表示关系张力或冲突强度，不表示亲密" in prompt
+        assert "当前关系类型 = 死对头plus" in prompt
+        assert "关系强度 = 100/100" in prompt
+        assert "说明 = 当前图谱确认双方敌对" in prompt
+        assert "敌人（enemy）" not in prompt
+        assert "关系张力" not in prompt
+        assert "亲密度" not in prompt
         assert "回答“你们是什么关系”" in prompt
-        assert "关系：enemy（亲密度 100/100）" not in prompt
+
+    def test_relationship_context_preserves_custom_type_for_conflict_checks(self):
+        from memoria.core import relationship_context
+
+        relationship = {
+            "relationship_type": "血盟契约",
+            "affinity": 42,
+            "description": "当前图谱指定的自定义关系",
+        }
+
+        summary = relationship_context.relationship_summary_for_prompt(relationship)
+
+        assert "当前关系类型 = 血盟契约" in summary
+        assert "关系强度 = 42/100" in summary
+        assert relationship_context.relationship_text_conflicts_with_graph(
+            "甲和乙是师徒。",
+            relationship,
+            aliases=["甲", "乙"],
+        )
+        assert not relationship_context.relationship_text_conflicts_with_graph(
+            "甲和乙是血盟契约。",
+            relationship,
+            aliases=["甲", "乙"],
+        )
+        assert relationship_context.relationship_text_conflicts_with_graph(
+            "甲和乙既是师徒也是血盟契约。",
+            relationship,
+            aliases=["甲", "乙"],
+        )
+
+    def test_relationship_context_keeps_non_relationship_memories(self):
+        from memoria.core import relationship_context
+
+        records = [
+            {
+                "memory_text": "甲和乙是旧盟约。",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
+            {
+                "memory_text": "他们一起调查仓库。",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
+            {
+                "memory_text": "甲喜欢猫。",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
+            {
+                "memory_text": "他们的关系是旧盟约。",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            },
+        ]
+
+        filtered = relationship_context.filter_stale_relationship_memory_records(
+            records,
+            "2026-01-03T00:00:00+00:00",
+            participant_aliases=["甲", "乙"],
+            relationship_context=True,
+        )
+        filtered_text = [record["memory_text"] for record in filtered]
+
+        assert "甲和乙是旧盟约。" not in filtered_text
+        assert "他们的关系是旧盟约。" not in filtered_text
+        assert "他们一起调查仓库。" in filtered_text
+        assert "甲喜欢猫。" in filtered_text
 
     def test_build_system_prompt_affinity_indicator(self):
         from memoria.core import prompt_builder, character_loader
