@@ -69,6 +69,31 @@ class TestLongTermFact:
         facts = repository.get_long_term_facts("fC","fP",5)
         assert any("猫" in f for f in facts)
 
+    def test_get_long_term_facts_filters_created_after(self):
+        character_id = f"lfc_{uuid.uuid4().hex[:8]}"
+        player_id = f"lfp_{uuid.uuid4().hex[:8]}"
+        repository.save_long_term_fact(character_id, player_id, "旧关系事实：师徒", 7)
+        repository.save_long_term_fact(character_id, player_id, "新关系事实：情侣", 7)
+
+        with repository.get_conn() as conn:
+            conn.execute(
+                "UPDATE long_term_fact SET created_at=?, last_referenced=? WHERE character_id=? AND player_id=? AND fact_text=?",
+                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", character_id, player_id, "旧关系事实：师徒"),
+            )
+            conn.execute(
+                "UPDATE long_term_fact SET created_at=?, last_referenced=? WHERE character_id=? AND player_id=? AND fact_text=?",
+                ("2026-01-02T00:00:00+00:00", "2026-01-02T00:00:00+00:00", character_id, player_id, "新关系事实：情侣"),
+            )
+
+        facts = repository.get_long_term_facts(
+            character_id,
+            player_id,
+            limit=5,
+            created_after="2026-01-02T00:00:00+00:00",
+        )
+        assert "新关系事实：情侣" in facts
+        assert "旧关系事实：师徒" not in facts
+
 class TestCharacterCard:
     def test_save_list_delete(self):
         import json
@@ -189,7 +214,13 @@ class TestRelationship:
         repository.update_relationship_affinity(owner,"rA","rB",10.0)
         rel2 = repository.get_character_relationship(owner,"rA","rB")
         assert rel2["affinity"] == 60.0
+        updated_before_delete = repository.get_character_relationship_updated_at(owner, "rA", "rB")
+        assert updated_before_delete is not None
         assert repository.delete_character_relationship(owner,"rA","rB")
+        assert repository.get_character_relationship(owner, "rA", "rB") is None
+        updated_after_delete = repository.get_character_relationship_updated_at(owner, "rA", "rB")
+        assert updated_after_delete is not None
+        assert updated_after_delete >= updated_before_delete
 
     def test_same_relationship_pair_is_isolated_by_owner(self):
         owner_a = f"user_a_{uuid.uuid4().hex[:8]}"
@@ -340,6 +371,66 @@ class TestMultiSession:
 
         history = repository.get_multi_character_thread_history(first_sid, limit_messages=None)
         assert [m["content"] for m in history] == ["同名第一段", "同名第二段"]
+
+    def test_multi_character_thread_history_filters_created_after(self):
+        sid = str(uuid.uuid4())
+        player_id = f"gcf_{uuid.uuid4().hex[:8]}"
+        assert repository.create_multi_character_session(
+            sid,
+            player_id,
+            "Player",
+            ["gc1", "gc2"],
+            group_name="关系变更群聊",
+        )
+        repository.append_multi_character_message(sid, "user", "旧关系历史")
+        repository.append_multi_character_message(sid, "assistant", "新关系历史", "gc1", "角色一")
+
+        with repository.get_conn() as conn:
+            conn.execute(
+                "UPDATE short_term_message SET created_at=? WHERE session_id=? AND content=?",
+                ("2026-01-01T00:00:00+00:00", sid, "旧关系历史"),
+            )
+            conn.execute(
+                "UPDATE short_term_message SET created_at=? WHERE session_id=? AND content=?",
+                ("2026-01-02T00:00:00+00:00", sid, "新关系历史"),
+            )
+
+        history = repository.get_multi_character_thread_history(
+            sid,
+            limit_messages=None,
+            created_after="2026-01-02T00:00:00+00:00",
+        )
+        assert [m["content"] for m in history] == ["新关系历史"]
+
+    def test_multi_character_history_filters_created_after(self):
+        sid = str(uuid.uuid4())
+        player_id = f"gch_{uuid.uuid4().hex[:8]}"
+        assert repository.create_multi_character_session(
+            sid,
+            player_id,
+            "Player",
+            ["gc1", "gc2"],
+            group_name="当前会话过滤",
+        )
+        repository.append_multi_character_message(sid, "user", "旧当前会话历史")
+        repository.append_multi_character_message(sid, "assistant", "新当前会话历史", "gc1", "角色一")
+
+        with repository.get_conn() as conn:
+            conn.execute(
+                "UPDATE short_term_message SET created_at=? WHERE session_id=? AND content=?",
+                ("2026-01-01T00:00:00+00:00", sid, "旧当前会话历史"),
+            )
+            conn.execute(
+                "UPDATE short_term_message SET created_at=? WHERE session_id=? AND content=?",
+                ("2026-01-02T00:00:00+00:00", sid, "新当前会话历史"),
+            )
+
+        history = repository.get_multi_character_history(
+            sid,
+            limit_messages=None,
+            created_after="2026-01-02T00:00:00+00:00",
+        )
+        assert [m["content"] for m in history] == ["新当前会话历史"]
 
     def test_player_group_name_exists_matches_trimmed_names(self):
         sid = str(uuid.uuid4())

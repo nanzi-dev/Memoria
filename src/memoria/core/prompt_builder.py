@@ -118,6 +118,113 @@ def _safe_get_runtime(runtime_state: dict, key: str, default):
     return default if value is None else value
 
 
+_RELATIONSHIP_TYPE_LABELS = {
+    "friend": "朋友",
+    "enemy": "敌人",
+    "family": "家人",
+    "rival": "宿敌/对手",
+    "mentor": "师徒/导师",
+    "teacher": "老师",
+    "student": "学生",
+    "master": "师父",
+    "apprentice": "徒弟",
+    "lover": "恋人",
+    "love": "恋人",
+    "partner": "伴侣/伙伴",
+    "companion": "同伴",
+    "ally": "盟友",
+    "colleague": "同事",
+    "stranger": "陌生人",
+    "neutral": "中立",
+}
+
+_CONFLICT_RELATIONSHIP_CUES = (
+    "enemy", "rival", "opponent", "competitor", "hostile",
+    "敌", "仇", "宿敌", "对手", "竞争", "冲突", "死敌",
+)
+
+
+def _relationship_between(character_relationships: dict, char_a: str, char_b: str) -> dict | None:
+    rel_key = f"{char_a}_{char_b}"
+    rel_key_rev = f"{char_b}_{char_a}"
+    return character_relationships.get(rel_key) or character_relationships.get(rel_key_rev)
+
+
+def _relationship_type_for_prompt(relationship_type: str | None) -> str:
+    raw = str(relationship_type or "").strip()
+    if not raw:
+        return "未定义"
+    label = _RELATIONSHIP_TYPE_LABELS.get(raw.lower(), raw)
+    return f"{label}（{raw}）" if label != raw else label
+
+
+def _is_conflict_relationship(relationship: dict) -> bool:
+    rel_text = " ".join(
+        str(relationship.get(key) or "")
+        for key in ("relationship_type", "description")
+    ).lower()
+    return any(cue in rel_text for cue in _CONFLICT_RELATIONSHIP_CUES)
+
+
+def _relationship_metric_for_prompt(relationship: dict) -> str:
+    affinity = relationship.get("affinity")
+    if affinity is None:
+        return ""
+    try:
+        affinity_value = float(affinity)
+    except Exception:
+        return ""
+    if _is_conflict_relationship(relationship) or affinity_value < 0:
+        return f"关系张力 {abs(affinity_value):g}/100"
+    return f"亲密度 {affinity_value:g}/100"
+
+
+def _relationship_summary_for_prompt(relationship: dict) -> str:
+    rel_type = _relationship_type_for_prompt(relationship.get("relationship_type"))
+    metric = _relationship_metric_for_prompt(relationship)
+    desc = str(relationship.get("description") or "").strip()
+    parts = [rel_type]
+    if metric:
+        parts.append(metric)
+    summary = "，".join(parts)
+    if desc:
+        summary += f"：{desc}"
+    return summary
+
+
+def _build_relationship_graph_lines(
+    card: CharacterCard,
+    other_characters: list[dict],
+    character_relationships: dict
+) -> list[str]:
+    participants = [
+        (
+            card.character_id,
+            card.meta.display_name or card.meta.name or card.character_id,
+        )
+    ]
+    for other in other_characters:
+        other_id = other.get("character_id")
+        if not other_id:
+            continue
+        other_name = other.get("display_name") or other.get("name") or other_id
+        participants.append((other_id, other_name))
+
+    lines = []
+    for idx, (char_a, name_a) in enumerate(participants):
+        for char_b, name_b in participants[idx + 1:]:
+            relationship = _relationship_between(character_relationships, char_a, char_b)
+            if relationship:
+                lines.append(
+                    f"- {name_a} 与 {name_b}：当前关系 = {_relationship_summary_for_prompt(relationship)}"
+                )
+            else:
+                lines.append(
+                    f"- {name_a} 与 {name_b}：当前关系 = 未定义（不得从角色卡背景、长期记忆或历史发言恢复旧关系）"
+                )
+    return lines
+
+
 # =========================
 # 主 Prompt 构建函数
 # =========================
@@ -292,6 +399,11 @@ def build_multi_character_system_prompt(
     other_chars_info = []
     character_relationships = character_relationships or {}
     current_char_id = getattr(card, 'character_id', None)
+    relationship_graph_lines = _build_relationship_graph_lines(
+        card,
+        other_characters,
+        character_relationships,
+    )
     
     for other in other_characters:
         other_id = other.get("character_id")
@@ -309,15 +421,9 @@ def build_multi_character_system_prompt(
             relationship = character_relationships.get(rel_key) or character_relationships.get(rel_key_rev)
             
             if relationship:
-                rel_type = relationship.get("relationship_type", "")
-                rel_desc = relationship.get("description", "")
-                rel_affinity = relationship.get("affinity", None)
-                if rel_type:
-                    char_desc += f" - 关系：{rel_type}"
-                if rel_affinity is not None:
-                    char_desc += f"（亲密度 {rel_affinity}/100）"
-                if rel_desc:
-                    char_desc += f": {rel_desc}"
+                char_desc += f" - 当前图谱关系：{_relationship_summary_for_prompt(relationship)}"
+            else:
+                char_desc += " - 当前图谱关系：未定义"
         
         other_chars_info.append(f"- {char_desc}")
     
@@ -328,12 +434,35 @@ def build_multi_character_system_prompt(
         f"# 角色设定",
         f"你正在扮演：{card.meta.display_name or card.meta.name}",
         f"",
+    ]
+
+    if relationship_graph_lines:
+        prompt_parts.extend([
+            "# 当前关系图谱（最高优先级，覆盖角色卡背景）",
+            "下面是当前多角色关系的唯一权威事实。",
+            "如果角色卡简介、角色卡人物关系、长期记忆或历史发言与本节冲突，必须以本节为准。",
+            "关系类型为敌人、宿敌、对手等冲突关系时，数值表示关系张力或冲突强度，不表示亲密。",
+            "回答“你们是什么关系”“你和某某是什么关系”这类问题时，只能按本节关系作答。",
+            *relationship_graph_lines,
+            "",
+        ])
+
+    prompt_parts.extend([
         f"## 身份背景",
         f"- 年龄：{identity.age}",
         f"- 性别：{identity.gender}",
         f"- 职业：{identity.occupation}",
         f"- 外貌：{identity.appearance}",
         f"- 简介：{card.background.story_bio}",
+    ])
+
+    if relationship_graph_lines:
+        prompt_parts.append(
+            "- 关系覆盖：简介中出现的师徒、朋友、恋人、敌人等旧关系称谓，"
+            "如果与当前关系图谱冲突，只能视为过期背景，不能作为当前关系回答或表现。"
+        )
+
+    prompt_parts.extend([
         f"",
         f"## 性格特质",
         f"核心特质：{_join(personality.core_traits)}",
@@ -344,7 +473,7 @@ def build_multi_character_system_prompt(
         f"- 语气：{speech_style.tone_register}",
         f"- 用词：{speech_style.vocabulary_notes}",
         f"- 句式：{_join(speech_style.sentence_patterns)}",
-    ]
+    ])
     
     # 口头禅
     if hasattr(speech_style, "catchphrases") and speech_style.catchphrases:
@@ -364,6 +493,16 @@ def build_multi_character_system_prompt(
         f"- 信任度：{trust}/100",
         f"",
     ])
+
+    if relationship_graph_lines:
+        prompt_parts.extend([
+            "# 关系执行规则",
+            "当前关系图谱覆盖角色卡背景、静态人物关系、长期记忆、历史互动记录和最近对话历史。",
+            "不得把已被图谱覆盖的旧关系当作当前关系来回答或表现。",
+            "如果当前图谱关系为未定义，不得自行恢复师徒、情侣、朋友、敌人等关系。",
+            "凡是回答、称呼、态度、亲密程度涉及其他角色关系时，必须直接遵循当前关系图谱。",
+            ""
+        ])
     
     # 长期记忆
     if known_facts_str and known_facts_str != "暂无":
@@ -385,7 +524,7 @@ def build_multi_character_system_prompt(
     prompt_parts.extend([
         "# 行为指引",
         "1. 严格按照角色设定进行对话，保持性格一致性",
-        "2. 注意你与其他角色的关系，在对话中自然体现",
+        "2. 角色关系以当前关系图谱为准，在对话中自然体现",
         "3. 可以对其他角色的发言做出反应，形成自然的群聊氛围",
         "4. 使用符合角色的语言风格和表达方式",
         "5. 根据当前情绪调整对话语气",

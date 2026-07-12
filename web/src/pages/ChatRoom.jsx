@@ -106,19 +106,20 @@ const currentDelta = (currentValue, previousValue, fallbackDelta = 0) => {
   return Number.isFinite(delta) ? Number(delta.toFixed(6)) : toDelta(fallbackDelta);
 };
 
-function normalizeDialogueMessage(message) {
+function normalizeDialogueMessage(message, options = {}) {
   return {
     role: message.role,
     content: message.content,
     action: message.action || '',
     affinity_delta: toDelta(message.affinity_delta),
     trust_delta: toDelta(message.trust_delta),
+    showRelationshipDelta: options.showRelationshipDelta === true,
     created_at: message.created_at,
     message_id: message.message_id || message.id,
   };
 }
 
-function normalizeGroupMessage(message, knownParticipants = []) {
+function normalizeGroupMessage(message, knownParticipants = [], options = {}) {
   const charId = message.charId || message.character_id || message.speaker_id || '';
   const participant = charId
     ? knownParticipants.find(p => p.character_id === charId || p.charId === charId)
@@ -134,6 +135,7 @@ function normalizeGroupMessage(message, knownParticipants = []) {
     action: message.action || '',
     affinity_delta: toDelta(message.affinity_delta),
     trust_delta: toDelta(message.trust_delta),
+    showRelationshipDelta: options.showRelationshipDelta === true,
     created_at: message.created_at,
     message_id: message.message_id || message.id,
   };
@@ -965,6 +967,7 @@ export default function ChatRoom() {
           action: res.action || '',
           affinity_delta: affinityDelta,
           trust_delta: trustDelta,
+          showRelationshipDelta: true,
         }]);
 
         setHistoryOffset(prev => prev + 2);
@@ -1024,7 +1027,7 @@ export default function ChatRoom() {
         const groupResponses = Array.isArray(res.responses) ? res.responses : [res];
         setMessages(prev => [
           ...prev,
-          ...groupResponses.map(r => normalizeGroupMessage(r, [...participants, ...allChars])),
+          ...groupResponses.map(r => normalizeGroupMessage(r, [...participants, ...allChars], { showRelationshipDelta: true })),
         ]);
 
       }
@@ -1643,7 +1646,9 @@ export default function ChatRoom() {
                     <MessageContent content={msg.content} />
                   </div>
 
-                  <RelationshipDeltaLine affinityDelta={msg.affinity_delta} trustDelta={msg.trust_delta} />
+                  {msg.showRelationshipDelta && (
+                    <RelationshipDeltaLine affinityDelta={msg.affinity_delta} trustDelta={msg.trust_delta} />
+                  )}
                 </div>
               </div>
             );
@@ -1969,7 +1974,9 @@ export default function ChatRoom() {
 
                   </div>
 
-                  <RelationshipDeltaLine affinityDelta={msg.affinity_delta} trustDelta={msg.trust_delta} />
+                  {msg.showRelationshipDelta && (
+                    <RelationshipDeltaLine affinityDelta={msg.affinity_delta} trustDelta={msg.trust_delta} />
+                  )}
 
                 </div>
 

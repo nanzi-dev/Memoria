@@ -15,6 +15,7 @@
 import pytest
 import sys
 import json
+import uuid
 from pathlib import Path
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch, MagicMock
@@ -825,6 +826,177 @@ class TestMultiCharacterMemory:
         assert len(results) >= 1
         assert "冒险" in results[0]["memory_text"]
 
+    def test_integrated_context_filters_memories_before_relationship_update(self):
+        """测试图谱更新前仅旧关系事实被过滤，普通旧记忆继续进入多角色上下文"""
+        from memoria.core import multi_character_memory
+        from memoria.db import repository
+
+        player_id = f"user_ctx_{uuid.uuid4().hex[:8]}"
+        session_id = f"group_ctx_{uuid.uuid4().hex[:8]}"
+        repository.save_long_term_fact("npc_a", player_id, "旧玩家记忆：npc_b只是师徒", 7)
+        repository.save_long_term_fact("npc_a", player_id, "旧普通记忆：玩家喜欢猫", 7)
+        repository.save_long_term_fact("npc_a", player_id, "新玩家记忆：npc_b已经是情侣", 7)
+        repository.save_shared_memory(player_id, "npc_a", "npc_b", "旧印象：只是师徒", importance=0.9)
+        repository.save_shared_memory(player_id, "npc_a", "npc_b", "旧共同经历：一起巡逻", importance=0.9)
+        repository.save_shared_memory(player_id, "npc_a", "npc_b", "旧爱好记录：一起喜欢猫科动物并整理生态笔记", importance=0.9)
+        repository.save_shared_memory(player_id, "npc_a", "npc_b", "新印象：已经是情侣", importance=0.8)
+        repository.save_group_memory(session_id, "旧群体记忆：师徒训诫", ["npc_a", "npc_b"], importance=0.9)
+        repository.save_group_memory(session_id, "旧群体记忆：一起调查仓库", ["npc_a", "npc_b"], importance=0.9)
+        repository.save_group_memory(session_id, "旧群体事件：一起喜欢猫科动物并整理生态笔记", ["npc_a", "npc_b"], importance=0.9)
+        repository.save_group_memory(session_id, "新群体记忆：情侣同行", ["npc_a", "npc_b"], importance=0.8)
+
+        with repository.get_conn() as conn:
+            conn.execute(
+                "UPDATE long_term_fact SET created_at=?, last_referenced=? WHERE character_id=? AND player_id=? AND fact_text=?",
+                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", "npc_a", player_id, "旧玩家记忆：npc_b只是师徒"),
+            )
+            conn.execute(
+                "UPDATE long_term_fact SET created_at=?, last_referenced=? WHERE character_id=? AND player_id=? AND fact_text=?",
+                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", "npc_a", player_id, "旧普通记忆：玩家喜欢猫"),
+            )
+            conn.execute(
+                "UPDATE long_term_fact SET created_at=?, last_referenced=? WHERE character_id=? AND player_id=? AND fact_text=?",
+                ("2026-01-02T00:00:00+00:00", "2026-01-02T00:00:00+00:00", "npc_a", player_id, "新玩家记忆：npc_b已经是情侣"),
+            )
+            conn.execute(
+                "UPDATE shared_memory SET created_at=?, last_referenced=? WHERE owner_user_id=? AND memory_text=?",
+                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", player_id, "旧印象：只是师徒"),
+            )
+            conn.execute(
+                "UPDATE shared_memory SET created_at=?, last_referenced=? WHERE owner_user_id=? AND memory_text=?",
+                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", player_id, "旧共同经历：一起巡逻"),
+            )
+            conn.execute(
+                "UPDATE shared_memory SET created_at=?, last_referenced=? WHERE owner_user_id=? AND memory_text=?",
+                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", player_id, "旧爱好记录：一起喜欢猫科动物并整理生态笔记"),
+            )
+            conn.execute(
+                "UPDATE shared_memory SET created_at=?, last_referenced=? WHERE owner_user_id=? AND memory_text=?",
+                ("2026-01-02T00:00:00+00:00", "2026-01-02T00:00:00+00:00", player_id, "新印象：已经是情侣"),
+            )
+            conn.execute(
+                "UPDATE group_memory SET created_at=?, last_referenced=? WHERE session_id=? AND memory_text=?",
+                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", session_id, "旧群体记忆：师徒训诫"),
+            )
+            conn.execute(
+                "UPDATE group_memory SET created_at=?, last_referenced=? WHERE session_id=? AND memory_text=?",
+                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", session_id, "旧群体记忆：一起调查仓库"),
+            )
+            conn.execute(
+                "UPDATE group_memory SET created_at=?, last_referenced=? WHERE session_id=? AND memory_text=?",
+                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", session_id, "旧群体事件：一起喜欢猫科动物并整理生态笔记"),
+            )
+            conn.execute(
+                "UPDATE group_memory SET created_at=?, last_referenced=? WHERE session_id=? AND memory_text=?",
+                ("2026-01-02T00:00:00+00:00", "2026-01-02T00:00:00+00:00", session_id, "新群体记忆：情侣同行"),
+            )
+
+        context = multi_character_memory.integrate_multi_character_context(
+            character_id="npc_a",
+            player_id=player_id,
+            session_id=session_id,
+            other_character_ids=["npc_b"],
+            character_relationships={
+                "npc_a_npc_b": {
+                    "relationship_type": "情侣",
+                    "affinity": 100,
+                    "updated_at": "2026-01-02T00:00:00+00:00",
+                }
+            },
+        )
+
+        player_memory_text = "\n".join(context["player_memories"])
+        impression_text = "\n".join(context["character_impressions"].get("npc_b", []))
+        group_text = "\n".join(context["group_memories"])
+        assert "新玩家记忆：npc_b已经是情侣" in player_memory_text
+        assert "旧玩家记忆：npc_b只是师徒" not in player_memory_text
+        assert "旧普通记忆：玩家喜欢猫" in player_memory_text
+        assert "新印象：已经是情侣" in impression_text
+        assert "旧印象：只是师徒" not in impression_text
+        assert "旧共同经历：一起巡逻" in impression_text
+        assert "旧爱好记录：一起喜欢猫科动物并整理生态笔记" in impression_text
+        assert "新群体记忆：情侣同行" in group_text
+        assert "旧群体记忆：师徒训诫" not in group_text
+        assert "旧群体记忆：一起调查仓库" in group_text
+        assert "旧群体事件：一起喜欢猫科动物并整理生态笔记" in group_text
+
+    def test_integrated_context_filters_memories_after_relationship_delete(self):
+        """测试关系删除后仍按图谱修订时间过滤旧关系记忆"""
+        from memoria.core import multi_character_memory
+        from memoria.db import repository
+
+        player_id = f"user_del_{uuid.uuid4().hex[:8]}"
+        session_id = f"group_del_{uuid.uuid4().hex[:8]}"
+        cutoff = "2026-01-02T00:00:00+00:00"
+
+        repository.save_long_term_fact("npc_a", player_id, "过期恋爱关系事实：亲昵称呼和恋人承诺", 7)
+        repository.save_shared_memory(player_id, "npc_a", "npc_b", "删除前印象：恋人关系", importance=0.9)
+        repository.save_group_memory(session_id, "旧事件：恋人约会和拥抱", ["npc_a", "npc_b"], importance=0.9)
+
+        assert repository.save_character_relationship(
+            player_id,
+            "npc_a",
+            "npc_b",
+            relationship_type="恋人",
+            affinity=90,
+        )
+        assert repository.delete_character_relationship(player_id, "npc_a", "npc_b")
+
+        repository.save_long_term_fact("npc_a", player_id, "当前图谱事实：未定义关系，只能普通互动", 7)
+        repository.save_shared_memory(player_id, "npc_a", "npc_b", "删除后印象：没有定义关系", importance=0.8)
+        repository.save_group_memory(session_id, "新事件：普通队友一起巡逻", ["npc_a", "npc_b"], importance=0.8)
+
+        with repository.get_conn() as conn:
+            conn.execute(
+                "UPDATE character_relationship_revision SET updated_at=? WHERE owner_user_id=? AND character_id_a=? AND character_id_b=?",
+                (cutoff, player_id, "npc_a", "npc_b"),
+            )
+            conn.execute(
+                "UPDATE long_term_fact SET created_at=?, last_referenced=? WHERE character_id=? AND player_id=? AND fact_text=?",
+                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", "npc_a", player_id, "过期恋爱关系事实：亲昵称呼和恋人承诺"),
+            )
+            conn.execute(
+                "UPDATE long_term_fact SET created_at=?, last_referenced=? WHERE character_id=? AND player_id=? AND fact_text=?",
+                ("2026-01-03T00:00:00+00:00", "2026-01-03T00:00:00+00:00", "npc_a", player_id, "当前图谱事实：未定义关系，只能普通互动"),
+            )
+            conn.execute(
+                "UPDATE shared_memory SET created_at=?, last_referenced=? WHERE owner_user_id=? AND memory_text=?",
+                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", player_id, "删除前印象：恋人关系"),
+            )
+            conn.execute(
+                "UPDATE shared_memory SET created_at=?, last_referenced=? WHERE owner_user_id=? AND memory_text=?",
+                ("2026-01-03T00:00:00+00:00", "2026-01-03T00:00:00+00:00", player_id, "删除后印象：没有定义关系"),
+            )
+            conn.execute(
+                "UPDATE group_memory SET created_at=?, last_referenced=? WHERE session_id=? AND memory_text=?",
+                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", session_id, "旧事件：恋人约会和拥抱"),
+            )
+            conn.execute(
+                "UPDATE group_memory SET created_at=?, last_referenced=? WHERE session_id=? AND memory_text=?",
+                ("2026-01-03T00:00:00+00:00", "2026-01-03T00:00:00+00:00", session_id, "新事件：普通队友一起巡逻"),
+            )
+
+        assert repository.get_character_relationship(player_id, "npc_a", "npc_b") is None
+        assert multi_character_memory.get_relationship_history_cutoff(player_id, ["npc_a", "npc_b"]) == cutoff
+
+        context = multi_character_memory.integrate_multi_character_context(
+            character_id="npc_a",
+            player_id=player_id,
+            session_id=session_id,
+            other_character_ids=["npc_b"],
+            character_relationships={},
+        )
+
+        player_memory_text = "\n".join(context["player_memories"])
+        impression_text = "\n".join(context["character_impressions"].get("npc_b", []))
+        group_text = "\n".join(context["group_memories"])
+        assert "当前图谱事实：未定义关系，只能普通互动" in player_memory_text
+        assert "过期恋爱关系事实：亲昵称呼和恋人承诺" not in player_memory_text
+        assert "删除后印象：没有定义关系" in impression_text
+        assert "删除前印象：恋人关系" not in impression_text
+        assert "新事件：普通队友一起巡逻" in group_text
+        assert "旧事件：恋人约会和拥抱" not in group_text
+
     def test_get_character_group_memories(self):
         """测试按角色查询群体记忆"""
         from memoria.db import repository
@@ -923,7 +1095,7 @@ class TestMultiCharacterMemory:
         monkeypatch.setattr(
             multi_character_memory.repository,
             "get_multi_character_history",
-            lambda session_id, limit_messages: [
+            lambda session_id, limit_messages, created_after=None: [
                 {"role": "user", "content": "行动开始"},
                 {"role": "assistant", "character_id": "npc_a", "content": "B配合得很好。"},
             ],

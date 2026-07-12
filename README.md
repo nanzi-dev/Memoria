@@ -48,12 +48,13 @@
 - **中期记忆**：自动生成会话摘要，支持跨会话记忆持久化
 - **长期记忆**：自动提取和存储重要事实，RAG 向量检索智能召回相关记忆
 - **记忆萃取引擎**：使用 AI 从对话中智能提取关键信息并评估重要性
+- **图谱修订隔离**：多角色关系图谱更新或删除后，生成上下文只过滤图谱变更前的旧关系事实；普通长期记忆、共同经历和世界事实继续保留。最近对话里若出现与当前图谱冲突的关系表述，也会在送入模型前跳过，避免旧关系覆盖当前图谱
 
 ### 关系与情感追踪
 - **好感度系统**：根据对话内容动态调整角色对玩家的好感度（-100 ~ 100）
 - **信任度机制**：追踪角色对玩家的信任程度，影响话题开放度
 - **情绪状态**：实时跟踪角色当前情绪，影响对话表现和反应
-- **角色关系网络**：支持当前用户私有的角色间关系定义（朋友、敌人、家人、师徒等）并提供网络查询 API
+- **角色关系网络**：支持当前用户私有的角色间关系定义（朋友、敌人、家人、师徒等）并提供网络查询 API；多角色对话以当前关系图谱为最高优先级，缺失关系边表示未定义关系；敌人、宿敌等冲突关系的数值在 prompt 中按关系张力解释，不按亲密度解释
 
 ### 多角色对话系统
 - **群聊模式**：支持 2-5 个 NPC 同时参与对话
@@ -84,7 +85,7 @@
 ### Web 前端
 - **登录与用户资料**：支持用户注册、登录、资料编辑和头像设置
 - **角色卡编辑器**：分步编辑角色身份、性格、语言风格、背景和交互规则
-- **会话体验**：支持单角色对话、会话恢复、多角色群聊和会话列表
+- **会话体验**：支持单角色对话、会话恢复、多角色群聊和会话列表；好感度/信任度变化只在当前会话新回复上展示，历史加载消息不回放旧变化提示
 - **管理视图**：提供事件列表/编辑器和角色关系图谱页面
 
 ---
@@ -125,14 +126,14 @@ Memoria/
 │   │   └── repository.py       # SQLite / PostgreSQL 数据库操作
 │   └── main.py                 # 应用入口
 ├── tests/                      # 测试文件
-│   ├── test_core.py             # 核心模块测试（60 tests）
-│   ├── test_repository.py       # 数据库层测试（39 tests）
+│   ├── test_core.py             # 核心模块测试（62 tests）
+│   ├── test_repository.py       # 数据库层测试（43 tests）
 │   ├── test_events.py           # 事件系统测试（16 tests）
-│   ├── test_orchestrator.py     # 编排器测试（15 tests）
+│   ├── test_orchestrator.py     # 编排器测试（16 tests）
 │   ├── test_multi_dialogue_api.py # 多角色 API 测试（14 tests）
 │   ├── test_dialogue_api.py     # 单角色 API 测试（7 tests）
 │   ├── test_api_models.py       # API 模型测试（19 tests）
-│   ├── test_memory_extractor.py # 记忆/提示测试（28 tests）
+│   ├── test_memory_extractor.py # 记忆/提示测试（30 tests）
 │   ├── test_cli_debug.py        # CLI debug 标志测试（1 test）
 │   ├── test_developer_experience.py # 开发者体验端点测试（5 tests）
 │   ├── test_postgres_compat.py  # PostgreSQL 兼容层测试（5 tests）
@@ -286,7 +287,7 @@ npm run dev
 | 文档 | 内容 |
 |------|------|
 | [API 文档](docs/API.md) | 完整 REST API 参考（对话/角色卡/事件/关系/多角色/用户/系统管理），含请求/响应示例 |
-| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（17 张表）、三层记忆架构、角色卡开发规范 |
+| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（18 张表）、三层记忆架构、角色卡开发规范 |
 | [开发路线图](docs/ROADMAP.md) | 已完成功能和未来规划 |
 | [故障排查](docs/FAQ.md) | 常见问题解决方案、调试技巧、性能优化建议 |
 | [贡献指南](docs/CONTRIBUTING.md) | 如何贡献代码、Commit 规范、代码审查标准 |
@@ -342,7 +343,7 @@ PYTHONPATH=src pytest tests/test_multi_dialogue_api.py -v # 多角色 API
 PYTHONPATH=src pytest tests/test_system.py -v            # 系统端点与限流
 ```
 
-当前测试集合以 `pytest --collect-only -q` 为准。
+当前测试集合以 `pytest --collect-only -q` 为准；当前项目收集到 240 个测试。
 
 ---
 

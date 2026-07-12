@@ -52,7 +52,7 @@ def _patch_multi_summary(monkeypatch, multi_dialogue, saved_summary):
     monkeypatch.setattr(
         multi_dialogue.repository,
         "get_multi_character_history",
-        lambda session_id, limit_messages=None: [
+        lambda session_id, limit_messages=None, created_after=None: [
             {
                 "role": "user" if i % 2 == 0 else "assistant",
                 "content": f"制定计划 {i}",
@@ -69,6 +69,11 @@ def _patch_multi_summary(monkeypatch, multi_dialogue, saved_summary):
             {**_participant("c1", "角色一", 1), "display_name": None},
             {**_participant("c2", "角色二", 2), "display_name": "二号"},
         ],
+    )
+    monkeypatch.setattr(
+        multi_dialogue.multi_character_memory,
+        "get_relationship_history_cutoff",
+        lambda player_id, character_ids, character_relationships=None: None,
     )
     monkeypatch.setattr(
         multi_dialogue.repository,
@@ -390,7 +395,12 @@ async def test_end_multi_session_chunks_long_history_before_saving_summary(monke
     monkeypatch.setattr(
         multi_dialogue.repository,
         "get_multi_character_history",
-        lambda session_id, limit_messages=None: long_history,
+        lambda session_id, limit_messages=None, created_after=None: long_history,
+    )
+    monkeypatch.setattr(
+        multi_dialogue.multi_character_memory,
+        "get_relationship_history_cutoff",
+        lambda player_id, character_ids, character_relationships=None: None,
     )
     monkeypatch.setattr(
         multi_dialogue.repository,

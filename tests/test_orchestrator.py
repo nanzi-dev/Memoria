@@ -46,6 +46,101 @@ class TestHistoryFormatting:
         assert formatted[1]["role"] == "assistant"  # own msg
         assert formatted[2]["role"] == "user"  # other char msg
 
+    def test_format_history_filters_relationship_claims_that_conflict_with_graph(self):
+        from types import SimpleNamespace
+        from memoria.core import multi_character_orchestrator
+
+        orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
+            multi_character_orchestrator.MultiCharacterOrchestrator
+        )
+        orch.session_id = "session-rel-history"
+        orch.player_name = "Player"
+        orch.character_ids = ["npc_wuxian", "npc_wanjiji"]
+        orch.character_cards = {
+            "npc_wuxian": SimpleNamespace(
+                meta=SimpleNamespace(name="无限", display_name="无限", aliases=[])
+            ),
+            "npc_wanjiji": SimpleNamespace(
+                meta=SimpleNamespace(name="晚叽叽", display_name="晚叽叽", aliases=[])
+            ),
+        }
+        history = [
+            {"role": "user", "content": "你们是什么关系？"},
+            {
+                "role": "assistant",
+                "content": "我和晚叽叽是师徒。",
+                "character_id": "npc_wuxian",
+                "character_name": "无限",
+            },
+            {
+                "role": "assistant",
+                "content": "我们现在是敌人。",
+                "character_id": "npc_wanjiji",
+                "character_name": "晚叽叽",
+            },
+            {
+                "role": "assistant",
+                "content": "我会检查周围。",
+                "character_id": "npc_wuxian",
+                "character_name": "无限",
+            },
+        ]
+
+        formatted = orch._format_history_for_llm(
+            history,
+            "npc_wuxian",
+            character_relationships={
+                "npc_wanjiji_npc_wuxian": {
+                    "relationship_type": "enemy",
+                    "affinity": 100,
+                }
+            },
+        )
+        contents = [msg["content"] for msg in formatted]
+
+        assert any("你们是什么关系" in content for content in contents)
+        assert not any("师徒" in content for content in contents)
+        assert any("敌人" in content for content in contents)
+        assert any("检查周围" in content for content in contents)
+
+    def test_format_history_filters_deleted_graph_edge_relationship_claims(self):
+        from types import SimpleNamespace
+        from memoria.core import multi_character_orchestrator
+
+        orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
+            multi_character_orchestrator.MultiCharacterOrchestrator
+        )
+        orch.session_id = "session-undefined-history"
+        orch.player_name = "Player"
+        orch.character_ids = ["c1", "c2"]
+        orch.character_cards = {
+            "c1": SimpleNamespace(meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])),
+            "c2": SimpleNamespace(meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])),
+        }
+
+        formatted = orch._format_history_for_llm(
+            [
+                {
+                    "role": "assistant",
+                    "content": "我们已经是师徒了。",
+                    "character_id": "c1",
+                    "character_name": "甲",
+                },
+                {
+                    "role": "assistant",
+                    "content": "刚才的线索在门边。",
+                    "character_id": "c1",
+                    "character_name": "甲",
+                },
+            ],
+            "c1",
+            character_relationships={},
+        )
+
+        contents = [msg["content"] for msg in formatted]
+        assert not any("师徒" in content for content in contents)
+        assert any("门边" in content for content in contents)
+
 class TestLoadRelationships:
     def test_load_all_relationships(self):
         from memoria.core.multi_character_orchestrator import MultiCharacterOrchestrator
@@ -146,6 +241,88 @@ class TestMultiCharacterGroupMemory:
 
         assert "群体记忆：大家决定一起调查旧仓库" in memory_context
         assert "对角色二的印象：行动很谨慎" in memory_context
+
+    def test_load_memory_context_filters_relationship_memories_conflicting_with_graph(self, monkeypatch):
+        from types import SimpleNamespace
+        from memoria.core import multi_character_orchestrator
+
+        orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
+            multi_character_orchestrator.MultiCharacterOrchestrator
+        )
+        orch.session_id = "session-graph-memory"
+        orch.player_id = "player-1"
+        orch.character_ids = ["c1", "c2"]
+        orch.character_cards = {
+            "c1": SimpleNamespace(meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])),
+            "c2": SimpleNamespace(meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])),
+        }
+
+        monkeypatch.setattr(
+            multi_character_orchestrator.multi_character_memory,
+            "integrate_multi_character_context",
+            lambda **kwargs: {
+                "group_memories": ["甲和乙是师徒", "大家决定调查旧仓库"],
+                "character_impressions": {"c2": ["甲认为乙是徒弟", "行动很谨慎"]},
+            },
+        )
+
+        memory_context = orch._load_memory_context(
+            "c1",
+            character_relationships={
+                "c1_c2": {
+                    "relationship_type": "enemy",
+                    "affinity": 100,
+                }
+            },
+        )
+
+        assert not any("师徒" in item or "徒弟" in item for item in memory_context)
+        assert "群体记忆：大家决定调查旧仓库" in memory_context
+        assert "对乙的印象：行动很谨慎" in memory_context
+
+    def test_load_runtime_state_filters_conflicting_relation_facts_only(self, monkeypatch):
+        from types import SimpleNamespace
+        from memoria.core import multi_character_orchestrator
+
+        orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
+            multi_character_orchestrator.MultiCharacterOrchestrator
+        )
+        orch.player_id = "player-1"
+        orch.character_ids = ["c1", "c2"]
+        orch.character_cards = {
+            "c1": SimpleNamespace(meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])),
+            "c2": SimpleNamespace(meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])),
+        }
+
+        monkeypatch.setattr(
+            multi_character_orchestrator.repository,
+            "get_runtime_state",
+            lambda *args, **kwargs: {
+                "affection_level": 0,
+                "trust_level": 0,
+                "current_mood": "neutral",
+            },
+        )
+        monkeypatch.setattr(
+            multi_character_orchestrator.multi_character_memory,
+            "load_player_memories_for_relationship_graph",
+            lambda **kwargs: ["甲和乙是师徒", "玩家喜欢猫", "大家一起调查旧仓库"],
+        )
+
+        state = orch._load_runtime_state_for_prompt(
+            "c1",
+            card=object(),
+            character_relationships={
+                "c1_c2": {
+                    "relationship_type": "enemy",
+                    "affinity": 100,
+                }
+            },
+        )
+
+        assert "甲和乙是师徒" not in state["known_player_facts"]
+        assert "玩家喜欢猫" in state["known_player_facts"]
+        assert "大家一起调查旧仓库" in state["known_player_facts"]
 
     def test_process_player_message_does_not_save_group_memory(self, monkeypatch):
         from memoria.core import multi_character_orchestrator

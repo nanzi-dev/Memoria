@@ -406,6 +406,15 @@ CREATE TABLE IF NOT EXISTS character_relationship (
     FOREIGN KEY (owner_user_id) REFERENCES users(user_id)
 );
 
+CREATE TABLE IF NOT EXISTS character_relationship_revision (
+    owner_user_id   TEXT NOT NULL,
+    character_id_a  TEXT NOT NULL,
+    character_id_b  TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    PRIMARY KEY (owner_user_id, character_id_a, character_id_b),
+    FOREIGN KEY (owner_user_id) REFERENCES users(user_id)
+);
+
 -- =========================
 -- 角色关系状态（runtime_state核心）
 -- =========================
@@ -615,6 +624,9 @@ CREATE TABLE IF NOT EXISTS group_memory (
 
 CREATE INDEX IF NOT EXISTS idx_relationship_lookup
 ON character_relationship(owner_user_id, character_id_a, character_id_b);
+
+CREATE INDEX IF NOT EXISTS idx_relationship_revision_lookup
+ON character_relationship_revision(owner_user_id, character_id_a, character_id_b);
 """
 
 def _migrate(conn):
@@ -668,8 +680,20 @@ def _migrate(conn):
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         );
 
+        CREATE TABLE IF NOT EXISTS character_relationship_revision (
+            owner_user_id   TEXT NOT NULL,
+            character_id_a  TEXT NOT NULL,
+            character_id_b  TEXT NOT NULL,
+            updated_at      TEXT NOT NULL,
+            PRIMARY KEY (owner_user_id, character_id_a, character_id_b),
+            FOREIGN KEY (owner_user_id) REFERENCES users(user_id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_auth_token_user
         ON auth_token(user_id, expires_at);
+
+        CREATE INDEX IF NOT EXISTS idx_relationship_revision_lookup
+        ON character_relationship_revision(owner_user_id, character_id_a, character_id_b);
         """
     if _is_postgres_enabled():
         migration_schema = migration_schema.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
@@ -761,7 +785,8 @@ def get_runtime_state(
     character_id: str, 
     player_id: str, 
     card,
-    query_context: str = None
+    query_context: str = None,
+    memory_created_after: str | None = None
 ) -> dict:
      """
     获取角色运行时状态（好感度 / 信任 / 情绪）
@@ -773,6 +798,7 @@ def get_runtime_state(
         player_id: 玩家 ID
         card: 角色卡对象
         query_context: 查询上下文（用于向量检索长期记忆）
+        memory_created_after: 只加载该时间之后保存的长期记忆
     """
      with get_conn() as conn:
          row = conn.execute(
@@ -819,7 +845,8 @@ def get_runtime_state(
          state["known_player_facts"] = get_long_term_facts(
              character_id, 
              player_id,
-             query_context=query_context
+             query_context=query_context,
+             created_after=memory_created_after
          )
          return state
      
@@ -850,7 +877,8 @@ def get_long_term_facts(
     character_id: str, 
     player_id: str, 
     limit: int = 20,
-    query_context: str = None
+    query_context: str = None,
+    created_after: str | None = None
 ) -> list[str]:
     """
     获取长期记忆
@@ -860,12 +888,36 @@ def get_long_term_facts(
         player_id: 玩家 ID
         limit: 返回的最大记忆数量
         query_context: 查询上下文（用于向量检索），如果提供则使用语义检索
+        created_after: 只返回该时间之后创建的记忆
     
     Returns:
         list[str]: 记忆文本列表
     """
+    records = get_long_term_fact_records(
+        character_id=character_id,
+        player_id=player_id,
+        limit=limit,
+        query_context=query_context,
+        created_after=created_after,
+    )
+    return [r["fact_text"] for r in records]
+
+
+def get_long_term_fact_records(
+    character_id: str,
+    player_id: str,
+    limit: int = 20,
+    query_context: str = None,
+    created_after: str | None = None
+) -> list[dict]:
+    """
+    获取长期记忆记录，包含创建时间等元数据。
+
+    `get_long_term_facts` 保持只返回文本；多角色关系图谱过滤需要
+    `created_at` 来区分图谱修订前后的关系事实。
+    """
     # 如果提供了查询上下文，使用向量检索
-    if query_context:
+    if query_context and not created_after:
         try:
             from memoria.core.vector_memory import get_vector_store
             vector_store = get_vector_store()
@@ -882,25 +934,62 @@ def get_long_term_facts(
             
             if vector_results:
                 logger.debug(f"向量检索返回 {len(vector_results)} 条记忆")
-                return [r["fact_text"] for r in vector_results]
+                fact_ids = [r.get("fact_id") for r in vector_results if r.get("fact_id") is not None]
+                records_by_id = {}
+                if fact_ids:
+                    placeholders = ",".join(["?"] * len(fact_ids))
+                    with get_conn() as conn:
+                        rows = conn.execute(
+                            f"""
+                            SELECT id, fact_text, importance, created_at, last_referenced
+                            FROM long_term_fact
+                            WHERE id IN ({placeholders})
+                            """,
+                            tuple(fact_ids),
+                        ).fetchall()
+                    records_by_id = {row["id"]: dict(row) for row in rows}
+
+                records = []
+                for result in vector_results:
+                    fact_id = result.get("fact_id")
+                    record = records_by_id.get(fact_id)
+                    if record:
+                        record["similarity"] = result.get("similarity")
+                        records.append(record)
+                    else:
+                        records.append({
+                            "id": fact_id,
+                            "fact_text": result["fact_text"],
+                            "importance": result.get("importance", 0),
+                            "created_at": None,
+                            "last_referenced": None,
+                            "similarity": result.get("similarity"),
+                        })
+                return records
                 
         except Exception as e:
             logger.warning(f"向量检索失败，回退到传统查询: {e}")
     
     # 传统查询（按重要性和最近引用排序）
+    where_clause = "character_id = ? AND player_id = ?"
+    params = [character_id, player_id]
+    if created_after:
+        where_clause += " AND created_at >= ?"
+        params.append(created_after)
+    params.append(limit)
     with get_conn() as conn:
         rows = conn.execute(
-            """
-            SELECT fact_text
+            f"""
+            SELECT id, fact_text, importance, created_at, last_referenced
             FROM long_term_fact
-            WHERE character_id = ? AND player_id = ?
+            WHERE {where_clause}
             ORDER BY importance DESC, last_referenced DESC
             LIMIT ?
             """,
-            (character_id, player_id, limit),
+            tuple(params),
         ).fetchall()
         
-    return [r["fact_text"] for r in rows]
+    return [dict(r) for r in rows]
 
 def save_long_term_fact(
     character_id: str, 
@@ -1548,15 +1637,27 @@ def save_shared_memory(
     return memory_id
 
 
-def get_shared_memories(owner_user_id: str, character_id_a: str, character_id_b: str, limit: int = 10) -> list[dict]:
+def get_shared_memories(
+    owner_user_id: str,
+    character_id_a: str,
+    character_id_b: str,
+    limit: int = 10,
+    created_after: str | None = None
+) -> list[dict]:
     """获取同一用户下两个角色之间的共享记忆"""
     if not owner_user_id:
         raise ValueError("owner_user_id is required for shared_memory isolation")
     a, b = sorted([character_id_a, character_id_b])
+    where_clause = "owner_user_id=? AND character_a_id=? AND character_b_id=?"
+    params = [owner_user_id, a, b]
+    if created_after:
+        where_clause += " AND created_at >= ?"
+        params.append(created_after)
+    params.append(limit)
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, memory_text, context, importance, created_at FROM shared_memory WHERE owner_user_id=? AND character_a_id=? AND character_b_id=? ORDER BY importance DESC, last_referenced DESC LIMIT ?",
-            (owner_user_id, a, b, limit)).fetchall()
+            f"SELECT id, memory_text, context, importance, created_at FROM shared_memory WHERE {where_clause} ORDER BY importance DESC, last_referenced DESC LIMIT ?",
+            tuple(params)).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -1605,21 +1706,41 @@ def save_group_memory(
     return memory_id
 
 
-def get_session_group_memories(session_id: str, limit: int = 20) -> list[dict]:
+def get_session_group_memories(
+    session_id: str,
+    limit: int = 20,
+    created_after: str | None = None
+) -> list[dict]:
     """获取某个会话的群体记忆"""
+    where_clause = "session_id=?"
+    params = [session_id]
+    if created_after:
+        where_clause += " AND created_at >= ?"
+        params.append(created_after)
+    params.append(limit)
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, memory_text, participants, context, importance, created_at FROM group_memory WHERE session_id=? ORDER BY importance DESC, last_referenced DESC LIMIT ?",
-            (session_id, limit)).fetchall()
+            f"SELECT id, memory_text, participants, context, importance, created_at FROM group_memory WHERE {where_clause} ORDER BY importance DESC, last_referenced DESC LIMIT ?",
+            tuple(params)).fetchall()
     return [dict(r) for r in rows]
 
 
-def get_character_group_memories(character_id: str, limit: int = 20) -> list[dict]:
+def get_character_group_memories(
+    character_id: str,
+    limit: int = 20,
+    created_after: str | None = None
+) -> list[dict]:
     """获取某个角色参与过的群体记忆"""
+    where_clause = "participants LIKE ?"
+    params = [f"%{character_id}%"]
+    if created_after:
+        where_clause += " AND created_at >= ?"
+        params.append(created_after)
+    params.append(limit)
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, session_id, memory_text, participants, context, importance, created_at FROM group_memory WHERE participants LIKE ? ORDER BY importance DESC, last_referenced DESC LIMIT ?",
-            (f"%{character_id}%", limit)).fetchall()
+            f"SELECT id, session_id, memory_text, participants, context, importance, created_at FROM group_memory WHERE {where_clause} ORDER BY importance DESC, last_referenced DESC LIMIT ?",
+            tuple(params)).fetchall()
     return [dict(r) for r in rows]
 
 # =========================
@@ -2227,6 +2348,30 @@ def delete_event_template(template_id: str) -> bool:
 # =========================
 # 角色关系网络
 # =========================
+def _normalize_relationship_pair(character_id_a: str, character_id_b: str) -> tuple[str, str]:
+    return (character_id_b, character_id_a) if character_id_a > character_id_b else (character_id_a, character_id_b)
+
+
+def _touch_character_relationship_revision(
+    conn,
+    owner_user_id: str,
+    character_id_a: str,
+    character_id_b: str,
+    updated_at: str
+) -> None:
+    character_id_a, character_id_b = _normalize_relationship_pair(character_id_a, character_id_b)
+    conn.execute(
+        """
+        INSERT INTO character_relationship_revision
+        (owner_user_id, character_id_a, character_id_b, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(owner_user_id, character_id_a, character_id_b)
+        DO UPDATE SET updated_at=excluded.updated_at
+        """,
+        (owner_user_id, character_id_a, character_id_b, updated_at),
+    )
+
+
 def save_character_relationship(
     owner_user_id: str,
     character_id_a: str,
@@ -2238,8 +2383,8 @@ def save_character_relationship(
     """保存角色关系（无向关系，自动排序确保唯一性）"""
     try:
         # 确保 character_id_a < character_id_b（字母序）
-        if character_id_a > character_id_b:
-            character_id_a, character_id_b = character_id_b, character_id_a
+        character_id_a, character_id_b = _normalize_relationship_pair(character_id_a, character_id_b)
+        now = _now()
         
         with get_conn() as conn:
             conn.execute(
@@ -2256,8 +2401,9 @@ def save_character_relationship(
                     updated_at=excluded.updated_at
                 """,
                 (owner_user_id, character_id_a, character_id_b, relationship_type, affinity,
-                 description, _now(), _now()),
+                 description, now, now),
             )
+            _touch_character_relationship_revision(conn, owner_user_id, character_id_a, character_id_b, now)
         return True
     except Exception as e:
         logger.error(f"保存角色关系失败: {e}")
@@ -2266,8 +2412,7 @@ def save_character_relationship(
 def get_character_relationship(owner_user_id: str, character_id_a: str, character_id_b: str) -> dict | None:
     """获取两个角色之间的关系"""
     # 排序确保查询顺序一致
-    if character_id_a > character_id_b:
-        character_id_a, character_id_b = character_id_b, character_id_a
+    character_id_a, character_id_b = _normalize_relationship_pair(character_id_a, character_id_b)
     
     with get_conn() as conn:
         row = conn.execute(
@@ -2279,6 +2424,34 @@ def get_character_relationship(owner_user_id: str, character_id_a: str, characte
         ).fetchone()
     
     return _row_to_dict(row)
+
+
+def get_character_relationship_updated_at(owner_user_id: str, character_id_a: str, character_id_b: str) -> str | None:
+    """获取某对角色关系图谱最近一次变更时间，包含已删除关系。"""
+    character_id_a, character_id_b = _normalize_relationship_pair(character_id_a, character_id_b)
+
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT updated_at
+            FROM character_relationship_revision
+            WHERE owner_user_id = ? AND character_id_a = ? AND character_id_b = ?
+            """,
+            (owner_user_id, character_id_a, character_id_b),
+        ).fetchone()
+        if row:
+            return row["updated_at"]
+
+        row = conn.execute(
+            """
+            SELECT updated_at
+            FROM character_relationship
+            WHERE owner_user_id = ? AND character_id_a = ? AND character_id_b = ?
+            """,
+            (owner_user_id, character_id_a, character_id_b),
+        ).fetchone()
+
+    return row["updated_at"] if row else None
 
 def list_character_relationships(owner_user_id: str, character_id: str) -> list[dict]:
     """列出指定角色的所有关系"""
@@ -2312,8 +2485,8 @@ def list_all_character_relationships(owner_user_id: str) -> list[dict]:
 def delete_character_relationship(owner_user_id: str, character_id_a: str, character_id_b: str) -> bool:
     """删除角色关系"""
     try:
-        if character_id_a > character_id_b:
-            character_id_a, character_id_b = character_id_b, character_id_a
+        character_id_a, character_id_b = _normalize_relationship_pair(character_id_a, character_id_b)
+        now = _now()
         
         with get_conn() as conn:
             conn.execute(
@@ -2323,6 +2496,7 @@ def delete_character_relationship(owner_user_id: str, character_id_a: str, chara
                 """,
                 (owner_user_id, character_id_a, character_id_b),
             )
+            _touch_character_relationship_revision(conn, owner_user_id, character_id_a, character_id_b, now)
         return True
     except Exception as e:
         logger.error(f"删除角色关系失败: {e}")
@@ -2331,6 +2505,23 @@ def delete_character_relationship(owner_user_id: str, character_id_a: str, chara
 def delete_all_relationships_of_character(owner_user_id: str, character_id: str) -> int:
     """删除某个角色涉及的所有关系"""
     with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT character_id_a, character_id_b
+            FROM character_relationship
+            WHERE owner_user_id = ? AND (character_id_a = ? OR character_id_b = ?)
+            """,
+            (owner_user_id, character_id, character_id),
+        ).fetchall()
+        now = _now()
+        for row in rows:
+            _touch_character_relationship_revision(
+                conn,
+                owner_user_id,
+                row["character_id_a"],
+                row["character_id_b"],
+                now
+            )
         cur = conn.execute(
             """
             DELETE FROM character_relationship
@@ -2347,19 +2538,21 @@ def update_relationship_affinity(
     affinity_delta: float
 ):
     """更新关系亲密度"""
-    if character_id_a > character_id_b:
-        character_id_a, character_id_b = character_id_b, character_id_a
+    character_id_a, character_id_b = _normalize_relationship_pair(character_id_a, character_id_b)
+    now = _now()
     
     with get_conn() as conn:
-        conn.execute(
+        cursor = conn.execute(
             """
             UPDATE character_relationship
             SET affinity = affinity + ?,
                 updated_at = ?
             WHERE owner_user_id = ? AND character_id_a = ? AND character_id_b = ?
             """,
-            (affinity_delta, _now(), owner_user_id, character_id_a, character_id_b),
+            (affinity_delta, now, owner_user_id, character_id_a, character_id_b),
         )
+        if cursor.rowcount > 0:
+            _touch_character_relationship_revision(conn, owner_user_id, character_id_a, character_id_b, now)
 
 
 
@@ -2563,7 +2756,8 @@ def append_multi_character_message(
 
 def get_multi_character_history(
     session_id: str,
-    limit_messages: int | None = 20
+    limit_messages: int | None = 20,
+    created_after: str | None = None
 ) -> list[dict]:
     """
     获取多角色会话历史
@@ -2571,32 +2765,42 @@ def get_multi_character_history(
     Args:
         session_id: 会话 ID
         limit_messages: 最大消息数量；传 None 时返回全部消息
+        created_after: 只返回该时间之后创建的消息
     
     Returns:
         list[dict]: 消息列表，包含 role, content, character_id, character_name
     """
+    created_after_clause = ""
+    base_params = [session_id]
+    if created_after:
+        created_after_clause = "AND created_at >= ?"
+        base_params.append(created_after)
+
     with get_conn() as conn:
         if limit_messages is None:
             rows = conn.execute(
-                """
+                f"""
                 SELECT role, content, character_id, character_name, created_at
                 FROM short_term_message
                 WHERE session_id = ?
+                  {created_after_clause}
                 ORDER BY id ASC
                 """,
-                (session_id,),
+                tuple(base_params),
             ).fetchall()
             return [dict(r) for r in rows]
 
+        params = [*base_params, limit_messages]
         rows = conn.execute(
-            """
+            f"""
             SELECT role, content, character_id, character_name, created_at
             FROM short_term_message
             WHERE session_id = ?
+              {created_after_clause}
             ORDER BY id DESC
             LIMIT ?
             """,
-            (session_id, limit_messages),
+            tuple(params),
         ).fetchall()
 
     messages = [dict(r) for r in rows]
@@ -2606,7 +2810,8 @@ def get_multi_character_history(
 
 def get_multi_character_thread_history(
     session_id: str,
-    limit_messages: int | None = 20
+    limit_messages: int | None = 20,
+    created_after: str | None = None
 ) -> list[dict]:
     """
     获取同一逻辑群聊下跨多个 session 的历史消息。
@@ -2618,11 +2823,16 @@ def get_multi_character_thread_history(
     if not thread_id:
         return []
     group_name_key = (session.get("group_name") or "").strip().lower()
+    created_after_clause = ""
+    base_params = [session["player_id"], thread_id, group_name_key, group_name_key]
+    if created_after:
+        created_after_clause = "AND m.created_at >= ?"
+        base_params.append(created_after)
 
     with get_conn() as conn:
         if limit_messages is None:
             rows = conn.execute(
-                """
+                f"""
                 SELECT m.id AS message_id, m.session_id, m.role, m.content,
                        m.character_id, m.character_name, m.created_at
                 FROM short_term_message m
@@ -2633,14 +2843,16 @@ def get_multi_character_thread_history(
                     COALESCE(s.group_thread_id, s.session_id) = ?
                     OR (? != '' AND LOWER(TRIM(COALESCE(s.group_name, ''))) = ?)
                   )
+                  {created_after_clause}
                 ORDER BY m.id ASC
                 """,
-                (session["player_id"], thread_id, group_name_key, group_name_key),
+                tuple(base_params),
             ).fetchall()
             return [dict(r) for r in rows]
 
+        params = [*base_params, limit_messages]
         rows = conn.execute(
-            """
+            f"""
             SELECT m.id AS message_id, m.session_id, m.role, m.content,
                    m.character_id, m.character_name, m.created_at
             FROM short_term_message m
@@ -2651,10 +2863,11 @@ def get_multi_character_thread_history(
                 COALESCE(s.group_thread_id, s.session_id) = ?
                 OR (? != '' AND LOWER(TRIM(COALESCE(s.group_name, ''))) = ?)
               )
+              {created_after_clause}
             ORDER BY m.id DESC
             LIMIT ?
             """,
-            (session["player_id"], thread_id, group_name_key, group_name_key, limit_messages),
+            tuple(params),
         ).fetchall()
 
     messages = [dict(r) for r in rows]

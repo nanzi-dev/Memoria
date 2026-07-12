@@ -13,8 +13,6 @@ import json
 import logging
 import random
 import uuid
-from datetime import datetime, timezone
-from typing import Any
 
 from memoria.core import character_loader, llm_client, multi_character_memory, prompt_builder
 from memoria.core.speaking_strategy import HybridStrategy, SpeakingStrategy
@@ -38,6 +36,110 @@ def _safe_float(value, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
+
+
+_RELATIONSHIP_TERM_GROUPS = {
+    "friend": frozenset(("friend", "朋友", "好友", "挚友", "友人")),
+    "enemy": frozenset(("enemy", "敌人", "仇人", "死敌", "敌对", "敌手")),
+    "rival": frozenset(("rival", "宿敌", "对手", "竞争者")),
+    "family": frozenset(("family", "家人", "亲人", "父子", "父女", "母子", "母女", "兄弟", "姐妹", "兄妹", "姐弟")),
+    "mentor": frozenset(("mentor", "master", "apprentice", "teacher", "student", "师徒", "师父", "师傅", "徒弟", "导师", "老师", "学生", "师生")),
+    "lover": frozenset(("lover", "love", "恋人", "情侣", "爱人", "夫妻", "伴侣", "亲密", "暧昧")),
+    "partner": frozenset(("partner", "companion", "ally", "伙伴", "同伴", "队友", "盟友")),
+    "colleague": frozenset(("colleague", "同事", "同僚")),
+    "stranger": frozenset(("stranger", "neutral", "陌生人", "陌生", "中立", "不熟")),
+}
+
+_ALL_RELATIONSHIP_TERMS = frozenset(
+    term
+    for terms in _RELATIONSHIP_TERM_GROUPS.values()
+    for term in terms
+)
+
+_RELATIONSHIP_CONTEXT_MARKERS = (
+    "关系", "我们", "咱们", "你们", "他们", "她们", "二人", "两人",
+    "彼此", "对方", "互相", "之间", "称呼", "叫", "只是", "已经是", "算是",
+)
+
+_HIGH_SIGNAL_RELATIONSHIP_TERMS = frozenset((
+    "师徒", "师父", "师傅", "徒弟", "导师", "老师", "学生", "师生",
+    "情侣", "恋人", "爱人", "夫妻", "伴侣",
+    "敌人", "仇人", "死敌", "宿敌",
+    "家人", "亲人", "父子", "父女", "母子", "母女", "兄弟", "姐妹", "兄妹", "姐弟",
+))
+
+
+def _text_contains_term(text: str, term: str) -> bool:
+    if not text or not term:
+        return False
+    if term.isascii():
+        return term.lower() in text.lower()
+    return term in text
+
+
+def _relationship_terms_for_type(relationship_type: str | None) -> set[str]:
+    raw = str(relationship_type or "").strip()
+    if not raw:
+        return set()
+
+    raw_lower = raw.lower()
+    terms = {raw}
+    for key, group_terms in _RELATIONSHIP_TERM_GROUPS.items():
+        if raw_lower == key or key in raw_lower:
+            terms.update(group_terms)
+            continue
+        if any(_text_contains_term(raw, term) for term in group_terms):
+            terms.update(group_terms)
+    return terms
+
+
+def _relationship_for_pair(
+    character_relationships: dict | None,
+    character_id_a: str,
+    character_id_b: str
+) -> dict | None:
+    if not character_relationships:
+        return None
+    return (
+        character_relationships.get(f"{character_id_a}_{character_id_b}")
+        or character_relationships.get(f"{character_id_b}_{character_id_a}")
+    )
+
+
+def _relationship_terms_in_text(text: str) -> set[str]:
+    return {
+        term
+        for term in _ALL_RELATIONSHIP_TERMS
+        if _text_contains_term(text, term)
+    }
+
+
+def _has_relationship_context(text: str, aliases: list[str] | None = None) -> bool:
+    if any(marker in text for marker in _RELATIONSHIP_CONTEXT_MARKERS):
+        return True
+    aliases = aliases or []
+    return any(alias and _text_contains_term(text, alias) for alias in aliases)
+
+
+def _relationship_text_conflicts_with_graph(
+    text: str,
+    relationship: dict | None,
+    aliases: list[str] | None = None
+) -> bool:
+    found_terms = _relationship_terms_in_text(text)
+    if not found_terms:
+        return False
+
+    allowed_terms = _relationship_terms_for_type(
+        relationship.get("relationship_type") if relationship else None
+    )
+    disallowed_terms = found_terms - allowed_terms
+    if not disallowed_terms:
+        return False
+
+    if any(term in _HIGH_SIGNAL_RELATIONSHIP_TERMS for term in disallowed_terms):
+        return True
+    return _has_relationship_context(text, aliases)
 
 
 # =========================
@@ -391,7 +493,13 @@ class MultiCharacterOrchestrator:
         return relationships
 
 
-    def _load_memory_context(self, character_id: str, query_context: str | None = None) -> list[str]:
+    def _load_memory_context(
+        self,
+        character_id: str,
+        query_context: str | None = None,
+        character_relationships: dict | None = None,
+        relationship_aliases: list[str] | None = None
+    ) -> list[str]:
         """加载多角色记忆上下文，供 prompt 的历史记录区使用。"""
         other_character_ids = [cid for cid in self.character_ids if cid != character_id]
 
@@ -402,6 +510,8 @@ class MultiCharacterOrchestrator:
                 session_id=self.session_id,
                 other_character_ids=other_character_ids,
                 query_context=query_context,
+                character_relationships=character_relationships,
+                relationship_aliases=relationship_aliases or self._memory_aliases_for_characters(self.character_ids),
             )
         except Exception as e:
             logger.warning(f"加载多角色记忆上下文失败: {e}")
@@ -410,6 +520,12 @@ class MultiCharacterOrchestrator:
         memory_lines = []
 
         for memory in context.get("group_memories", [])[:5]:
+            if self._text_conflicts_with_relationship_graph(
+                memory,
+                character_relationships,
+                character_id=character_id
+            ):
+                continue
             memory_lines.append(f"群体记忆：{memory}")
 
         impressions = context.get("character_impressions", {})
@@ -417,9 +533,68 @@ class MultiCharacterOrchestrator:
             other_card = self.character_cards.get(other_id)
             other_name = other_card.meta.display_name if other_card else other_id
             for memory in memories[:2]:
+                if self._text_conflicts_with_relationship_graph(
+                    memory,
+                    character_relationships,
+                    character_id=character_id
+                ):
+                    continue
                 memory_lines.append(f"对{other_name}的印象：{memory}")
 
         return memory_lines
+
+
+    def _memory_aliases_for_characters(self, character_ids: list[str]) -> list[str]:
+        """返回参与角色的 ID 和显示名，用于识别旧长期记忆中的关系事实。"""
+        aliases = []
+        for character_id in character_ids:
+            aliases.append(character_id)
+            card = self.character_cards.get(character_id)
+            if card:
+                meta = getattr(card, "meta", None)
+                aliases.extend([
+                    getattr(meta, "name", ""),
+                    getattr(meta, "display_name", ""),
+                ])
+        return aliases
+
+
+    def _load_runtime_state_for_prompt(
+        self,
+        character_id: str,
+        card,
+        relationship_history_cutoff: str | None = None,
+        query_context: str | None = None,
+        character_relationships: dict | None = None
+    ) -> dict:
+        """加载运行时状态，并过滤会覆盖当前图谱的角色关系事实。"""
+        runtime_state = repository.get_runtime_state(
+            character_id,
+            self.player_id,
+            card,
+            query_context=query_context,
+        )
+        other_character_ids = [cid for cid in self.character_ids if cid != character_id]
+        runtime_state["known_player_facts"] = (
+            multi_character_memory.load_player_memories_for_relationship_graph(
+                character_id=character_id,
+                player_id=self.player_id,
+                other_character_ids=other_character_ids,
+                relationship_history_cutoff=relationship_history_cutoff,
+                query_context=query_context,
+                relationship_aliases=self._memory_aliases_for_characters(self.character_ids),
+            )
+        )
+        runtime_state["known_player_facts"] = [
+            fact
+            for fact in runtime_state["known_player_facts"]
+            if not self._text_conflicts_with_relationship_graph(
+                fact,
+                character_relationships,
+                character_id=character_id
+            )
+        ]
+        return runtime_state
 
 
     def _select_character_for_interaction(self) -> str:
@@ -473,7 +648,18 @@ class MultiCharacterOrchestrator:
             dict: 开场白结果
         """
         card = self.character_cards[character_id]
-        runtime_state = repository.get_runtime_state(character_id, self.player_id, card)
+        character_relationships = self._load_all_relationships()
+        relationship_history_cutoff = multi_character_memory.get_relationship_history_cutoff(
+            self.player_id,
+            self.character_ids,
+            character_relationships
+        )
+        runtime_state = self._load_runtime_state_for_prompt(
+            character_id,
+            card,
+            relationship_history_cutoff=relationship_history_cutoff,
+            character_relationships=character_relationships
+        )
         
         # 准备其他角色信息
         other_characters = []
@@ -494,7 +680,7 @@ class MultiCharacterOrchestrator:
             runtime_state=runtime_state,
             player_name=self.player_name,
             other_characters=other_characters,
-            character_relationships=self._load_all_relationships(),
+            character_relationships=character_relationships,
             is_opening=True
         )
         
@@ -541,10 +727,17 @@ class MultiCharacterOrchestrator:
         if character_id not in self.character_cards:
             raise ValueError(f"角色不可回复: {character_id}")
         card = self.character_cards[character_id]
-        runtime_state = repository.get_runtime_state(
-            character_id,
+        character_relationships = self._load_all_relationships()
+        relationship_history_cutoff = multi_character_memory.get_relationship_history_cutoff(
             self.player_id,
-            card
+            self.character_ids,
+            character_relationships
+        )
+        runtime_state = self._load_runtime_state_for_prompt(
+            character_id,
+            card,
+            relationship_history_cutoff=relationship_history_cutoff,
+            character_relationships=character_relationships
         )
         
         # 准备其他角色信息
@@ -566,18 +759,26 @@ class MultiCharacterOrchestrator:
             runtime_state=runtime_state,
             player_name=self.player_name,
             other_characters=other_characters,
-            character_relationships=self._load_all_relationships(),
-            past_summaries=self._load_memory_context(character_id)
+            character_relationships=character_relationships,
+            past_summaries=self._load_memory_context(
+                character_id,
+                character_relationships=character_relationships
+            )
         )
         
         # 获取对话历史
         history = repository.get_multi_character_thread_history(
             self.session_id,
-            limit_messages=20
+            limit_messages=20,
+            created_after=relationship_history_cutoff
         )
         
         # 转换为 LLM 格式
-        messages = self._format_history_for_llm(history, character_id)
+        messages = self._format_history_for_llm(
+            history,
+            character_id,
+            character_relationships=character_relationships
+        )
         messages.append({"role": "user", "content": player_message})
         
         # 调用 LLM
@@ -660,10 +861,17 @@ class MultiCharacterOrchestrator:
         if trigger_character_id not in self.character_cards:
             raise ValueError(f"角色不可回复: {trigger_character_id}")
         card = self.character_cards[trigger_character_id]
-        runtime_state = repository.get_runtime_state(
-            trigger_character_id,
+        character_relationships = self._load_all_relationships()
+        relationship_history_cutoff = multi_character_memory.get_relationship_history_cutoff(
             self.player_id,
-            card
+            self.character_ids,
+            character_relationships
+        )
+        runtime_state = self._load_runtime_state_for_prompt(
+            trigger_character_id,
+            card,
+            relationship_history_cutoff=relationship_history_cutoff,
+            character_relationships=character_relationships
         )
         
         # 准备其他角色信息
@@ -685,18 +893,26 @@ class MultiCharacterOrchestrator:
             runtime_state=runtime_state,
             player_name=self.player_name,
             other_characters=other_characters,
-            character_relationships=self._load_all_relationships(),
-            past_summaries=self._load_memory_context(trigger_character_id),
+            character_relationships=character_relationships,
+            past_summaries=self._load_memory_context(
+                trigger_character_id,
+                character_relationships=character_relationships
+            ),
             is_interaction=True
         )
         
         # 获取对话历史
         history = repository.get_multi_character_thread_history(
             self.session_id,
-            limit_messages=20
+            limit_messages=20,
+            created_after=relationship_history_cutoff
         )
         
-        messages = self._format_history_for_llm(history, trigger_character_id)
+        messages = self._format_history_for_llm(
+            history,
+            trigger_character_id,
+            character_relationships=character_relationships
+        )
         
         # 添加互动提示
         interaction_prompt = prompt or "（现在可以主动说些什么，或者对其他角色的发言做出反应）"
@@ -729,13 +945,131 @@ class MultiCharacterOrchestrator:
         }
     
     
-    def _format_history_for_llm(self, history: list[dict], current_character_id: str) -> list[dict]:
+    def _aliases_for_character(self, character_id: str) -> list[str]:
+        aliases = [character_id]
+        card = self.character_cards.get(character_id)
+        meta = getattr(card, "meta", None) if card else None
+        if meta:
+            aliases.extend([
+                getattr(meta, "name", ""),
+                getattr(meta, "display_name", ""),
+            ])
+            aliases.extend(getattr(meta, "aliases", []) or [])
+
+        clean_aliases = []
+        seen = set()
+        for alias in aliases:
+            alias = str(alias or "").strip()
+            if not alias:
+                continue
+            lowered = alias.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            clean_aliases.append(alias)
+        return clean_aliases
+
+
+    def _aliases_for_pair(self, character_id_a: str, character_id_b: str) -> list[str]:
+        return self._aliases_for_character(character_id_a) + self._aliases_for_character(character_id_b)
+
+
+    def _participant_pairs(self) -> list[tuple[str, str]]:
+        pairs = []
+        for idx, character_id_a in enumerate(self.character_ids):
+            for character_id_b in self.character_ids[idx + 1:]:
+                pairs.append((character_id_a, character_id_b))
+        return pairs
+
+
+    def _history_candidate_relationship_pairs(self, msg: dict) -> tuple[list[tuple[str, str]], bool]:
+        text = str(msg.get("content") or "")
+        speaker_id = msg.get("character_id")
+        alias_matched_pairs = []
+
+        for pair in self._participant_pairs():
+            aliases = self._aliases_for_pair(*pair)
+            if any(alias and _text_contains_term(text, alias) for alias in aliases):
+                alias_matched_pairs.append(pair)
+
+        if alias_matched_pairs:
+            return alias_matched_pairs, True
+
+        if speaker_id in self.character_ids:
+            return [
+                (speaker_id, other_id)
+                for other_id in self.character_ids
+                if other_id != speaker_id
+            ], False
+
+        if _has_relationship_context(text):
+            return self._participant_pairs(), False
+
+        return [], False
+
+
+    def _text_conflicts_with_relationship_graph(
+        self,
+        text: str,
+        character_relationships: dict | None,
+        character_id: str | None = None
+    ) -> bool:
+        if character_relationships is None:
+            return False
+        if not text:
+            return False
+
+        pairs, has_alias_match = self._history_candidate_relationship_pairs({
+            "content": text,
+            "character_id": character_id,
+        })
+        if not pairs:
+            return False
+
+        conflicts = []
+        for character_id_a, character_id_b in pairs:
+            relationship = _relationship_for_pair(
+                character_relationships,
+                character_id_a,
+                character_id_b
+            )
+            aliases = self._aliases_for_pair(character_id_a, character_id_b)
+            conflicts.append(
+                _relationship_text_conflicts_with_graph(text, relationship, aliases)
+            )
+
+        if has_alias_match or len(conflicts) == 1:
+            return any(conflicts)
+        return bool(conflicts) and all(conflicts)
+
+
+    def _history_message_conflicts_with_relationship_graph(
+        self,
+        msg: dict,
+        character_relationships: dict | None
+    ) -> bool:
+        if msg.get("role") != "assistant":
+            return False
+        return self._text_conflicts_with_relationship_graph(
+            str(msg.get("content") or ""),
+            character_relationships,
+            character_id=msg.get("character_id")
+        )
+
+
+    def _format_history_for_llm(
+        self,
+        history: list[dict],
+        current_character_id: str,
+        character_relationships: dict | None = None
+    ) -> list[dict]:
         """
         将多角色历史转换为 LLM 格式
         
         Args:
             history: 原始历史记录
             current_character_id: 当前发言角色 ID
+            character_relationships: 当前关系图谱，用于丢弃与图谱冲突的关系历史
         
         Returns:
             list[dict]: 格式化后的消息列表
@@ -743,6 +1077,17 @@ class MultiCharacterOrchestrator:
         messages = []
         
         for msg in history:
+            if self._history_message_conflicts_with_relationship_graph(
+                msg,
+                character_relationships
+            ):
+                logger.debug(
+                    "跳过与当前关系图谱冲突的历史关系发言: session=%s, character=%s",
+                    self.session_id,
+                    msg.get("character_id"),
+                )
+                continue
+
             role = msg["role"]
             content = msg["content"]
             char_id = msg.get("character_id")

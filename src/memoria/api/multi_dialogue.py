@@ -217,6 +217,16 @@ def _generate_bounded_session_summary(
 
 def _save_session_summary_on_end(session_id: str, session: dict) -> None:
     """结束多角色会话时，将整场群聊统一摘要并提取角色间印象。"""
+    participants = repository.get_session_participants(session_id, only_active=False)
+    character_ids = [p["character_id"] for p in participants if p.get("character_id")]
+    if not character_ids:
+        logger.info(f"多角色会话无参与角色，跳过摘要保存: session={session_id}")
+        return
+
+    relationship_history_cutoff = multi_character_memory.get_relationship_history_cutoff(
+        session["player_id"],
+        character_ids
+    )
     existing_summary = repository.get_session_summary(session_id)
     has_completed_summary = False
     if existing_summary and existing_summary.get("summary_status") == "completed":
@@ -225,16 +235,14 @@ def _save_session_summary_on_end(session_id: str, session: dict) -> None:
             has_completed_summary = True
             logger.info(f"多角色会话摘要已存在，跳过重复保存摘要: session={session_id}")
 
-    messages = repository.get_multi_character_history(session_id, limit_messages=None)
+    messages = repository.get_multi_character_history(
+        session_id,
+        limit_messages=None,
+        created_after=relationship_history_cutoff
+    )
     meaningful_messages = [m for m in messages if str(m.get("content") or "").strip()]
     if len(meaningful_messages) <= SUMMARY_MIN_MESSAGE_COUNT:
         logger.info(f"多角色会话有效消息不超过 {SUMMARY_MIN_MESSAGE_COUNT} 条，跳过摘要保存: session={session_id}")
-        return
-
-    participants = repository.get_session_participants(session_id, only_active=False)
-    character_ids = [p["character_id"] for p in participants if p.get("character_id")]
-    if not character_ids:
-        logger.info(f"多角色会话无参与角色，跳过摘要保存: session={session_id}")
         return
 
     character_names = {

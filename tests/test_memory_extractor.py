@@ -29,6 +29,83 @@ class TestPromptBuilder:
         assert "小黑" in prompt or "罗小黑" in prompt
         assert "无限" in prompt or "巫仙" in prompt
 
+    def test_multi_character_prompt_marks_relationship_graph_authoritative(self):
+        from memoria.core import prompt_builder, character_loader
+        c1 = character_loader.load_character_card("npc_luo_xiaohei")
+        prompt = prompt_builder.build_multi_character_system_prompt(
+            c1,
+            {"affection_level":30,"trust_level":50,"current_mood":"开心","known_player_facts":["旧记忆说他们只是师徒"]},
+            "测试者",
+            other_characters=[{"character_id":"npc_wuxian","name":"巫仙","display_name":"无限","occupation":"修行者"}],
+            character_relationships={
+                "npc_luo_xiaohei_npc_wuxian": {
+                    "relationship_type": "情侣",
+                    "affinity": 100,
+                    "description": "当前已经确认的亲密关系",
+                    "updated_at": "2026-07-12T03:09:58+00:00",
+                }
+            },
+            past_summaries=["旧历史记录说他们是师徒"]
+        )
+        assert "当前关系图谱（最高优先级，覆盖角色卡背景）" in prompt
+        assert "唯一权威事实" in prompt
+        assert "覆盖角色卡背景" in prompt
+        assert "回答“你们是什么关系”" in prompt
+        assert "当前关系 = 情侣，亲密度 100/100" in prompt
+
+    def test_multi_character_prompt_treats_missing_graph_edge_as_authoritative(self):
+        from memoria.core import prompt_builder, character_loader
+        c1 = character_loader.load_character_card("npc_luo_xiaohei")
+        prompt = prompt_builder.build_multi_character_system_prompt(
+            c1,
+            {"affection_level":30,"trust_level":50,"current_mood":"开心","known_player_facts":["旧记忆说他们是师徒"]},
+            "测试者",
+            other_characters=[{"character_id":"npc_wuxian","name":"巫仙","display_name":"无限","occupation":"修行者"}],
+            character_relationships={},
+            past_summaries=["旧历史记录说他们是师徒"]
+        )
+        assert "当前关系图谱（最高优先级，覆盖角色卡背景）" in prompt
+        assert "当前关系 = 未定义" in prompt
+        assert "不得从角色卡背景、长期记忆或历史发言恢复旧关系" in prompt
+
+    def test_multi_character_prompt_renders_enemy_affinity_as_tension(self):
+        from memoria.core import prompt_builder, character_loader
+        c1 = character_loader.load_character_card("npc_wuxian")
+        prompt = prompt_builder.build_multi_character_system_prompt(
+            c1,
+            {
+                "affection_level": 30,
+                "trust_level": 50,
+                "current_mood": "平静",
+                "known_player_facts": ["旧记忆说无限和晚叽叽是师徒"],
+            },
+            "测试者",
+            other_characters=[
+                {
+                    "character_id": "npc_wanjiji",
+                    "name": "晚叽叽",
+                    "display_name": "晚叽叽",
+                    "occupation": "修行者",
+                }
+            ],
+            character_relationships={
+                "npc_wanjiji_npc_wuxian": {
+                    "relationship_type": "enemy",
+                    "affinity": 100,
+                    "description": "当前图谱确认双方敌对",
+                    "updated_at": "2026-07-12T04:30:31+00:00",
+                }
+            },
+            past_summaries=["旧历史记录说他们是师徒"],
+        )
+
+        assert "当前关系图谱（最高优先级，覆盖角色卡背景）" in prompt
+        assert "敌人（enemy）" in prompt
+        assert "关系张力 100/100" in prompt
+        assert "数值表示关系张力或冲突强度，不表示亲密" in prompt
+        assert "回答“你们是什么关系”" in prompt
+        assert "关系：enemy（亲密度 100/100）" not in prompt
+
     def test_build_system_prompt_affinity_indicator(self):
         from memoria.core import prompt_builder, character_loader
         card = character_loader.load_character_card("npc_luo_xiaohei")
