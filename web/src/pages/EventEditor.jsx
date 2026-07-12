@@ -113,6 +113,7 @@ const DEFAULT_FORM = {
   effects: [],
   priority: 0,
   is_active: true,
+  template_id: '',
 };
 
 function makeEventId(name) {
@@ -787,21 +788,16 @@ export default function EventEditor() {
   const { eventId } = useParams();
   const navigate = useNavigate();
   const dialog = useDialog();
-  const [loading, setLoading] = useState(!!eventId);
+  const isExistingEvent = !!eventId && eventId !== 'new';
+  const eventRequestRef = useRef(0);
+  const [loading, setLoading] = useState(isExistingEvent);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
-
-  const [form, setForm] = useState({
-    event_id: '',
-    event_name: '',
-    description: '',
-    character_id: '',
-    trigger_condition: { trigger_type: 'keyword_match', keywords: [], match_mode: 'any', cooldown_hours: 0 },
-    effects: [],
-    priority: 0,
-    is_active: true,
-    template_id: '',
-  });
+  const [loadError, setLoadError] = useState('');
+  const [loadedEventId, setLoadedEventId] = useState(isExistingEvent ? null : 'new');
+  const [reloadVersion, setReloadVersion] = useState(0);
+  const [form, setForm] = useState(cloneDefaultForm);
 
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [templates, setTemplates] = useState([]);
@@ -833,13 +829,26 @@ export default function EventEditor() {
   }, []);
 
   useEffect(() => {
-    if (!eventId || eventId === 'new') {
+    const requestId = ++eventRequestRef.current;
+    let cancelled = false;
+
+    setSaveMsg('');
+    setLoadError('');
+
+    if (!isExistingEvent) {
+      setForm(cloneDefaultForm());
+      setSelectedTemplateId('');
+      setLoadedEventId('new');
       setLoading(false);
-      return;
+      return () => { cancelled = true; };
     }
+
+    setLoading(true);
+    setLoadedEventId(null);
     (async () => {
       try {
         const detail = await eventAdmin.get(eventId);
+        if (cancelled || eventRequestRef.current !== requestId) return;
         setForm({
           event_id: detail.event_id,
           event_name: detail.event_name,
@@ -852,24 +861,33 @@ export default function EventEditor() {
           template_id: detail.template_id || '',
         });
         setSelectedTemplateId(detail.template_id || '');
+        setLoadedEventId(eventId);
       } catch (e) {
-        console.error('Load event failed:', e.message);
+        if (cancelled || eventRequestRef.current !== requestId) return;
+        setLoadError(e.message || '事件加载失败');
       } finally {
-        setLoading(false);
+        if (!cancelled && eventRequestRef.current === requestId) setLoading(false);
       }
     })();
-  }, [eventId]);
+    return () => { cancelled = true; };
+  }, [eventId, isExistingEvent, reloadVersion]);
 
   async function handleSave() {
-    if (!form.event_id || !form.event_name) {
-      setSaveMsg('事件 ID 和名称为必填项');
+    if (isExistingEvent && loadedEventId !== eventId) {
+      setSaveMsg('事件尚未正确加载，无法保存');
+      return;
+    }
+    const validationErrors = validateEventForm(form);
+    if (validationErrors.length) {
+      setSaveMsg(validationErrors.join('；'));
       return;
     }
     setSaving(true);
     setSaveMsg('');
     try {
-      const payload = { ...form, priority: form.priority || 0, template_id: form.template_id || null };
-      if (eventId && eventId !== 'new') {
+      const payload = cloneJson(sanitizeEventPayload(form));
+      payload.template_id = sanitizeOptionalString(payload.template_id);
+      if (isExistingEvent) {
         await eventAdmin.update(eventId, payload);
       } else {
         await eventAdmin.create(payload);
@@ -884,7 +902,7 @@ export default function EventEditor() {
   }
 
   async function handleDelete() {
-    if (!eventId || eventId === 'new') return;
+    if (!isExistingEvent || loadedEventId !== eventId || saving || deleting) return;
     const ok = await dialog.confirm({
       title: '永久删除事件',
       message: `确定要永久删除「${form.event_name || eventId}」吗？\n删除后无法恢复。`,
@@ -892,11 +910,15 @@ export default function EventEditor() {
       confirmText: '删除',
     });
     if (!ok) return;
+    setDeleting(true);
+    setSaveMsg('');
     try {
       await eventAdmin.delete(eventId);
       navigate('/events');
     } catch (e) {
       setSaveMsg(`删除失败: ${e.message}`);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -908,7 +930,38 @@ export default function EventEditor() {
     );
   }
 
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-cyber-bg flex items-center justify-center px-6">
+        <div className="w-full max-w-md rounded-lg border border-red-400/20 bg-cyber-surface/50 p-6 text-center">
+          <AlertCircle className="mx-auto text-red-400/80" size={32} />
+          <h1 className="mt-4 font-display text-base text-cyber-green tracking-[0.16em]">
+            EVENT LOAD FAILED
+          </h1>
+          <p className="mt-2 break-words text-xs font-mono text-red-300/80">{loadError}</p>
+          <div className="mt-5 flex justify-center gap-3">
+            <button
+              onClick={() => navigate('/events')}
+              className="flex min-h-[40px] items-center gap-2 rounded border border-cyber-green/20 px-4 py-2 text-xs font-mono text-cyber-green/70 hover:border-cyber-green/40 hover:text-cyber-green"
+            >
+              <ArrowLeft size={14} />
+              返回
+            </button>
+            <button
+              onClick={() => setReloadVersion(value => value + 1)}
+              className="min-h-[40px] rounded border border-cyber-green/30 bg-cyber-green/10 px-4 py-2 text-xs font-mono text-cyber-green hover:bg-cyber-green/20"
+            >
+              重试
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const updateField = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
+  const actionPending = saving || deleting;
+  const saveDisabled = actionPending || (isExistingEvent && loadedEventId !== eventId);
 
   const handleApplyTemplate = () => {
     if (!selectedTemplate) return;
@@ -947,14 +1000,15 @@ export default function EventEditor() {
             {eventId && eventId !== 'new' && (
               <button
                 onClick={handleDelete}
+                disabled={actionPending || loadedEventId !== eventId}
                 className="px-3 py-1 text-xs font-mono text-red-400/60 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 rounded transition-colors"
               >
-                Delete
+                {deleting ? 'Deleting...' : 'Delete'}
               </button>
             )}
             <button
               onClick={handleSave}
-              disabled={saving}
+              disabled={saveDisabled}
               className="flex items-center gap-1 px-4 py-1.5 bg-cyber-green/10 border border-cyber-green/30 text-cyber-green font-mono text-sm rounded hover:bg-cyber-green/20 transition-colors disabled:opacity-50"
             >
               {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
@@ -1151,7 +1205,7 @@ export default function EventEditor() {
           <div className="flex justify-end">
             <button
               onClick={handleSave}
-              disabled={saving}
+              disabled={saveDisabled}
               className="flex items-center gap-2 px-6 py-2 bg-cyber-green/10 border border-cyber-green/30 text-cyber-green font-mono text-sm rounded hover:bg-cyber-green/20 transition-colors disabled:opacity-50"
             >
               {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}

@@ -44,16 +44,28 @@ def process_knowledge_document(
     document_id: str,
     *,
     vector_store=None,
+    resume_processing: bool = False,
+    expected_status: str | None = None,
+    expected_updated_at: str | None = None,
 ) -> dict:
     document = repository.get_knowledge_document(owner_user_id, document_id)
     if not document:
         raise ValueError("知识文档不存在")
-    vector_store = vector_store or get_knowledge_vector_store()
-    repository.update_knowledge_document_status(
-        owner_user_id, document_id, "processing", error_message=None
+    status = expected_status or document["status"]
+    updated_at = expected_updated_at or document["updated_at"]
+    if status != "queued" and not (resume_processing and status == "processing"):
+        return document
+    claimed = repository.claim_knowledge_document_for_processing(
+        owner_user_id,
+        document_id,
+        expected_status=status,
+        expected_updated_at=updated_at,
     )
+    if not claimed:
+        return repository.get_knowledge_document(owner_user_id, document_id) or {}
 
     try:
+        vector_store = vector_store or get_knowledge_vector_store()
         vector_store.delete_document(owner_user_id, document_id)
         repository.clear_knowledge_document_chunks(owner_user_id, document_id)
         storage_path = document.get("storage_path")
@@ -83,10 +95,11 @@ def process_knowledge_document(
             page_count=extracted.page_count,
         )
     except Exception as exc:
-        try:
-            vector_store.delete_document(owner_user_id, document_id)
-        except Exception:
-            logger.exception("清理失败知识文档的部分向量时出错")
+        if vector_store is not None:
+            try:
+                vector_store.delete_document(owner_user_id, document_id)
+            except Exception:
+                logger.exception("清理失败知识文档的部分向量时出错")
         repository.clear_knowledge_document_chunks(owner_user_id, document_id)
         if not repository.get_knowledge_document(owner_user_id, document_id):
             return {}

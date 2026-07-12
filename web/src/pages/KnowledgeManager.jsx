@@ -51,6 +51,11 @@ function getDocumentCount(base) {
   return Number(base?.document_count ?? base?.documents?.length ?? 0);
 }
 
+function hasPendingDocuments(base) {
+  return Array.isArray(base?.documents)
+    && base.documents.some(doc => doc.status === 'queued' || doc.status === 'processing');
+}
+
 function formatByteSize(value) {
   const bytes = Number(value || 0);
   if (bytes < 1024) return `${bytes} B`;
@@ -126,6 +131,7 @@ export default function KnowledgeManager() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [busyBaseId, setBusyBaseId] = useState(null);
+  const listRequestRef = useRef(0);
 
   // 选中的知识库详情
   const [selectedBaseId, setSelectedBaseId] = useState(null);
@@ -143,6 +149,7 @@ export default function KnowledgeManager() {
   const [showPreviewModal, setShowPreviewModal] = useState(false);
 
   const loadBases = useCallback(async ({ soft = false } = {}) => {
+    const requestId = ++listRequestRef.current;
     if (userLoading) {
       if (soft) setRefreshing(true);
       else setLoading(true);
@@ -162,25 +169,34 @@ export default function KnowledgeManager() {
       else setLoading(true);
       setError(null);
       const list = await knowledgeApi.listBases();
+      if (listRequestRef.current !== requestId) return;
       setBases(Array.isArray(list) ? list : []);
     } catch (e) {
+      if (listRequestRef.current !== requestId) return;
       const message = e.message || '知识库列表加载失败';
       setError(message);
       if (AUTH_ERROR_PATTERN.test(message)) setBases([]);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (listRequestRef.current === requestId) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [userLoading, user?.user_id]);
 
-  useEffect(() => { loadBases(); }, [loadBases]);
+  useEffect(() => {
+    loadBases();
+    return () => { listRequestRef.current += 1; };
+  }, [loadBases]);
 
   // 加载选中知识库的详细信息
-  const loadBaseDetail = useCallback(async (baseId) => {
+  const loadBaseDetail = useCallback(async (baseId, { soft = false } = {}) => {
     if (!baseId) return;
     const requestId = ++detailRequestRef.current;
-    setBaseLoading(true);
-    setDetailError('');
+    if (!soft) {
+      setBaseLoading(true);
+      setDetailError('');
+    }
     try {
       const detail = await knowledgeApi.getBase(baseId);
       if (detailRequestRef.current !== requestId) return;
@@ -189,7 +205,7 @@ export default function KnowledgeManager() {
         base.knowledge_base_id === baseId ? mergeBaseSummary(base, detail) : base
       )));
     } catch (e) {
-      if (detailRequestRef.current === requestId) {
+      if (!soft && detailRequestRef.current === requestId) {
         setDetailError(e.message || '加载知识库详情失败');
       }
     } finally {
@@ -220,6 +236,28 @@ export default function KnowledgeManager() {
       setSelectedBase(bases[0]);
     }
   }, [bases, loading, selectedBaseId]);
+
+  const shouldPollSelectedBase = selectedBase?.knowledge_base_id === selectedBaseId
+    && hasPendingDocuments(selectedBase);
+
+  useEffect(() => {
+    if (!selectedBaseId || !shouldPollSelectedBase) return undefined;
+
+    let cancelled = false;
+    let timerId;
+    const poll = async () => {
+      if (document.visibilityState !== 'hidden') {
+        await loadBaseDetail(selectedBaseId, { soft: true });
+      }
+      if (!cancelled) timerId = window.setTimeout(poll, 1500);
+    };
+
+    timerId = window.setTimeout(poll, 1000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timerId);
+    };
+  }, [selectedBaseId, shouldPollSelectedBase, loadBaseDetail]);
 
   // 切换启停状态
   async function handleToggleBase(base) {

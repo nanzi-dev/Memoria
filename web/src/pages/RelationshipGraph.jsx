@@ -383,6 +383,7 @@ export default function RelationshipGraph() {
   const containerRef = useRef(null);
   const simulationRef = useRef(null);
   const zoomRef = useRef(null);
+  const loadRequestRef = useRef(0);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -401,6 +402,7 @@ export default function RelationshipGraph() {
   }, [relationTypes]);
 
   const loadData = useCallback(async () => {
+    const requestId = ++loadRequestRef.current;
     if (userLoading) {
       setLoading(true);
       return;
@@ -415,8 +417,11 @@ export default function RelationshipGraph() {
 
     try {
       setLoading(true); setError(null);
-      const charList = await characterAdmin.list(false);
-      const netData = await relationshipAdmin.network();
+      const [charList, netData] = await Promise.all([
+        characterAdmin.list(false),
+        relationshipAdmin.network(),
+      ]);
+      if (loadRequestRef.current !== requestId) return;
       const map = {};
       for (const c of charList) {
         map[c.character_id] = {
@@ -437,11 +442,17 @@ export default function RelationshipGraph() {
       setNetwork({ nodes: enrichedNodes, edges: netData.edges });
       setRelationTypes(prev => mergeRelationTypes(prev, netData.edges));
     } catch (e) {
+      if (loadRequestRef.current !== requestId) return;
       setError(e.message);
-    } finally { setLoading(false); }
+    } finally {
+      if (loadRequestRef.current === requestId) setLoading(false);
+    }
   }, [userLoading, user?.user_id]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    loadData();
+    return () => { loadRequestRef.current += 1; };
+  }, [loadData]);
 
   // ── D3 渲染 ──
   useEffect(() => {

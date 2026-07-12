@@ -31,6 +31,7 @@ def test_admin_and_relationship_write_routes_require_auth_dependency():
 
     assert "require_current_user_id" in _route_dependencies(character_router, "/admin/characters", "POST")
     assert "require_current_user_id" in _route_dependencies(event_router, "/admin/events", "POST")
+    assert "require_current_user_id" in _route_dependencies(event_router, "/admin/event-templates", "GET")
     assert "require_current_user_id" in _route_dependencies(event_router, "/admin/event-templates", "POST")
     assert "require_current_user_id" in _route_dependencies(
         event_router,
@@ -80,7 +81,30 @@ def test_avatar_downloader_rejects_private_ip(monkeypatch):
     assert "内网" in exc_info.value.detail
 
 
-def test_user_avatar_url_saves_original_url_when_remote_fetch_is_blocked(monkeypatch):
+def test_avatar_downloader_closes_rejected_response(monkeypatch):
+    from memoria.api import avatar_fetcher
+
+    response = SimpleNamespace(
+        is_redirect=False,
+        headers={"Content-Type": "text/html"},
+        close=lambda: setattr(response, "closed", True),
+        raise_for_status=lambda: None,
+        closed=False,
+    )
+    monkeypatch.setattr(
+        avatar_fetcher.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("93.184.216.34", 443))],
+    )
+    monkeypatch.setattr(avatar_fetcher.requests, "get", lambda *args, **kwargs: response)
+
+    with pytest.raises(HTTPException):
+        avatar_fetcher.download_remote_image("https://example.test/avatar")
+
+    assert response.closed is True
+
+
+def test_user_avatar_url_rejects_url_when_remote_fetch_is_blocked(monkeypatch):
     from memoria.api import user
 
     saved = {}
@@ -97,16 +121,17 @@ def test_user_avatar_url_saves_original_url_when_remote_fetch_is_blocked(monkeyp
         lambda uid, **kwargs: saved.update(user_id=uid, **kwargs),
     )
 
-    res = user.set_avatar_url(
-        user.SetAvatarUrlRequest(url=url),
-        token="token",
-        authorization=None,
-        cookie_token=None,
-    )
+    with pytest.raises(HTTPException) as exc_info:
+        user.set_avatar_url(
+            user.SetAvatarUrlRequest(url=url),
+            token="token",
+            authorization=None,
+            cookie_token=None,
+        )
 
-    assert res.success is True
-    assert res.message == "头像 URL 已保存"
-    assert saved == {"user_id": "usr_1", "avatar_url": url}
+    assert exc_info.value.status_code == 400
+    assert "内网" in exc_info.value.detail
+    assert saved == {}
 
 
 def test_legacy_password_login_upgrades_hash_and_persists_token(monkeypatch):

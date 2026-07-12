@@ -331,7 +331,7 @@ def paste_knowledge_document(
             knowledge_base_id,
             original_name=original_name,
             media_type="text/plain",
-            source_type="paste",
+            source_type="pasted_text",
             storage_path=storage_path,
             checksum=checksum,
             byte_size=len(data),

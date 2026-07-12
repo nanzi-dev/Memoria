@@ -3941,6 +3941,54 @@ def list_knowledge_documents(
     return [dict(row) for row in rows]
 
 
+def list_incomplete_knowledge_documents() -> list[dict]:
+    """Return queued or interrupted documents so startup can resume indexing."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT d.*,
+                   (SELECT COUNT(*) FROM knowledge_chunk c
+                    WHERE c.owner_user_id = d.owner_user_id
+                      AND c.document_id = d.document_id) AS chunk_count
+            FROM knowledge_document d
+            WHERE d.status IN ('queued', 'processing')
+            ORDER BY d.created_at ASC
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def claim_knowledge_document_for_processing(
+    owner_user_id: str,
+    document_id: str,
+    *,
+    expected_status: str,
+    expected_updated_at: str,
+) -> bool:
+    """Atomically claim a queued or interrupted document for one worker."""
+    if expected_status not in {"queued", "processing"}:
+        return False
+    with get_conn() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE knowledge_document
+            SET status = 'processing', error_message = NULL, updated_at = ?
+            WHERE owner_user_id = ?
+              AND document_id = ?
+              AND status = ?
+              AND updated_at = ?
+            """,
+            (
+                _now(),
+                owner_user_id,
+                document_id,
+                expected_status,
+                expected_updated_at,
+            ),
+        )
+        return cursor.rowcount == 1
+
+
 def update_knowledge_document_status(
     owner_user_id: str,
     document_id: str,

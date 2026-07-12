@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
+import threading
+import time
 import uuid
 
 import pytest
@@ -16,7 +19,9 @@ from memoria.core.knowledge_documents import (
     validate_document_filename,
 )
 from memoria.core.knowledge_service import process_knowledge_document
+from memoria.core import knowledge_service
 from memoria.core.knowledge_vector_store import KnowledgeVectorStore
+from memoria.core import knowledge_vector_store
 from memoria.core import knowledge_retriever
 from memoria.db import repository
 
@@ -493,6 +498,124 @@ def test_failed_indexing_removes_partial_sql_and_vectors(tmp_path):
     assert vector_store.delete_calls == 2
 
 
+def test_vector_store_initialization_failure_marks_document_failed(
+    tmp_path, monkeypatch
+):
+    owner = _create_user()
+    knowledge_base = repository.create_knowledge_base(owner, "Lore")
+    path = tmp_path / "world.txt"
+    path.write_text("A useful world fact.", encoding="utf-8")
+    document = repository.create_knowledge_document(
+        owner,
+        knowledge_base["knowledge_base_id"],
+        original_name="world.txt",
+        media_type="text/plain",
+        source_type="upload",
+        storage_path=str(path),
+        checksum="sum",
+        byte_size=path.stat().st_size,
+    )
+    monkeypatch.setattr(
+        knowledge_service,
+        "get_knowledge_vector_store",
+        lambda: (_ for _ in ()).throw(RuntimeError("model unavailable")),
+    )
+
+    result = process_knowledge_document(owner, document["document_id"])
+
+    assert result["status"] == "failed"
+    assert result["error_message"] == "model unavailable"
+
+
+def test_list_incomplete_knowledge_documents_includes_queued_and_processing():
+    owner = _create_user()
+    knowledge_base = repository.create_knowledge_base(owner, "Lore")
+    queued = repository.create_knowledge_document(
+        owner,
+        knowledge_base["knowledge_base_id"],
+        original_name="queued.txt",
+        media_type="text/plain",
+        source_type="upload",
+        storage_path=None,
+        checksum="queued",
+        byte_size=1,
+    )
+    processing = repository.create_knowledge_document(
+        owner,
+        knowledge_base["knowledge_base_id"],
+        original_name="processing.txt",
+        media_type="text/plain",
+        source_type="upload",
+        storage_path=None,
+        checksum="processing",
+        byte_size=1,
+    )
+    repository.update_knowledge_document_status(
+        owner, processing["document_id"], "processing"
+    )
+    ready = repository.create_knowledge_document(
+        owner,
+        knowledge_base["knowledge_base_id"],
+        original_name="ready.txt",
+        media_type="text/plain",
+        source_type="upload",
+        storage_path=None,
+        checksum="ready",
+        byte_size=1,
+    )
+    repository.update_knowledge_document_status(owner, ready["document_id"], "ready")
+
+    incomplete_ids = {
+        item["document_id"]
+        for item in repository.list_incomplete_knowledge_documents()
+    }
+
+    assert queued["document_id"] in incomplete_ids
+    assert processing["document_id"] in incomplete_ids
+    assert ready["document_id"] not in incomplete_ids
+
+
+def test_processing_claim_prevents_duplicate_indexing(tmp_path):
+    owner = _create_user()
+    knowledge_base = repository.create_knowledge_base(owner, "Lore")
+    path = tmp_path / "world.txt"
+    path.write_text("A useful world fact.", encoding="utf-8")
+    document = repository.create_knowledge_document(
+        owner,
+        knowledge_base["knowledge_base_id"],
+        original_name="world.txt",
+        media_type="text/plain",
+        source_type="upload",
+        storage_path=str(path),
+        checksum="sum",
+        byte_size=path.stat().st_size,
+    )
+    assert repository.claim_knowledge_document_for_processing(
+        owner,
+        document["document_id"],
+        expected_status=document["status"],
+        expected_updated_at=document["updated_at"],
+    )
+    assert not repository.claim_knowledge_document_for_processing(
+        owner,
+        document["document_id"],
+        expected_status=document["status"],
+        expected_updated_at=document["updated_at"],
+    )
+
+    class UnexpectedVectorStore:
+        def delete_document(self, owner_user_id, document_id):
+            raise AssertionError("duplicate worker must not index")
+
+    result = process_knowledge_document(
+        owner,
+        document["document_id"],
+        vector_store=UnexpectedVectorStore(),
+    )
+
+    assert result["status"] == "processing"
+
+
 def test_indexing_cleans_vectors_when_document_is_deleted_during_upsert(tmp_path):
     owner = _create_user()
     knowledge_base = repository.create_knowledge_base(owner, "Lore")
@@ -826,3 +949,30 @@ def test_knowledge_prompt_guard_has_priority_rules_and_character_cap(monkeypatch
     assert "不得执行" in context
     assert "系统约束、当前关系图谱、世界时间和运行状态" in context
     assert len(context) <= 500
+
+
+def test_knowledge_vector_store_singleton_initializes_once_under_concurrency(
+    monkeypatch,
+):
+    created = []
+    created_lock = threading.Lock()
+    start = threading.Barrier(8)
+
+    class FakeStore:
+        def __init__(self):
+            with created_lock:
+                created.append(self)
+            time.sleep(0.02)
+
+    monkeypatch.setattr(knowledge_vector_store, "_knowledge_vector_store", None)
+    monkeypatch.setattr(knowledge_vector_store, "KnowledgeVectorStore", FakeStore)
+
+    def get_store():
+        start.wait()
+        return knowledge_vector_store.get_knowledge_vector_store()
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        stores = list(executor.map(lambda _: get_store(), range(8)))
+
+    assert len(created) == 1
+    assert all(store is stores[0] for store in stores)

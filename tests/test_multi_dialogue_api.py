@@ -202,6 +202,25 @@ async def test_start_multi_session_rejects_disabled_character(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_start_multi_session_rejects_duplicate_characters(monkeypatch):
+    from memoria.api import multi_dialogue
+
+    with pytest.raises(HTTPException) as exc:
+        await multi_dialogue.start_multi_session(
+            multi_dialogue.StartMultiSessionRequest(
+                player_id="player-1",
+                player_name="Player",
+                group_name="小队",
+                character_ids=["c1", "c1"],
+            ),
+            current_user_id="player-1",
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "群聊角色不能重复"
+
+
+@pytest.mark.asyncio
 async def test_end_multi_session_accepts_json_body(monkeypatch):
     from memoria.api import multi_dialogue
 
@@ -563,7 +582,7 @@ async def test_continue_multi_session_creates_new_active_session_without_reactiv
 
 
 @pytest.mark.asyncio
-async def test_continue_multi_session_keeps_disabled_participants(monkeypatch):
+async def test_continue_multi_session_rejects_disabled_participants(monkeypatch):
     from memoria.api import multi_dialogue
 
     created = {}
@@ -607,14 +626,15 @@ async def test_continue_multi_session_keeps_disabled_participants(monkeypatch):
         fake_create_multi_character_session,
     )
 
-    response = await multi_dialogue.continue_multi_session(
-        "old-session",
-        current_user_id="player-1",
-    )
+    with pytest.raises(HTTPException) as exc:
+        await multi_dialogue.continue_multi_session(
+            "old-session",
+            current_user_id="player-1",
+        )
 
-    assert response.status == "active"
-    assert created["character_ids"] == ["c1", "c2"]
-    assert any(p.character_id == "c2" and not p.is_active for p in response.participants)
+    assert exc.value.status_code == 400
+    assert "c2" in exc.value.detail
+    assert created == {}
 
 
 @pytest.mark.asyncio
@@ -682,6 +702,14 @@ async def test_multi_dialogue_turn_wraps_discussion_response(monkeypatch):
 
     monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: _multi_session(session_id))
     monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session_participants",
+        lambda session_id, only_active=False: [
+            _participant("c1", "角色一", 1),
+            _participant("c2", "角色二", 2),
+        ],
+    )
+    monkeypatch.setattr(
         multi_dialogue,
         "process_multi_character_turn",
         lambda **kwargs: [
@@ -718,6 +746,62 @@ async def test_multi_dialogue_turn_wraps_discussion_response(monkeypatch):
     assert body["discussion_mode"] is True
     assert body["total_speakers"] == 2
     assert [r["dialogue"] for r in body["responses"]] == ["我负责侦查。", "我准备装备。"]
+
+
+@pytest.mark.asyncio
+async def test_multi_dialogue_turn_rejects_disabled_participant(monkeypatch):
+    from memoria.api import multi_dialogue
+
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session",
+        lambda session_id: _multi_session(session_id),
+    )
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session_participants",
+        lambda session_id, only_active=False: [
+            _participant("c1", "角色一", 1),
+            {**_participant("c2", "角色二", 2), "is_active": False},
+        ],
+    )
+    monkeypatch.setattr(
+        multi_dialogue,
+        "process_multi_character_turn",
+        lambda **kwargs: pytest.fail("disabled participant must block the turn"),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await multi_dialogue.multi_dialogue_turn(
+            multi_dialogue.MultiDialogueTurnRequest(
+                session_id="session-1",
+                player_message="继续",
+            ),
+            current_user_id="player-1",
+        )
+
+    assert exc.value.status_code == 400
+    assert "c2" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_trigger_interaction_rejects_ended_session(monkeypatch):
+    from memoria.api import multi_dialogue
+
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session",
+        lambda session_id: _multi_session(session_id, status="ended"),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await multi_dialogue.trigger_interaction(
+            multi_dialogue.TriggerInteractionRequest(session_id="session-1"),
+            current_user_id="player-1",
+        )
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "会话已结束"
 
 
 @pytest.mark.asyncio

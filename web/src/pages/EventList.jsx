@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -116,8 +116,10 @@ export default function EventList() {
   const [search, setSearch] = useState('');
   const [busyEventId, setBusyEventId] = useState(null);
   const [notice, setNotice] = useState('');
+  const loadRequestRef = useRef(0);
 
   const loadEvents = useCallback(async ({ soft = false } = {}) => {
+    const requestId = ++loadRequestRef.current;
     if (userLoading) {
       if (soft) setRefreshing(true);
       else setLoading(true);
@@ -137,18 +139,25 @@ export default function EventList() {
       else setLoading(true);
       setError(null);
       const list = await eventAdmin.list();
+      if (loadRequestRef.current !== requestId) return;
       setEvents(Array.isArray(list) ? list : []);
     } catch (e) {
+      if (loadRequestRef.current !== requestId) return;
       const message = e.message || '事件列表加载失败';
       setError(message);
       if (AUTH_ERROR_PATTERN.test(message)) setEvents([]);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (loadRequestRef.current === requestId) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [userLoading, user?.user_id]);
 
-  useEffect(() => { loadEvents(); }, [loadEvents]);
+  useEffect(() => {
+    loadEvents();
+    return () => { loadRequestRef.current += 1; };
+  }, [loadEvents]);
 
   async function handleToggle(evt) {
     setBusyEventId(evt.event_id);

@@ -9,6 +9,7 @@
 
 import logging
 import os
+import threading
 from typing import List, Optional
 # import chromadb  # lazy
 # from chromadb.config import Settings  # lazy
@@ -337,10 +338,13 @@ class VectorMemoryStore:
 # 全局单例
 # =========================
 _vector_store_instance: Optional[VectorMemoryStore] = None
+_vector_store_lock = threading.Lock()
 
 def get_vector_store() -> VectorMemoryStore:
     """获取向量存储单例"""
     global _vector_store_instance
     if _vector_store_instance is None:
-        _vector_store_instance = VectorMemoryStore()
+        with _vector_store_lock:
+            if _vector_store_instance is None:
+                _vector_store_instance = VectorMemoryStore()
     return _vector_store_instance

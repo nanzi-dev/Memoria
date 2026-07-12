@@ -68,6 +68,63 @@ class TestConfigValidation:
         errors = _validate_config()
         assert isinstance(errors, list)
 
+
+class TestKnowledgeRecovery:
+    def test_resume_incomplete_documents(self, monkeypatch):
+        from memoria import main
+
+        documents = [
+            {
+                "owner_user_id": "owner-a",
+                "document_id": "doc-a",
+                "status": "queued",
+                "updated_at": "2026-07-13T00:00:00+00:00",
+            },
+            {
+                "owner_user_id": "owner-b",
+                "document_id": "doc-b",
+                "status": "processing",
+                "updated_at": "2026-07-13T00:00:01+00:00",
+            },
+        ]
+        processed = []
+        monkeypatch.setattr(
+            main.repository,
+            "list_incomplete_knowledge_documents",
+            lambda: documents,
+        )
+        monkeypatch.setattr(
+            main,
+            "process_knowledge_document",
+            lambda owner, document, **kwargs: processed.append(
+                (owner, document, kwargs)
+            ),
+        )
+
+        main._resume_incomplete_knowledge_documents()
+
+        assert processed == [
+            (
+                "owner-a",
+                "doc-a",
+                {
+                    "resume_processing": True,
+                    "expected_status": "queued",
+                    "expected_updated_at": "2026-07-13T00:00:00+00:00",
+                },
+            ),
+            (
+                "owner-b",
+                "doc-b",
+                {
+                    "resume_processing": True,
+                    "expected_status": "processing",
+                    "expected_updated_at": "2026-07-13T00:00:01+00:00",
+                },
+            ),
+        ]
+
+
 class TestRateLimiting:
     def test_rate_limit_allows_first_requests(self):
         from memoria.main import _check_rate_limit

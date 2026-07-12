@@ -9,7 +9,6 @@ import mimetypes
 import secrets
 import re
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Header, Response, Cookie, Depends, Query
 from pydantic import BaseModel, StrictInt
@@ -137,13 +136,6 @@ def _resize_image(data: bytes, max_dim: int = 512) -> bytes | None:
     except Exception:
         return None
 
-
-def _ensure_http_avatar_url(url: str) -> None:
-    parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"}:
-        raise HTTPException(400, "仅支持 http/https 图片 URL")
-    if not parsed.hostname:
-        raise HTTPException(400, "图片 URL 缺少主机名")
 
 def get_current_user_id(token: str) -> str | None:
     """从 token 获取 user_id"""
@@ -451,24 +443,17 @@ def set_avatar_url(
         repository.update_user_profile(uid, avatar_url=None)
         return OperationResponse(success=True, message="头像已清除")
 
-    _ensure_http_avatar_url(url)
-    try:
-        image = download_remote_image(url, timeout=10)
-    except HTTPException:
-        avatar_url = url
-        message = "头像 URL 已保存"
-    else:
-        data = image.data
-        ct = image.content_type
-        if len(data) > MAX_AVATAR_SIZE:
-            data = _resize_image(data)
-            if data is None:
-                raise HTTPException(400, "图片过大且压缩失败")
-            ct = "image/jpeg"
+    image = download_remote_image(url, timeout=10)
+    data = image.data
+    ct = image.content_type
+    if len(data) > MAX_AVATAR_SIZE:
+        data = _resize_image(data)
+        if data is None:
+            raise HTTPException(400, "图片过大且压缩失败")
+        ct = "image/jpeg"
 
-        b64 = base64.b64encode(data).decode("ascii")
-        avatar_url = f"data:{ct};base64,{b64}"
-        message = "头像设置成功"
+    b64 = base64.b64encode(data).decode("ascii")
+    avatar_url = f"data:{ct};base64,{b64}"
 
     repository.update_user_profile(uid, avatar_url=avatar_url)
-    return OperationResponse(success=True, message=message)
+    return OperationResponse(success=True, message="头像设置成功")

@@ -125,16 +125,10 @@ export const characterAdmin = {
   async uploadAvatar(characterId, file) {
     const formData = new FormData();
     formData.append('file', file);
-    const resp = await fetch(`${API_BASE}/admin/characters/${characterId}/avatar/upload`, {
+    return request(`/admin/characters/${characterId}/avatar/upload`, {
       method: 'POST',
-      credentials: 'include',
       body: formData,
     });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${resp.status}`);
-    }
-    return resp.json();
   },
   setAvatarUrl(characterId, url) {
     return request(`/admin/characters/${characterId}/avatar/url`, {

@@ -74,6 +74,25 @@ class OperationResponse(BaseModel):
     message: str
 
 
+def _require_relationship_characters(
+    current_user_id: str,
+    character_id_a: str,
+    character_id_b: str,
+) -> None:
+    """Require two distinct character cards owned by the current user."""
+    if character_id_a == character_id_b:
+        raise HTTPException(status_code=400, detail="不能创建角色与自身的关系")
+
+    for character_id in (character_id_a, character_id_b):
+        character = repository.get_character_card_from_db(
+            current_user_id,
+            character_id,
+            include_inactive=True,
+        )
+        if not character:
+            raise HTTPException(status_code=404, detail=f"角色 '{character_id}' 不存在")
+
+
 # =========================
 # 创建关系
 # =========================
@@ -84,6 +103,12 @@ def create_relationship(
 ):
     """创建角色关系"""
     try:
+        _require_relationship_characters(
+            current_user_id,
+            req.character_id_a,
+            req.character_id_b,
+        )
+
         # 检查是否已存在关系
         existing = repository.get_character_relationship(
             current_user_id,
@@ -92,10 +117,7 @@ def create_relationship(
         )
         
         if existing:
-            return OperationResponse(
-                success=False,
-                message=f"关系已存在，请使用更新接口"
-            )
+            raise HTTPException(status_code=409, detail="关系已存在，请使用更新接口")
         
         # 创建关系
         success = repository.save_character_relationship(
@@ -158,6 +180,12 @@ def update_relationship(
 ):
     """更新角色关系"""
     try:
+        _require_relationship_characters(
+            current_user_id,
+            character_id_a,
+            character_id_b,
+        )
+
         # 检查关系是否存在
         existing = repository.get_character_relationship(
             current_user_id,
@@ -206,6 +234,22 @@ def delete_relationship(
 ):
     """删除角色关系"""
     try:
+        _require_relationship_characters(
+            current_user_id,
+            character_id_a,
+            character_id_b,
+        )
+        existing = repository.get_character_relationship(
+            current_user_id,
+            character_id_a,
+            character_id_b,
+        )
+        if not existing:
+            raise HTTPException(
+                status_code=404,
+                detail=f"未找到角色 {character_id_a} 和 {character_id_b} 之间的关系",
+            )
+
         success = repository.delete_character_relationship(
             current_user_id,
             character_id_a,
@@ -334,6 +378,19 @@ def batch_create_relationships(
         
         for rel in relationships:
             try:
+                _require_relationship_characters(
+                    current_user_id,
+                    rel.character_id_a,
+                    rel.character_id_b,
+                )
+                existing = repository.get_character_relationship(
+                    current_user_id,
+                    rel.character_id_a,
+                    rel.character_id_b,
+                )
+                if existing:
+                    failed_count += 1
+                    continue
                 success = repository.save_character_relationship(
                     owner_user_id=current_user_id,
                     character_id_a=rel.character_id_a,
@@ -346,11 +403,11 @@ def batch_create_relationships(
                     success_count += 1
                 else:
                     failed_count += 1
-            except Exception as e:
+            except Exception:
                 failed_count += 1
         
         return OperationResponse(
-            success=True,
+            success=success_count > 0,
             message=f"批量创建完成: 成功 {success_count} 条，失败 {failed_count} 条"
         )
     

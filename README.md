@@ -1,6 +1,6 @@
 # Memoria - 角色模拟系统
 
-一个基于大语言模型的沉浸式角色扮演对话系统，支持动态记忆管理、情感状态追踪、事件系统和个性化交互体验。
+一个基于大语言模型的沉浸式角色扮演对话系统，支持动态记忆管理、外部知识库 RAG、情感状态追踪、事件系统和个性化交互体验。
 
 [![GitHub stars](https://img.shields.io/github/stars/nanzi-dev/Memoria?style=social)](https://github.com/nanzi-dev/Memoria)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -15,6 +15,7 @@
   - [核心特性](#核心特性)
     - [深度角色模拟](#深度角色模拟)
     - [三层智能记忆系统](#三层智能记忆系统)
+    - [外部知识库 RAG](#外部知识库-rag)
     - [关系与情感追踪](#关系与情感追踪)
     - [多角色对话系统](#多角色对话系统)
     - [事件系统](#事件系统)
@@ -50,6 +51,13 @@
 - **记忆萃取引擎**：使用 AI 从对话中智能提取关键信息并评估重要性
 - **图谱修订隔离**：角色关系图谱更新或删除后，单聊和群聊生成上下文只过滤图谱变更前的旧关系事实；普通长期记忆、共同经历和世界事实继续保留。最近对话里若出现与当前图谱冲突的关系表述，也会在送入模型前跳过，避免旧关系覆盖当前图谱
 
+### 外部知识库 RAG
+- **多格式文档导入**：支持上传 UTF-8 TXT、Markdown、PDF、DOCX，或直接粘贴文本
+- **异步处理与状态恢复**：文档按 `queued → processing → ready/failed` 流转；前端自动轮询，服务重启后会恢复排队中或被中断的任务
+- **精细绑定范围**：知识库可绑定为全局、指定角色或指定群聊线程，并可随时启用、禁用
+- **安全检索注入**：单聊和群聊按绑定范围检索知识块，知识内容只作为低优先级世界事实，不执行文档中的指令
+- **来源可追溯**：对话响应返回 `knowledge_sources`，管理页支持检索预览、失败原因展示和重试
+
 ### 关系与情感追踪
 - **好感度系统**：根据对话内容动态调整角色对玩家的好感度（-100 ~ 100）
 - **信任度机制**：追踪角色对玩家的信任程度，影响话题开放度
@@ -71,6 +79,7 @@
 - **冷却时间管理**：支持事件冷却和触发次数限制
 - **深度集成**：支持 cron 式时间事件、事件模板库和跨会话事件上下文持久化
 - **用户隔离**：角色卡、事件定义和角色关系都按登录用户隔离，不同用户可以使用相同的 `character_id` / `event_id`
+- **世界时钟与通知**：每个用户拥有独立的 IANA 时区和 0/1/2/5/10 倍世界时间；事件通知持久化到用户收件箱并支持已读状态
 
 ### 沉浸感保护
 - **AI 身份检测**：自动识别并过滤可能破坏沉浸感的输出
@@ -86,7 +95,7 @@
 - **登录与用户资料**：支持用户注册、登录、资料编辑和头像设置
 - **角色卡编辑器**：分步编辑角色身份、性格、语言风格、背景和交互规则
 - **会话体验**：支持单角色对话、会话恢复、多角色群聊和会话列表；好感度/信任度变化只在当前会话新回复上展示，历史加载消息不回放旧变化提示
-- **管理视图**：提供事件列表/编辑器和角色关系图谱页面
+- **管理视图**：提供事件列表/编辑器、角色关系图谱和知识库管理页面
 
 ---
 
@@ -101,6 +110,7 @@ Memoria/
 │   │   ├── event_admin.py      # 事件管理 API
 │   │   ├── multi_dialogue.py   # 多角色对话 API
 │   │   ├── relationship.py     # 角色关系 API
+│   │   ├── knowledge.py        # 知识库、文档与检索预览 API
 │   │   ├── developer.py        # 回放、性能指标、质量评分等开发者 API
 │   │   └── user.py             # 用户注册、登录、资料和头像 API
 │   ├── characters/             # 角色卡 JSON 配置文件
@@ -114,6 +124,11 @@ Memoria/
 │   │   ├── memory_extractor.py # 记忆萃取模块
 │   │   ├── prompt_builder.py   # Prompt 组装器
 │   │   ├── vector_memory.py    # 向量记忆管理
+│   │   ├── knowledge_documents.py    # 知识文档校验、提取与切块
+│   │   ├── knowledge_service.py      # 文档持久化与异步索引
+│   │   ├── knowledge_retriever.py    # 知识检索、排序与 Prompt 注入
+│   │   ├── knowledge_vector_store.py # 知识向量存储
+│   │   ├── world_clock.py      # 用户世界时钟
 │   │   ├── character_loader.py # 角色卡加载与缓存
 │   │   ├── character_schema.py # 角色卡数据模型
 │   │   ├── event_detector.py   # 事件检测引擎
@@ -125,21 +140,7 @@ Memoria/
 │   ├── db/                     # 数据持久化层
 │   │   └── repository.py       # SQLite / PostgreSQL 数据库操作
 │   └── main.py                 # 应用入口
-├── tests/                      # 测试文件
-│   ├── test_core.py             # 核心模块测试（62 tests）
-│   ├── test_repository.py       # 数据库层测试（43 tests）
-│   ├── test_events.py           # 事件系统测试（16 tests）
-│   ├── test_orchestrator.py     # 编排器测试（16 tests）
-│   ├── test_multi_dialogue_api.py # 多角色 API 测试（14 tests）
-│   ├── test_dialogue_api.py     # 单角色 API 测试（7 tests）
-│   ├── test_api_models.py       # API 模型测试（19 tests）
-│   ├── test_memory_extractor.py # 记忆/提示测试（30 tests）
-│   ├── test_cli_debug.py        # CLI debug 标志测试（1 test）
-│   ├── test_developer_experience.py # 开发者体验端点测试（5 tests）
-│   ├── test_postgres_compat.py  # PostgreSQL 兼容层测试（5 tests）
-│   ├── test_security_fixes.py   # 安全回归测试（8 tests）
-│   ├── test_system.py           # 系统级测试（12 tests）
-│   ├── test_vector_memory.py    # 向量记忆测试（2 tests）
+├── tests/                      # pytest 测试（核心、API、安全、知识库、世界时钟等）
 ├── docs/                       # 项目文档
 │   ├── API.md                  # API 文档
 │   ├── ARCHITECTURE.md         # 系统架构与数据库
@@ -148,7 +149,8 @@ Memoria/
 │   └── CONTRIBUTING.md         # 贡献指南
 ├── data/                       # 运行时数据
 │   ├── sqlite_db/              # SQLite 开发数据库
-│   └── chroma_db/              # 向量数据库 (ChromaDB)
+│   ├── chroma_db/              # 向量数据库 (ChromaDB)
+│   └── knowledge/              # 知识库上传原文件
 ├── scripts/                    # 工具脚本
 │   ├── chat.sh                 # CLI 聊天启动脚本
 │   ├── cli_chat.py             # 命令行对话工具
@@ -286,8 +288,8 @@ npm run dev
 
 | 文档 | 内容 |
 |------|------|
-| [API 文档](docs/API.md) | 完整 REST API 参考（对话/角色卡/事件/关系/多角色/用户/系统管理），含请求/响应示例 |
-| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（18 张表）、三层记忆架构、角色卡开发规范 |
+| [API 文档](docs/API.md) | 完整 REST API 参考（对话/角色卡/事件/关系/多角色/知识库/用户/系统管理），含请求/响应示例 |
+| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（24 张表）、记忆与知识检索架构、角色卡开发规范 |
 | [开发路线图](docs/ROADMAP.md) | 已完成功能和未来规划 |
 | [故障排查](docs/FAQ.md) | 常见问题解决方案、调试技巧、性能优化建议 |
 | [贡献指南](docs/CONTRIBUTING.md) | 如何贡献代码、Commit 规范、代码审查标准 |
@@ -323,6 +325,8 @@ EMBEDDING_MODEL=./models/sentence-transformers/all-MiniLM-L6-v2  # 嵌入模型
 VECTOR_SEARCH_TOP_K=10                         # 向量检索返回数量
 ```
 
+知识库的存储路径、检索阈值、切块和上传限制由 `config/settings.yaml` 的 `knowledge` 节控制；仓库默认值为 10 MiB、Top-K 6、相似度阈值 0.35、单次注入最多 6000 字符。
+
 Docker 部署文件统一存放在 `deploy/docker/`。运行时 `deploy/docker/docker-compose.yml` 会自动生成容器内 PostgreSQL 连接串；通常只需要通过 `deploy/docker/.env` 配置 `POSTGRES_*`、`LLM_*`、端口和模型参数。
 
 ---
@@ -344,7 +348,7 @@ PYTHONPATH=src pytest tests/test_multi_dialogue_api.py -v # 多角色 API
 PYTHONPATH=src pytest tests/test_system.py -v            # 系统端点与限流
 ```
 
-当前测试集合以 `pytest --collect-only -q` 为准；当前项目收集到 240 个测试。
+当前测试集合以 `pytest --collect-only -q` 为准；当前项目收集到 328 个测试，覆盖核心编排、持久化、事件、单聊/群聊 API、安全、知识库、向量存储、世界时钟和系统端点。
 
 ---
 

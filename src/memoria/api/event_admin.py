@@ -91,6 +91,7 @@ class EventCreateRequest(BaseModel):
 class EventUpdateRequest(BaseModel):
     event_name: Optional[str] = None
     description: Optional[str] = None
+    character_id: Optional[str] = None
     trigger_condition: Optional[TriggerConditionDTO] = None
     effects: Optional[list[EventEffectDTO]] = None
     priority: Optional[int] = None
@@ -180,6 +181,24 @@ class EventContextStateItem(BaseModel):
     progress: float
     last_session_id: Optional[str] = None
     updated_at: Optional[str] = None
+
+
+def _require_owned_character(
+    current_user_id: str,
+    character_id: Optional[str],
+) -> Optional[str]:
+    """Validate an optional event character and return its normalized ID."""
+    normalized_id = str(character_id or "").strip()
+    if not normalized_id:
+        return None
+    character = repository.get_character_card_from_db(
+        current_user_id,
+        normalized_id,
+        include_inactive=True,
+    )
+    if not character:
+        raise HTTPException(status_code=404, detail=f"角色 '{normalized_id}' 不存在")
+    return normalized_id
 
 
 # =========================
@@ -296,6 +315,8 @@ def create_event(
             detail=f"事件 '{req.event_id}' 已存在，请使用更新接口",
         )
 
+    character_id = _require_owned_character(current_user_id, req.character_id)
+
     # 将 DTO 转为 event_schema 对象进行深度校验
     try:
         TriggerCondition.model_validate(req.trigger_condition.model_dump())
@@ -315,7 +336,7 @@ def create_event(
         event_name=req.event_name,
         trigger_config=trigger_json,
         effects_config=effects_json,
-        character_id=req.character_id,
+        character_id=character_id,
         description=req.description,
         priority=req.priority,
         is_active=req.is_active,
@@ -357,6 +378,9 @@ def update_event(
     is_active = req.is_active if req.is_active is not None else bool(existing.get("is_active", 1))
     schedule = req.schedule if req.schedule is not None else existing.get("schedule")
     template_id = req.template_id if req.template_id is not None else existing.get("template_id")
+    character_id = existing.get("character_id")
+    if "character_id" in req.model_fields_set:
+        character_id = _require_owned_character(current_user_id, req.character_id)
 
     if req.trigger_condition is not None:
         try:
@@ -385,7 +409,7 @@ def update_event(
         event_name=event_name,
         trigger_config=trigger_json,
         effects_config=effects_json,
-        character_id=existing.get("character_id"),
+        character_id=character_id,
         description=description,
         priority=priority,
         is_active=is_active,
@@ -547,7 +571,10 @@ def reset_trigger_history(
 # =========================
 
 @router.get("/admin/event-templates", response_model=list[EventTemplateItem])
-def list_event_templates(category: Optional[str] = None):
+def list_event_templates(
+    category: Optional[str] = None,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """列出内置和已保存的事件模板。"""
     event_runtime.ensure_default_event_templates()
     rows = repository.list_event_templates(category=category)
@@ -572,7 +599,10 @@ def list_event_templates(category: Optional[str] = None):
 
 
 @router.post("/admin/event-templates", response_model=OperationResponse)
-def create_event_template(req: EventTemplateCreateRequest):
+def create_event_template(
+    req: EventTemplateCreateRequest,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """创建或更新系统事件模板。仅作为开发维护 API 使用。"""
     try:
         TriggerCondition.model_validate(req.trigger_config.model_dump())
@@ -601,7 +631,10 @@ def create_event_template(req: EventTemplateCreateRequest):
 
 
 @router.delete("/admin/event-templates/{template_id}", response_model=OperationResponse)
-def delete_event_template(template_id: str):
+def delete_event_template(
+    template_id: str,
+    current_user_id: str = Depends(require_current_user_id),
+):
     """删除系统事件模板。仅作为开发维护 API 使用。"""
     existing = repository.get_event_template(template_id)
     if not existing:
@@ -629,11 +662,12 @@ def register_event_schedule(
     existing = repository.get_event_definition(current_user_id, req.event_id)
     if not existing:
         raise HTTPException(status_code=404, detail=f"事件 '{req.event_id}' 不存在")
+    character_id = _require_owned_character(current_user_id, req.character_id)
 
     try:
         event_runtime.register_time_event_schedule(
             event_id=req.event_id,
-            character_id=req.character_id,
+            character_id=character_id,
             player_id=req.player_id,
             schedule=req.schedule,
         )

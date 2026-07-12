@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, Check, ChevronLeft, ChevronRight, Upload, Download } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Check, ChevronLeft, ChevronRight, Upload, Download, RefreshCw } from 'lucide-react';
 import { characterAdmin } from '../api/memoria';
 import StepIdentity from '../components/editor/StepIdentity';
 import StepPersonality from '../components/editor/StepPersonality';
@@ -79,9 +79,13 @@ export default function CharacterEditor() {
   const dialog = useDialog();
   const fileInputRef = useRef(null);
   const [currentStep, setCurrentStep] = useState(0);
-  const [formData, setFormData] = useState(DEFAULT_DATA);
+  const [formData, setFormData] = useState(() => mergeCharacterData({}));
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(!!characterId);
+  const [loadedCharacterId, setLoadedCharacterId] = useState(characterId ? null : '');
+  const [loadError, setLoadError] = useState('');
+  const [reloadVersion, setReloadVersion] = useState(0);
+  const [actionPending, setActionPending] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
   const [isActive, setIsActive] = useState(true);
 
@@ -94,7 +98,22 @@ export default function CharacterEditor() {
 
   // Load existing character data
   useEffect(() => {
-    if (!characterId) return;
+    let cancelled = false;
+    if (!characterId) {
+      setFormData(mergeCharacterData({}));
+      setLoading(false);
+      setLoadedCharacterId('');
+      setLoadError('');
+      setIsActive(true);
+      return () => { cancelled = true; };
+    }
+
+    setLoading(true);
+    setLoadedCharacterId(null);
+    setLoadError('');
+    setSaveMessage('');
+    setCurrentStep(0);
+
     (async () => {
       try {
         // 重试最多2次，应对 429
@@ -108,17 +127,23 @@ export default function CharacterEditor() {
             await new Promise(r => setTimeout(r, 800));
           }
         }
+        if (cancelled) return;
         setFormData(detail.card_data);
         // is_active: 1=active, 0=disabled (int)
         const active = detail.is_active === undefined ? true : (detail.is_active === 1 || detail.is_active === true);
         setIsActive(active);
+        setLoadedCharacterId(characterId);
       } catch (e) {
-        console.error('Failed to load character:', e.message);
+        if (!cancelled) {
+          setLoadError(`Failed to load character: ${e.message}`);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
-  }, [characterId]);
+
+    return () => { cancelled = true; };
+  }, [characterId, reloadVersion]);
 
   const updateField = useCallback((path, value) => {
     setFormData(prev => {
@@ -135,14 +160,15 @@ export default function CharacterEditor() {
   }, []);
 
   async function handleSave() {
+    if (characterId && loadedCharacterId !== characterId) return;
     setSaving(true);
     setSaveMessage('');
     try {
-      const data = { ...formData };
+      const data = JSON.parse(JSON.stringify(formData));
       // Auto-generate character_id from name if empty
       if (!data.character_id || data.character_id === '') {
         const name = data.meta?.name || 'new_character';
-        data.character_id = `npc_${name.toLowerCase().replace(/\\s+/g, '_').replace(/[^a-z0-9_]/g, '')}`;
+        data.character_id = `npc_${name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')}`;
       }
       data.character_id = data.character_id || 'npc_new_character';
       if (!data.meta?.name) data.meta.name = data.character_id;
@@ -210,7 +236,7 @@ export default function CharacterEditor() {
   }
 
   async function handleToggleActive() {
-    if (!characterId) return;
+    if (!characterId || actionPending) return;
     const action = isActive ? '禁用' : '启用';
     const ok = await dialog.confirm({
       title: `${action}角色卡`,
@@ -219,41 +245,73 @@ export default function CharacterEditor() {
       confirmText: action,
     });
     if (!ok) return;
+    setActionPending(true);
+    setSaveMessage('');
     try {
       if (isActive) {
         await characterAdmin.delete(characterId, false); // soft delete = disable
       } else {
         await characterAdmin.activate(characterId);
       }
-      setIsActive(!isActive);
+      setIsActive(prev => !prev);
+      setSaveMessage(`${action}成功`);
     } catch (e) {
-      console.error(`${action}失败:`, e.message);
+      setSaveMessage(`Error: ${action}失败: ${e.message}`);
+    } finally {
+      setActionPending(false);
     }
   }
 
-  function handleDelete() {
-    if (!characterId) return;
-    (async () => {
-      const ok = await dialog.confirm({
-        title: '永久删除角色卡',
-        message: '确定要永久删除这个角色卡吗？此操作不可撤销！',
-        variant: 'danger',
-        confirmText: '删除',
-      });
-      if (!ok) return;
-      try {
-        await characterAdmin.delete(characterId, true); // permanent delete
-      } catch (e) {
-        console.error('Delete failed:', e.message);
-      }
+  async function handleDelete() {
+    if (!characterId || actionPending) return;
+    const ok = await dialog.confirm({
+      title: '永久删除角色卡',
+      message: '确定要永久删除这个角色卡吗？此操作不可撤销！',
+      variant: 'danger',
+      confirmText: '删除',
+    });
+    if (!ok) return;
+    setActionPending(true);
+    setSaveMessage('');
+    try {
+      await characterAdmin.delete(characterId, true); // permanent delete
       navigate('/');
-    })();
+    } catch (e) {
+      setSaveMessage(`Error: Delete failed: ${e.message}`);
+      setActionPending(false);
+    }
   }
 
-  if (loading) {
+  if (characterId && (loading || loadedCharacterId !== characterId) && !loadError) {
     return (
       <div className="min-h-screen bg-cyber-bg flex items-center justify-center">
         <Loader2 className="animate-spin text-cyber-green" size={32} />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-dvh character-editor-page flex items-center justify-center px-4">
+        <div className="w-full max-w-md border border-red-400/30 bg-cyber-surface p-6 text-center">
+          <p className="font-mono text-sm text-red-300 break-words">{loadError}</p>
+          <div className="mt-5 flex items-center justify-center gap-3">
+            <button
+              onClick={() => navigate('/')}
+              className="flex min-h-[40px] items-center gap-2 border border-cyber-green/20 px-3 font-mono text-sm text-cyber-green/70 hover:text-cyber-green"
+            >
+              <ArrowLeft size={16} />
+              Back
+            </button>
+            <button
+              onClick={() => setReloadVersion(version => version + 1)}
+              className="flex min-h-[40px] items-center gap-2 border border-cyber-green/40 bg-cyber-green/10 px-3 font-mono text-sm text-cyber-green hover:bg-cyber-green/20"
+            >
+              <RefreshCw size={16} />
+              Retry
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -306,17 +364,19 @@ export default function CharacterEditor() {
               <>
                 <button
                   onClick={handleToggleActive}
+                  disabled={actionPending}
                   className={`min-h-[40px] px-3 py-1 text-xs font-mono rounded transition-colors border ${
                     isActive
                       ? 'text-amber-400/70 hover:text-amber-400 border-amber-400/20 hover:border-amber-400/40'
                       : 'text-green-400/70 hover:text-green-400 border-green-400/20 hover:border-green-400/40'
-                  }`}
+                  } disabled:opacity-50`}
                 >
                   {isActive ? 'Disable' : 'Enable'}
                 </button>
                 <button
                   onClick={handleDelete}
-                  className="min-h-[40px] px-3 py-1 text-xs font-mono text-red-400/60 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 rounded transition-colors"
+                  disabled={actionPending}
+                  className="min-h-[40px] px-3 py-1 text-xs font-mono text-red-400/60 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 rounded transition-colors disabled:opacity-50"
                 >
                   Delete
                 </button>
@@ -324,7 +384,7 @@ export default function CharacterEditor() {
             )}
             <button
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || actionPending}
               className="flex items-center gap-1 min-h-[40px] px-4 py-1.5 bg-cyber-green/10 border border-cyber-green/30 text-cyber-green font-mono text-sm rounded hover:bg-cyber-green/20 transition-colors disabled:opacity-50"
             >
               {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}

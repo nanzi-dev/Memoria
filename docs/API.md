@@ -12,6 +12,7 @@
   - [事件管理 API](#事件管理-api)
   - [角色关系 API](#角色关系-api)
   - [多角色对话 API](#多角色对话-api)
+  - [知识库 API](#知识库-api)
   - [用户 API](#用户-api)
   - [开发者体验 API](#开发者体验-api)
   - [系统管理 API](#系统管理-api)
@@ -97,9 +98,22 @@ Content-Type: application/json
       "effects_applied": ["状态已修改", "记忆已添加"]
     }
   ],
-  "event_notification": "解锁新话题：童年回忆"
+  "event_notification": "解锁新话题：童年回忆",
+  "knowledge_sources": [
+    {
+      "knowledge_base_id": "kb-uuid",
+      "knowledge_base_name": "世界设定",
+      "document_id": "doc-uuid",
+      "document_name": "地理.md",
+      "chunk_id": "chunk-uuid",
+      "excerpt": "北境终年积雪……",
+      "similarity": 0.81
+    }
+  ]
 }
 ```
+
+`knowledge_sources` 只包含当前用户已授权绑定且实际注入本轮 Prompt 的来源；未命中知识时为空数组。
 
 ### 4. 获取会话列表
 ```http
@@ -398,7 +412,7 @@ Content-Type: application/json
 
 ## 事件管理 API
 
-本节接口均需要登录态。
+本节接口均需要登录态。事件定义只属于当前登录用户；创建、更新和注册调度时，非空 `character_id` 必须指向当前用户拥有的角色卡，禁用角色仍可用于维护已有事件。`character_id: null` 或空字符串表示当前用户下的全局事件。
 
 ---
 
@@ -543,9 +557,12 @@ Content-Type: application/json
 {
   "event_name": "更新后的事件名称",
   "priority": 2,
-  "is_active": false
+  "is_active": false,
+  "character_id": null
 }
 ```
+
+更新请求可包含 `character_id`，其含义和所有权校验与创建事件一致；传 `null` 可把角色专属事件改为全局事件。
 
 **响应示例：**
 ```json
@@ -680,7 +697,7 @@ DELETE /api/v1/admin/events/{event_id}/history?character_id=&player_id=
 GET /api/v1/admin/event-templates?category=relationship
 ```
 
-内置模板包括好感度里程碑、信任度里程碑和关键剧情节点。服务启动时会自动初始化模板库。模板库是全局系统模板；套用模板创建事件时，事件会保存到当前登录用户自己的 `event_definition` 中。
+内置模板包括好感度里程碑、信任度里程碑和关键剧情节点。服务启动时会自动初始化模板库。模板库是经过认证访问的全局系统模板；套用模板创建事件时，事件会保存到当前登录用户自己的 `event_definition` 中。
 
 **响应示例：**
 ```json
@@ -705,7 +722,7 @@ GET /api/v1/admin/event-templates?category=relationship
 POST /api/v1/admin/event-templates
 ```
 
-该接口用于开发维护系统模板库，不在普通用户前端暴露。
+该接口需要登录态，用于开发维护共享的系统模板库，不在普通用户前端暴露。
 
 **请求体：**
 ```json
@@ -746,7 +763,7 @@ POST /api/v1/admin/event-templates
 DELETE /api/v1/admin/event-templates/{template_id}
 ```
 
-删除指定模板记录。内置默认模板在服务启动或模板列表自动初始化时可能被重新写入。
+该接口需要登录态。删除指定共享模板记录；内置默认模板在服务启动或模板列表自动初始化时可能被重新写入。
 
 **响应：**
 ```json
@@ -774,6 +791,8 @@ Content-Type: application/json
 ```
 
 `schedule` 使用 5 字段 cron 表达式：`minute hour day month weekday`，支持 `*`、`*/N`、逗号列表和范围。
+
+非空 `character_id` 必须是当前用户拥有的角色卡；`player_id` 必须等于当前登录用户 ID。
 
 **响应示例：**
 ```json
@@ -848,6 +867,8 @@ GET /api/v1/admin/event-context?character_id=&player_id=&status=&limit=100
 本节接口均需要登录态，且只读写当前登录用户的角色关系。相同角色 ID 组合可以在不同用户下保存不同关系。
 
 关系图谱是单聊和多角色对话中角色间关系的最高优先级来源。创建、更新、删除关系都会刷新该角色对的图谱修订时间；后续单聊、多角色生成和主动互动会过滤修订时间之前的关系相关长期记忆、角色间共享记忆和群体记忆，但会保留普通玩家事实、共同经历和世界事实。跨 session 原始群聊历史与群聊结束摘要提取仍按修订时间截止，避免旧关系状态覆盖当前图谱。删除关系后，当前图谱中缺失的边会被视为“未定义关系”，不会从旧记忆中恢复。
+
+关系两端都必须是当前用户拥有的角色卡；禁用角色仍可维护关系。接口拒绝角色与自身建立关系（400）。重复创建返回 409，删除不存在的关系返回 404。
 
 ### 1. 创建角色关系
 ```http
@@ -940,7 +961,7 @@ Content-Type: application/json
 ]
 ```
 
-批量接口逐条调用关系保存逻辑；若同一用户下同一对角色已存在关系，会按请求内容更新该关系并刷新图谱修订时间。
+批量接口逐条尝试创建并返回每项结果。自关系、未知/他人角色和已存在关系计为失败，不会覆盖已有关系；至少一项写入成功时顶层 `success` 才为 true。
 
 ---
 
@@ -969,7 +990,7 @@ Content-Type: application/json
 - `player_id`: 玩家ID
 - `player_name`: 玩家显示名称
 - `group_name` (可选): 群聊名称，会写入会话列表
-- `character_ids`: 参与角色ID列表（至少2个）；禁用角色不能用于新建群聊
+- `character_ids`: 参与角色 ID 列表（2-5 个且不得重复）；不存在、属于其他用户或已禁用的角色都会被拒绝
 
 **响应示例：**
 ```json
@@ -1004,7 +1025,7 @@ Content-Type: application/json
 
 每次玩家发起的多角色轮次会保存玩家消息和角色回复。群聊结束且有效消息数大于 6 条、摘要模型返回非空内容时，系统会将整场对话统一摘要写入 `session_summary`，并同步保存到 `group_memory` 作为群聊会话记忆；后续多角色 Prompt 会召回这些群体记忆，帮助参与角色延续共同经历。若群聊期间关系图谱被修改或删除，结束摘要和角色间印象提取只处理图谱修订时间之后的消息，避免旧关系被重新萃取。
 
-根据讨论触发条件，响应可能是单角色回复，也可能是多角色连续讨论回复。`discussion_mode` 默认启用；`max_responses` 可传 1-5，但编排器会结合语境、参与人数和内部上限动态决定实际接话人数，当前最多 4 个角色发言。讨论模式下返回结构包含 `responses` 数组，每个元素对应一个角色发言。已有群聊中如果某个角色卡被禁用，该成员仍保留在参与者列表和历史中，但不会再被编排器选中回复；如果没有任何在线可回复角色，本接口返回 400。
+根据讨论触发条件，响应可能是单角色回复，也可能是多角色连续讨论回复。`discussion_mode` 默认启用；`max_responses` 可传 1-5，但编排器会结合语境、参与人数和内部上限动态决定实际接话人数，当前最多 4 个角色发言。讨论模式下返回结构包含 `responses` 数组，每个元素对应一个角色发言。发送轮次前会重新校验全部会话参与者；任一参与角色卡不存在或被禁用时返回 400，避免以不完整参与者集合继续生成。
 
 **响应示例：**
 ```json
@@ -1017,7 +1038,8 @@ Content-Type: application/json
   "trust_delta": 0,
   "current_affinity": 1,
   "current_trust": 0,
-  "current_mood": "平静"
+  "current_mood": "平静",
+  "knowledge_sources": []
 }
 ```
 
@@ -1061,7 +1083,9 @@ Content-Type: application/json
 - 场景氛围营造
 - 推进剧情发展
 
-留空`trigger_character_id`则自动选择一个角色。
+留空 `trigger_character_id` 则自动选择一个角色。
+
+互动只允许在 `active` 会话中触发。指定 `trigger_character_id` 时，该角色必须是当前会话的活跃参与者；会话中任一参与角色卡不存在或被禁用时请求会被拒绝。
 
 **响应示例：**
 ```json
@@ -1171,6 +1195,155 @@ POST /api/v1/multi-dialogue/session/{session_id}/continue
 
 当原群聊已结束时，该接口会在同一个 `group_thread_id` 下创建新的 active 会话；若同一线程已有 active 会话，则直接返回该会话。
 
+继续会话前会校验原参与者仍存在且全部启用；否则返回 400。
+
+---
+
+## 知识库 API
+
+前缀为 `/api/v1/knowledge`，本节全部接口都需要登录态，只能访问当前用户拥有的知识库、文档和绑定目标。
+
+知识库绑定支持：
+
+- `global`：对当前用户所有单聊和群聊生效，`target_id` 为空字符串
+- `character`：对指定角色的单聊，以及该角色在群聊中生成回复时生效
+- `group_thread`：仅对指定逻辑群聊线程生效
+
+### 1. 知识库 CRUD
+
+```http
+GET    /api/v1/knowledge/bases
+POST   /api/v1/knowledge/bases
+GET    /api/v1/knowledge/bases/{knowledge_base_id}
+PUT    /api/v1/knowledge/bases/{knowledge_base_id}
+PATCH  /api/v1/knowledge/bases/{knowledge_base_id}/enabled
+DELETE /api/v1/knowledge/bases/{knowledge_base_id}
+```
+
+创建请求：
+
+```json
+{
+  "name": "北境世界观",
+  "description": "地理、历史和势力设定"
+}
+```
+
+启用状态请求：
+
+```json
+{
+  "is_enabled": true
+}
+```
+
+详情响应包含 `bindings` 和 `documents`。删除知识库会同时删除其绑定、文档记录、文本块、向量和知识目录内的原文件。
+
+### 2. 设置绑定与查询绑定目标
+
+```http
+PUT /api/v1/knowledge/bases/{knowledge_base_id}/bindings
+GET /api/v1/knowledge/binding-targets
+```
+
+设置绑定会整体替换该知识库现有绑定：
+
+```json
+{
+  "bindings": [
+    {"target_type": "global", "target_id": ""},
+    {"target_type": "character", "target_id": "npc_luo_xiaohei"},
+    {"target_type": "group_thread", "target_id": "thread-uuid"}
+  ]
+}
+```
+
+角色和群聊线程目标必须属于当前用户。`binding-targets` 返回可选角色与逻辑群聊线程。
+
+### 3. 查询文档
+
+```http
+GET /api/v1/knowledge/bases/{knowledge_base_id}/documents
+```
+
+文档状态：
+
+| 状态 | 含义 |
+|------|------|
+| `queued` | 已保存，等待后台任务接管 |
+| `processing` | 正在提取、切块和写入向量 |
+| `ready` | 可用于检索 |
+| `failed` | 处理失败，`error_message` 包含原因 |
+
+### 4. 上传文件
+
+```http
+POST /api/v1/knowledge/bases/{knowledge_base_id}/documents/upload
+Content-Type: multipart/form-data
+
+file=@world.md
+```
+
+支持 UTF-8 TXT、Markdown、PDF 和 DOCX，最大 10 MiB。PDF 最多 300 页且暂不支持无文本 OCR 扫描件；提取文本最多 1,000,000 字符。成功返回 202 和初始文档记录，后台异步处理。
+
+### 5. 粘贴文本
+
+```http
+POST /api/v1/knowledge/bases/{knowledge_base_id}/documents/paste
+Content-Type: application/json
+
+{
+  "title": "王国年表",
+  "text": "帝国历 417 年……"
+}
+```
+
+成功返回 202。新记录的 `source_type` 为 `pasted_text`。
+
+### 6. 删除或重试文档
+
+```http
+DELETE /api/v1/knowledge/documents/{document_id}
+POST   /api/v1/knowledge/documents/{document_id}/retry
+```
+
+删除会清理数据库文本块、向量和原文件。重试只适用于终态文档；`queued` 或 `processing` 文档返回 409。重试成功返回 202 并将状态重新设为 `queued`。
+
+### 7. 检索预览
+
+```http
+POST /api/v1/knowledge/preview
+Content-Type: application/json
+
+{
+  "query": "北境首都在哪里？",
+  "character_id": "npc_luo_xiaohei",
+  "group_thread_id": null,
+  "knowledge_base_id": "kb-uuid"
+}
+```
+
+`query` 最长 4000 字符。指定 `knowledge_base_id` 时只预览该知识库；否则按全局、角色和群聊线程绑定检索。响应返回实际查询文本及最多 6 个来源：
+
+```json
+{
+  "query_text": "北境首都在哪里？",
+  "sources": [
+    {
+      "knowledge_base_id": "kb-uuid",
+      "knowledge_base_name": "北境世界观",
+      "document_id": "doc-uuid",
+      "document_name": "地理.md",
+      "chunk_id": "chunk-uuid",
+      "excerpt": "北境首都是白塔城……",
+      "similarity": 0.79
+    }
+  ]
+}
+```
+
+上传和粘贴文档后，前端会对选中知识库中的 `queued/processing` 文档轮询详情。服务启动也会恢复排队中或被中断的任务；处理异常会落为 `failed`，不会永久停留在“处理中”。
+
 ---
 
 ## 用户 API
@@ -1266,6 +1439,48 @@ Content-Type: application/json
 ```
 
 传空字符串会清除头像。
+
+### 8. 获取或更新世界时钟
+
+```http
+GET /api/v1/user/world-clock
+PUT /api/v1/user/world-clock
+```
+
+更新请求中的字段均可选；`timezone` 必须是有效 IANA 时区，`time_scale` 只允许 `0`、`1`、`2`、`5`、`10`，其中 `0` 表示暂停。
+
+```json
+{
+  "timezone": "Asia/Shanghai",
+  "time_scale": 2
+}
+```
+
+响应包含 `world_now`、`real_now`、`timezone`、`time_scale` 和 `paused`。
+
+### 9. 将世界时间同步到真实时间
+
+```http
+POST /api/v1/user/world-clock/sync
+```
+
+保留当前时区和倍率，把世界时间锚点重置为当前真实 UTC 时间。
+
+### 10. 查询事件收件箱
+
+```http
+GET /api/v1/user/event-inbox?unread_only=true&limit=50
+```
+
+`limit` 范围为 1-100。通知包含来源事件/角色/会话、内容、世界创建时间、真实创建时间和 `read_at`。
+
+### 11. 标记事件通知已读
+
+```http
+POST /api/v1/user/event-inbox/{inbox_id}/read
+```
+
+只能操作当前用户自己的通知；记录不存在时返回 404。
 
 ---
 

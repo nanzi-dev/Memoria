@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Optional
 
 from memoria.core.config import configs
@@ -126,10 +127,13 @@ class KnowledgeVectorStore:
 
 
 _knowledge_vector_store: Optional[KnowledgeVectorStore] = None
+_knowledge_vector_store_lock = threading.Lock()
 
 
 def get_knowledge_vector_store() -> KnowledgeVectorStore:
     global _knowledge_vector_store
     if _knowledge_vector_store is None:
-        _knowledge_vector_store = KnowledgeVectorStore()
+        with _knowledge_vector_store_lock:
+            if _knowledge_vector_store is None:
+                _knowledge_vector_store = KnowledgeVectorStore()
     return _knowledge_vector_store

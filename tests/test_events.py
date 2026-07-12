@@ -297,11 +297,11 @@ class TestEventDeepIntegration:
             metadata={"dev": True},
         )
 
-        created = event_admin.create_event_template(req)
+        created = event_admin.create_event_template(req, current_user_id="test-user")
         assert created.success is True
         assert created.template_id == tid
         assert repository.get_event_template(tid) is not None
 
-        deleted = event_admin.delete_event_template(tid)
+        deleted = event_admin.delete_event_template(tid, current_user_id="test-user")
         assert deleted.success is True
         assert repository.get_event_template(tid) is None

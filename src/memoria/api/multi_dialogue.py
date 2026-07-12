@@ -171,6 +171,26 @@ def _inactive_character_ids(player_id: str, character_ids: list[str]) -> list[st
     ]
 
 
+def _require_active_session_participants(session_id: str) -> list[dict]:
+    """Require at least two participants whose character cards remain active."""
+    participants = repository.get_session_participants(session_id, only_active=False)
+    character_ids = [p["character_id"] for p in participants if p.get("character_id")]
+    if len(character_ids) < 2:
+        raise HTTPException(status_code=400, detail="群聊至少需要2个角色")
+
+    inactive_ids = [
+        p["character_id"]
+        for p in participants
+        if p.get("character_id") and not p.get("is_active")
+    ]
+    if inactive_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"群聊包含已禁用或不存在的角色卡: {', '.join(inactive_ids)}",
+        )
+    return participants
+
+
 def _generate_bounded_session_summary(
     session_id: str,
     messages: list[dict],
@@ -361,6 +381,8 @@ async def start_multi_session(
                 status_code=400,
                 detail="多角色会话至少需要2个角色"
             )
+        if len(set(request.character_ids)) != len(request.character_ids):
+            raise HTTPException(status_code=400, detail="群聊角色不能重复")
 
         inactive_ids = _inactive_character_ids(request.player_id, request.character_ids)
         if inactive_ids:
@@ -425,6 +447,7 @@ async def multi_dialogue_turn(
         
         if session.get("status") != "active":
             raise HTTPException(status_code=400, detail="会话已结束")
+        _require_active_session_participants(request.session_id)
         
         # 处理对话
         result = process_multi_character_turn(
@@ -487,7 +510,14 @@ async def trigger_interaction(
         logger.info(f"触发角色互动: session={request.session_id}")
         
         # 验证会话
-        _get_owned_multi_session(request.session_id, current_user_id)
+        session = _get_owned_multi_session(request.session_id, current_user_id)
+        if session.get("status") != "active":
+            raise HTTPException(status_code=400, detail="会话已结束")
+        participants = _require_active_session_participants(request.session_id)
+        if request.trigger_character_id and request.trigger_character_id not in {
+            p["character_id"] for p in participants
+        }:
+            raise HTTPException(status_code=400, detail="触发角色不在当前群聊中")
         
         # 触发互动
         orchestrator = MultiCharacterOrchestrator(request.session_id)
@@ -561,7 +591,7 @@ async def continue_multi_session(
         )
         if active_session:
             target_session_id = active_session["session_id"]
-            participants = repository.get_session_participants(target_session_id, only_active=False)
+            participants = _require_active_session_participants(target_session_id)
             return ContinueMultiSessionResponse(
                 session_id=target_session_id,
                 group_name=active_session.get("group_name") or source_session.get("group_name"),
@@ -570,10 +600,8 @@ async def continue_multi_session(
                 participants=[SessionParticipant(**p) for p in participants],
             )
 
-        participants = repository.get_session_participants(session_id, only_active=False)
+        participants = _require_active_session_participants(session_id)
         character_ids = [p["character_id"] for p in participants if p.get("character_id")]
-        if len(character_ids) < 2:
-            raise HTTPException(status_code=400, detail="群聊至少需要2个角色才能继续")
 
         new_session_id = str(uuid.uuid4())
         group_thread_id = source_session.get("group_thread_id") or source_session["session_id"]

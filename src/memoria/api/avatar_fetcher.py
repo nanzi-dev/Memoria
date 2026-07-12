@@ -80,42 +80,43 @@ def download_remote_image(url: str, timeout: float = 5.0) -> DownloadedImage:
         except requests.RequestException as exc:
             raise HTTPException(status_code=400, detail=f"无法获取图片: {exc}")
 
-        if response.is_redirect:
-            location = response.headers.get("Location")
-            if not location:
-                raise HTTPException(status_code=400, detail="图片 URL 重定向缺少 Location")
-            current_url = _validate_url(urljoin(current_url, location))
-            response.close()
-            continue
-
         try:
-            response.raise_for_status()
-        except requests.RequestException as exc:
-            raise HTTPException(status_code=400, detail=f"无法获取图片: {exc}")
-
-        content_type = (response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-        if content_type not in ALLOWED_IMAGE_MIME_TYPES:
-            raise HTTPException(status_code=400, detail=f"URL 返回的不是支持的图片: {content_type or 'unknown'}")
-
-        content_length = response.headers.get("Content-Length")
-        if content_length:
-            try:
-                if int(content_length) > MAX_REMOTE_IMAGE_BYTES:
-                    raise HTTPException(status_code=400, detail="图片文件过大")
-            except ValueError:
-                pass
-
-        chunks: list[bytes] = []
-        total = 0
-        for chunk in response.iter_content(chunk_size=64 * 1024):
-            if not chunk:
+            if response.is_redirect:
+                location = response.headers.get("Location")
+                if not location:
+                    raise HTTPException(status_code=400, detail="图片 URL 重定向缺少 Location")
+                current_url = _validate_url(urljoin(current_url, location))
                 continue
-            total += len(chunk)
-            if total > MAX_REMOTE_IMAGE_BYTES:
-                response.close()
-                raise HTTPException(status_code=400, detail="图片文件过大")
-            chunks.append(chunk)
 
-        return DownloadedImage(data=b"".join(chunks), content_type=content_type)
+            try:
+                response.raise_for_status()
+            except requests.RequestException as exc:
+                raise HTTPException(status_code=400, detail=f"无法获取图片: {exc}")
+
+            content_type = (response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+            if content_type not in ALLOWED_IMAGE_MIME_TYPES:
+                raise HTTPException(status_code=400, detail=f"URL 返回的不是支持的图片: {content_type or 'unknown'}")
+
+            content_length = response.headers.get("Content-Length")
+            if content_length:
+                try:
+                    if int(content_length) > MAX_REMOTE_IMAGE_BYTES:
+                        raise HTTPException(status_code=400, detail="图片文件过大")
+                except ValueError:
+                    pass
+
+            chunks: list[bytes] = []
+            total = 0
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > MAX_REMOTE_IMAGE_BYTES:
+                    raise HTTPException(status_code=400, detail="图片文件过大")
+                chunks.append(chunk)
+
+            return DownloadedImage(data=b"".join(chunks), content_type=content_type)
+        finally:
+            response.close()
 
     raise HTTPException(status_code=400, detail="图片 URL 重定向次数过多")

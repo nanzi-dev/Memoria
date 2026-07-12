@@ -8,6 +8,7 @@
 import asyncio
 import os
 import logging
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -28,12 +29,13 @@ from memoria.api.user import (
     router as user_router,
     require_current_user_id,
 )
-from memoria.db.repository import init_db
 from memoria.core.config import configs
 from memoria.core.event_runtime import (
     ensure_default_event_templates,
     run_world_clock_scheduler,
 )
+from memoria.core.knowledge_service import process_knowledge_document
+from memoria.db import repository
 
 # =========================
 # 结构化日志配置
@@ -100,6 +102,31 @@ def _get_rate_limit_key(request: Request) -> str:
 # =========================
 # 生命周期管理
 # =========================
+def _resume_incomplete_knowledge_documents(
+    stop_event: threading.Event | None = None,
+) -> None:
+    documents = repository.list_incomplete_knowledge_documents()
+    if not documents:
+        return
+    logger.warning("恢复 %s 个未完成的知识文档处理任务", len(documents))
+    for document in documents:
+        if stop_event is not None and stop_event.is_set():
+            return
+        try:
+            process_knowledge_document(
+                document["owner_user_id"],
+                document["document_id"],
+                resume_processing=True,
+                expected_status=document["status"],
+                expected_updated_at=document["updated_at"],
+            )
+        except Exception:
+            logger.exception(
+                "恢复知识文档处理任务失败: document=%s",
+                document["document_id"],
+            )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ---------- startup ----------
@@ -109,7 +136,7 @@ async def lifespan(app: FastAPI):
             logger.warning("配置警告: %s", err)
     
     try:
-        init_db()
+        repository.init_db()
         ensure_default_event_templates()
         logger.info("数据库初始化成功")
     except Exception as e:
@@ -120,12 +147,21 @@ async def lifespan(app: FastAPI):
         run_world_clock_scheduler(),
         name="memoria-world-clock-scheduler",
     )
+    knowledge_recovery_stop = threading.Event()
+    knowledge_recovery_thread = threading.Thread(
+        target=_resume_incomplete_knowledge_documents,
+        args=(knowledge_recovery_stop,),
+        name="memoria-knowledge-document-recovery",
+        daemon=True,
+    )
+    knowledge_recovery_thread.start()
     logger.info("Memoria 服务已启动 (v%s)", APP_VERSION)
     try:
         yield
     finally:
         # ---------- shutdown ----------
         scheduler_task.cancel()
+        knowledge_recovery_stop.set()
         try:
             await scheduler_task
         except asyncio.CancelledError:
