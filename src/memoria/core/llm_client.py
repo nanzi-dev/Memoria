@@ -10,11 +10,15 @@ LLM 调用适配层
 """
 
 import json
+import inspect
 import logging
 import re
 from typing import Callable, Optional
+from urllib.parse import urlsplit
+from urllib.request import getproxies, proxy_bypass
 
-from openai import BadRequestError, OpenAI
+import httpx
+from openai import BadRequestError, DefaultHttpxClient, OpenAI
 
 from memoria.core import performance, tracing
 from memoria.core.config import configs
@@ -30,12 +34,51 @@ _client = None
 _light_client = None
 _light_client_signature = None
 
+
+def _resolve_http_proxy(base_url: str) -> str | None:
+    """Resolve one HTTP proxy without letting an unsupported ALL_PROXY win."""
+    parsed = urlsplit(base_url)
+    if not parsed.hostname or proxy_bypass(parsed.hostname):
+        return None
+
+    proxies = getproxies()
+    proxy_url = proxies.get(parsed.scheme.lower()) or proxies.get("all")
+    if not proxy_url:
+        return None
+
+    proxy_scheme = urlsplit(proxy_url).scheme.lower()
+    if proxy_scheme not in {"http", "https"}:
+        logger.warning("Ignoring unsupported LLM proxy scheme: %s", proxy_scheme or "unknown")
+        return None
+    return proxy_url
+
+
+def _build_http_client(base_url: str):
+    proxy_url = _resolve_http_proxy(base_url)
+    kwargs = {"trust_env": False}
+    if proxy_url:
+        proxy_parameter = (
+            "proxy"
+            if "proxy" in inspect.signature(httpx.Client).parameters
+            else "proxies"
+        )
+        kwargs[proxy_parameter] = proxy_url
+    return DefaultHttpxClient(**kwargs)
+
+
+def _create_openai_client(base_url: str, api_key: str):
+    return OpenAI(
+        base_url=base_url,
+        api_key=api_key,
+        http_client=_build_http_client(base_url),
+    )
+
 def _get_client():
     global _client
     if _client is None:
-        _client = OpenAI(
-            base_url=configs.llm_base_url,
-            api_key=configs.llm_api_key.get_secret_value()
+        _client = _create_openai_client(
+            configs.llm_base_url,
+            configs.llm_api_key.get_secret_value(),
         )
     return _client
 
@@ -45,11 +88,15 @@ def _get_light_client():
     global _light_client, _light_client_signature
     light_api_key = configs.llm_light_api_key.get_secret_value()
     if configs.llm_light_base_url and light_api_key:
-        signature = (configs.llm_light_base_url, light_api_key)
+        signature = (
+            configs.llm_light_base_url,
+            light_api_key,
+            _resolve_http_proxy(configs.llm_light_base_url),
+        )
         if _light_client is None or _light_client_signature != signature:
-            _light_client = OpenAI(
-                base_url=configs.llm_light_base_url,
-                api_key=light_api_key,
+            _light_client = _create_openai_client(
+                configs.llm_light_base_url,
+                light_api_key,
             )
             _light_client_signature = signature
             logger.info("Light task client initialized: %s", configs.llm_light_base_url)

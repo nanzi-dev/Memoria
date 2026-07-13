@@ -201,17 +201,21 @@ def test_get_light_client_uses_light_base_url(monkeypatch):
     from memoria.core import llm_client
 
     created = {}
+    http_client = object()
 
     class FakeOpenAI:
-        def __init__(self, base_url, api_key):
+        def __init__(self, base_url, api_key, http_client):
             created["base_url"] = base_url
             created["api_key"] = api_key
+            created["http_client"] = http_client
 
     monkeypatch.setattr(llm_client.configs, "llm_base_url", "https://main.test/v1")
     monkeypatch.setattr(llm_client.configs, "llm_api_key", SecretStr("main-key"))
     monkeypatch.setattr(llm_client.configs, "llm_light_base_url", "https://light.test/v1")
     monkeypatch.setattr(llm_client.configs, "llm_light_api_key", SecretStr("light-key"))
     monkeypatch.setattr(llm_client, "OpenAI", FakeOpenAI)
+    monkeypatch.setattr(llm_client, "_build_http_client", lambda base_url: http_client)
+    monkeypatch.setattr(llm_client, "_resolve_http_proxy", lambda base_url: None)
     monkeypatch.setattr(llm_client, "_client", None)
     monkeypatch.setattr(llm_client, "_light_client", None)
     monkeypatch.setattr(llm_client, "_light_client_signature", None)
@@ -219,7 +223,75 @@ def test_get_light_client_uses_light_base_url(monkeypatch):
     client = llm_client._get_light_client()
 
     assert isinstance(client, FakeOpenAI)
-    assert created == {"base_url": "https://light.test/v1", "api_key": "light-key"}
+    assert created == {
+        "base_url": "https://light.test/v1",
+        "api_key": "light-key",
+        "http_client": http_client,
+    }
+
+
+def test_llm_http_client_prefers_scheme_proxy_over_all_proxy(monkeypatch):
+    from memoria.core import llm_client
+
+    created = {}
+
+    class FakeHttpClient:
+        def __init__(self, **kwargs):
+            created.update(kwargs)
+
+    monkeypatch.setattr(
+        llm_client,
+        "getproxies",
+        lambda: {
+            "https": "http://127.0.0.1:7890/",
+            "all": "socks://127.0.0.1:7890/",
+        },
+    )
+    monkeypatch.setattr(llm_client, "proxy_bypass", lambda host: False)
+    monkeypatch.setattr(llm_client, "DefaultHttpxClient", FakeHttpClient)
+    monkeypatch.setattr(
+        llm_client.inspect,
+        "signature",
+        lambda callable_obj: SimpleNamespace(parameters={"proxy": object()}),
+    )
+
+    client = llm_client._build_http_client("https://api.deepseek.test/v1")
+
+    assert isinstance(client, FakeHttpClient)
+    assert created == {
+        "trust_env": False,
+        "proxy": "http://127.0.0.1:7890/",
+    }
+
+
+def test_llm_http_client_supports_legacy_httpx_proxy_parameter(monkeypatch):
+    from memoria.core import llm_client
+
+    created = {}
+
+    class FakeHttpClient:
+        def __init__(self, **kwargs):
+            created.update(kwargs)
+
+    monkeypatch.setattr(
+        llm_client,
+        "_resolve_http_proxy",
+        lambda base_url: "http://127.0.0.1:7890/",
+    )
+    monkeypatch.setattr(llm_client, "DefaultHttpxClient", FakeHttpClient)
+    monkeypatch.setattr(
+        llm_client.inspect,
+        "signature",
+        lambda callable_obj: SimpleNamespace(parameters={"proxies": object()}),
+    )
+
+    client = llm_client._build_http_client("https://api.deepseek.test/v1")
+
+    assert isinstance(client, FakeHttpClient)
+    assert created == {
+        "trust_env": False,
+        "proxies": "http://127.0.0.1:7890/",
+    }
 
 
 def test_call_light_task_can_ignore_reasoning_content(monkeypatch):

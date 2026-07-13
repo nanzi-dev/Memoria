@@ -250,6 +250,8 @@ class TestMemoryExtractor:
         assert "玩家消息 1" not in called["prompt"]
         assert "玩家消息 2" in called["prompt"]
         assert "玩家消息 7" in called["prompt"]
+        assert "玩家明确做出的承诺、邀请、决定或计划" in called["prompt"]
+        assert "玩家承诺本次请客" in called["prompt"]
 
     def test_format_messages_empty(self):
         from memoria.core.multi_character_memory import _format_messages_for_extraction as _format_messages
