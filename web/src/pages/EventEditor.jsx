@@ -11,24 +11,24 @@ import {
   ChevronUp,
   X,
   AlertCircle,
-  CheckCircle2,
-  Activity,
-  Settings2,
-  GitBranch,
+  AlertTriangle,
   Wand2,
 } from 'lucide-react';
 import { eventAdmin } from '../api/memoria';
 import { useDialog } from '../context/DialogContext';
-import SideRays from '../components/SideRays';
+import EventOperationsPanel from '../components/EventOperationsPanel';
 
 const TRIGGER_TYPES = [
   { value: 'affinity_threshold', label: '好感度阈值' },
   { value: 'trust_threshold', label: '信任度阈值' },
   { value: 'keyword_match', label: '关键词匹配' },
+  { value: 'npc_keyword_match', label: 'NPC 回复关键词' },
   { value: 'dialogue_count', label: '对话次数' },
   { value: 'time_based', label: '时间条件' },
   { value: 'mood_match', label: '情绪匹配' },
-  { value: 'relationship_change', label: '关系变化' },
+  { value: 'state_delta', label: '状态变化量' },
+  { value: 'event_history', label: '事件历史' },
+  { value: 'world_time_window', label: '世界时间窗口' },
   { value: 'composite', label: '复合条件' },
 ];
 
@@ -47,14 +47,33 @@ const EFFECT_TYPES = [
   { value: 'add_memory', label: '添加记忆' },
   { value: 'change_mood', label: '改变情绪' },
   { value: 'notify_player', label: '通知玩家' },
-  { value: 'grant_item', label: '给予物品' },
-  { value: 'start_quest', label: '开启任务' },
-  { value: 'modify_relationship', label: '修改关系' },
   { value: 'trigger_event', label: '触发事件链' },
   { value: 'branch_event', label: '分支事件' },
   { value: 'npc_proactive_dialogue', label: 'NPC 主动发言' },
+  { value: 'update_event_progress', label: '更新事件进度' },
 ];
 const EFFECT_LABELS = Object.fromEntries(EFFECT_TYPES.map(et => [et.value, et.label]));
+
+const UNAVAILABLE_TRIGGER_TYPES = new Set([
+  'item_acquired',
+  'quest_completed',
+  'relationship_change',
+]);
+const UNAVAILABLE_EFFECT_TYPES = new Set([
+  'grant_item',
+  'start_quest',
+  'modify_relationship',
+]);
+const MATCH_MODES = [
+  { value: 'any', label: '任一匹配' },
+  { value: 'all', label: '全部匹配' },
+  { value: 'exact', label: '全文精确' },
+  { value: 'whole_word', label: '完整词匹配' },
+  { value: 'regex', label: '正则表达式' },
+];
+const EVENT_STATUSES = ['succeeded', 'failed', 'partial', 'skipped'];
+const PROGRESS_STATUSES = ['pending', 'active', 'completed', 'failed'];
+const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
 
 const MOODS = ['happy', 'sad', 'angry', 'fearful', 'surprised', 'disgusted', 'neutral', 'excited', 'nervous', 'calm'];
 
@@ -74,10 +93,13 @@ const DEFAULT_EFFECT = {
   target_character_id: '',
   relationship_change: {},
   next_event_id: '',
-  branch_conditions_text: '',
+  branch_conditions: [],
   target_session_id: '',
   proactive_character_id: '',
   proactive_prompt: '',
+  progress: null,
+  progress_delta: null,
+  event_status: '',
 };
 
 const DEFAULT_SUB_CONDITION = {
@@ -86,23 +108,23 @@ const DEFAULT_SUB_CONDITION = {
   comparison: 'gte',
   keywords: [],
   match_mode: 'any',
+  crossing: false,
+  state_field: 'affinity',
+  event_id: '',
+  event_status: 'succeeded',
+  min_occurrences: 1,
+  time_window_start: '',
+  time_window_end: '',
+  weekdays: [],
+  cooldown_hours: 0,
+};
+
+const DEFAULT_BRANCH_CONDITION = {
+  event_id: '',
+  condition: { ...DEFAULT_SUB_CONDITION },
 };
 
 const cloneJson = value => JSON.parse(JSON.stringify(value ?? null));
-
-const EDITOR_RAYS_PROPS = {
-  speed: 1.45,
-  rayColor1: '#A7EF9E',
-  rayColor2: '#96c8ff',
-  intensity: 1.75,
-  spread: 2,
-  origin: 'top-right',
-  tilt: -10,
-  saturation: 1.25,
-  blend: 0.68,
-  falloff: 1.65,
-  opacity: 0.48,
-};
 
 const DEFAULT_FORM = {
   event_id: '',
@@ -112,24 +134,13 @@ const DEFAULT_FORM = {
   trigger_condition: { trigger_type: 'keyword_match', keywords: [], match_mode: 'any', cooldown_hours: 0 },
   effects: [],
   priority: 0,
+  exclusive_group: '',
+  max_triggers_per_turn: 3,
+  stop_processing: false,
   is_active: true,
+  schedule: '',
   template_id: '',
 };
-
-function makeEventId(name) {
-  const slug = String(name || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '_')
-    .replace(/[^a-z0-9_]/g, '')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '');
-  return `evt_${slug || 'custom_event'}`;
-}
-
-function snapshotForm(form) {
-  return JSON.stringify(form);
-}
 
 function cloneDefaultForm() {
   return {
@@ -160,6 +171,7 @@ function sanitizeEffect(effect) {
     'target_session_id',
     'proactive_character_id',
     'proactive_prompt',
+    'event_status',
   ]) {
     if (key in cleaned) cleaned[key] = sanitizeOptionalString(cleaned[key]);
   }
@@ -171,7 +183,36 @@ function sanitizeEffect(effect) {
       cleaned.branch_conditions = cleaned.branch_conditions || [];
     }
   }
+  if (Array.isArray(cleaned.branch_conditions)) {
+    cleaned.branch_conditions = cleaned.branch_conditions.map(branch => ({
+      ...branch,
+      event_id: sanitizeOptionalString(branch?.event_id),
+      condition: sanitizeCondition(branch?.condition),
+    }));
+  }
 
+  return cleaned;
+}
+
+function sanitizeCondition(condition) {
+  const cleaned = cloneJson(condition || DEFAULT_FORM.trigger_condition);
+  for (const key of [
+    'schedule',
+    'mood',
+    'state_field',
+    'event_id',
+    'event_status',
+    'time_window_start',
+    'time_window_end',
+  ]) {
+    if (key in cleaned) cleaned[key] = sanitizeOptionalString(cleaned[key]);
+  }
+  if (Array.isArray(cleaned.sub_conditions)) {
+    cleaned.sub_conditions = cleaned.sub_conditions.map(sanitizeCondition);
+  }
+  if (Array.isArray(cleaned.weekdays) && cleaned.weekdays.length === 0) {
+    cleaned.weekdays = null;
+  }
   return cleaned;
 }
 
@@ -183,127 +224,166 @@ function sanitizeEventPayload(form) {
     description: String(form.description || '').trim(),
     character_id: sanitizeOptionalString(form.character_id),
     priority: Number(form.priority) || 0,
-    trigger_condition: form.trigger_condition || DEFAULT_FORM.trigger_condition,
+    exclusive_group: sanitizeOptionalString(form.exclusive_group),
+    max_triggers_per_turn: Math.max(1, Math.min(20, Number(form.max_triggers_per_turn) || 3)),
+    stop_processing: Boolean(form.stop_processing),
+    schedule: sanitizeOptionalString(form.schedule),
+    trigger_condition: sanitizeCondition(form.trigger_condition),
     effects: (form.effects || []).map(sanitizeEffect),
   };
 }
 
+function collectUnavailableConfiguration(condition, effects, messages = []) {
+  if (UNAVAILABLE_TRIGGER_TYPES.has(condition?.trigger_type)) {
+    messages.push(`触发类型 ${condition.trigger_type} 尚未实现`);
+  }
+  for (const child of condition?.sub_conditions || []) {
+    collectUnavailableConfiguration(child, [], messages);
+  }
+  for (const effect of effects || []) {
+    if (UNAVAILABLE_EFFECT_TYPES.has(effect.effect_type)) {
+      messages.push(`效果类型 ${effect.effect_type} 尚未实现`);
+    }
+  }
+  return messages;
+}
+
 function validateEventForm(form) {
   const errors = [];
+  const warnings = [];
   const condition = form.trigger_condition || {};
-  const triggerType = condition.trigger_type;
 
   if (!String(form.event_id || '').trim()) errors.push('事件 ID 必填');
   if (!String(form.event_name || '').trim()) errors.push('事件名称必填');
+  if (form.schedule?.trim() && !form.character_id?.trim()) {
+    errors.push('定时事件必须绑定角色 ID');
+  }
 
-  if (triggerType === 'keyword_match' && !(condition.keywords || []).length) {
-    errors.push('关键词触发需要至少 1 个关键词');
+  function validateCondition(current, label = '触发条件') {
+    const triggerType = current?.trigger_type;
+    if (UNAVAILABLE_TRIGGER_TYPES.has(triggerType)) {
+      errors.push(`${label}使用未实现类型 ${triggerType}，请更换后保存`);
+    }
+    if (
+      (triggerType === 'keyword_match' || triggerType === 'npc_keyword_match')
+      && !(current.keywords || []).some(keyword => String(keyword || '').trim())
+    ) {
+      errors.push(`${label}需要至少 1 个关键词`);
+    }
+    if (
+      ['affinity_threshold', 'trust_threshold', 'state_delta'].includes(triggerType)
+      && current.threshold == null
+    ) {
+      errors.push(`${label}需要填写阈值`);
+    }
+    if (triggerType === 'state_delta' && !['affinity', 'trust'].includes(current.state_field)) {
+      errors.push(`${label}需要选择好感度或信任度变化量`);
+    }
+    if (triggerType === 'dialogue_count' && current.count == null) {
+      errors.push(`${label}需要填写对话次数`);
+    }
+    if (triggerType === 'time_based' && current.duration_minutes == null && !current.schedule?.trim()) {
+      errors.push(`${label}需要填写分钟数或 Cron 表达式`);
+    }
+    if (triggerType === 'mood_match' && !current.mood) {
+      errors.push(`${label}需要选择情绪`);
+    }
+    if (triggerType === 'event_history' && !current.event_id) {
+      errors.push(`${label}需要选择依赖事件`);
+    }
+    if (triggerType === 'event_history' && Number(current.min_occurrences) < 1) {
+      errors.push(`${label}的最少执行次数必须大于 0`);
+    }
+    if (
+      triggerType === 'world_time_window'
+      && (!current.time_window_start || !current.time_window_end)
+    ) {
+      errors.push(`${label}需要填写开始和结束时间`);
+    }
+    if (triggerType === 'composite') {
+      if (!(current.sub_conditions || []).length) {
+        errors.push(`${label}需要至少 1 个子条件`);
+      }
+      (current.sub_conditions || []).forEach((child, index) => {
+        validateCondition(child, `${label} #${index + 1}`);
+      });
+    }
   }
-  if ((triggerType === 'affinity_threshold' || triggerType === 'trust_threshold') && condition.threshold == null) {
-    errors.push('阈值触发需要填写阈值');
-  }
-  if (triggerType === 'dialogue_count' && !condition.count) {
-    errors.push('对话次数触发需要填写次数');
-  }
-  if (triggerType === 'time_based' && !condition.duration_minutes && !condition.schedule) {
-    errors.push('时间触发需要填写分钟数或计划表达式');
-  }
-  if (triggerType === 'composite' && !(condition.sub_conditions || []).length) {
-    errors.push('复合条件需要至少 1 个子条件');
-  }
+
+  validateCondition(condition);
 
   (form.effects || []).forEach((effect, index) => {
     const label = `效果 #${index + 1}`;
-    if (effect.effect_type === 'trigger_event' && !String(effect.next_event_id || '').trim()) {
-      errors.push(`${label} 需要填写后续事件 ID`);
+    if (UNAVAILABLE_EFFECT_TYPES.has(effect.effect_type)) {
+      errors.push(`${label} 使用未实现类型 ${effect.effect_type}，请更换后保存`);
     }
-    if (effect.effect_type === 'branch_event' && effect.branch_conditions_text) {
-      try {
-        JSON.parse(effect.branch_conditions_text);
-      } catch (err) {
-        errors.push(`${label} 的分支 JSON 格式不正确`);
+    if (effect.effect_type === 'modify_state' && !Object.keys(effect.state_changes || {}).length) {
+      errors.push(`${label} 需要至少 1 个状态变化`);
+    }
+    if (effect.effect_type === 'modify_state') {
+      const unknownFields = Object.keys(effect.state_changes || {}).filter(
+        key => !['affection_level', 'trust_level', 'current_mood'].includes(key)
+      );
+      if (unknownFields.length) {
+        errors.push(`${label} 包含不支持的状态字段: ${unknownFields.join(', ')}`);
       }
+    }
+    if (effect.effect_type === 'unlock_content' && !(effect.unlock_keys || []).length) {
+      errors.push(`${label} 需要至少 1 个解锁标识`);
+    }
+    if (effect.effect_type === 'trigger_dialogue' && !String(effect.dialogue_text || '').trim()) {
+      errors.push(`${label} 需要填写对话内容`);
+    }
+    if (effect.effect_type === 'add_memory' && !String(effect.memory_text || '').trim()) {
+      errors.push(`${label} 需要填写记忆内容`);
+    }
+    if (effect.effect_type === 'change_mood' && !effect.target_mood) {
+      errors.push(`${label} 需要选择目标情绪`);
+    }
+    if (effect.effect_type === 'notify_player' && !String(effect.notification_message || '').trim()) {
+      errors.push(`${label} 需要填写通知消息`);
+    }
+    if (effect.effect_type === 'trigger_event' && !String(effect.next_event_id || '').trim()) {
+      errors.push(`${label} 需要选择后续事件`);
+    }
+    if (effect.effect_type === 'branch_event' && !(effect.branch_conditions || []).length) {
+      errors.push(`${label} 需要至少 1 个分支`);
+    }
+    if (effect.effect_type === 'branch_event') {
+      (effect.branch_conditions || []).forEach((branch, branchIndex) => {
+        if (!branch.event_id || !branch.condition) {
+          errors.push(`${label} 的分支 #${branchIndex + 1} 配置不完整`);
+        } else {
+          validateCondition(branch.condition, `${label} 的分支 #${branchIndex + 1}`);
+        }
+      });
     }
     if (effect.effect_type === 'npc_proactive_dialogue' && !String(effect.proactive_prompt || '').trim()) {
       errors.push(`${label} 需要填写主动发言提示`);
     }
+    if (
+      effect.effect_type === 'update_event_progress'
+      && effect.progress == null
+      && effect.progress_delta == null
+      && !effect.event_status
+    ) {
+      errors.push(`${label} 需要设置进度、进度变化量或状态`);
+    }
+    if (
+      effect.effect_type === 'update_event_progress'
+      && effect.progress != null
+      && (Number(effect.progress) < 0 || Number(effect.progress) > 1)
+    ) {
+      errors.push(`${label} 的直接进度必须位于 0 到 1`);
+    }
   });
 
-  const warnings = [];
   if (!form.effects?.length) warnings.push('当前事件没有效果，触发后不会产生动作');
   if (!form.description?.trim()) warnings.push('建议补充描述，便于后续维护');
 
   return { errors, warnings };
 }
 
-
-// ─── Key-Value Pair Editor ───────────────────────────────────────────────
-function KeyValueEditor({ data, onChange, keyLabel, valueLabel }) {
-  const entries = Object.entries(data || {});
-
-  function handleAdd() {
-    onChange({ ...data, '': '' });
-  }
-
-  function handleChange(oldKey, newKey, newValue) {
-    const result = {};
-    for (const [k, v] of Object.entries(data)) {
-      if (k === oldKey) {
-        if (newKey.trim()) result[newKey.trim()] = newValue;
-      } else {
-        result[k] = v;
-      }
-    }
-    onChange(result);
-  }
-
-  function handleDelete(key) {
-    const result = { ...data };
-    delete result[key];
-    onChange(result);
-  }
-
-  return (
-    <div className="space-y-1">
-      {entries.length === 0 && (
-        <p className="text-[10px] font-mono text-cyber-green/15 italic">暂无条目</p>
-      )}
-      {entries.map(([key, value]) => (
-        <div key={key} className="flex items-center gap-1.5 group">
-          <input
-            type="text"
-            value={key}
-            onChange={e => handleChange(key, e.target.value, value)}
-            placeholder={keyLabel || '键'}
-            className="flex-1 bg-cyber-surface border border-cyber-green/15 text-cyber-green text-[11px] font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/40 placeholder:text-cyber-green/15"
-          />
-          <span className="text-cyber-green/20 text-[10px]">=</span>
-          <input
-            type="text"
-            value={value}
-            onChange={e => handleChange(key, key, e.target.value)}
-            placeholder={valueLabel || '值'}
-            className="flex-1 bg-cyber-surface border border-cyber-green/15 text-cyber-green text-[11px] font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/40 placeholder:text-cyber-green/15"
-          />
-          <button
-            type="button"
-            onClick={() => handleDelete(key)}
-            className="text-cyber-green/15 hover:text-red-400/60 transition-colors shrink-0 opacity-0 group-hover:opacity-100"
-          >
-            <X size={12} />
-          </button>
-        </div>
-      ))}
-      <button
-        type="button"
-        onClick={handleAdd}
-        className="text-[10px] font-mono text-cyber-green/35 hover:text-cyber-green/70 flex items-center gap-1 transition-colors"
-      >
-        <Plus size={10} /> 添加条目
-      </button>
-    </div>
-  );
-}
 
 // ─── Pipeline Preview ────────────────────────────────────────────────────
 function PipelinePreview({ triggerCondition, effects }) {
@@ -350,18 +430,48 @@ function PipelinePreview({ triggerCondition, effects }) {
   );
 }
 
-function SubConditionEditor({ condition, onChange, onDelete, depth = 0 }) {
+function EventDependencySelect({ value, onChange, eventOptions, placeholder, allowEmpty = true }) {
+  const normalizedValue = value || '';
+  const valueIsMissing = normalizedValue && !eventOptions.some(event => event.event_id === normalizedValue);
+
   return (
-    <div className="ml-4 pl-4 border-l-2 border-cyber-green/10 rounded">
+    <select
+      value={normalizedValue}
+      onChange={event => onChange(event.target.value)}
+      className="min-h-[42px] w-full min-w-0 rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+    >
+      {allowEmpty && <option value="">{placeholder || '选择事件'}</option>}
+      {valueIsMissing && (
+        <option value={normalizedValue}>[{normalizedValue} - 当前不可选]</option>
+      )}
+      {eventOptions.map(event => (
+        <option key={event.event_id} value={event.event_id}>
+          {event.event_name ? `${event.event_name} (${event.event_id})` : event.event_id}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function SubConditionEditor({ condition, onChange, onDelete, eventOptions, depth = 0 }) {
+  return (
+    <div className="rounded border-l-2 border-cyber-green/10 pl-3 sm:ml-4 sm:pl-4">
       <div className="flex items-center justify-between mb-1">
         <span className="text-[10px] font-mono text-cyber-green/40">子条件</span>
-        <button type="button" onClick={onDelete} className="text-cyber-green/20 hover:text-red-400 transition-colors">
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label="删除子条件"
+          title="删除子条件"
+          className="inline-flex h-9 w-9 items-center justify-center text-cyber-green/30 transition-colors hover:text-red-400"
+        >
           <Trash2 size={10} />
         </button>
       </div>
       <TriggerConditionForm
         condition={condition}
         onChange={onChange}
+        eventOptions={eventOptions}
         isSub={true}
         depth={depth + 1}
       />
@@ -369,9 +479,11 @@ function SubConditionEditor({ condition, onChange, onDelete, depth = 0 }) {
   );
 }
 
-function TriggerConditionForm({ condition, onChange, isSub = false, depth = 0 }) {
+function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = false, depth = 0 }) {
   const update = (k, v) => onChange({ ...condition, [k]: v });
-  const t = condition.trigger_type;
+  const t = condition?.trigger_type || 'keyword_match';
+  const unavailable = UNAVAILABLE_TRIGGER_TYPES.has(t);
+  const thresholdType = ['affinity_threshold', 'trust_threshold', 'state_delta'].includes(t);
 
   return (
     <div className="space-y-3">
@@ -379,21 +491,28 @@ function TriggerConditionForm({ condition, onChange, isSub = false, depth = 0 })
         <select
           value={t}
           onChange={e => onChange({ ...DEFAULT_SUB_CONDITION, trigger_type: e.target.value })}
-          className="bg-cyber-surface border border-cyber-green/30 text-cyber-green text-xs font-mono rounded px-2 py-1.5 focus:outline-none focus:border-cyber-green/60"
+          className="min-h-[42px] max-w-full rounded border border-cyber-green/30 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/60 focus:outline-none"
         >
+          {unavailable && <option value={t}>{t}（未实现）</option>}
           {TRIGGER_TYPES.filter(tt => isSub ? tt.value !== 'composite' : true).map(tt => (
             <option key={tt.value} value={tt.value}>{tt.label}</option>
           ))}
         </select>
       </div>
 
-      {/* Threshold-based: affinity, trust, dialogue_count, time_based */}
-      {(t === 'affinity_threshold' || t === 'trust_threshold' || t === 'dialogue_count' || t === 'time_based') && (
-        <div className="flex items-center gap-2">
+      {unavailable && (
+        <div className="flex items-start gap-2 rounded border border-amber-300/20 bg-amber-300/5 p-3 text-[10px] font-mono text-amber-200/70">
+          <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+          该旧触发类型尚未实现，原配置已保留。请切换到可用类型后再保存。
+        </div>
+      )}
+
+      {thresholdType && (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,180px)_minmax(0,140px)]">
           <select
             value={condition.comparison || 'gte'}
             onChange={e => update('comparison', e.target.value)}
-            className="bg-cyber-surface border border-cyber-green/20 text-cyber-green/70 text-xs font-mono rounded px-2 py-1"
+            className="min-h-[42px] rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green/70"
           >
             {COMPARISONS.map(c => (
               <option key={c.value} value={c.value}>{c.label}</option>
@@ -401,46 +520,111 @@ function TriggerConditionForm({ condition, onChange, isSub = false, depth = 0 })
           </select>
           <input
             type="number"
-            value={t === 'time_based' ? (condition.duration_minutes || '') : (t === 'dialogue_count' ? (condition.count || '') : (condition.threshold ?? ''))}
-            onChange={e => {
-              const v = e.target.value === '' ? null : Number(e.target.value);
-              if (t === 'time_based') update('duration_minutes', v);
-              else if (t === 'dialogue_count') update('count', v);
-              else update('threshold', v);
-            }}
+            value={condition.threshold ?? ''}
+            onChange={e => update('threshold', e.target.value === '' ? null : Number(e.target.value))}
             placeholder="数值"
-            className="bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 w-24 focus:outline-none focus:border-cyber-green/50"
+            className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
           />
         </div>
       )}
 
-      {/* Keywords */}
-      {t === 'keyword_match' && (
+      {(t === 'affinity_threshold' || t === 'trust_threshold') && (
+        <label className="flex min-h-[40px] items-center gap-2 text-[10px] font-mono text-cyber-green/45">
+          <input
+            type="checkbox"
+            checked={Boolean(condition.crossing)}
+            onChange={e => update('crossing', e.target.checked)}
+            className="accent-cyber-green"
+          />
+          仅在本轮首次跨过阈值时触发
+        </label>
+      )}
+
+      {t === 'state_delta' && (
+        <label className="block text-[10px] font-mono text-cyber-green/40">
+          <span className="mb-1 block">变化字段</span>
+          <select
+            value={condition.state_field || 'affinity'}
+            onChange={e => update('state_field', e.target.value)}
+            className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green sm:max-w-xs"
+          >
+            <option value="affinity">好感度变化量</option>
+            <option value="trust">信任度变化量</option>
+          </select>
+        </label>
+      )}
+
+      {t === 'dialogue_count' && (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,180px)_minmax(0,140px)]">
+          <select
+            value={condition.comparison || 'gte'}
+            onChange={e => update('comparison', e.target.value)}
+            className="min-h-[42px] rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green/70"
+          >
+            {COMPARISONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
+          <input
+            type="number"
+            min="0"
+            value={condition.count ?? ''}
+            onChange={e => update('count', e.target.value === '' ? null : Number(e.target.value))}
+            placeholder="历史总轮数"
+            className="min-h-[42px] rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+          />
+        </div>
+      )}
+
+      {t === 'time_based' && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label className="text-[10px] font-mono text-cyber-green/40">
+            <span className="mb-1 block">会话时长（分钟）</span>
+            <input
+              type="number"
+              min="0"
+              value={condition.duration_minutes ?? ''}
+              onChange={e => update('duration_minutes', e.target.value === '' ? null : Number(e.target.value))}
+              className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+            />
+          </label>
+          <label className="text-[10px] font-mono text-cyber-green/40">
+            <span className="mb-1 block">Cron（5 字段，可替代时长）</span>
+            <input
+              type="text"
+              value={condition.schedule || ''}
+              onChange={e => update('schedule', e.target.value)}
+              placeholder="0 9 * * *"
+              className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+            />
+          </label>
+        </div>
+      )}
+
+      {(t === 'keyword_match' || t === 'npc_keyword_match') && (
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <select
               value={condition.match_mode || 'any'}
               onChange={e => update('match_mode', e.target.value)}
-              className="bg-cyber-surface border border-cyber-green/20 text-cyber-green/70 text-xs font-mono rounded px-2 py-0.5"
+              className="min-h-[42px] rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green/70"
             >
-              <option value="any">任一匹配</option>
-              <option value="all">全部匹配</option>
+              {MATCH_MODES.map(mode => (
+                <option key={mode.value} value={mode.value}>{mode.label}</option>
+              ))}
             </select>
           </div>
           <TagInput
             tags={condition.keywords || []}
             onChange={v => update('keywords', v)}
-            placeholder="输入关键词按 Enter 添加"
+            placeholder={condition.match_mode === 'regex' ? '输入正则表达式并按 Enter' : '输入关键词并按 Enter'}
           />
         </div>
       )}
 
-      {/* Mood */}
       {t === 'mood_match' && (
         <select
           value={condition.mood || 'neutral'}
           onChange={e => update('mood', e.target.value)}
-          className="bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1"
+          className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green sm:max-w-xs"
         >
           {MOODS.map(m => (
             <option key={m} value={m}>{m}</option>
@@ -448,31 +632,112 @@ function TriggerConditionForm({ condition, onChange, isSub = false, depth = 0 })
         </select>
       )}
 
-      {/* Relationship change */}
-      {t === 'relationship_change' && (
-        <div className="text-xs text-cyber-green/40 font-mono">关系变化触发（自动检测）</div>
+      {t === 'event_history' && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <label className="min-w-0 text-[10px] font-mono text-cyber-green/40 sm:col-span-3">
+            <span className="mb-1 block">依赖事件</span>
+            <EventDependencySelect
+              value={condition.event_id}
+              onChange={value => update('event_id', value)}
+              eventOptions={eventOptions}
+              placeholder="选择依赖事件"
+            />
+          </label>
+          <label className="text-[10px] font-mono text-cyber-green/40">
+            <span className="mb-1 block">执行状态</span>
+            <select
+              value={condition.event_status || 'succeeded'}
+              onChange={e => update('event_status', e.target.value)}
+              className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green"
+            >
+              {EVENT_STATUSES.map(status => <option key={status} value={status}>{status}</option>)}
+            </select>
+          </label>
+          <label className="text-[10px] font-mono text-cyber-green/40">
+            <span className="mb-1 block">最少执行次数</span>
+            <input
+              type="number"
+              min="1"
+              value={condition.min_occurrences ?? 1}
+              onChange={e => update('min_occurrences', Math.max(1, Number(e.target.value) || 1))}
+              className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+            />
+          </label>
+        </div>
       )}
 
-      {/* Cooldown */}
-      <div className="flex items-center gap-2">
+      {t === 'world_time_window' && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3 sm:max-w-md">
+            <label className="text-[10px] font-mono text-cyber-green/40">
+              <span className="mb-1 block">开始时间</span>
+              <input
+                type="time"
+                value={condition.time_window_start || ''}
+                onChange={e => update('time_window_start', e.target.value)}
+                className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green"
+              />
+            </label>
+            <label className="text-[10px] font-mono text-cyber-green/40">
+              <span className="mb-1 block">结束时间</span>
+              <input
+                type="time"
+                value={condition.time_window_end || ''}
+                onChange={e => update('time_window_end', e.target.value)}
+                className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green"
+              />
+            </label>
+          </div>
+          <div>
+            <p className="mb-1 text-[10px] font-mono text-cyber-green/40">星期（不选表示每天）</p>
+            <div className="flex flex-wrap gap-1.5">
+              {WEEKDAYS.map((label, day) => {
+                const selected = (condition.weekdays || []).includes(day);
+                return (
+                  <button
+                    key={day}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => {
+                      const weekdays = selected
+                        ? (condition.weekdays || []).filter(value => value !== day)
+                        : [...(condition.weekdays || []), day].sort();
+                      update('weekdays', weekdays);
+                    }}
+                    className={`h-10 w-10 rounded border text-[10px] font-mono transition-colors ${
+                      selected
+                        ? 'border-cyber-green/40 bg-cyber-green/10 text-cyber-green'
+                        : 'border-cyber-green/15 text-cyber-green/35 hover:text-cyber-green/70'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
         <label className="text-[10px] font-mono text-cyber-green/40">冷却时间</label>
         <input
           type="number"
+          min="0"
           value={condition.cooldown_hours ?? 0}
           onChange={e => update('cooldown_hours', Math.max(0, Number(e.target.value)))}
-          className="bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 w-16 focus:outline-none focus:border-cyber-green/50"
+          className="min-h-[40px] w-20 rounded border border-cyber-green/20 bg-cyber-surface px-2 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
         />
         <span className="text-[10px] text-cyber-green/30">小时 (0=一次性)</span>
       </div>
 
-      {/* Composite: recurse */}
       {t === 'composite' && !isSub && (
         <div className="space-y-2 mt-3">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <select
               value={condition.logic_operator || 'and'}
               onChange={e => update('logic_operator', e.target.value)}
-              className="bg-cyber-surface border border-cyber-green/20 text-cyber-green/70 text-xs font-mono rounded px-2 py-1"
+              className="min-h-[42px] rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green/70"
             >
               <option value="and">AND（全部满足）</option>
               <option value="or">OR（任一满足）</option>
@@ -480,10 +745,10 @@ function TriggerConditionForm({ condition, onChange, isSub = false, depth = 0 })
             <button
               type="button"
               onClick={() => {
-                const subs = [...(condition.sub_conditions || []), { ...DEFAULT_SUB_CONDITION }];
+                const subs = [...(condition.sub_conditions || []), cloneJson(DEFAULT_SUB_CONDITION)];
                 update('sub_conditions', subs);
               }}
-              className="flex items-center gap-1 text-[10px] font-mono text-cyber-green/50 hover:text-cyber-green border border-cyber-green/20 rounded px-2 py-0.5 transition-colors"
+              className="flex min-h-[42px] items-center justify-center gap-1 rounded border border-cyber-green/20 px-3 text-[10px] font-mono text-cyber-green/50 transition-colors hover:text-cyber-green"
             >
               <Plus size={10} /> 添加子条件
             </button>
@@ -501,6 +766,7 @@ function TriggerConditionForm({ condition, onChange, isSub = false, depth = 0 })
                 const subs = (condition.sub_conditions || []).filter((_, j) => j !== i);
                 update('sub_conditions', subs);
               }}
+              eventOptions={eventOptions}
               depth={depth}
             />
           ))}
@@ -549,41 +815,116 @@ function TagInput({ tags, onChange, placeholder }) {
   );
 }
 
-function EffectEditor({ effect, onChange, onDelete, index }) {
+function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
   const update = (k, v) => onChange({ ...effect, [k]: v });
-  const t = effect.effect_type;
+  const t = effect.effect_type || 'modify_state';
+  const unavailable = UNAVAILABLE_EFFECT_TYPES.has(t);
 
   return (
-    <div className="p-4 bg-cyber-surface/40 rounded border border-cyber-green/10 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+    <div className="space-y-3 rounded border border-cyber-green/10 bg-cyber-surface/40 p-3 sm:p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2">
           <span className="text-[10px] font-mono text-cyber-green/40">效果 #{index + 1}</span>
           <select
             value={t}
-            onChange={e => onChange({ ...DEFAULT_EFFECT, effect_type: e.target.value })}
-            className="bg-cyber-surface border border-cyber-green/30 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/60"
+            onChange={e => onChange({ ...cloneJson(DEFAULT_EFFECT), effect_type: e.target.value })}
+            className="min-h-[42px] min-w-0 rounded border border-cyber-green/30 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/60 focus:outline-none"
           >
+            {unavailable && <option value={t}>{t}（未实现）</option>}
             {EFFECT_TYPES.map(et => (
               <option key={et.value} value={et.value}>{et.label}</option>
             ))}
           </select>
         </div>
-        <button type="button" onClick={onDelete} className="text-cyber-green/20 hover:text-red-400 transition-colors">
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label={`删除效果 ${index + 1}`}
+          title="删除效果"
+          className="inline-flex h-10 w-10 shrink-0 items-center justify-center text-cyber-green/30 transition-colors hover:text-red-400"
+        >
           <Trash2 size={14} />
         </button>
       </div>
 
-      {/* Modify state */}
-      {t === 'modify_state' && (
-        <KeyValueEditor
-          data={effect.state_changes || {}}
-          onChange={v => update('state_changes', v)}
-          keyLabel="状态名"
-          valueLabel="值"
-        />
+      {unavailable && (
+        <div className="flex items-start gap-2 rounded border border-amber-300/20 bg-amber-300/5 p-3 text-[10px] font-mono text-amber-200/70">
+          <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+          该旧效果尚未实现，原始字段仍保留。请切换到可用效果后再保存。
+        </div>
       )}
 
-      {/* Unlock content */}
+      {t === 'modify_state' && (
+        <div className="space-y-2">
+          {Object.entries(effect.state_changes || {}).map(([key, value]) => (
+            <div key={key} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_40px] items-center gap-2">
+              <select
+                value={key}
+                onChange={e => {
+                  const next = { ...(effect.state_changes || {}) };
+                  delete next[key];
+                  next[e.target.value] = value;
+                  update('state_changes', next);
+                }}
+                className="min-h-[42px] min-w-0 rounded border border-cyber-green/20 bg-cyber-surface px-2 text-[11px] font-mono text-cyber-green"
+              >
+                {!['affection_level', 'trust_level', 'current_mood'].includes(key) && (
+                  <option value={key}>{key}（不支持）</option>
+                )}
+                <option value="affection_level">好感度变化</option>
+                <option value="trust_level">信任度变化</option>
+                <option value="current_mood">当前情绪</option>
+              </select>
+              {key === 'current_mood' ? (
+                <select
+                  value={value ?? 'neutral'}
+                  onChange={e => update('state_changes', { ...(effect.state_changes || {}), [key]: e.target.value })}
+                  className="min-h-[42px] min-w-0 rounded border border-cyber-green/20 bg-cyber-surface px-2 text-[11px] font-mono text-cyber-green"
+                >
+                  {MOODS.map(mood => <option key={mood} value={mood}>{mood}</option>)}
+                </select>
+              ) : (
+                <input
+                  type="number"
+                  value={value ?? ''}
+                  onChange={e => update('state_changes', {
+                    ...(effect.state_changes || {}),
+                    [key]: e.target.value === '' ? '' : Number(e.target.value),
+                  })}
+                  placeholder="变化值"
+                  className="min-h-[42px] min-w-0 rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+                />
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  const next = { ...(effect.state_changes || {}) };
+                  delete next[key];
+                  update('state_changes', next);
+                }}
+                aria-label={`删除状态字段 ${key}`}
+                title="删除状态字段"
+                className="inline-flex h-10 w-10 items-center justify-center text-cyber-green/30 hover:text-red-400"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => {
+              const changes = effect.state_changes || {};
+              const nextKey = ['affection_level', 'trust_level', 'current_mood'].find(key => !(key in changes));
+              if (nextKey) update('state_changes', { ...changes, [nextKey]: nextKey === 'current_mood' ? 'neutral' : 0 });
+            }}
+            disabled={['affection_level', 'trust_level', 'current_mood'].every(key => key in (effect.state_changes || {}))}
+            className="flex min-h-[40px] items-center gap-1 text-[10px] font-mono text-cyber-green/45 hover:text-cyber-green disabled:opacity-30"
+          >
+            <Plus size={11} /> 添加状态字段
+          </button>
+        </div>
+      )}
+
       {t === 'unlock_content' && (
         <TagInput
           tags={effect.unlock_keys || []}
@@ -592,7 +933,6 @@ function EffectEditor({ effect, onChange, onDelete, index }) {
         />
       )}
 
-      {/* Trigger dialogue */}
       {t === 'trigger_dialogue' && (
         <div className="space-y-2">
           <input
@@ -600,19 +940,18 @@ function EffectEditor({ effect, onChange, onDelete, index }) {
             value={effect.dialogue_text || ''}
             onChange={e => update('dialogue_text', e.target.value)}
             placeholder="对话内容"
-            className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50"
+            className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
           />
           <input
             type="text"
             value={effect.dialogue_action || ''}
             onChange={e => update('dialogue_action', e.target.value)}
             placeholder="动作描述"
-            className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50"
+            className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
           />
         </div>
       )}
 
-      {/* Add memory */}
       {t === 'add_memory' && (
         <div className="space-y-2">
           <textarea
@@ -620,7 +959,7 @@ function EffectEditor({ effect, onChange, onDelete, index }) {
             onChange={e => update('memory_text', e.target.value)}
             placeholder="记忆内容"
             rows={2}
-            className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50"
+            className="w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 py-2 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
           />
           <div className="flex items-center gap-2">
             <label className="text-[10px] font-mono text-cyber-green/40">重要性</label>
@@ -629,18 +968,17 @@ function EffectEditor({ effect, onChange, onDelete, index }) {
               value={effect.memory_importance ?? 5}
               onChange={e => update('memory_importance', Number(e.target.value))}
               min={1} max={10}
-              className="bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 w-16 focus:outline-none focus:border-cyber-green/50"
+              className="min-h-[40px] w-20 rounded border border-cyber-green/20 bg-cyber-surface px-2 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
             />
           </div>
         </div>
       )}
 
-      {/* Change mood */}
       {t === 'change_mood' && (
         <select
           value={effect.target_mood || 'neutral'}
           onChange={e => update('target_mood', e.target.value)}
-          className="bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1"
+          className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green sm:max-w-xs"
         >
           {MOODS.map(m => (
             <option key={m} value={m}>{m}</option>
@@ -648,7 +986,6 @@ function EffectEditor({ effect, onChange, onDelete, index }) {
         </select>
       )}
 
-      {/* Notify player */}
       {t === 'notify_player' && (
         <div className="space-y-2">
           <input
@@ -656,12 +993,12 @@ function EffectEditor({ effect, onChange, onDelete, index }) {
             value={effect.notification_message || ''}
             onChange={e => update('notification_message', e.target.value)}
             placeholder="通知消息"
-            className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50"
+            className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
           />
           <select
             value={effect.notification_type || 'info'}
             onChange={e => update('notification_type', e.target.value)}
-            className="bg-cyber-surface border border-cyber-green/20 text-cyber-green/70 text-xs font-mono rounded px-2 py-1"
+            className="min-h-[42px] rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green/70"
           >
             <option value="info">Info</option>
             <option value="success">Success</option>
@@ -671,90 +1008,77 @@ function EffectEditor({ effect, onChange, onDelete, index }) {
         </div>
       )}
 
-      {/* Grant item */}
-      {t === 'grant_item' && (
-        <input
-          type="text"
-          value={effect.item_id || ''}
-          onChange={e => update('item_id', e.target.value)}
-          placeholder="物品 ID"
-          className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50"
-        />
-      )}
-
-      {/* Start quest */}
-      {t === 'start_quest' && (
-        <input
-          type="text"
-          value={effect.quest_id || ''}
-          onChange={e => update('quest_id', e.target.value)}
-          placeholder="任务 ID"
-          className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50"
-        />
-      )}
-
-      {/* Modify relationship */}
-      {t === 'modify_relationship' && (
-        <div className="space-y-2">
-          <input
-            type="text"
-            value={effect.target_character_id || ''}
-            onChange={e => update('target_character_id', e.target.value)}
-            placeholder="目标角色 ID"
-            className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50"
-          />
-          <KeyValueEditor
-            data={effect.relationship_change || {}}
-            onChange={v => update('relationship_change', v)}
-            keyLabel="关系属性"
-            valueLabel="变化值"
-          />
-        </div>
-      )}
-
-      {/* Trigger another event */}
       {t === 'trigger_event' && (
-        <input
-          type="text"
-          value={effect.next_event_id || ''}
-          onChange={e => update('next_event_id', e.target.value)}
-          placeholder="后续事件 ID"
-          className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50"
+        <EventDependencySelect
+          value={effect.next_event_id}
+          onChange={value => update('next_event_id', value)}
+          eventOptions={eventOptions}
+          placeholder="选择后续事件"
         />
       )}
 
-      {/* Branch event */}
       {t === 'branch_event' && (
-        <div className="space-y-2">
-          <input
-            type="text"
-            value={effect.next_event_id || ''}
-            onChange={e => update('next_event_id', e.target.value)}
-            placeholder="默认后续事件 ID"
-            className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50"
-          />
-          <textarea
-            value={effect.branch_conditions_text || JSON.stringify(effect.branch_conditions || [], null, 2)}
-            onChange={e => {
-              const value = e.target.value;
-              try {
-                onChange({
-                  ...effect,
-                  branch_conditions: value.trim() ? JSON.parse(value) : [],
-                  branch_conditions_text: value,
-                });
-              } catch (err) {
-                update('branch_conditions_text', value);
-              }
-            }}
-            rows={3}
-            placeholder='分支 JSON，例如 [{"event_id":"evt_next","condition":{...}}]'
-            className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50 placeholder:text-cyber-green/18"
-          />
+        <div className="space-y-4">
+          <label className="block text-[10px] font-mono text-cyber-green/40">
+            <span className="mb-1 block">默认后续事件（无分支命中时，可选）</span>
+            <EventDependencySelect
+              value={effect.next_event_id}
+              onChange={value => update('next_event_id', value)}
+              eventOptions={eventOptions}
+              placeholder="不设置默认事件"
+            />
+          </label>
+          {(effect.branch_conditions || []).map((branch, branchIndex) => (
+            <div key={branchIndex} className="space-y-3 border-l-2 border-cyber-green/10 pl-3 sm:pl-4">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[10px] font-mono text-cyber-green/40">分支 #{branchIndex + 1}</span>
+                <button
+                  type="button"
+                  onClick={() => update(
+                    'branch_conditions',
+                    (effect.branch_conditions || []).filter((_, itemIndex) => itemIndex !== branchIndex)
+                  )}
+                  aria-label={`删除分支 ${branchIndex + 1}`}
+                  title="删除分支"
+                  className="inline-flex h-9 w-9 items-center justify-center text-cyber-green/30 hover:text-red-400"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+              <EventDependencySelect
+                value={branch.event_id}
+                onChange={value => {
+                  const branches = cloneJson(effect.branch_conditions || []);
+                  branches[branchIndex] = { ...branches[branchIndex], event_id: value };
+                  update('branch_conditions', branches);
+                }}
+                eventOptions={eventOptions}
+                placeholder="选择该分支的后续事件"
+              />
+              <TriggerConditionForm
+                condition={branch.condition || cloneJson(DEFAULT_SUB_CONDITION)}
+                onChange={value => {
+                  const branches = cloneJson(effect.branch_conditions || []);
+                  branches[branchIndex] = { ...branches[branchIndex], condition: value };
+                  update('branch_conditions', branches);
+                }}
+                eventOptions={eventOptions}
+              />
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={() => update('branch_conditions', [
+              ...(effect.branch_conditions || []),
+              cloneJson(DEFAULT_BRANCH_CONDITION),
+            ])}
+            className="flex min-h-[42px] items-center gap-1 rounded border border-cyber-green/20 px-3 text-[10px] font-mono text-cyber-green/50 hover:text-cyber-green"
+          >
+            <Plus size={11} /> 添加分支
+          </button>
         </div>
       )}
 
-      {/* NPC proactive dialogue */}
       {t === 'npc_proactive_dialogue' && (
         <div className="space-y-2">
           <input
@@ -762,22 +1086,60 @@ function EffectEditor({ effect, onChange, onDelete, index }) {
             value={effect.proactive_character_id || ''}
             onChange={e => update('proactive_character_id', e.target.value)}
             placeholder="主动发言角色 ID（可选）"
-            className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50"
+            className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
           />
           <input
             type="text"
             value={effect.target_session_id || ''}
             onChange={e => update('target_session_id', e.target.value)}
             placeholder="目标会话 ID（可选）"
-            className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50"
+            className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
           />
           <textarea
             value={effect.proactive_prompt || ''}
             onChange={e => update('proactive_prompt', e.target.value)}
             placeholder="主动发言提示"
             rows={2}
-            className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 focus:outline-none focus:border-cyber-green/50"
+            className="w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 py-2 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
           />
+        </div>
+      )}
+
+      {t === 'update_event_progress' && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <label className="text-[10px] font-mono text-cyber-green/40">
+            <span className="mb-1 block">直接进度（0 到 1）</span>
+            <input
+              type="number"
+              min="0"
+              max="1"
+              step="0.01"
+              value={effect.progress ?? ''}
+              onChange={e => update('progress', e.target.value === '' ? null : Number(e.target.value))}
+              className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+            />
+          </label>
+          <label className="text-[10px] font-mono text-cyber-green/40">
+            <span className="mb-1 block">进度变化量</span>
+            <input
+              type="number"
+              step="0.01"
+              value={effect.progress_delta ?? ''}
+              onChange={e => update('progress_delta', e.target.value === '' ? null : Number(e.target.value))}
+              className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+            />
+          </label>
+          <label className="text-[10px] font-mono text-cyber-green/40">
+            <span className="mb-1 block">阶段状态</span>
+            <select
+              value={effect.event_status || ''}
+              onChange={e => update('event_status', e.target.value)}
+              className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green"
+            >
+              <option value="">不修改</option>
+              {PROGRESS_STATUSES.map(status => <option key={status} value={status}>{status}</option>)}
+            </select>
+          </label>
         </div>
       )}
     </div>
@@ -794,6 +1156,8 @@ export default function EventEditor() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
+  const [saveMsgKind, setSaveMsgKind] = useState('info');
+  const [validationWarnings, setValidationWarnings] = useState([]);
   const [loadError, setLoadError] = useState('');
   const [loadedEventId, setLoadedEventId] = useState(isExistingEvent ? null : 'new');
   const [reloadVersion, setReloadVersion] = useState(0);
@@ -804,10 +1168,21 @@ export default function EventEditor() {
   const [templatesLoading, setTemplatesLoading] = useState(true);
   const [templatesError, setTemplatesError] = useState('');
   const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [events, setEvents] = useState([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [eventsError, setEventsError] = useState('');
 
   const selectedTemplate = useMemo(
     () => templates.find(t => t.template_id === selectedTemplateId),
     [templates, selectedTemplateId]
+  );
+  const eventOptions = useMemo(
+    () => events.filter(event => event.event_id !== (eventId && eventId !== 'new' ? eventId : form.event_id)),
+    [events, eventId, form.event_id]
+  );
+  const unavailableConfiguration = useMemo(
+    () => collectUnavailableConfiguration(form.trigger_condition, form.effects, []),
+    [form.trigger_condition, form.effects]
   );
 
   useEffect(() => {
@@ -829,10 +1204,30 @@ export default function EventEditor() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await eventAdmin.list();
+        if (cancelled) return;
+        setEvents(Array.isArray(rows) ? rows : []);
+        setEventsError('');
+      } catch (e) {
+        if (cancelled) return;
+        setEventsError(e.message || '事件依赖列表加载失败');
+      } finally {
+        if (!cancelled) setEventsLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
     const requestId = ++eventRequestRef.current;
     let cancelled = false;
 
     setSaveMsg('');
+    setSaveMsgKind('info');
+    setValidationWarnings([]);
     setLoadError('');
 
     if (!isExistingEvent) {
@@ -857,7 +1252,11 @@ export default function EventEditor() {
           trigger_condition: detail.trigger_condition || { trigger_type: 'keyword_match', keywords: [] },
           effects: detail.effects || [],
           priority: detail.priority || 0,
+          exclusive_group: detail.exclusive_group || '',
+          max_triggers_per_turn: detail.max_triggers_per_turn || 3,
+          stop_processing: Boolean(detail.stop_processing),
           is_active: detail.is_active,
+          schedule: detail.schedule || '',
           template_id: detail.template_id || '',
         });
         setSelectedTemplateId(detail.template_id || '');
@@ -875,15 +1274,19 @@ export default function EventEditor() {
   async function handleSave() {
     if (isExistingEvent && loadedEventId !== eventId) {
       setSaveMsg('事件尚未正确加载，无法保存');
+      setSaveMsgKind('error');
       return;
     }
-    const validationErrors = validateEventForm(form);
-    if (validationErrors.length) {
-      setSaveMsg(validationErrors.join('；'));
+    const { errors, warnings } = validateEventForm(form);
+    setValidationWarnings(warnings);
+    if (errors.length) {
+      setSaveMsg(errors.join('；'));
+      setSaveMsgKind('error');
       return;
     }
     setSaving(true);
     setSaveMsg('');
+    setSaveMsgKind('info');
     try {
       const payload = cloneJson(sanitizeEventPayload(form));
       payload.template_id = sanitizeOptionalString(payload.template_id);
@@ -892,10 +1295,12 @@ export default function EventEditor() {
       } else {
         await eventAdmin.create(payload);
       }
-      setSaveMsg('保存成功！');
+      setSaveMsg(warnings.length ? `保存成功；${warnings.join('；')}` : '保存成功');
+      setSaveMsgKind('success');
       setTimeout(() => navigate('/events'), 600);
     } catch (e) {
       setSaveMsg(`保存失败: ${e.message}`);
+      setSaveMsgKind('error');
     } finally {
       setSaving(false);
     }
@@ -912,11 +1317,13 @@ export default function EventEditor() {
     if (!ok) return;
     setDeleting(true);
     setSaveMsg('');
+    setSaveMsgKind('info');
     try {
       await eventAdmin.delete(eventId);
       navigate('/events');
     } catch (e) {
       setSaveMsg(`删除失败: ${e.message}`);
+      setSaveMsgKind('error');
     } finally {
       setDeleting(false);
     }
@@ -974,45 +1381,53 @@ export default function EventEditor() {
       template_id: selectedTemplate.template_id,
     }));
     setSaveMsg(`已应用模板: ${selectedTemplate.template_name}`);
+    setSaveMsgKind('info');
   };
 
   return (
     <div className="min-h-screen bg-cyber-bg">
       {/* Header */}
       <div className="sticky top-0 z-20 bg-cyber-bg/95 backdrop-blur border-b border-cyber-green/15">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="mx-auto grid max-w-6xl grid-cols-[auto_1fr_auto] items-center gap-2 px-4 py-3 sm:gap-4 sm:px-6 sm:py-4">
           <button
             onClick={() => navigate('/events')}
-            className="flex items-center gap-1 text-cyber-green/60 hover:text-cyber-green transition-colors font-mono text-sm"
+            aria-label="返回事件列表"
+            title="返回事件列表"
+            className="flex min-h-[44px] items-center gap-1 text-sm font-mono text-cyber-green/60 transition-colors hover:text-cyber-green"
           >
             <ArrowLeft size={16} />
-            Events
+            <span className="hidden sm:inline">Events</span>
           </button>
-          <div className="text-center">
-            <h1 className="font-display text-base text-cyber-green tracking-[0.25em]">
+          <div className="min-w-0 text-center">
+            <h1 className="font-display text-sm text-cyber-green tracking-[0.16em] sm:text-base sm:tracking-[0.25em]">
               {eventId && eventId !== 'new' ? 'EDIT EVENT' : 'NEW EVENT'}
             </h1>
             {form.event_id && (
-              <p className="text-[10px] font-mono text-cyber-green/30 mt-0.5">{form.event_id}</p>
+              <p className="mt-0.5 hidden truncate text-[10px] font-mono text-cyber-green/30 sm:block">
+                {form.event_id}
+              </p>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center justify-end gap-1.5 sm:gap-2">
             {eventId && eventId !== 'new' && (
               <button
                 onClick={handleDelete}
                 disabled={actionPending || loadedEventId !== eventId}
-                className="px-3 py-1 text-xs font-mono text-red-400/60 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 rounded transition-colors"
+                aria-label="删除事件"
+                title="删除事件"
+                className="inline-flex min-h-[44px] items-center justify-center rounded border border-red-400/20 px-2 text-xs font-mono text-red-400/60 transition-colors hover:border-red-400/40 hover:text-red-400 sm:px-3"
               >
-                {deleting ? 'Deleting...' : 'Delete'}
+                {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                <span className="ml-1 hidden sm:inline">Delete</span>
               </button>
             )}
             <button
               onClick={handleSave}
               disabled={saveDisabled}
-              className="flex items-center gap-1 px-4 py-1.5 bg-cyber-green/10 border border-cyber-green/30 text-cyber-green font-mono text-sm rounded hover:bg-cyber-green/20 transition-colors disabled:opacity-50"
+              className="flex min-h-[44px] items-center gap-1 rounded border border-cyber-green/30 bg-cyber-green/10 px-2 text-xs font-mono text-cyber-green transition-colors hover:bg-cyber-green/20 disabled:opacity-50 sm:px-4 sm:text-sm"
             >
               {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              Save
+              <span className="hidden sm:inline">Save</span>
             </button>
           </div>
         </div>
@@ -1020,18 +1435,41 @@ export default function EventEditor() {
 
       {/* Save message */}
       {saveMsg && (
-        <div className={`fixed top-16 left-1/2 -translate-x-1/2 z-30 px-4 py-2 rounded font-mono text-sm ${
-          saveMsg.includes('失败') ? 'bg-red-900/80 text-red-300' : 'bg-cyber-green/20 text-cyber-green'
+        <div className={`fixed left-4 right-4 top-16 z-30 mx-auto max-w-2xl break-words rounded border px-4 py-2 font-mono text-xs shadow-lg sm:left-1/2 sm:right-auto sm:w-max sm:max-w-[calc(100vw-2rem)] sm:-translate-x-1/2 ${
+          saveMsgKind === 'error'
+            ? 'border-red-400/20 bg-red-950/95 text-red-300'
+            : saveMsgKind === 'success'
+              ? 'border-cyber-green/20 bg-cyber-bg/95 text-cyber-green'
+              : 'border-sky-300/20 bg-cyber-bg/95 text-sky-200/75'
         }`}>
           {saveMsg}
         </div>
       )}
 
       {/* Form content */}
-      <div className="max-w-5xl mx-auto px-6 py-8">
+      <div className="mx-auto max-w-5xl px-4 py-5 sm:px-6 sm:py-8">
         <div className="space-y-6">
+          {unavailableConfiguration.length > 0 && (
+            <div className="flex items-start gap-3 rounded border border-amber-300/25 bg-amber-300/5 p-4 text-xs font-mono text-amber-100/75">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <div className="min-w-0">
+                <p className="font-medium text-amber-100/90">存在不可用的旧配置，当前禁止保存</p>
+                <p className="mt-1 break-words text-[10px] leading-5">
+                  {unavailableConfiguration.join('；')}。原字段不会被静默替换，请在对应位置切换类型。
+                </p>
+              </div>
+            </div>
+          )}
+
+          {validationWarnings.length > 0 && (
+            <div className="flex items-start gap-3 rounded border border-sky-300/15 bg-sky-300/5 p-4 text-[10px] font-mono text-sky-100/60">
+              <AlertCircle size={14} className="mt-0.5 shrink-0" />
+              <p className="min-w-0 break-words">{validationWarnings.join('；')}</p>
+            </div>
+          )}
+
           {/* Basic info card */}
-          <div className="rounded-lg border border-cyber-green/15 bg-cyber-surface/40 p-6 space-y-4">
+          <div className="space-y-4 rounded-lg border border-cyber-green/15 bg-cyber-surface/40 p-4 sm:p-6">
             <h2 className="font-mono text-sm text-cyber-green/70 flex items-center gap-2">
               <Zap size={14} />
               基本信息
@@ -1045,7 +1483,7 @@ export default function EventEditor() {
                     value={selectedTemplateId}
                     onChange={e => setSelectedTemplateId(e.target.value)}
                     disabled={templatesLoading}
-                    className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-3 py-1.5 focus:outline-none focus:border-cyber-green/50 disabled:opacity-50"
+                    className="min-h-[44px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none disabled:opacity-50"
                   >
                     <option value="">{templatesLoading ? '加载模板中...' : '不使用模板'}</option>
                     {templates.map(template => (
@@ -1059,7 +1497,7 @@ export default function EventEditor() {
                   type="button"
                   onClick={handleApplyTemplate}
                   disabled={!selectedTemplate || templatesLoading}
-                  className="flex items-center justify-center gap-1 px-3 py-1.5 border border-cyber-green/30 text-cyber-green/70 hover:text-cyber-green hover:border-cyber-green/50 rounded text-xs font-mono transition-colors disabled:opacity-40 disabled:hover:text-cyber-green/70 disabled:hover:border-cyber-green/30"
+                  className="flex min-h-[44px] items-center justify-center gap-1 rounded border border-cyber-green/30 px-3 text-xs font-mono text-cyber-green/70 transition-colors hover:border-cyber-green/50 hover:text-cyber-green disabled:opacity-40 disabled:hover:border-cyber-green/30 disabled:hover:text-cyber-green/70"
                 >
                   <Wand2 size={14} />
                   应用模板
@@ -1073,7 +1511,7 @@ export default function EventEditor() {
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="block text-[10px] font-mono text-cyber-green/40 mb-1">事件 ID *</label>
                 <input
@@ -1082,7 +1520,7 @@ export default function EventEditor() {
                   onChange={e => updateField('event_id', e.target.value)}
                   disabled={!!(eventId && eventId !== 'new')}
                   placeholder="evt_charactername_eventname"
-                  className="w-full bg-cyber-surface border border-cyber-green/30 text-cyber-green text-xs font-mono rounded px-3 py-1.5 focus:outline-none focus:border-cyber-green/60 disabled:opacity-40"
+                  className="min-h-[44px] w-full rounded border border-cyber-green/30 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/60 focus:outline-none disabled:opacity-40"
                 />
               </div>
               <div>
@@ -1092,7 +1530,7 @@ export default function EventEditor() {
                   value={form.event_name}
                   onChange={e => updateField('event_name', e.target.value)}
                   placeholder="例如：初次见面的惊喜"
-                  className="w-full bg-cyber-surface border border-cyber-green/30 text-cyber-green text-xs font-mono rounded px-3 py-1.5 focus:outline-none focus:border-cyber-green/60"
+                  className="min-h-[44px] w-full rounded border border-cyber-green/30 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/60 focus:outline-none"
                 />
               </div>
             </div>
@@ -1104,20 +1542,22 @@ export default function EventEditor() {
                 onChange={e => updateField('description', e.target.value)}
                 placeholder="事件的简要描述..."
                 rows={2}
-                className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-3 py-1.5 focus:outline-none focus:border-cyber-green/50"
+                className="w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 py-2 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
               />
             </div>
 
             {/* Advanced */}
             <button
               onClick={() => setAdvancedOpen(!advancedOpen)}
-              className="flex items-center gap-1 text-[10px] font-mono text-cyber-green/40 hover:text-cyber-green/70 transition-colors"
+              type="button"
+              aria-expanded={advancedOpen}
+              className="flex min-h-[40px] items-center gap-1 text-[10px] font-mono text-cyber-green/40 transition-colors hover:text-cyber-green/70"
             >
               {advancedOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
               高级设置
             </button>
             {advancedOpen && (
-              <div className="grid grid-cols-3 gap-4 pt-2">
+              <div className="grid grid-cols-1 gap-4 pt-2 sm:grid-cols-2 lg:grid-cols-3">
                 <div>
                   <label className="block text-[10px] font-mono text-cyber-green/40 mb-1">关联角色 ID</label>
                   <input
@@ -1125,7 +1565,7 @@ export default function EventEditor() {
                     value={form.character_id}
                     onChange={e => updateField('character_id', e.target.value)}
                     placeholder="留空=全局事件"
-                    className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-3 py-1.5 focus:outline-none focus:border-cyber-green/50"
+                    className="min-h-[44px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
                   />
                 </div>
                 <div>
@@ -1134,11 +1574,42 @@ export default function EventEditor() {
                     type="number"
                     value={form.priority}
                     onChange={e => updateField('priority', Number(e.target.value))}
-                    className="w-full bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-3 py-1.5 focus:outline-none focus:border-cyber-green/50"
+                    className="min-h-[44px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
                   />
                 </div>
-                <div className="flex items-end">
-                  <label className="flex items-center gap-2 cursor-pointer">
+                <div>
+                  <label className="block text-[10px] font-mono text-cyber-green/40 mb-1">互斥组</label>
+                  <input
+                    type="text"
+                    value={form.exclusive_group}
+                    onChange={e => updateField('exclusive_group', e.target.value)}
+                    placeholder="同组每轮仅触发最高优先级"
+                    className="min-h-[44px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-mono text-cyber-green/40 mb-1">每轮最多触发</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="20"
+                    value={form.max_triggers_per_turn}
+                    onChange={e => updateField('max_triggers_per_turn', Number(e.target.value))}
+                    className="min-h-[44px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+                  />
+                </div>
+                <div className="sm:col-span-2 lg:col-span-2">
+                  <label className="block text-[10px] font-mono text-cyber-green/40 mb-1">调度 Cron（5 字段）</label>
+                  <input
+                    type="text"
+                    value={form.schedule}
+                    onChange={e => updateField('schedule', e.target.value)}
+                    placeholder="0 9 * * *；必须绑定角色"
+                    className="min-h-[44px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+                  />
+                </div>
+                <div className="flex flex-col justify-end gap-2 sm:flex-row sm:items-center lg:flex-col lg:items-start">
+                  <label className="flex min-h-[40px] cursor-pointer items-center gap-2">
                     <input
                       type="checkbox"
                       checked={form.is_active}
@@ -1147,17 +1618,33 @@ export default function EventEditor() {
                     />
                     <span className="text-[10px] font-mono text-cyber-green/40">启用事件</span>
                   </label>
+                  <label className="flex min-h-[40px] cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={form.stop_processing}
+                      onChange={e => updateField('stop_processing', e.target.checked)}
+                      className="accent-cyber-green"
+                    />
+                    <span className="text-[10px] font-mono text-cyber-green/40">触发后停止处理后续事件</span>
+                  </label>
                 </div>
               </div>
             )}
           </div>
 
           {/* Trigger condition card */}
-          <div className="rounded-lg border border-cyber-green/15 bg-cyber-surface/40 p-6 space-y-4">
+          <div className="space-y-4 rounded-lg border border-cyber-green/15 bg-cyber-surface/40 p-4 sm:p-6">
             <h2 className="font-mono text-sm text-cyber-green/70">触发条件</h2>
+            {eventsLoading && (
+              <p className="text-[10px] font-mono text-cyber-green/30">正在加载事件依赖...</p>
+            )}
+            {eventsError && (
+              <p className="break-words text-[10px] font-mono text-red-300/70">{eventsError}</p>
+            )}
             <TriggerConditionForm
               condition={form.trigger_condition}
               onChange={v => updateField('trigger_condition', v)}
+              eventOptions={eventOptions}
             />
           </div>
 
@@ -1171,12 +1658,12 @@ export default function EventEditor() {
           </div>
 
           {/* Effects card */}
-          <div className="rounded-lg border border-cyber-green/15 bg-cyber-surface/40 p-6 space-y-4">
-            <div className="flex items-center justify-between">
+          <div className="space-y-4 rounded-lg border border-cyber-green/15 bg-cyber-surface/40 p-4 sm:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h2 className="font-mono text-sm text-cyber-green/70">事件效果</h2>
               <button
                 onClick={() => updateField('effects', [...form.effects, { ...DEFAULT_EFFECT }])}
-                className="flex items-center gap-1 text-[10px] font-mono text-cyber-green/50 hover:text-cyber-green border border-cyber-green/20 rounded px-2 py-1 transition-colors"
+                className="flex min-h-[42px] items-center justify-center gap-1 rounded border border-cyber-green/20 px-3 text-[10px] font-mono text-cyber-green/50 transition-colors hover:text-cyber-green"
               >
                 <Plus size={12} /> 添加效果
               </button>
@@ -1189,6 +1676,7 @@ export default function EventEditor() {
                 key={i}
                 index={i}
                 effect={eff}
+                eventOptions={eventOptions}
                 onChange={v => {
                   const effects = [...form.effects];
                   effects[i] = v;
@@ -1201,12 +1689,16 @@ export default function EventEditor() {
             ))}
           </div>
 
+          {isExistingEvent && loadedEventId === eventId && (
+            <EventOperationsPanel eventId={eventId} characterId={form.character_id} />
+          )}
+
           {/* Bottom save */}
-          <div className="flex justify-end">
+          <div className="flex justify-stretch sm:justify-end">
             <button
               onClick={handleSave}
               disabled={saveDisabled}
-              className="flex items-center gap-2 px-6 py-2 bg-cyber-green/10 border border-cyber-green/30 text-cyber-green font-mono text-sm rounded hover:bg-cyber-green/20 transition-colors disabled:opacity-50"
+              className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded border border-cyber-green/30 bg-cyber-green/10 px-6 text-sm font-mono text-cyber-green transition-colors hover:bg-cyber-green/20 disabled:opacity-50 sm:w-auto"
             >
               {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
               Save Event

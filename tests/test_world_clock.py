@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from memoria.core import event_runtime, prompt_builder, world_clock
+from memoria.core import character_loader, event_runtime, prompt_builder, world_clock
 from memoria.core.event_schema import (
     EffectType,
     EventContext,
@@ -191,7 +191,7 @@ def test_catch_up_runs_once_and_advances_beyond_world_now(monkeypatch):
         "schedule": "*/5 * * * *",
         "next_run_at": "2026-07-12T10:00:00+00:00",
     }
-    completed = []
+    commits = []
     monkeypatch.setattr(event_runtime.repository, "list_active_event_schedules", lambda **kwargs: [row])
     monkeypatch.setattr(
         event_runtime.world_clock,
@@ -208,30 +208,41 @@ def test_catch_up_runs_once_and_advances_beyond_world_now(monkeypatch):
     monkeypatch.setattr(event_runtime.repository, "get_event_definition", lambda *args: {"event_id": "scheduled_event"})
     monkeypatch.setattr(event_runtime, "_event_definition_from_row", lambda row: _scheduled_event())
     monkeypatch.setattr(event_runtime, "_load_scheduled_event_context", lambda *args: _scheduled_context())
+    result = EventTriggerResult(
+        execution_id="scheduled-execution",
+        event_id="scheduled_event",
+        event_name="定时事件",
+        character_id=row["character_id"],
+        triggered=True,
+    )
+    monkeypatch.setattr(event_runtime.repository, "get_event_execution_batch", lambda *args: None)
     monkeypatch.setattr(
         event_runtime,
-        "execute_event_with_chain",
-        lambda *args: [
-            EventTriggerResult(
-                event_id="scheduled_event",
-                event_name="定时事件",
-                triggered=True,
-            )
-        ],
+        "_plan_event_chain",
+        lambda *args: ([result], [{
+            "execution_id": result.execution_id,
+            "status": "succeeded",
+            "inbox_items": [],
+        }]),
     )
-    monkeypatch.setattr(event_runtime, "_persist_scheduled_event_results", lambda *args: None)
     monkeypatch.setattr(
         event_runtime.repository,
-        "complete_event_schedule",
-        lambda *args, **kwargs: completed.append(kwargs) or True,
+        "commit_event_execution_batch",
+        lambda **kwargs: commits.append(kwargs) or {
+            "deduplicated": False,
+            "inserted_memories": [],
+        },
     )
 
     results = event_runtime.run_due_time_events(
         now=datetime(2026, 7, 12, 12, 0, tzinfo=UTC)
     )
     assert len(results) == 1
-    assert len(completed) == 1
-    assert datetime.fromisoformat(completed[0]["next_run_at"]) > world_now
+    assert len(commits) == 1
+    assert datetime.fromisoformat(
+        commits[0]["schedule_completion"]["next_run_at"]
+    ) > world_now
+    assert commits[0]["schedule_completion"]["lease_owner"].startswith("scheduler:")
 
 
 def test_schedule_claim_prevents_stale_second_worker():
@@ -304,17 +315,13 @@ def test_concurrent_schedulers_execute_due_event_once(monkeypatch):
         scan_barrier.wait(timeout=5)
         return [row]
 
+    original_plan_event_chain = event_runtime._plan_event_chain
+
     def execute_once(*args):
         nonlocal execution_count
         with execution_lock:
             execution_count += 1
-        return [
-            EventTriggerResult(
-                event_id=event_id,
-                event_name="并发定时事件",
-                triggered=True,
-            )
-        ]
+        return original_plan_event_chain(*args)
 
     monkeypatch.setattr(
         event_runtime.repository,
@@ -357,12 +364,7 @@ def test_concurrent_schedulers_execute_due_event_once(monkeypatch):
             update={"player_id": player_id}
         ),
     )
-    monkeypatch.setattr(event_runtime, "execute_event_with_chain", execute_once)
-    monkeypatch.setattr(
-        event_runtime,
-        "_persist_scheduled_event_results",
-        lambda *args: None,
-    )
+    monkeypatch.setattr(event_runtime, "_plan_event_chain", execute_once)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [
@@ -414,7 +416,92 @@ def test_scheduled_results_persist_state_and_inbox(monkeypatch):
     assert json.loads(inbox[0][1]["payload"])[0]["event_id"] == "scheduled_event"
 
 
-def test_scheduled_event_persists_state_memory_relationship_and_inbox():
+def test_atomic_schedule_completion_rolls_back_when_lease_is_lost():
+    player_id = _create_user("atomic_lease")
+    character_id = "npc_luo_xiaohei"
+    event_id = f"atomic_lease_{uuid.uuid4().hex[:8]}"
+    execution_key = f"schedule:{event_id}:lost"
+    repository.save_event_definition(
+        owner_user_id=player_id,
+        event_id=event_id,
+        event_name="租约回滚",
+        trigger_config=TriggerCondition(
+            trigger_type=TriggerType.TIME_BASED,
+            schedule="*/5 * * * *",
+        ).model_dump_json(),
+        effects_config="[]",
+        character_id=character_id,
+        schedule="*/5 * * * *",
+    )
+    repository.save_runtime_state(character_id, player_id, 10, 20, "neutral")
+    execution = {
+        "execution_id": uuid.uuid4().hex,
+        "event_id": event_id,
+        "character_id": character_id,
+        "session_id": f"schedule:{event_id}",
+        "status": "succeeded",
+        "effects_data": "[]",
+        "result_data": "{}",
+        "error": None,
+        "duration_ms": 1,
+        "context_snapshot": "{}",
+        "effects_applied": "[]",
+        "context_state": {
+            "context_data": "{}",
+            "status": "active",
+            "progress": 0.25,
+        },
+        "memories": [{
+            "character_id": character_id,
+            "player_id": player_id,
+            "fact_text": "租约丢失时不能落库",
+            "importance": 5,
+        }],
+        "unlock_keys": ["lease_unlock"],
+        "inbox_items": [{"content": "租约通知"}],
+        "proactive_messages": [],
+    }
+
+    with pytest.raises(RuntimeError, match="lease was lost"):
+        repository.commit_event_execution_batch(
+            player_id=player_id,
+            execution_key=execution_key,
+            trigger_source="schedule",
+            results_data="[]",
+            executions=[execution],
+            runtime_states=[{
+                "character_id": character_id,
+                "affection_level": 15,
+                "trust_level": 20,
+                "current_mood": "happy",
+            }],
+            schedule_completion={
+                "event_id": event_id,
+                "character_id": character_id,
+                "lease_owner": "lost-worker",
+                "last_checked_at": "2026-07-14T12:00:00+00:00",
+                "last_run_at": "2026-07-14T12:00:00+00:00",
+                "next_run_at": "2026-07-14T12:05:00+00:00",
+            },
+        )
+
+    assert repository.get_event_execution_batch(player_id, execution_key) is None
+    assert repository.list_event_execution_history(player_id, event_id=event_id) == []
+    assert repository.get_event_trigger_history(event_id=event_id, player_id=player_id) == []
+    assert repository.get_long_term_facts(character_id, player_id, 10) == []
+    assert repository.list_event_unlocks(player_id, character_id) == []
+    assert repository.list_player_event_inbox(player_id) == []
+    assert repository.get_event_context_state(event_id, character_id, player_id) is None
+    runtime = repository.get_runtime_state(
+        character_id,
+        player_id,
+        character_loader.load_character_card(character_id),
+    )
+    assert runtime["affection_level"] == 10
+    assert runtime["current_mood"] == "neutral"
+
+
+def test_unimplemented_scheduled_effect_rolls_back_all_side_effects():
     player_id = _create_user("side_effects")
     character_id = "npc_luo_xiaohei"
     target_character_id = "npc_wuxian"
@@ -469,15 +556,12 @@ def test_scheduled_event_persists_state_memory_relationship_and_inbox():
         relationship_type="ally",
         affinity=10,
     )
-    world_now = datetime(2026, 7, 12, 12, 0, tzinfo=UTC)
+    repository.save_runtime_state(character_id, player_id, 25, 30, "neutral")
 
     results = event_runtime.execute_event_with_chain(event, context)
-    event_runtime._persist_scheduled_event_results(
-        event,
-        context,
-        results,
-        world_now,
-    )
+    assert len(results) == 1
+    assert results[0].status == "failed"
+    assert results[0].triggered is False
 
     from memoria.core import character_loader
 
@@ -486,10 +570,10 @@ def test_scheduled_event_persists_state_memory_relationship_and_inbox():
         player_id,
         character_loader.load_character_card(character_id),
     )
-    assert runtime_state["affection_level"] == 30
-    assert runtime_state["trust_level"] == 32
-    assert runtime_state["current_mood"] == "happy"
-    assert "定时事件留下了一段清晰的记忆。" in repository.get_long_term_facts(
+    assert runtime_state["affection_level"] == 25
+    assert runtime_state["trust_level"] == 30
+    assert runtime_state["current_mood"] == "neutral"
+    assert "定时事件留下了一段清晰的记忆。" not in repository.get_long_term_facts(
         character_id,
         player_id,
         limit=10,
@@ -499,10 +583,13 @@ def test_scheduled_event_persists_state_memory_relationship_and_inbox():
         character_id,
         target_character_id,
     )
-    assert relationship["affinity"] == 14
+    assert relationship["affinity"] == 10
     inbox = repository.list_player_event_inbox(player_id)
-    assert inbox[0]["content"] == "定时事件已经完成"
-    assert inbox[0]["world_created_at"] == world_now.isoformat()
+    assert inbox == []
+    assert repository.get_event_trigger_history(
+        event_id=event.event_id,
+        player_id=player_id,
+    ) == []
 
 
 def test_single_and_group_prompts_share_world_context():
@@ -881,4 +968,3 @@ def test_world_clock_api_auth_isolation_and_inbox_ownership():
         inbox_id,
         user_id=player_a,
     ).success is True
-

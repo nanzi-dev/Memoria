@@ -16,6 +16,7 @@ import uuid
 
 from memoria.core import (
     character_loader,
+    event_runtime,
     llm_client,
     multi_character_memory,
     prompt_builder,
@@ -146,8 +147,13 @@ class MultiCharacterOrchestrator:
         return result
     
     
-    def process_player_message(self, player_message: str, allow_multiple_responses: bool = False,
-                                max_responses: int | None = None) -> dict | list[dict]:
+    def process_player_message(
+        self,
+        player_message: str,
+        allow_multiple_responses: bool = False,
+        max_responses: int | None = None,
+        request_id: str | None = None,
+    ) -> dict | list[dict]:
         """
         处理玩家消息，决定哪个角色回应
         
@@ -178,12 +184,13 @@ class MultiCharacterOrchestrator:
                     speaker_id,
                     player_message,
                     clock_snapshot=clock_snapshot,
+                    persist=False,
                 )
             except TypeError as exc:
-                if "unexpected keyword argument 'clock_snapshot'" not in str(exc):
+                if "unexpected keyword argument" not in str(exc):
                     raise
                 result = self._generate_character_response(speaker_id, player_message)
-            return result
+            responses = [result]
         
         else:
             # 多角色讨论模式
@@ -199,7 +206,124 @@ class MultiCharacterOrchestrator:
                 if "unexpected keyword argument 'clock_snapshot'" not in str(exc):
                     raise
                 responses = self._generate_group_discussion(player_message, response_count)
+        event_results = self._apply_group_event_results(
+            player_message,
+            responses,
+            clock_snapshot=clock_snapshot,
+            request_id=request_id,
+        )
+        if getattr(self, "player_id", None):
+            for response in responses:
+                if response.get("character_id") and response.get("character_name"):
+                    self._persist_generated_response(response, clock_snapshot)
+
+        if allow_multiple_responses:
             return responses
+        return responses[0]
+
+
+    def _apply_group_event_results(
+        self,
+        player_message: str,
+        responses: list[dict],
+        *,
+        clock_snapshot,
+        request_id: str | None,
+    ) -> list:
+        if not getattr(self, "player_id", None):
+            return []
+        if any(
+            not response.get("character_id")
+            or "current_affinity" not in response
+            or "current_trust" not in response
+            or "current_mood" not in response
+            for response in responses
+        ):
+            return []
+        execution_key = (
+            f"multi:{self.session_id}:{request_id}"
+            if request_id
+            else f"multi:{self.session_id}:{uuid.uuid4().hex}"
+        )
+        relationships = self._load_all_relationships()
+        contexts = []
+        for response in responses:
+            contexts.append(event_runtime.build_event_context(
+                character_id=response["character_id"],
+                player_id=self.player_id,
+                session_id=self.session_id,
+                current_affinity=response["current_affinity"],
+                current_trust=response["current_trust"],
+                current_mood=response["current_mood"],
+                previous_affinity=response.pop("_previous_affinity"),
+                previous_trust=response.pop("_previous_trust"),
+                affinity_delta=response["affinity_delta"],
+                trust_delta=response["trust_delta"],
+                player_message=player_message,
+                npc_response=response["dialogue"],
+                character_relationships=relationships,
+                world_time=clock_snapshot.world_now.isoformat(),
+                execution_key=execution_key,
+                trigger_source="multi_dialogue",
+                current_user_turn_persisted=True,
+            ))
+
+        event_results = event_runtime.detect_and_execute_event_contexts(contexts)
+        for response, context in zip(responses, contexts):
+            character_results = [
+                result
+                for result in event_results
+                if result.character_id == response["character_id"]
+            ]
+            (
+                response["dialogue"],
+                response["current_affinity"],
+                response["current_trust"],
+                response["current_mood"],
+                response["triggered_events"],
+                response["event_notification"],
+            ) = event_runtime.apply_event_results_to_dialogue_state(
+                character_results,
+                response["dialogue"],
+                response["current_affinity"],
+                response["current_trust"],
+                response["current_mood"],
+            )
+            response["affinity_delta"] = round(
+                response["current_affinity"] - float(context.previous_affinity or 0),
+                6,
+            )
+            response["trust_delta"] = round(
+                response["current_trust"] - float(context.previous_trust or 0),
+                6,
+            )
+            response["event_executions"] = [
+                result.model_dump(mode="json") for result in character_results
+            ]
+            response["event_notifications"] = (
+                event_runtime.collect_event_notifications(character_results)
+            )
+        return event_results
+
+
+    def _persist_generated_response(self, response: dict, clock_snapshot) -> None:
+        repository.append_multi_character_message(
+            self.session_id,
+            role="assistant",
+            content=response["dialogue"],
+            character_id=response["character_id"],
+            character_name=response["character_name"],
+            world_created_at=clock_snapshot.world_now.isoformat(),
+            knowledge_sources=response.get("knowledge_sources") or [],
+        )
+        if not getattr(self, "_checkpoint_memory_ready", False):
+            self._prepare_checkpoint_memory()
+        if getattr(self, "_checkpoint_memory_fact", None):
+            repository.save_long_term_fact(
+                response["character_id"],
+                self.player_id,
+                self._checkpoint_memory_fact,
+            )
 
 
     def _prepare_checkpoint_memory(self) -> None:
@@ -374,6 +498,7 @@ class MultiCharacterOrchestrator:
                 speaker_id,
                 player_message,
                 clock_snapshot=clock_snapshot,
+                persist=False,
             )
             responses.append(result)
             
@@ -393,7 +518,13 @@ class MultiCharacterOrchestrator:
         return responses
     
     
-    def trigger_character_interaction(self, trigger_character_id: str = None, prompt: str = None) -> dict:
+    def trigger_character_interaction(
+        self,
+        trigger_character_id: str = None,
+        prompt: str = None,
+        *,
+        persist: bool = True,
+    ) -> dict:
         """
         触发角色间互动（角色主动发言）
         
@@ -412,6 +543,7 @@ class MultiCharacterOrchestrator:
             trigger_character_id,
             prompt=prompt,
             clock_snapshot=clock_snapshot,
+            persist=persist,
         )
         
         return result
@@ -699,6 +831,7 @@ class MultiCharacterOrchestrator:
         player_message: str,
         *,
         clock_snapshot=None,
+        persist: bool = True,
     ) -> dict:
         """
         生成角色对玩家的回应
@@ -807,37 +940,8 @@ class MultiCharacterOrchestrator:
         
         mood_after = result.get("mood_after") or runtime_state.get("current_mood", "neutral")
         
-        # 持久化状态
-        repository.save_runtime_state(
-            character_id,
-            self.player_id,
-            new_affinity,
-            new_trust,
-            mood_after
-        )
-        
-        # 记录消息
         character_name = card.meta.display_name or card.meta.name
-        repository.append_multi_character_message(
-            self.session_id,
-            role="assistant",
-            content=dialogue,
-            character_id=character_id,
-            character_name=character_name,
-            world_created_at=clock_snapshot.world_now.isoformat(),
-            knowledge_sources=knowledge.sources,
-        )
-        
-        if not getattr(self, "_checkpoint_memory_ready", False):
-            self._prepare_checkpoint_memory()
-        if getattr(self, "_checkpoint_memory_fact", None):
-            repository.save_long_term_fact(
-                character_id,
-                self.player_id,
-                self._checkpoint_memory_fact,
-            )
-        
-        return {
+        response = {
             "character_id": character_id,
             "character_name": character_name,
             "dialogue": dialogue,
@@ -848,7 +952,21 @@ class MultiCharacterOrchestrator:
             "current_trust": new_trust,
             "current_mood": mood_after,
             "knowledge_sources": knowledge.sources,
+            "_previous_affinity": runtime_state.get("affection_level", 0),
+            "_previous_trust": runtime_state.get("trust_level", 0),
         }
+        if persist:
+            repository.save_runtime_state(
+                character_id,
+                self.player_id,
+                new_affinity,
+                new_trust,
+                mood_after,
+            )
+            self._persist_generated_response(response, clock_snapshot)
+            response.pop("_previous_affinity", None)
+            response.pop("_previous_trust", None)
+        return response
     
     
     def _generate_character_interaction(
@@ -857,6 +975,7 @@ class MultiCharacterOrchestrator:
         prompt: str = None,
         *,
         clock_snapshot=None,
+        persist: bool = True,
     ) -> dict:
         """
         生成角色间互动（角色主动发言）
@@ -952,15 +1071,16 @@ class MultiCharacterOrchestrator:
         
         # 记录消息
         character_name = card.meta.display_name or card.meta.name
-        repository.append_multi_character_message(
-            self.session_id,
-            role="assistant",
-            content=dialogue,
-            character_id=trigger_character_id,
-            character_name=character_name,
-            world_created_at=clock_snapshot.world_now.isoformat(),
-            knowledge_sources=knowledge.sources,
-        )
+        if persist:
+            repository.append_multi_character_message(
+                self.session_id,
+                role="assistant",
+                content=dialogue,
+                character_id=trigger_character_id,
+                character_name=character_name,
+                world_created_at=clock_snapshot.world_now.isoformat(),
+                knowledge_sources=knowledge.sources,
+            )
         
         return {
             "character_id": trigger_character_id,
@@ -1228,7 +1348,8 @@ def process_multi_character_turn(
     session_id: str,
     player_message: str,
     discussion_mode: bool = True,
-    max_responses: int | None = None
+    max_responses: int | None = None,
+    request_id: str | None = None,
 ) -> dict | list[dict]:
     """
     处理多角色对话轮次
@@ -1246,6 +1367,7 @@ def process_multi_character_turn(
     result = orchestrator.process_player_message(
         player_message, 
         allow_multiple_responses=discussion_mode,
-        max_responses=max_responses
+        max_responses=max_responses,
+        request_id=request_id,
     )
     return result

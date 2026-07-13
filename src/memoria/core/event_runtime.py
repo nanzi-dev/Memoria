@@ -63,6 +63,9 @@ def _event_definition_from_row(row: dict[str, Any]) -> EventDefinition:
         trigger_condition=json.loads(row["trigger_config"]),
         effects=json.loads(row["effects_config"]),
         priority=row.get("priority", 0),
+        exclusive_group=row.get("exclusive_group"),
+        max_triggers_per_turn=row.get("max_triggers_per_turn") or 3,
+        stop_processing=bool(row.get("stop_processing", 0)),
         is_active=bool(row.get("is_active", 1)),
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
@@ -73,8 +76,123 @@ def _event_definition_from_row(row: dict[str, Any]) -> EventDefinition:
     )
 
 
-def persist_event_context(event: EventDefinition, context: EventContext, result: EventTriggerResult) -> None:
-    """保存事件触发后的上下文进度。"""
+def build_event_context(
+    *,
+    character_id: str,
+    player_id: str,
+    session_id: str,
+    current_affinity: float,
+    current_trust: float,
+    current_mood: str,
+    player_message: str = "",
+    npc_response: str | None = None,
+    previous_affinity: float | None = None,
+    previous_trust: float | None = None,
+    affinity_delta: float | None = None,
+    trust_delta: float | None = None,
+    character_relationships: dict[str, dict] | None = None,
+    event_data: dict[str, Any] | None = None,
+    last_event_id: str | None = None,
+    world_time: str | None = None,
+    execution_key: str | None = None,
+    trigger_source: str = "dialogue",
+    current_user_turn_persisted: bool = False,
+) -> EventContext:
+    """Build one canonical event context for dialogue, group chat, and schedules."""
+    session = repository.get_session(session_id)
+    session_turns = repository.get_session_user_turn_count(session_id) if session else 0
+    total_turns = repository.count_character_user_turns(player_id, character_id)
+    if player_message and not current_user_turn_persisted:
+        session_turns += 1
+        total_turns += 1
+
+    session_duration_minutes = 0.0
+    if session and session.get("created_at"):
+        created_at = _parse_iso(session["created_at"])
+        if created_at:
+            session_duration_minutes = max(
+                0.0,
+                (datetime.now(timezone.utc) - created_at).total_seconds() / 60.0,
+            )
+
+    active_multi_session = repository.get_latest_active_multi_session(player_id)
+    if world_time is None:
+        world_time = world_clock.get_clock_snapshot(player_id).world_now.isoformat()
+    if affinity_delta is None:
+        affinity_delta = (
+            current_affinity - previous_affinity
+            if previous_affinity is not None
+            else 0.0
+        )
+    if trust_delta is None:
+        trust_delta = (
+            current_trust - previous_trust
+            if previous_trust is not None
+            else 0.0
+        )
+
+    return EventContext(
+        character_id=character_id,
+        player_id=player_id,
+        session_id=session_id,
+        current_affinity=current_affinity,
+        current_trust=current_trust,
+        current_mood=current_mood,
+        previous_affinity=previous_affinity,
+        previous_trust=previous_trust,
+        player_message=player_message,
+        npc_response=npc_response,
+        dialogue_count=session_turns,
+        total_dialogue_count=total_turns,
+        session_duration_minutes=session_duration_minutes,
+        affinity_delta=affinity_delta,
+        trust_delta=trust_delta,
+        unlocked_content=repository.list_event_unlocks(player_id, character_id),
+        character_relationships=character_relationships or {},
+        event_data=event_data or {},
+        event_history=repository.list_event_execution_history(player_id, limit=200),
+        world_time=world_time,
+        last_event_id=last_event_id,
+        active_multi_session_id=(
+            active_multi_session["session_id"] if active_multi_session else None
+        ),
+        execution_key=execution_key,
+        trigger_source=trigger_source,
+    )
+
+
+def _context_state_for_result(
+    event: EventDefinition,
+    context: EventContext,
+    result: EventTriggerResult,
+) -> dict[str, Any]:
+    stored = repository.get_event_context_state(
+        event.event_id,
+        context.character_id,
+        context.player_id,
+    )
+    stored_data: dict[str, Any] = {}
+    if stored and stored.get("context_data"):
+        try:
+            stored_data = json.loads(stored["context_data"])
+        except (TypeError, ValueError):
+            stored_data = {}
+
+    progress = float((stored or {}).get("progress") or 0.0)
+    status = str((stored or {}).get("status") or "active")
+    progress_update = result.state_changes.get("event_progress") or {}
+    if "progress" in progress_update:
+        progress = float(progress_update["progress"])
+    if "progress_delta" in progress_update:
+        progress += float(progress_update["progress_delta"])
+    progress = max(0.0, min(1.0, progress))
+    if progress_update.get("status"):
+        status = str(progress_update["status"])
+    elif progress_update and progress >= 1.0:
+        status = "completed"
+    elif progress_update and status == "completed" and progress < 1.0:
+        status = "active"
+
     context_data = {
         "event_id": event.event_id,
         "event_name": event.event_name,
@@ -89,17 +207,215 @@ def persist_event_context(event: EventDefinition, context: EventContext, result:
         "chained_events": result.chained_events,
         "proactive_dialogues": result.proactive_dialogues,
         "event_data": context.event_data,
+        "previous_context": stored_data,
     }
-    progress = min(1.0, float(context.event_data.get("progress", 1.0) or 1.0))
+    return {
+        "context_data": json.dumps(context_data, ensure_ascii=False),
+        "status": status,
+        "progress": progress,
+    }
+
+
+def persist_event_context(
+    event: EventDefinition,
+    context: EventContext,
+    result: EventTriggerResult,
+) -> None:
+    """Legacy standalone persistence wrapper; production uses the batch transaction."""
+    state = _context_state_for_result(event, context, result)
     repository.save_event_context_state(
         event_id=event.event_id,
         character_id=context.character_id,
         player_id=context.player_id,
-        context_data=json.dumps(context_data, ensure_ascii=False),
-        status="completed" if progress >= 1.0 else "active",
-        progress=progress,
+        context_data=state["context_data"],
+        status=state["status"],
+        progress=state["progress"],
         last_session_id=context.session_id,
     )
+
+
+def _restore_batch_results(batch: dict[str, Any]) -> list[EventTriggerResult]:
+    try:
+        stored = json.loads(batch.get("results_data") or "[]")
+    except (TypeError, ValueError):
+        logger.error("Invalid event batch result payload", extra={"batch": batch})
+        return []
+    restored = [EventTriggerResult.model_validate(item) for item in stored]
+    for result in restored:
+        result.status = "skipped"
+        result.deduplicated = True
+    return restored
+
+
+def _replay_batch_results(
+    player_id: str,
+    execution_key: str,
+    batch: dict[str, Any],
+) -> list[EventTriggerResult]:
+    repository.increment_event_execution_batch_deduplicated(
+        player_id,
+        execution_key,
+    )
+    return _restore_batch_results(batch)
+
+
+def _plan_event_chain(
+    roots: list[EventDefinition],
+    context: EventContext,
+    definitions_by_id: dict[str, EventDefinition],
+) -> tuple[list[EventTriggerResult], list[dict[str, Any]]]:
+    return _plan_event_roots(
+        [(event, context) for event in roots],
+        definitions_by_id,
+    )
+
+
+def _plan_event_roots(
+    roots: list[tuple[EventDefinition, EventContext]],
+    definitions_by_id: dict[str, EventDefinition],
+) -> tuple[list[EventTriggerResult], list[dict[str, Any]]]:
+    executor = get_event_executor()
+    results: list[EventTriggerResult] = []
+    executions: list[dict[str, Any]] = []
+    planned_event_ids: set[str] = set()
+
+    def visit(
+        event: EventDefinition,
+        chain_context: EventContext,
+        depth: int,
+        path: tuple[str, ...],
+    ) -> None:
+        if depth > MAX_CHAIN_DEPTH:
+            logger.warning("事件链超过最大深度，停止: %s", event.event_id)
+            return
+        if event.event_id in path:
+            logger.warning("检测到事件链循环，停止: %s", event.event_id)
+            return
+        if event.event_id in planned_event_ids:
+            logger.info("同一事件批次跳过重复链节点: %s", event.event_id)
+            return
+        planned_event_ids.add(event.event_id)
+
+        event_context = chain_context.model_copy(
+            update={
+                "execution_key": chain_context.execution_key,
+                "last_event_id": path[-1] if path else chain_context.last_event_id,
+            }
+        )
+        result, operations = executor.plan_event(
+            event,
+            event_context,
+            execution_key=chain_context.execution_key,
+        )
+        results.append(result)
+        executions.append(
+            executor.build_execution_record(
+                event,
+                event_context,
+                result,
+                operations,
+                context_state=(
+                    _context_state_for_result(event, event_context, result)
+                    if result.status == "succeeded"
+                    else None
+                ),
+            )
+        )
+        if result.status != "succeeded":
+            return
+        for next_event_id in result.chained_events:
+            next_event = definitions_by_id.get(next_event_id)
+            if next_event is None:
+                logger.warning("链式事件不存在或不属于当前用户: %s", next_event_id)
+                continue
+            visit(next_event, event_context, depth + 1, (*path, event.event_id))
+
+    for root, root_context in roots:
+        visit(root, root_context, 0, ())
+    return results, executions
+
+
+def _runtime_state_after_results(
+    context: EventContext,
+    results: list[EventTriggerResult],
+) -> dict[str, Any] | None:
+    affinity = context.current_affinity
+    trust = context.current_trust
+    mood = context.current_mood
+    changed = False
+    for result in results:
+        if result.status != "succeeded":
+            continue
+        changes = result.state_changes or {}
+        if "affection_level" in changes:
+            affinity = max(-100, min(100, affinity + float(changes["affection_level"])))
+            changed = True
+        if "trust_level" in changes:
+            trust = max(0, min(100, trust + float(changes["trust_level"])))
+            changed = True
+        if "current_mood" in changes:
+            mood = str(changes["current_mood"])
+            changed = True
+    if not changed:
+        return None
+    return {
+        "character_id": context.character_id,
+        "affection_level": affinity,
+        "trust_level": trust,
+        "current_mood": mood,
+    }
+
+
+def _runtime_states_after_contexts(
+    contexts: list[EventContext],
+    results: list[EventTriggerResult],
+) -> list[dict[str, Any]]:
+    states: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for context in contexts:
+        if context.character_id in seen:
+            continue
+        seen.add(context.character_id)
+        character_results = [
+            result
+            for result in results
+            if result.character_id == context.character_id
+        ]
+        state = _runtime_state_after_results(context, character_results) or {
+            "character_id": context.character_id,
+            "affection_level": context.current_affinity,
+            "trust_level": context.current_trust,
+            "current_mood": context.current_mood,
+        }
+        states.append(state)
+    return states
+
+
+def _commit_planned_batch(
+    context: EventContext,
+    results: list[EventTriggerResult],
+    executions: list[dict[str, Any]],
+    *,
+    runtime_states: list[dict[str, Any]] | None = None,
+    schedule_completion: dict[str, Any] | None = None,
+) -> list[EventTriggerResult]:
+    results_data = json.dumps(
+        [result.model_dump(mode="json") for result in results],
+        ensure_ascii=False,
+    )
+    commit = repository.commit_event_execution_batch(
+        player_id=context.player_id,
+        execution_key=str(context.execution_key),
+        trigger_source=context.trigger_source,
+        results_data=results_data,
+        executions=executions,
+        runtime_states=runtime_states,
+        schedule_completion=schedule_completion,
+    )
+    if commit["deduplicated"]:
+        return _restore_batch_results(commit["batch"])
+    get_event_executor()._sync_vector_memories(commit.get("inserted_memories") or [])
+    return results
 
 
 def execute_event_with_chain(
@@ -109,60 +425,160 @@ def execute_event_with_chain(
     depth: int = 0,
     visited: set[str] | None = None,
 ) -> list[EventTriggerResult]:
-    """执行事件并按配置继续执行链式事件。"""
-    if depth > MAX_CHAIN_DEPTH:
-        logger.warning(f"事件链超过最大深度，停止: {event.event_id}")
-        return []
-
-    visited = visited or set()
-    if event.event_id in visited:
-        logger.warning(f"检测到事件链循环，停止: {event.event_id}")
-        return []
-    visited.add(event.event_id)
-
-    executor = get_event_executor()
-    chain_context = context.model_copy(update={"last_event_id": event.event_id})
-    result = executor.execute_event(event, chain_context)
-    persist_event_context(event, chain_context, result)
-
-    results = [result]
-    if not result.chained_events:
-        return results
-
+    """Compatibility entry that executes one root and its chain as one batch."""
+    del depth, visited
     if definitions_by_id is None:
         definitions_by_id = {
             definition.event_id: definition
             for definition in load_event_definitions(context.player_id, context.character_id)
         }
+    definitions_by_id[event.event_id] = event
+    execution_key = context.execution_key or (
+        f"direct:{context.session_id}:{event.event_id}:{uuid.uuid4().hex}"
+    )
+    batch_context = context.model_copy(update={"execution_key": execution_key})
+    existing = repository.get_event_execution_batch(context.player_id, execution_key)
+    if existing:
+        return _replay_batch_results(context.player_id, execution_key, existing)
+    results, executions = _plan_event_chain(
+        [event],
+        batch_context,
+        definitions_by_id,
+    )
+    return _commit_planned_batch(
+        batch_context,
+        results,
+        executions,
+        runtime_states=[state] if (state := _runtime_state_after_results(batch_context, results)) else [],
+    )
 
-    for next_event_id in result.chained_events:
-        next_event = definitions_by_id.get(next_event_id)
-        if not next_event:
-            logger.warning(f"链式事件不存在: {next_event_id}")
-            continue
-        results.extend(
-            execute_event_with_chain(
-                next_event,
-                chain_context,
-                definitions_by_id=definitions_by_id,
-                depth=depth + 1,
-                visited=visited.copy(),
-            )
-        )
-    return results
 
+def detect_and_execute_events(
+    context: EventContext,
+    event_definitions: list[EventDefinition] | None = None,
+    *,
+    runtime_states: list[dict[str, Any]] | None = None,
+    schedule_completion: dict[str, Any] | None = None,
+) -> list[EventTriggerResult]:
+    """Detect, plan, and atomically commit one idempotent event batch."""
+    execution_key = context.execution_key or (
+        f"event:{context.trigger_source}:{context.session_id}:{uuid.uuid4().hex}"
+    )
+    context = context.model_copy(update={"execution_key": execution_key})
+    existing = repository.get_event_execution_batch(context.player_id, execution_key)
+    if existing:
+        return _replay_batch_results(context.player_id, execution_key, existing)
 
-def detect_and_execute_events(context: EventContext, event_definitions: list[EventDefinition] | None = None) -> list[EventTriggerResult]:
-    """检测并执行当前上下文触发的事件。"""
     definitions = event_definitions or load_event_definitions(context.player_id, context.character_id, only_active=True)
     detector = get_event_detector()
     triggered_events = detector.check_events(context, definitions)
     definitions_by_id = {event.event_id: event for event in definitions}
+    results, executions = _plan_event_chain(
+        triggered_events,
+        context,
+        definitions_by_id,
+    )
+    for result in results:
+        event = definitions_by_id.get(result.event_id)
+        if event and event in triggered_events:
+            result.condition_trace = [detector.evaluate_event(event, context)["condition"]]
 
-    results = []
-    for event in triggered_events:
-        results.extend(execute_event_with_chain(event, context, definitions_by_id=definitions_by_id))
-    return results
+    if runtime_states is None and results:
+        state = _runtime_state_after_results(context, results)
+        runtime_states = [state] if state else []
+    return _commit_planned_batch(
+        context,
+        results,
+        executions,
+        runtime_states=runtime_states,
+        schedule_completion=schedule_completion,
+    )
+
+
+def detect_and_execute_event_contexts(
+    contexts: list[EventContext],
+    event_definitions: list[EventDefinition] | None = None,
+) -> list[EventTriggerResult]:
+    """Execute one group-chat turn across multiple character contexts."""
+    if not contexts:
+        return []
+    player_id = contexts[0].player_id
+    execution_key = contexts[0].execution_key or (
+        f"event:multi:{contexts[0].session_id}:{uuid.uuid4().hex}"
+    )
+    normalized_contexts = [
+        context.model_copy(
+            update={
+                "execution_key": execution_key,
+                "trigger_source": "multi_dialogue",
+            }
+        )
+        for context in contexts
+    ]
+    if any(context.player_id != player_id for context in normalized_contexts):
+        raise ValueError("group event contexts must belong to one player")
+
+    existing = repository.get_event_execution_batch(player_id, execution_key)
+    if existing:
+        return _replay_batch_results(player_id, execution_key, existing)
+
+    definitions = event_definitions or load_event_definitions(
+        player_id,
+        character_id=None,
+        only_active=True,
+    )
+    definitions_by_id = {event.event_id: event for event in definitions}
+    detector = get_event_detector()
+    candidates: list[tuple[EventDefinition, EventContext]] = []
+    for event in definitions:
+        if not event.is_active:
+            continue
+        scoped_contexts = [
+            context
+            for context in normalized_contexts
+            if event.character_id in {None, context.character_id}
+        ]
+        for context in scoped_contexts:
+            if not detector._check_cooldown(event, context):
+                continue
+            if detector._check_trigger_condition(event.trigger_condition, context):
+                candidates.append((event, context))
+                break
+
+    candidates.sort(key=lambda pair: pair[0].priority, reverse=True)
+    roots: list[tuple[EventDefinition, EventContext]] = []
+    exclusive_groups: set[str] = set()
+    turn_limit = min(
+        (max(1, event.max_triggers_per_turn or 3) for event, _ in candidates),
+        default=3,
+    )
+    for event, context in candidates:
+        if event.exclusive_group and event.exclusive_group in exclusive_groups:
+            continue
+        if len(roots) >= turn_limit:
+            break
+        roots.append((event, context))
+        if event.exclusive_group:
+            exclusive_groups.add(event.exclusive_group)
+        if event.stop_processing:
+            break
+
+    results, executions = _plan_event_roots(roots, definitions_by_id)
+    root_contexts = {event.event_id: context for event, context in roots}
+    for result in results:
+        event = definitions_by_id.get(result.event_id)
+        root_context = root_contexts.get(result.event_id)
+        if event and root_context:
+            result.condition_trace = [
+                detector.evaluate_event(event, root_context)["condition"]
+            ]
+
+    return _commit_planned_batch(
+        normalized_contexts[0],
+        results,
+        executions,
+        runtime_states=_runtime_states_after_contexts(normalized_contexts, results),
+    )
 
 
 def apply_event_results_to_dialogue_state(
@@ -176,7 +592,24 @@ def apply_event_results_to_dialogue_state(
     notification = None
     triggered_info = []
 
+    dialogue_overrides: list[str] = []
+    notifications: list[str] = []
     for event_result in results:
+        triggered_info.append({
+            "event_id": event_result.event_id,
+            "event_name": event_result.event_name,
+            "character_id": event_result.character_id,
+            "execution_id": event_result.execution_id,
+            "status": event_result.status,
+            "effects": event_result.effects_applied,
+            "effect_details": [effect.model_dump(mode="json") for effect in event_result.effects],
+            "chained_events": event_result.chained_events,
+            "proactive_dialogues": event_result.proactive_dialogues,
+            "error": event_result.error,
+            "deduplicated": event_result.deduplicated,
+        })
+        if event_result.status != "succeeded":
+            continue
         state_changes = event_result.state_changes or {}
         if "affection_level" in state_changes:
             affinity = max(-100, min(100, affinity + state_changes["affection_level"]))
@@ -184,20 +617,33 @@ def apply_event_results_to_dialogue_state(
             trust = max(0, min(100, trust + state_changes["trust_level"]))
         if "current_mood" in state_changes:
             mood = state_changes["current_mood"]
-        if event_result.dialogue_override and not dialogue.startswith("[事件触发]"):
-            dialogue = f"[事件触发] {event_result.dialogue_override}"
-        if event_result.notification:
-            notification = event_result.notification
+        dialogue_overrides.extend(
+            event_result.dialogue_overrides
+            or ([event_result.dialogue_override] if event_result.dialogue_override else [])
+        )
+        notifications.extend(
+            item.message for item in event_result.notifications
+        )
+        if event_result.notification and event_result.notification not in notifications:
+            notifications.append(event_result.notification)
 
-        triggered_info.append({
-            "event_id": event_result.event_id,
-            "event_name": event_result.event_name,
-            "effects": event_result.effects_applied,
-            "chained_events": event_result.chained_events,
-            "proactive_dialogues": event_result.proactive_dialogues,
-        })
+    if dialogue_overrides:
+        dialogue = "[事件触发] " + "\n".join(dict.fromkeys(dialogue_overrides))
+    if notifications:
+        notification = "\n".join(dict.fromkeys(notifications))
 
     return dialogue, affinity, trust, mood, triggered_info, notification
+
+
+def collect_event_notifications(
+    results: list[EventTriggerResult],
+) -> list[dict[str, Any]]:
+    return [
+        notification.model_dump(mode="json")
+        for result in results
+        if getattr(result, "status", None) == "succeeded"
+        for notification in result.notifications
+    ]
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -212,24 +658,78 @@ def _parse_iso(value: str | None) -> datetime | None:
         return None
 
 
-def _field_matches(value: int, field: str, min_value: int, max_value: int) -> bool:
-    field = (field or "*").strip()
-    if field == "*":
-        return True
+def _parse_cron_number(value: str, field_name: str) -> int:
+    if not value or not value.isdigit():
+        raise ValueError(f"cron {field_name} 字段包含非法值: {value!r}")
+    return int(value)
+
+
+def _parse_cron_field(
+    field: str,
+    min_value: int,
+    max_value: int,
+    field_name: str,
+    *,
+    normalize_sunday: bool = False,
+) -> set[int]:
+    if not field:
+        raise ValueError(f"cron {field_name} 字段不能为空")
+
     allowed: set[int] = set()
     for part in field.split(","):
-        part = part.strip()
+        if not part:
+            raise ValueError(f"cron {field_name} 字段包含空列表项")
         if part == "*":
-            return True
-        if part.startswith("*/"):
-            step = int(part[2:])
-            allowed.update(range(min_value, max_value + 1, step))
+            values = range(min_value, max_value + 1)
+        elif part.startswith("*/"):
+            step = _parse_cron_number(part[2:], field_name)
+            if step <= 0:
+                raise ValueError(f"cron {field_name} 字段的步长必须大于 0")
+            values = range(min_value, max_value + 1, step)
         elif "-" in part:
-            start, end = [int(x) for x in part.split("-", 1)]
-            allowed.update(range(max(min_value, start), min(max_value, end) + 1))
+            bounds = part.split("-")
+            if len(bounds) != 2:
+                raise ValueError(f"cron {field_name} 字段范围无效: {part!r}")
+            start = _parse_cron_number(bounds[0], field_name)
+            end = _parse_cron_number(bounds[1], field_name)
+            if start > end:
+                raise ValueError(f"cron {field_name} 字段范围不能反向: {part!r}")
+            values = range(start, end + 1)
         else:
-            allowed.add(int(part))
-    return value in allowed
+            values = [_parse_cron_number(part, field_name)]
+
+        for raw_value in values:
+            if raw_value < min_value or raw_value > max_value:
+                raise ValueError(
+                    f"cron {field_name} 字段值 {raw_value} 超出范围 "
+                    f"{min_value}..{max_value}"
+                )
+            allowed.add(0 if normalize_sunday and raw_value == 7 else raw_value)
+    return allowed
+
+
+def _parse_cron_schedule(schedule: str) -> tuple[set[int], ...]:
+    parts = str(schedule or "").split()
+    if len(parts) != 5:
+        raise ValueError("cron 表达式必须是 5 字段: minute hour day month weekday")
+    return (
+        _parse_cron_field(parts[0], 0, 59, "minute"),
+        _parse_cron_field(parts[1], 0, 23, "hour"),
+        _parse_cron_field(parts[2], 1, 31, "day"),
+        _parse_cron_field(parts[3], 1, 12, "month"),
+        _parse_cron_field(
+            parts[4],
+            0,
+            7,
+            "weekday",
+            normalize_sunday=True,
+        ),
+    )
+
+
+def validate_cron_schedule(schedule: str) -> None:
+    """Validate the supported five-field cron grammar and numeric bounds."""
+    _parse_cron_schedule(schedule)
 
 
 def _cron_weekday(when: datetime) -> int:
@@ -237,49 +737,20 @@ def _cron_weekday(when: datetime) -> int:
     return (when.weekday() + 1) % 7
 
 
-def _weekday_field_matches(weekday: int, field: str) -> bool:
-    field = (field or "*").strip()
-    if field == "*":
-        return True
-
-    allowed: set[int] = set()
-    for part in field.split(","):
-        part = part.strip()
-        if part == "*":
-            return True
-        if part.startswith("*/"):
-            step = int(part[2:])
-            allowed.update(range(0, 7, step))
-        elif "-" in part:
-            raw_start, raw_end = [int(x) for x in part.split("-", 1)]
-            start = 0 if raw_start == 7 else raw_start
-            end = 0 if raw_end == 7 else raw_end
-            if raw_end == 7 and start > 0:
-                allowed.update(range(start, 7))
-                allowed.add(0)
-            elif start <= end:
-                allowed.update(range(max(0, start), min(6, end) + 1))
-            else:
-                allowed.update(range(start, 7))
-                allowed.update(range(0, end + 1))
-        else:
-            value = int(part)
-            allowed.add(0 if value == 7 else value)
-    return weekday in allowed
+def _cron_fields_match(fields: tuple[set[int], ...], when: datetime) -> bool:
+    minute, hour, day, month, weekday = fields
+    return (
+        when.minute in minute
+        and when.hour in hour
+        and when.day in day
+        and when.month in month
+        and _cron_weekday(when) in weekday
+    )
 
 
 def cron_matches(schedule: str, when: datetime) -> bool:
     """检查 5 字段 cron 是否匹配当前分钟。"""
-    parts = schedule.split()
-    if len(parts) != 5:
-        raise ValueError("cron 表达式必须是 5 字段: minute hour day month weekday")
-    return (
-        _field_matches(when.minute, parts[0], 0, 59)
-        and _field_matches(when.hour, parts[1], 0, 23)
-        and _field_matches(when.day, parts[2], 1, 31)
-        and _field_matches(when.month, parts[3], 1, 12)
-        and _weekday_field_matches(_cron_weekday(when), parts[4])
-    )
+    return _cron_fields_match(_parse_cron_schedule(schedule), when)
 
 
 def next_cron_run(
@@ -289,11 +760,12 @@ def next_cron_run(
     timezone_name: str = "UTC",
 ) -> datetime:
     """Return the next world-UTC instant matching a player's local cron."""
+    fields = _parse_cron_schedule(schedule)
     cursor = after or datetime.now(timezone.utc)
     cursor = cursor.astimezone(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1)
     local_timezone = ZoneInfo(timezone_name)
     for _ in range(max_minutes):
-        if cron_matches(schedule, cursor.astimezone(local_timezone)):
+        if _cron_fields_match(fields, cursor.astimezone(local_timezone)):
             return cursor
         cursor += timedelta(minutes=1)
     raise ValueError(f"无法在搜索窗口内计算下一次 cron: {schedule}")
@@ -363,27 +835,14 @@ def _load_scheduled_event_context(
     if not session:
         session = repository.get_latest_active_session(player_id, character_id)
 
-    active_multi_session = repository.get_latest_active_multi_session(player_id)
     session_id = session["session_id"] if session else f"schedule:{event.event_id}"
-    messages = repository.get_session_messages(session_id) if session else []
-    dialogue_count = sum(1 for message in messages if message.get("role") == "user")
-
-    session_duration_minutes = 0.0
-    if session and session.get("created_at"):
-        created_at = _parse_iso(session["created_at"])
-        if created_at:
-            session_duration_minutes = max(
-                0.0,
-                (datetime.now(timezone.utc) - created_at).total_seconds() / 60.0,
-            )
-
     event_data = dict(context_data.get("event_data") or {})
     event_data.update({
         "triggered_by": "schedule",
         "scheduled_for": schedule_state["next_run_at"],
         "world_now": world_now.isoformat(),
     })
-    return EventContext(
+    return build_event_context(
         character_id=character_id,
         player_id=player_id,
         session_id=session_id,
@@ -392,16 +851,12 @@ def _load_scheduled_event_context(
         current_mood=runtime_state.get("current_mood", "neutral"),
         player_message=context_data.get("player_message", ""),
         npc_response=context_data.get("npc_response"),
-        dialogue_count=dialogue_count,
-        total_dialogue_count=dialogue_count,
-        session_duration_minutes=session_duration_minutes,
-        unlocked_content=context_data.get("unlocked_content") or [],
         character_relationships=context_data.get("character_relationships") or {},
         event_data=event_data,
         last_event_id=context_data.get("last_event_id"),
-        active_multi_session_id=(
-            active_multi_session["session_id"] if active_multi_session else None
-        ),
+        world_time=world_now.isoformat(),
+        trigger_source="schedule",
+        current_user_turn_persisted=True,
     )
 
 
@@ -509,35 +964,104 @@ def run_due_time_events(
                 schedule_state,
                 snapshot.world_now,
             )
-            event_results = execute_event_with_chain(event, context)
-            _persist_scheduled_event_results(
-                event,
-                context,
-                event_results,
-                snapshot.world_now,
-            )
             next_run = next_cron_run(
                 schedule_state["schedule"],
                 snapshot.world_now,
                 timezone_name=snapshot.timezone,
             )
-            if not repository.complete_event_schedule(
-                schedule_state["event_id"],
-                schedule_state["character_id"],
-                schedule_state["player_id"],
-                lease_owner=owner,
-                last_checked_at=snapshot.world_now.isoformat(),
-                last_run_at=snapshot.world_now.isoformat(),
-                next_run_at=next_run.isoformat(),
-            ):
-                raise RuntimeError("schedule lease was lost before completion")
+            execution_key = (
+                f"schedule:{schedule_state['event_id']}:"
+                f"{schedule_state['character_id']}:{schedule_state['player_id']}:"
+                f"{schedule_state['next_run_at']}"
+            )
+            context = context.model_copy(update={"execution_key": execution_key})
+            existing = repository.get_event_execution_batch(
+                context.player_id,
+                execution_key,
+            )
+            if existing:
+                event_results = _replay_batch_results(
+                    context.player_id,
+                    execution_key,
+                    existing,
+                )
+                if not repository.complete_event_schedule(
+                    schedule_state["event_id"],
+                    schedule_state["character_id"],
+                    schedule_state["player_id"],
+                    lease_owner=owner,
+                    last_checked_at=snapshot.world_now.isoformat(),
+                    last_run_at=snapshot.world_now.isoformat(),
+                    next_run_at=next_run.isoformat(),
+                ):
+                    raise RuntimeError("schedule lease was lost before replay completion")
+            else:
+                definitions_by_id = {
+                    definition.event_id: definition
+                    for definition in load_event_definitions(
+                        context.player_id,
+                        context.character_id,
+                        only_active=True,
+                    )
+                }
+                definitions_by_id[event.event_id] = event
+                event_results, executions = _plan_event_chain(
+                    [event],
+                    context,
+                    definitions_by_id,
+                )
+                for execution in executions:
+                    if execution["status"] != "succeeded":
+                        continue
+                    has_inbox_item = bool(execution.get("inbox_items"))
+                    if not has_inbox_item:
+                        matching = next(
+                            result
+                            for result in event_results
+                            if result.execution_id == execution["execution_id"]
+                        )
+                        content_parts = list(matching.dialogue_overrides)
+                        content_parts.extend(
+                            str(item.get("dialogue") or item.get("content"))
+                            for item in matching.proactive_dialogues
+                            if item.get("dialogue") or item.get("content")
+                        )
+                        execution["inbox_items"].append({
+                            "title": matching.event_name,
+                            "content": "\n".join(dict.fromkeys(content_parts))
+                            or f"{matching.event_name} 已触发。",
+                            "session_id": (
+                                None
+                                if context.session_id.startswith("schedule:")
+                                else context.session_id
+                            ),
+                            "payload": matching.model_dump_json(),
+                            "world_created_at": snapshot.world_now.isoformat(),
+                        })
+                runtime_state = _runtime_state_after_results(context, event_results)
+                event_results = _commit_planned_batch(
+                    context,
+                    event_results,
+                    executions,
+                    runtime_states=[runtime_state] if runtime_state else [],
+                    schedule_completion={
+                        "event_id": schedule_state["event_id"],
+                        "character_id": schedule_state["character_id"],
+                        "lease_owner": owner,
+                        "last_checked_at": snapshot.world_now.isoformat(),
+                        "last_run_at": snapshot.world_now.isoformat(),
+                        "next_run_at": next_run.isoformat(),
+                    },
+                )
             results.extend(event_results)
-        except Exception:
-            repository.release_event_schedule(
+        except Exception as exc:
+            repository.fail_event_schedule(
                 schedule_state["event_id"],
                 schedule_state["character_id"],
                 schedule_state["player_id"],
                 lease_owner=owner,
+                error=str(exc),
+                failed_at=snapshot.world_now.isoformat(),
             )
             logger.error(
                 "Scheduled event execution failed",

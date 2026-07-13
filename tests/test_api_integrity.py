@@ -55,6 +55,47 @@ def test_create_event_rejects_character_not_owned_by_user(monkeypatch):
     assert exc_info.value.status_code == 404
 
 
+def test_create_event_uses_condition_schedule_when_top_level_is_blank(monkeypatch):
+    from memoria.api import event_admin
+
+    saved = {}
+    registered = {}
+    monkeypatch.setattr(event_admin.repository, "get_event_definition", lambda *args: None)
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_character_card_from_db",
+        lambda *args, **kwargs: {"character_id": "c1"},
+    )
+    monkeypatch.setattr(
+        event_admin.repository,
+        "save_event_definition",
+        lambda **kwargs: saved.update(kwargs) or True,
+    )
+    monkeypatch.setattr(
+        event_admin.event_runtime,
+        "register_time_event_schedule",
+        lambda **kwargs: registered.update(kwargs) or True,
+    )
+
+    response = event_admin.create_event(
+        event_admin.EventCreateRequest(
+            event_id="evt_scheduled",
+            event_name="Scheduled event",
+            character_id="c1",
+            schedule="   ",
+            trigger_condition=event_admin.TriggerConditionDTO(
+                trigger_type="time_based",
+                schedule="0 9 * * *",
+            ),
+        ),
+        current_user_id="user-1",
+    )
+
+    assert response.success is True
+    assert saved["schedule"] == "0 9 * * *"
+    assert registered["schedule"] == "0 9 * * *"
+
+
 def test_update_event_persists_changed_character(monkeypatch):
     from memoria.api import event_admin
 
@@ -85,6 +126,44 @@ def test_update_event_persists_changed_character(monkeypatch):
 
     assert response.success is True
     assert saved["character_id"] == "c2"
+
+
+def test_update_event_uses_condition_schedule_when_top_level_is_blank(monkeypatch):
+    from memoria.api import event_admin
+
+    saved = {}
+    registered = {}
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_event_definition",
+        lambda *args: _event_row(),
+    )
+    monkeypatch.setattr(
+        event_admin.repository,
+        "save_event_definition",
+        lambda **kwargs: saved.update(kwargs) or True,
+    )
+    monkeypatch.setattr(
+        event_admin.event_runtime,
+        "register_time_event_schedule",
+        lambda **kwargs: registered.update(kwargs) or True,
+    )
+
+    response = event_admin.update_event(
+        "evt_test",
+        event_admin.EventUpdateRequest(
+            schedule="",
+            trigger_condition=event_admin.TriggerConditionDTO(
+                trigger_type="time_based",
+                schedule="30 8 * * 1-5",
+            ),
+        ),
+        current_user_id="user-1",
+    )
+
+    assert response.success is True
+    assert saved["schedule"] == "30 8 * * 1-5"
+    assert registered["schedule"] == "30 8 * * 1-5"
 
 
 def test_update_event_can_clear_character_for_global_event(monkeypatch):
@@ -141,6 +220,245 @@ def test_register_event_schedule_rejects_unknown_character(monkeypatch):
         event_admin.register_event_schedule(request, current_user_id="user-1")
 
     assert exc_info.value.status_code == 404
+
+
+@pytest.mark.parametrize("schedule", ["99 * * * *", "*/0 * * * *"])
+def test_register_event_schedule_rejects_invalid_cron(monkeypatch, schedule):
+    from memoria.api import event_admin
+
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_event_definition",
+        lambda *args: _event_row(),
+    )
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_character_card_from_db",
+        lambda *args, **kwargs: {"character_id": "c1"},
+    )
+    monkeypatch.setattr(
+        event_admin.event_runtime,
+        "register_time_event_schedule",
+        lambda **kwargs: pytest.fail("invalid cron must not be registered"),
+    )
+
+    request = event_admin.ScheduleRegisterRequest(
+        event_id="evt_test",
+        character_id="c1",
+        player_id="user-1",
+        schedule=schedule,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        event_admin.register_event_schedule(request, current_user_id="user-1")
+
+    assert exc_info.value.status_code == 400
+
+
+def test_register_event_schedule_rejects_mismatched_event_character(monkeypatch):
+    from memoria.api import event_admin
+
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_event_definition",
+        lambda *args: _event_row(character_id="c1"),
+    )
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_character_card_from_db",
+        lambda owner_user_id, character_id, include_inactive=False: {
+            "character_id": character_id,
+        },
+    )
+    monkeypatch.setattr(
+        event_admin.event_runtime,
+        "register_time_event_schedule",
+        lambda **kwargs: pytest.fail("mismatched character must not be registered"),
+    )
+
+    request = event_admin.ScheduleRegisterRequest(
+        event_id="evt_test",
+        character_id="c2",
+        player_id="user-1",
+        schedule="0 9 * * *",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        event_admin.register_event_schedule(request, current_user_id="user-1")
+
+    assert exc_info.value.status_code == 400
+
+
+def test_register_event_schedule_reports_repository_failure(monkeypatch):
+    from memoria.api import event_admin
+
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_event_definition",
+        lambda *args: _event_row(),
+    )
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_character_card_from_db",
+        lambda *args, **kwargs: {"character_id": "c1"},
+    )
+    monkeypatch.setattr(
+        event_admin.event_runtime,
+        "register_time_event_schedule",
+        lambda **kwargs: False,
+    )
+
+    request = event_admin.ScheduleRegisterRequest(
+        event_id="evt_test",
+        character_id="c1",
+        player_id="user-1",
+        schedule="0 9 * * *",
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        event_admin.register_event_schedule(request, current_user_id="user-1")
+
+    assert exc_info.value.status_code == 500
+
+
+def test_event_simulation_plans_without_committing(monkeypatch):
+    from memoria.api import event_admin
+
+    row = _event_row(character_id="c1")
+    row["effects_config"] = (
+        '[{"effect_type":"notify_player","notification_message":"planned"}]'
+    )
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_event_definition",
+        lambda *args: row,
+    )
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_character_card_from_db",
+        lambda *args, **kwargs: {"character_id": "c1"},
+    )
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_event_context_state",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(
+        event_admin.repository,
+        "commit_event_execution_batch",
+        lambda **kwargs: pytest.fail("simulation must not commit event effects"),
+    )
+
+    result = event_admin.simulate_event(
+        "evt_test",
+        event_admin.EventSimulationRequest(
+            character_id="c1",
+            player_message="test",
+            current_affinity=10,
+            current_trust=20,
+        ),
+        current_user_id="user-1",
+    )
+
+    assert result.matched is True
+    assert result.planned_result["notifications"][0]["message"] == "planned"
+    assert result.planned_result["status"] == "succeeded"
+
+
+@pytest.mark.parametrize(
+    ("trigger", "effects", "expected_detail"),
+    [
+        (
+            {"trigger_type": "keyword_match", "keywords": ["["] , "match_mode": "regex"},
+            [],
+            "正则表达式无效",
+        ),
+        (
+            {"trigger_type": "item_acquired"},
+            [],
+            "尚未实现",
+        ),
+        (
+            {"trigger_type": "keyword_match", "keywords": ["test"]},
+            [{"effect_type": "grant_item", "item_id": "item-1"}],
+            "尚未实现",
+        ),
+    ],
+)
+def test_create_event_rejects_invalid_or_unimplemented_configuration(
+    monkeypatch,
+    trigger,
+    effects,
+    expected_detail,
+):
+    from memoria.api import event_admin
+
+    monkeypatch.setattr(event_admin.repository, "get_event_definition", lambda *args: None)
+    monkeypatch.setattr(
+        event_admin.repository,
+        "save_event_definition",
+        lambda **kwargs: pytest.fail("invalid event must not be saved"),
+    )
+    request = event_admin.EventCreateRequest(
+        event_id="evt_invalid",
+        event_name="Invalid event",
+        trigger_condition=event_admin.TriggerConditionDTO(**trigger),
+        effects=[event_admin.EventEffectDTO(**effect) for effect in effects],
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        event_admin.create_event(request, current_user_id="user-1")
+
+    assert exc_info.value.status_code == 400
+    assert expected_detail in exc_info.value.detail
+
+
+def test_schedule_pause_resume_and_delete_lifecycle(monkeypatch):
+    from memoria.api import event_admin
+
+    statuses = []
+    deleted = []
+    schedule_state = {
+        "event_id": "evt_test",
+        "character_id": "c1",
+        "player_id": "user-1",
+        "schedule": "0 9 * * *",
+        "status": "active",
+    }
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_event_definition",
+        lambda *args: _event_row(),
+    )
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_event_schedule",
+        lambda *args: schedule_state,
+    )
+    monkeypatch.setattr(
+        event_admin.repository,
+        "set_event_schedule_status",
+        lambda event_id, character_id, player_id, status, **kwargs: (
+            statuses.append((status, kwargs.get("next_run_at"))) or True
+        ),
+    )
+    monkeypatch.setattr(
+        event_admin.repository,
+        "delete_event_definition",
+        lambda owner_user_id, event_id: (
+            deleted.append((owner_user_id, event_id)) or True
+        ),
+    )
+
+    paused = event_admin.pause_event_schedule("evt_test", "c1", "user-1")
+    resumed = event_admin.resume_event_schedule("evt_test", "c1", "user-1")
+    removed = event_admin.delete_event("evt_test", current_user_id="user-1")
+
+    assert paused.success and resumed.success and removed.success
+    assert statuses[0] == ("paused", None)
+    assert statuses[1][0] == "active"
+    assert statuses[1][1]
+    assert deleted == [("user-1", "evt_test")]
 
 
 def _relationship_request(character_id_a="c1", character_id_b="c2"):

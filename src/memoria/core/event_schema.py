@@ -26,6 +26,10 @@ class TriggerType(str, Enum):
     QUEST_COMPLETED = "quest_completed"            # 完成任务（扩展功能）
     RELATIONSHIP_CHANGE = "relationship_change"     # 与其他角色关系变化
     MOOD_MATCH = "mood_match"                      # 特定情绪状态
+    NPC_KEYWORD_MATCH = "npc_keyword_match"        # NPC 回复关键词匹配
+    STATE_DELTA = "state_delta"                    # 好感度/信任度变化量
+    EVENT_HISTORY = "event_history"                # 历史事件执行状态
+    WORLD_TIME_WINDOW = "world_time_window"        # 玩家世界时间窗口
     COMPOSITE = "composite"                        # 复合条件（多个条件组合）
 
 
@@ -43,6 +47,7 @@ class TriggerCondition(BaseModel):
     # 关键词匹配
     keywords: Optional[list[str]] = None           # 关键词列表
     match_mode: Optional[str] = "any"              # any（任一匹配）或 all（全部匹配）
+    crossing: bool = False                          # 仅在本轮跨过阈值时触发
     
     # 计数条件
     count: Optional[int] = None                    # 目标计数
@@ -53,6 +58,15 @@ class TriggerCondition(BaseModel):
     
     # 情绪条件
     mood: Optional[str] = None                     # 目标情绪
+
+    # 状态变化量 / 事件历史 / 世界时间窗口
+    state_field: Optional[str] = None              # affinity / trust
+    event_id: Optional[str] = None                 # 依赖的历史事件 ID
+    event_status: Optional[str] = "succeeded"      # 依赖事件状态
+    min_occurrences: Optional[int] = 1             # 最少历史执行次数
+    time_window_start: Optional[str] = None         # HH:MM
+    time_window_end: Optional[str] = None           # HH:MM
+    weekdays: Optional[list[int]] = None            # 0=Monday ... 6=Sunday
     
     # 复合条件
     sub_conditions: Optional[list["TriggerCondition"]] = None  # 子条件列表
@@ -79,6 +93,7 @@ class EffectType(str, Enum):
     TRIGGER_EVENT = "trigger_event"                # 触发另一个事件（事件链）
     BRANCH_EVENT = "branch_event"                  # 按上下文分支触发事件
     NPC_PROACTIVE_DIALOGUE = "npc_proactive_dialogue"  # NPC 主动发言（多角色编排器）
+    UPDATE_EVENT_PROGRESS = "update_event_progress"    # 更新多阶段事件状态/进度
 
 
 # =========================
@@ -126,6 +141,11 @@ class EventEffect(BaseModel):
     proactive_character_id: Optional[str] = None   # 指定主动发言 NPC；为空时自动选择
     proactive_prompt: Optional[str] = None         # 发言提示，默认由多角色编排器生成
 
+    # 多阶段事件进度
+    progress: Optional[float] = None               # 直接设置进度（0.0 ~ 1.0）
+    progress_delta: Optional[float] = None         # 在当前进度上增减
+    event_status: Optional[str] = None             # pending / active / completed / failed
+
 
 # =========================
 # 事件定义
@@ -147,6 +167,9 @@ class EventDefinition(BaseModel):
     
     # 优先级
     priority: int = Field(default=0, description="优先级，数字越大越优先")
+    exclusive_group: Optional[str] = None          # 同一轮同组只执行最高优先级事件
+    max_triggers_per_turn: int = Field(default=3, ge=1, le=20)
+    stop_processing: bool = False                  # 触发后停止处理后续普通事件
     
     # 启用状态
     is_active: bool = Field(default=True, description="是否启用")
@@ -171,6 +194,7 @@ class EventTriggerResult(BaseModel):
     """事件触发结果"""
     event_id: str
     event_name: str
+    character_id: Optional[str] = None
     triggered: bool = Field(default=False, description="是否成功触发")
     effects_applied: list[str] = Field(default_factory=list, description="已应用的效果列表")
     notification: Optional[str] = None             # 需要显示给玩家的通知
@@ -178,6 +202,38 @@ class EventTriggerResult(BaseModel):
     state_changes: dict[str, Any] = Field(default_factory=dict)  # 状态变化
     chained_events: list[str] = Field(default_factory=list)      # 被链式触发的事件 ID
     proactive_dialogues: list[dict[str, Any]] = Field(default_factory=list)  # NPC 主动发言结果
+
+    # 新执行契约；上面的字段保留一个兼容周期。
+    execution_id: Optional[str] = None
+    execution_key: Optional[str] = None
+    status: str = "succeeded"                     # succeeded / partial / failed / skipped
+    effects: list["EffectExecutionDetail"] = Field(default_factory=list)
+    notifications: list["EventNotification"] = Field(default_factory=list)
+    dialogue_overrides: list[str] = Field(default_factory=list)
+    error: Optional[str] = None
+    deduplicated: bool = False
+    duration_ms: float = 0.0
+    condition_trace: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class EffectExecutionDetail(BaseModel):
+    """单个效果的可审计执行结果。"""
+
+    index: int
+    effect_type: str
+    status: str = "succeeded"                     # succeeded / failed / skipped / planned
+    message: Optional[str] = None
+    error: Optional[str] = None
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class EventNotification(BaseModel):
+    """可返回给客户端或写入玩家收件箱的结构化通知。"""
+
+    event_id: str
+    message: str
+    notification_type: str = "info"
+    title: Optional[str] = None
 
 
 # =========================
@@ -193,6 +249,8 @@ class EventContext(BaseModel):
     current_affinity: float
     current_trust: float
     current_mood: str
+    previous_affinity: Optional[float] = None
+    previous_trust: Optional[float] = None
     
     # 当前对话
     player_message: str
@@ -202,6 +260,8 @@ class EventContext(BaseModel):
     dialogue_count: int                            # 本次会话对话轮数
     total_dialogue_count: int                      # 历史总对话轮数
     session_duration_minutes: float                # 会话时长
+    affinity_delta: float = 0.0
+    trust_delta: float = 0.0
     
     # 已解锁内容
     unlocked_content: list[str] = Field(default_factory=list)
@@ -211,9 +271,14 @@ class EventContext(BaseModel):
 
     # 持久化上下文 / 调度信息
     event_data: dict[str, Any] = Field(default_factory=dict)
+    event_history: list[dict[str, Any]] = Field(default_factory=list)
+    world_time: Optional[str] = None
     last_event_id: Optional[str] = None
     active_multi_session_id: Optional[str] = None
+    execution_key: Optional[str] = None
+    trigger_source: str = "dialogue"
 
 
 # 更新前向引用
 TriggerCondition.model_rebuild()
+EventTriggerResult.model_rebuild()

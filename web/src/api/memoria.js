@@ -188,6 +188,42 @@ export const eventAdmin = {
   resetHistory(eventId, characterId, playerId) {
     return request(`/admin/events/${eventId}/history?character_id=${characterId}&player_id=${playerId}`, { method: 'DELETE' });
   },
+  simulate(eventId, data) {
+    return request(`/admin/events/${encodeURIComponent(eventId)}/simulate`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  schedules(eventId = null, status = null) {
+    const params = new URLSearchParams();
+    if (eventId) params.set('event_id', eventId);
+    if (status) params.set('status', status);
+    const qs = params.toString();
+    return request(`/admin/event-schedules${qs ? '?' + qs : ''}`);
+  },
+  pauseSchedule(eventId, characterId) {
+    return request(
+      `/admin/event-schedules/${encodeURIComponent(eventId)}/${encodeURIComponent(characterId)}/pause`,
+      { method: 'POST' }
+    );
+  },
+  resumeSchedule(eventId, characterId) {
+    return request(
+      `/admin/event-schedules/${encodeURIComponent(eventId)}/${encodeURIComponent(characterId)}/resume`,
+      { method: 'POST' }
+    );
+  },
+  metrics(eventId = null) {
+    const params = new URLSearchParams();
+    if (eventId) params.set('event_id', eventId);
+    const qs = params.toString();
+    return request(`/admin/event-metrics${qs ? '?' + qs : ''}`);
+  },
+  executions(eventId, limit = 100) {
+    return request(
+      `/admin/events/${encodeURIComponent(eventId)}/executions?limit=${encodeURIComponent(limit)}`
+    );
+  },
 };
 
 export const relationshipAdmin = {
