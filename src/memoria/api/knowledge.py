@@ -221,8 +221,14 @@ def delete_knowledge_base(
         get_knowledge_vector_store().delete_knowledge_base(
             current_user_id, knowledge_base_id
         )
-    except Exception:
+        repository.complete_knowledge_vector_cleanup(
+            (deleted or {}).get("vector_cleanup_id")
+        )
+    except Exception as exc:
         logger.exception("知识库已删除，但向量清理失败: %s", knowledge_base_id)
+        cleanup_id = (deleted or {}).get("vector_cleanup_id")
+        if cleanup_id:
+            repository.fail_knowledge_vector_cleanup(cleanup_id, str(exc))
     for document in (deleted or {}).get("documents", []):
         remove_stored_knowledge_file(document.get("storage_path"))
     return OperationResponse()
@@ -351,14 +357,23 @@ def delete_knowledge_document(
 ):
     document = _require_document(current_user_id, document_id)
     try:
-        repository.delete_knowledge_document(current_user_id, document_id)
+        deleted = repository.delete_knowledge_document(
+            current_user_id,
+            document_id,
+        )
     except Exception as exc:
         logger.exception("删除知识文档失败: %s", document_id)
         raise HTTPException(status_code=500, detail="删除知识文档失败") from exc
     try:
         get_knowledge_vector_store().delete_document(current_user_id, document_id)
-    except Exception:
+        repository.complete_knowledge_vector_cleanup(
+            (deleted or {}).get("vector_cleanup_id")
+        )
+    except Exception as exc:
         logger.exception("知识文档已删除，但向量清理失败: %s", document_id)
+        cleanup_id = (deleted or {}).get("vector_cleanup_id")
+        if cleanup_id:
+            repository.fail_knowledge_vector_cleanup(cleanup_id, str(exc))
     remove_stored_knowledge_file(document.get("storage_path"))
     return OperationResponse()
 

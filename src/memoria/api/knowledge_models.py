@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class KnowledgeSource(BaseModel):
@@ -9,3 +9,7 @@ class KnowledgeSource(BaseModel):
     chunk_id: str
     excerpt: str
     similarity: float
+    vector_similarity: float | None = None
+    keyword_score: float | None = None
+    hybrid_score: float | None = None
+    source_metadata: dict = Field(default_factory=dict)

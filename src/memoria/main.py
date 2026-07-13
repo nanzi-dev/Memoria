@@ -34,7 +34,11 @@ from memoria.core.event_runtime import (
     ensure_default_event_templates,
     run_world_clock_scheduler,
 )
-from memoria.core.knowledge_service import process_knowledge_document
+from memoria.core.knowledge_service import (
+    process_knowledge_document,
+    reconcile_knowledge_vectors,
+    retry_knowledge_vector_cleanups,
+)
 from memoria.db import repository
 
 # =========================
@@ -105,6 +109,16 @@ def _get_rate_limit_key(request: Request) -> str:
 def _resume_incomplete_knowledge_documents(
     stop_event: threading.Event | None = None,
 ) -> None:
+    try:
+        cleanup_result = retry_knowledge_vector_cleanups()
+        reconciliation = reconcile_knowledge_vectors()
+        logger.info(
+            "知识向量对账完成: cleanup=%s reconciliation=%s",
+            cleanup_result,
+            reconciliation,
+        )
+    except Exception:
+        logger.exception("知识向量清理或启动对账失败")
     documents = repository.list_incomplete_knowledge_documents()
     if not documents:
         return

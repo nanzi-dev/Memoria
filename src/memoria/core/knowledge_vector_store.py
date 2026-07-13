@@ -7,6 +7,7 @@ import threading
 from typing import Optional
 
 from memoria.core.config import configs
+from memoria.core.knowledge_documents import build_chunk_index_text
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,10 @@ class KnowledgeVectorStore:
         )
         self.embedding_model = SentenceTransformer(configs.embedding_model)
 
+    @property
+    def tokenizer(self):
+        return getattr(self.embedding_model, "tokenizer", None)
+
     def _encode(self, texts: list[str]) -> list[list[float]]:
         encoded = self.embedding_model.encode(texts)
         if hasattr(encoded, "tolist"):
@@ -49,7 +54,15 @@ class KnowledgeVectorStore:
     def upsert_chunks(self, chunks: list[dict]) -> None:
         if not chunks:
             return
-        texts = [chunk["content"] for chunk in chunks]
+        texts = [
+            chunk.get("index_text")
+            or build_chunk_index_text(
+                chunk.get("document_name", ""),
+                chunk.get("source_metadata") or {},
+                chunk["content"],
+            )
+            for chunk in chunks
+        ]
         self.collection.upsert(
             ids=[chunk["chunk_id"] for chunk in chunks],
             embeddings=self._encode(texts),
@@ -124,6 +137,14 @@ class KnowledgeVectorStore:
                 ]
             }
         )
+
+    def list_chunk_ids(self) -> set[str]:
+        result = self.collection.get(include=["metadatas"])
+        return set(result.get("ids") or [])
+
+    def delete_chunks(self, chunk_ids: list[str]) -> None:
+        if chunk_ids:
+            self.collection.delete(ids=chunk_ids)
 
 
 _knowledge_vector_store: Optional[KnowledgeVectorStore] = None

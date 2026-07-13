@@ -18,4 +18,5 @@ def pytest_sessionstart(session):
     db_dir = Path(tempfile.mkdtemp(prefix="memoria_pytest_"))
     configs.database_url = ""
     configs.database_path = str(db_dir / "memoria.db")
+    configs.vector_db_path = str(db_dir / "chroma_db")
     repository.init_db()

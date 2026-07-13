@@ -9,6 +9,7 @@ from fastapi import BackgroundTasks, HTTPException
 
 from memoria.api import knowledge as knowledge_api
 from memoria.api.user import require_current_user_id
+from memoria.core import knowledge_service
 from memoria.core.config import configs
 from memoria.db import repository
 
@@ -206,6 +207,61 @@ def test_paste_upload_retry_and_delete_document(knowledge_owner, monkeypatch):
     ]
 
 
+def test_delete_document_vector_failure_stays_queued_until_retry(
+    knowledge_owner, monkeypatch
+):
+    owner_user_id = knowledge_owner
+    monkeypatch.setattr(knowledge_api, "_queue_document", lambda *args: None)
+    knowledge_base_id = knowledge_api.create_knowledge_base(
+        knowledge_api.KnowledgeBaseCreate(name="删除重试"),
+        current_user_id=owner_user_id,
+    )["knowledge_base_id"]
+    document = knowledge_api.paste_knowledge_document(
+        knowledge_base_id,
+        knowledge_api.PastedDocumentCreate(
+            title="待删除文档",
+            text="删除失败后必须保留向量清理任务。",
+        ),
+        BackgroundTasks(),
+        current_user_id=owner_user_id,
+    )
+
+    class FailingVectorStore:
+        def delete_document(self, owner_user_id, document_id):
+            raise RuntimeError("temporary vector failure")
+
+    monkeypatch.setattr(
+        knowledge_api,
+        "get_knowledge_vector_store",
+        lambda: FailingVectorStore(),
+    )
+    response = knowledge_api.delete_knowledge_document(
+        document["document_id"],
+        current_user_id=owner_user_id,
+    )
+
+    assert response.success
+    assert repository.get_knowledge_document(
+        owner_user_id, document["document_id"]
+    ) is None
+    pending = repository.list_knowledge_vector_cleanups()
+    assert len(pending) == 1
+    assert pending[0]["scope_type"] == "document"
+    assert pending[0]["scope_id"] == document["document_id"]
+    assert pending[0]["attempts"] == 1
+    assert pending[0]["last_error"] == "temporary vector failure"
+
+    working_store = _FakeVectorStore()
+    result = knowledge_service.retry_knowledge_vector_cleanups(
+        vector_store=working_store
+    )
+    assert result == {"completed": 1, "failed": 0}
+    assert working_store.deleted_documents == [
+        (owner_user_id, document["document_id"])
+    ]
+    assert repository.list_knowledge_vector_cleanups() == []
+
+
 def test_upload_rejects_unsupported_suffix_before_storage_or_queue(
     knowledge_owner, monkeypatch
 ):
@@ -268,7 +324,7 @@ def test_preview_forwards_authenticated_context_and_returns_sources(
         current_user_id=owner_user_id,
     )
 
-    assert response.sources[0].model_dump() == source
+    assert response.sources[0].model_dump(exclude_defaults=True) == source
     assert calls == [
         {
             "owner_user_id": owner_user_id,

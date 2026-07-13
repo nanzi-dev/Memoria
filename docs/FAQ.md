@@ -50,7 +50,7 @@ PYTHONPATH=src uvicorn memoria.main:app --reload --host 127.0.0.1 --port 8001
 当前实现会把文本提取、嵌入模型初始化、向量存储写入等异常持久化为 `failed`，不会因为异常永久停留在“处理中”。遇到失败时：
 
 1. 展开文档查看 `error_message`，先处理文件格式、编码、PDF 加密/OCR 或模型初始化问题。
-2. 确认知识原文件仍位于 `config/settings.yaml` 中 `knowledge.storage_path` 指定的目录。
+2. 确认知识原文件仍位于 `KNOWLEDGE_STORAGE_PATH`（默认 `./data/knowledge`）指定的目录。
 3. 在管理页点击“重试”，或调用 `POST /api/v1/knowledge/documents/{document_id}/retry`。
 4. 如果状态仍不变化，检查后端日志中 `知识文档处理失败` 或 `恢复知识文档` 相关记录，并确认只有一个实例共享本地 SQLite/ChromaDB 和知识文件目录。
 

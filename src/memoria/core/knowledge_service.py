@@ -39,6 +39,55 @@ def remove_stored_knowledge_file(storage_path: str | None) -> None:
         logger.warning("删除知识文档原文件失败: %s", exc)
 
 
+def retry_knowledge_vector_cleanups(*, vector_store=None) -> dict:
+    tasks = repository.list_knowledge_vector_cleanups()
+    if not tasks:
+        return {"completed": 0, "failed": 0}
+    store = vector_store or get_knowledge_vector_store()
+    completed = 0
+    failed = 0
+    for task in tasks:
+        try:
+            if task["scope_type"] == "document":
+                store.delete_document(task["owner_user_id"], task["scope_id"])
+            else:
+                store.delete_knowledge_base(
+                    task["owner_user_id"],
+                    task["scope_id"],
+                )
+            repository.complete_knowledge_vector_cleanup(task["cleanup_id"])
+            completed += 1
+        except Exception as exc:
+            repository.fail_knowledge_vector_cleanup(task["cleanup_id"], str(exc))
+            failed += 1
+            logger.warning(
+                "知识向量清理重试失败: cleanup=%s error=%s",
+                task["cleanup_id"],
+                exc,
+            )
+    return {"completed": completed, "failed": failed}
+
+
+def reconcile_knowledge_vectors(*, vector_store=None) -> dict:
+    store = vector_store or get_knowledge_vector_store()
+    sql_chunks = repository.list_all_knowledge_chunks_for_indexing()
+    by_id = {chunk["chunk_id"]: chunk for chunk in sql_chunks}
+    vector_ids = store.list_chunk_ids()
+    sql_ids = set(by_id)
+    orphan_ids = sorted(vector_ids - sql_ids)
+    missing_ids = sorted(sql_ids - vector_ids)
+    if orphan_ids:
+        store.delete_chunks(orphan_ids)
+    if missing_ids:
+        store.upsert_chunks([by_id[chunk_id] for chunk_id in missing_ids])
+    return {
+        "sql_chunks": len(sql_ids),
+        "vector_chunks": len(vector_ids),
+        "deleted_orphans": len(orphan_ids),
+        "restored_missing": len(missing_ids),
+    }
+
+
 def process_knowledge_document(
     owner_user_id: str,
     document_id: str,
@@ -73,7 +122,11 @@ def process_knowledge_document(
             raise ValueError("知识文档缺少存储文件")
         data = Path(storage_path).read_bytes()
         extracted = extract_document(document["original_name"], data)
-        chunks = chunk_document(extracted)
+        chunks = chunk_document(
+            extracted,
+            document_title=document["original_name"],
+            tokenizer=getattr(vector_store, "tokenizer", None),
+        )
         if not chunks:
             raise ValueError("文档未生成可检索文本块")
         stored_chunks = repository.replace_knowledge_chunks(
@@ -82,7 +135,15 @@ def process_knowledge_document(
         if not repository.get_knowledge_document(owner_user_id, document_id):
             vector_store.delete_document(owner_user_id, document_id)
             return {}
-        vector_store.upsert_chunks(stored_chunks)
+        vector_store.upsert_chunks(
+            [
+                {
+                    **chunk,
+                    "document_name": document["original_name"],
+                }
+                for chunk in stored_chunks
+            ]
+        )
         if not repository.get_knowledge_document(owner_user_id, document_id):
             vector_store.delete_document(owner_user_id, document_id)
             return {}
@@ -98,8 +159,14 @@ def process_knowledge_document(
         if vector_store is not None:
             try:
                 vector_store.delete_document(owner_user_id, document_id)
-            except Exception:
+            except Exception as cleanup_exc:
                 logger.exception("清理失败知识文档的部分向量时出错")
+                repository.enqueue_knowledge_vector_cleanup(
+                    owner_user_id,
+                    "document",
+                    document_id,
+                    error=str(cleanup_exc),
+                )
         repository.clear_knowledge_document_chunks(owner_user_id, document_id)
         if not repository.get_knowledge_document(owner_user_id, document_id):
             return {}

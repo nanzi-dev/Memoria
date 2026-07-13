@@ -48,13 +48,15 @@ class Configs(BaseSettings):
     knowledge_storage_path: str = "./data/knowledge"
     knowledge_query_max_chars: int = Field(default=4000, ge=100, le=20000)
     knowledge_retrieval_top_k: int = Field(default=6, ge=1, le=50)
+    knowledge_max_chunks_per_document: int = Field(default=3, ge=1, le=20)
     knowledge_similarity_threshold: float = Field(default=0.60, ge=0.0, le=1.0)
     knowledge_injection_max_chars: int = Field(default=6000, ge=500, le=50000)
     knowledge_upload_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024)
     knowledge_pdf_max_pages: int = Field(default=300, ge=1, le=2000)
     knowledge_extract_max_chars: int = Field(default=1_000_000, ge=1000)
-    knowledge_chunk_chars: int = Field(default=800, ge=100, le=5000)
-    knowledge_chunk_overlap_chars: int = Field(default=120, ge=0, le=1000)
+    knowledge_chunk_target_tokens: int = Field(default=200, ge=64, le=230)
+    knowledge_chunk_overlap_tokens: int = Field(default=36, ge=0, le=80)
+    knowledge_chunk_max_tokens: int = Field(default=240, ge=128, le=256)
     
     @property
     def light_model(self) -> str:

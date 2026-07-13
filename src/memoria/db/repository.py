@@ -618,6 +618,18 @@ CREATE TABLE IF NOT EXISTS knowledge_chunk (
     FOREIGN KEY (document_id) REFERENCES knowledge_document(document_id)
 );
 
+CREATE TABLE IF NOT EXISTS knowledge_vector_cleanup (
+    cleanup_id        TEXT PRIMARY KEY,
+    owner_user_id     TEXT NOT NULL,
+    scope_type        TEXT NOT NULL,
+    scope_id          TEXT NOT NULL,
+    attempts          INTEGER NOT NULL DEFAULT 0,
+    last_error        TEXT,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    UNIQUE(owner_user_id, scope_type, scope_id)
+);
+
 -- =========================
 -- 玩家事件收件箱
 -- =========================
@@ -720,6 +732,9 @@ ON knowledge_document(owner_user_id, knowledge_base_id, status, created_at DESC)
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_chunk_document
 ON knowledge_chunk(owner_user_id, document_id, chunk_index);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_vector_cleanup_pending
+ON knowledge_vector_cleanup(updated_at, attempts);
 
 
 -- =========================
@@ -908,6 +923,18 @@ def _migrate(conn):
             FOREIGN KEY (document_id) REFERENCES knowledge_document(document_id)
         );
 
+        CREATE TABLE IF NOT EXISTS knowledge_vector_cleanup (
+            cleanup_id        TEXT PRIMARY KEY,
+            owner_user_id     TEXT NOT NULL,
+            scope_type        TEXT NOT NULL,
+            scope_id          TEXT NOT NULL,
+            attempts          INTEGER NOT NULL DEFAULT 0,
+            last_error        TEXT,
+            created_at        TEXT NOT NULL,
+            updated_at        TEXT NOT NULL,
+            UNIQUE(owner_user_id, scope_type, scope_id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_auth_token_user
         ON auth_token(user_id, expires_at);
 
@@ -928,6 +955,9 @@ def _migrate(conn):
 
         CREATE INDEX IF NOT EXISTS idx_knowledge_chunk_document
         ON knowledge_chunk(owner_user_id, document_id, chunk_index);
+
+        CREATE INDEX IF NOT EXISTS idx_knowledge_vector_cleanup_pending
+        ON knowledge_vector_cleanup(updated_at, attempts);
         """
     if _is_postgres_enabled():
         migration_schema = migration_schema.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
@@ -3693,7 +3723,21 @@ def delete_knowledge_base(
     existing = get_knowledge_base(owner_user_id, knowledge_base_id)
     if not existing:
         return None
+    cleanup_id = str(uuid.uuid4())
+    now = _now()
     with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO knowledge_vector_cleanup
+            (cleanup_id, owner_user_id, scope_type, scope_id,
+             attempts, created_at, updated_at)
+            VALUES (?, ?, 'knowledge_base', ?, 0, ?, ?)
+            ON CONFLICT(owner_user_id, scope_type, scope_id) DO UPDATE SET
+                last_error = NULL,
+                updated_at = excluded.updated_at
+            """,
+            (cleanup_id, owner_user_id, knowledge_base_id, now, now),
+        )
         documents = conn.execute(
             """
             SELECT document_id, storage_path
@@ -3721,6 +3765,11 @@ def delete_knowledge_base(
     return {
         "knowledge_base": existing,
         "documents": [dict(row) for row in documents],
+        "vector_cleanup_id": get_knowledge_vector_cleanup_id(
+            owner_user_id,
+            "knowledge_base",
+            knowledge_base_id,
+        ),
     }
 
 
@@ -4076,15 +4125,16 @@ def list_knowledge_chunks(owner_user_id: str, document_id: str) -> list[dict]:
             """,
             (owner_user_id, document_id),
         ).fetchall()
-    result = []
-    for row in rows:
-        item = dict(row)
-        try:
-            item["source_metadata"] = json.loads(item.get("source_metadata") or "{}")
-        except (TypeError, ValueError):
-            item["source_metadata"] = {}
-        result.append(item)
-    return result
+    return [_decode_knowledge_chunk_row(row) for row in rows]
+
+
+def _decode_knowledge_chunk_row(row) -> dict:
+    item = dict(row)
+    try:
+        item["source_metadata"] = json.loads(item.get("source_metadata") or "{}")
+    except (TypeError, ValueError):
+        item["source_metadata"] = {}
+    return item
 
 
 def clear_knowledge_document_chunks(owner_user_id: str, document_id: str) -> None:
@@ -4102,7 +4152,21 @@ def delete_knowledge_document(
     document = get_knowledge_document(owner_user_id, document_id)
     if not document:
         return None
+    cleanup_id = str(uuid.uuid4())
+    now = _now()
     with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO knowledge_vector_cleanup
+            (cleanup_id, owner_user_id, scope_type, scope_id,
+             attempts, created_at, updated_at)
+            VALUES (?, ?, 'document', ?, 0, ?, ?)
+            ON CONFLICT(owner_user_id, scope_type, scope_id) DO UPDATE SET
+                last_error = NULL,
+                updated_at = excluded.updated_at
+            """,
+            (cleanup_id, owner_user_id, document_id, now, now),
+        )
         conn.execute(
             "DELETE FROM knowledge_chunk WHERE owner_user_id = ? AND document_id = ?",
             (owner_user_id, document_id),
@@ -4111,7 +4175,121 @@ def delete_knowledge_document(
             "DELETE FROM knowledge_document WHERE owner_user_id = ? AND document_id = ?",
             (owner_user_id, document_id),
         )
-    return document
+    return {
+        **document,
+        "vector_cleanup_id": get_knowledge_vector_cleanup_id(
+            owner_user_id,
+            "document",
+            document_id,
+        ),
+    }
+
+
+def get_knowledge_vector_cleanup_id(
+    owner_user_id: str,
+    scope_type: str,
+    scope_id: str,
+) -> str | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT cleanup_id
+            FROM knowledge_vector_cleanup
+            WHERE owner_user_id = ? AND scope_type = ? AND scope_id = ?
+            """,
+            (owner_user_id, scope_type, scope_id),
+        ).fetchone()
+    return row["cleanup_id"] if row else None
+
+
+def enqueue_knowledge_vector_cleanup(
+    owner_user_id: str,
+    scope_type: str,
+    scope_id: str,
+    *,
+    error: str | None = None,
+) -> str:
+    if scope_type not in {"document", "knowledge_base"}:
+        raise ValueError("无效向量清理范围")
+    cleanup_id = str(uuid.uuid4())
+    now = _now()
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO knowledge_vector_cleanup
+            (cleanup_id, owner_user_id, scope_type, scope_id,
+             attempts, last_error, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 0, ?, ?, ?)
+            ON CONFLICT(owner_user_id, scope_type, scope_id) DO UPDATE SET
+                last_error = excluded.last_error,
+                updated_at = excluded.updated_at
+            """,
+            (
+                cleanup_id,
+                owner_user_id,
+                scope_type,
+                scope_id,
+                str(error or "")[:2000] or None,
+                now,
+                now,
+            ),
+        )
+    return (
+        get_knowledge_vector_cleanup_id(owner_user_id, scope_type, scope_id)
+        or cleanup_id
+    )
+
+
+def list_knowledge_vector_cleanups(limit: int = 100) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM knowledge_vector_cleanup
+            ORDER BY updated_at ASC
+            LIMIT ?
+            """,
+            (max(1, limit),),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def complete_knowledge_vector_cleanup(cleanup_id: str | None) -> None:
+    if not cleanup_id:
+        return
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM knowledge_vector_cleanup WHERE cleanup_id = ?",
+            (cleanup_id,),
+        )
+
+
+def fail_knowledge_vector_cleanup(cleanup_id: str, error: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE knowledge_vector_cleanup
+            SET attempts = attempts + 1, last_error = ?, updated_at = ?
+            WHERE cleanup_id = ?
+            """,
+            (str(error)[:2000], _now(), cleanup_id),
+        )
+
+
+def list_all_knowledge_chunks_for_indexing() -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT c.*, d.original_name AS document_name
+            FROM knowledge_chunk c
+            INNER JOIN knowledge_document d
+              ON d.owner_user_id = c.owner_user_id
+             AND d.document_id = c.document_id
+            WHERE d.status = 'ready'
+            ORDER BY c.document_id, c.chunk_index
+            """
+        ).fetchall()
+    return [_decode_knowledge_chunk_row(row) for row in rows]
 
 
 def get_authorized_knowledge_chunks(
@@ -4159,7 +4337,10 @@ def get_authorized_knowledge_chunks(
             """,
             tuple([owner_user_id, *chunk_ids, *visibility_params]),
         ).fetchall()
-    by_id = {row["chunk_id"]: dict(row) for row in rows}
+    by_id = {
+        row["chunk_id"]: _decode_knowledge_chunk_row(row)
+        for row in rows
+    }
     return [by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_id]
 
 
@@ -4194,8 +4375,97 @@ def get_owned_knowledge_chunks(
             """,
             tuple([owner_user_id, *chunk_ids, *knowledge_base_ids]),
         ).fetchall()
-    by_id = {row["chunk_id"]: dict(row) for row in rows}
+    by_id = {
+        row["chunk_id"]: _decode_knowledge_chunk_row(row)
+        for row in rows
+    }
     return [by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_id]
+
+
+def list_authorized_knowledge_chunks(
+    owner_user_id: str,
+    *,
+    knowledge_base_ids: list[str],
+    character_id: str | None = None,
+    group_thread_id: str | None = None,
+) -> list[dict]:
+    """List the SQL corpus visible to a dialogue for independent keyword search."""
+    if not knowledge_base_ids:
+        return []
+    visibility = ["b.target_type = 'global'"]
+    visibility_params: list = []
+    if character_id:
+        visibility.append("(b.target_type = 'character' AND b.target_id = ?)")
+        visibility_params.append(character_id)
+    if group_thread_id:
+        visibility.append("(b.target_type = 'group_thread' AND b.target_id = ?)")
+        visibility_params.append(group_thread_id)
+    base_placeholders = ", ".join("?" for _ in knowledge_base_ids)
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT c.*, d.original_name AS document_name,
+                   kb.name AS knowledge_base_name
+            FROM knowledge_chunk c
+            INNER JOIN knowledge_document d
+              ON d.owner_user_id = c.owner_user_id
+             AND d.document_id = c.document_id
+            INNER JOIN knowledge_base kb
+              ON kb.owner_user_id = c.owner_user_id
+             AND kb.knowledge_base_id = c.knowledge_base_id
+            WHERE c.owner_user_id = ?
+              AND c.knowledge_base_id IN ({base_placeholders})
+              AND d.status = 'ready'
+              AND kb.is_enabled = 1
+              AND EXISTS (
+                  SELECT 1 FROM knowledge_binding b
+                  WHERE b.owner_user_id = c.owner_user_id
+                    AND b.knowledge_base_id = c.knowledge_base_id
+                    AND ({" OR ".join(visibility)})
+              )
+            ORDER BY c.document_id, c.chunk_index
+            """,
+            tuple(
+                [
+                    owner_user_id,
+                    *knowledge_base_ids,
+                    *visibility_params,
+                ]
+            ),
+        ).fetchall()
+    return [_decode_knowledge_chunk_row(row) for row in rows]
+
+
+def list_owned_knowledge_chunks_for_bases(
+    owner_user_id: str,
+    *,
+    knowledge_base_ids: list[str],
+) -> list[dict]:
+    """List ready chunks in owner-validated bases for admin retrieval preview."""
+    if not knowledge_base_ids:
+        return []
+    base_placeholders = ", ".join("?" for _ in knowledge_base_ids)
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT c.*, d.original_name AS document_name,
+                   kb.name AS knowledge_base_name
+            FROM knowledge_chunk c
+            INNER JOIN knowledge_document d
+              ON d.owner_user_id = c.owner_user_id
+             AND d.document_id = c.document_id
+            INNER JOIN knowledge_base kb
+              ON kb.owner_user_id = c.owner_user_id
+             AND kb.knowledge_base_id = c.knowledge_base_id
+            WHERE c.owner_user_id = ?
+              AND c.knowledge_base_id IN ({base_placeholders})
+              AND d.status = 'ready'
+              AND kb.is_enabled = 1
+            ORDER BY c.document_id, c.chunk_index
+            """,
+            tuple([owner_user_id, *knowledge_base_ids]),
+        ).fetchall()
+    return [_decode_knowledge_chunk_row(row) for row in rows]
 
 
 def get_authorized_knowledge_base_ids(

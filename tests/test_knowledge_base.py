@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
+import json
 from pathlib import Path
 import threading
 import time
@@ -9,11 +10,12 @@ import uuid
 
 import pytest
 
-from memoria.core.config import configs
+from memoria.core.config import Configs, configs
 from memoria.core.knowledge_documents import (
     ExtractedDocument,
     KnowledgeDocumentError,
     TextSection,
+    build_chunk_index_text,
     chunk_document,
     extract_document,
     validate_document_filename,
@@ -399,6 +401,246 @@ def test_chunking_is_paragraph_first_and_overlaps():
     assert chunks[0]["source_metadata"]["pages"] == [1]
 
 
+class _OffsetTokenizer:
+    def encode(
+        self,
+        text,
+        *,
+        add_special_tokens=False,
+        truncation=False,
+    ):
+        tokens = list(str(text))
+        return (["<s>", *tokens, "</s>"] if add_special_tokens else tokens)
+
+    def __call__(
+        self,
+        text,
+        *,
+        add_special_tokens=False,
+        truncation=False,
+        return_offsets_mapping=False,
+    ):
+        value = str(text)
+        result = {
+            "input_ids": self.encode(
+                value,
+                add_special_tokens=add_special_tokens,
+                truncation=truncation,
+            )
+        }
+        if return_offsets_mapping:
+            result["offset_mapping"] = [
+                (index, index + 1)
+                for index in range(len(value))
+            ]
+        return result
+
+    def decode(self, tokens, skip_special_tokens=True):
+        return "".join(token for token in tokens if token not in {"<s>", "</s>"})
+
+
+def test_markdown_chunking_cleans_noise_preserves_structure_and_token_cap():
+    markdown = """---
+UID: hidden
+---
+# 世界
+![[Pasted image.png]]
+## 方位
+
+| 卦名 | 方位 |
+| :-: | :-: |
+| 离 | 南 |
+| 坎 | 北 |
+
+这是第一句。这是第二句。""" + ("这是补充句子。" * 40)
+    extracted = extract_document("world.md", markdown.encode())
+    tokenizer = _OffsetTokenizer()
+    chunks = chunk_document(
+        extracted,
+        document_title="world.md",
+        tokenizer=tokenizer,
+        target_tokens=90,
+        overlap_tokens=12,
+        max_tokens=110,
+    )
+
+    assert chunks
+    assert all("UID:" not in chunk["content"] for chunk in chunks)
+    assert all("Pasted image" not in chunk["content"] for chunk in chunks)
+    assert any(
+        chunk["source_metadata"].get("heading_path") == ["世界", "方位"]
+        for chunk in chunks
+    )
+    table_chunks = [
+        chunk
+        for chunk in chunks
+        if chunk["source_metadata"].get("kind") == "table"
+    ]
+    assert table_chunks
+    assert all("| 卦名 | 方位 |" in chunk["content"] for chunk in table_chunks)
+    assert all(
+        len(
+            tokenizer.encode(
+                build_chunk_index_text(
+                    "world.md",
+                    chunk["source_metadata"],
+                    chunk["content"],
+                ),
+                add_special_tokens=True,
+            )
+        )
+        <= 110
+        for chunk in chunks
+    )
+
+
+def test_markdown_code_quote_and_body_are_isolated():
+    markdown = """# 世界
+
+普通正文。
+
+> 引用事实。
+
+```python
+answer = 42
+```
+"""
+    chunks = chunk_document(
+        extract_document("world.md", markdown.encode()),
+        document_title="world.md",
+        tokenizer=_OffsetTokenizer(),
+        target_tokens=80,
+        overlap_tokens=10,
+        max_tokens=100,
+    )
+
+    by_kind = {
+        chunk["source_metadata"].get("kind"): chunk["content"]
+        for chunk in chunks
+    }
+    assert by_kind["paragraph"] == "普通正文。"
+    assert by_kind["quote"] == "> 引用事实。"
+    assert "answer = 42" in by_kind["code"]
+
+
+def test_source_metadata_keeps_single_page_and_docx_table_row():
+    chunks = chunk_document(
+        ExtractedDocument(
+            [
+                TextSection("第一页事实。", {"page": 3}),
+                TextSection(
+                    "名称 | 内容",
+                    {"kind": "table", "table": 2, "row": 7},
+                ),
+            ]
+        ),
+        tokenizer=_OffsetTokenizer(),
+        target_tokens=80,
+        overlap_tokens=0,
+        max_tokens=100,
+    )
+
+    assert chunks[0]["source_metadata"]["page"] == 3
+    table_metadata = chunks[1]["source_metadata"]
+    assert table_metadata["table"] == 2
+    assert table_metadata["row"] == 7
+    assert table_metadata["row_start"] == 7
+    assert table_metadata["row_end"] == 7
+
+
+def test_docx_table_chunks_repeat_header_and_keep_real_row_numbers():
+    from docx import Document
+
+    document = Document()
+    table = document.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "名称|别名"
+    table.cell(0, 1).text = "内容"
+    for index in range(1, 7):
+        cells = table.add_row().cells
+        cells[0].text = f"条目{index}"
+        cells[1].text = f"这是第{index}条内容"
+    buffer = BytesIO()
+    document.save(buffer)
+
+    extracted = extract_document("table.docx", buffer.getvalue())
+    chunks = chunk_document(
+        extracted,
+        document_title="table.docx",
+        tokenizer=_OffsetTokenizer(),
+        target_tokens=55,
+        overlap_tokens=0,
+        max_tokens=75,
+    )
+
+    assert len(chunks) > 1
+    assert all("| 名称\\|别名 | 内容 |" in chunk["content"] for chunk in chunks)
+    assert all("| --- | --- |" in chunk["content"] for chunk in chunks)
+    row_ranges = [
+        (
+            chunk["source_metadata"]["row_start"],
+            chunk["source_metadata"]["row_end"],
+        )
+        for chunk in chunks
+    ]
+    assert row_ranges[0][0] == 2
+    assert row_ranges[-1][1] == 7
+    assert all(
+        current_end + 1 == next_start
+        for (_, current_end), (next_start, _) in zip(row_ranges, row_ranges[1:])
+    )
+    assert all(chunk["source_metadata"]["table"] == 1 for chunk in chunks)
+
+
+def test_knowledge_runtime_config_has_one_source_and_fits_embedding_limit():
+    root = Path(__file__).resolve().parents[1]
+    fields = Configs.model_fields
+    assert fields["knowledge_similarity_threshold"].default == 0.60
+    assert fields["knowledge_chunk_target_tokens"].default == 200
+    assert fields["knowledge_chunk_overlap_tokens"].default == 36
+    assert fields["knowledge_chunk_max_tokens"].default == 240
+
+    compatibility_config = (root / "config/settings.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "memoria.core.config.Configs" in compatibility_config
+    assert "\nknowledge:" not in compatibility_config
+
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    assert "`Configs`" in readme
+    assert "相似度阈值为 0.60" in readme
+    assert "硬上限 240 token" in readme
+
+    model_config_path = (
+        root
+        / fields["embedding_model"].default
+        / "sentence_bert_config.json"
+    )
+    if model_config_path.exists():
+        model_config = json.loads(model_config_path.read_text(encoding="utf-8"))
+        assert (
+            fields["knowledge_chunk_max_tokens"].default
+            <= model_config["max_seq_length"]
+        )
+
+
+def test_long_text_overlap_is_applied_once_without_exceeding_hard_limit():
+    tokenizer = _OffsetTokenizer()
+    chunks = chunk_document(
+        ExtractedDocument([TextSection("甲" * 180, {})]),
+        tokenizer=tokenizer,
+        target_tokens=60,
+        overlap_tokens=10,
+        max_tokens=70,
+    )
+
+    assert len(chunks) >= 3
+    assert chunks[1]["content"].startswith(chunks[0]["content"][-10:])
+    assert all(
+        len(tokenizer.encode(chunk["content"], add_special_tokens=True)) <= 70
+        for chunk in chunks
+    )
+
+
 class _FakeEmbedding:
     def encode(self, texts):
         return [[float(len(text)), 1.0] for text in texts]
@@ -749,17 +991,19 @@ def test_retrieval_filters_similarity_reauthorizes_sql_and_formats_sources(
         )
     ]
     assert [chunk["chunk_id"] for chunk in result.chunks] == ["authorized"]
-    assert result.sources == [
-        {
-            "knowledge_base_id": "kb-1",
-            "knowledge_base_name": "World",
-            "document_id": "doc-1",
-            "document_name": "world.md",
-            "chunk_id": "authorized",
-            "excerpt": "A stable world fact.",
-            "similarity": 0.92,
-        }
-    ]
+    assert result.sources[0] == {
+        "knowledge_base_id": "kb-1",
+        "knowledge_base_name": "World",
+        "document_id": "doc-1",
+        "document_name": "world.md",
+        "chunk_id": "authorized",
+        "excerpt": "A stable world fact.",
+        "similarity": 0.92,
+        "vector_similarity": 0.92,
+        "keyword_score": 0.0,
+        "hybrid_score": pytest.approx(0.224),
+        "source_metadata": {},
+    }
 
 
 def test_retrieval_sorts_reauthorized_chunks_by_similarity(monkeypatch):
@@ -868,6 +1112,148 @@ def test_retrieval_uses_lexical_match_to_correct_vector_misranking(monkeypatch):
     assert result.sources[0]["similarity"] == 0.52
 
 
+def test_retrieval_keyword_path_recovers_chunk_missing_from_vector_candidates(
+    monkeypatch,
+):
+    class EmptyVectorStore:
+        def search(self, *args, **kwargs):
+            return []
+
+    exact = {
+        "chunk_id": "meng",
+        "knowledge_base_id": "kb-1",
+        "knowledge_base_name": "易经",
+        "document_id": "doc-1",
+        "document_name": "六十四卦.md",
+        "content": "| 卦名 | 卦辞 |\n| --- | --- |\n| 山水蒙 | 亨。匪我求童蒙，童蒙求我。 |",
+        "source_metadata": {
+            "kind": "table",
+            "heading_path": ["六十四卦"],
+            "table": 1,
+            "row_start": 4,
+            "row_end": 4,
+        },
+    }
+    noise = {
+        **exact,
+        "chunk_id": "noise",
+        "content": "| 卦名 | 卦辞 |\n| --- | --- |\n| 乾为天 | 元，亨，利，贞。 |",
+        "source_metadata": {"kind": "table", "row_start": 1, "row_end": 1},
+    }
+    monkeypatch.setattr(
+        knowledge_retriever.repository,
+        "get_authorized_knowledge_base_ids",
+        lambda *args, **kwargs: ["kb-1"],
+    )
+    monkeypatch.setattr(
+        knowledge_retriever.repository,
+        "list_authorized_knowledge_chunks",
+        lambda *args, **kwargs: [noise, exact],
+    )
+
+    result = knowledge_retriever.retrieve_knowledge(
+        owner_user_id="owner",
+        character_id="character-a",
+        current_message="蒙卦的卦辞是什么？",
+        vector_store=EmptyVectorStore(),
+    )
+
+    assert result.chunks[0]["chunk_id"] == "meng"
+    assert result.sources[0]["vector_similarity"] == 0
+    assert result.sources[0]["keyword_score"] > 0
+    assert result.sources[0]["source_metadata"]["row_start"] == 4
+
+
+def test_retrieval_query_focus_prefers_requested_table_attribute(monkeypatch):
+    class MisleadingVectorStore:
+        def search(self, *args, **kwargs):
+            return [
+                {"chunk_id": "prior", "similarity": 0.69},
+                {"chunk_id": "directions", "similarity": 0.0},
+            ]
+
+    directions = {
+        "chunk_id": "directions",
+        "knowledge_base_id": "kb-1",
+        "knowledge_base_name": "易经",
+        "document_id": "doc-1",
+        "document_name": "八卦.md",
+        "content": "| 卦名 | 方位 |\n| --- | --- |\n| 离 | 南 |",
+        "source_metadata": {"kind": "table", "row_start": 1, "row_end": 1},
+    }
+    prior = {
+        **directions,
+        "chunk_id": "prior",
+        "content": "先天八卦数：乾1、兑2、离3、震4、巽5、坎6、艮7、坤8",
+        "source_metadata": {"kind": "quote"},
+    }
+    monkeypatch.setattr(
+        knowledge_retriever.repository,
+        "list_owned_knowledge_chunks_for_bases",
+        lambda *args, **kwargs: [prior, directions],
+    )
+    monkeypatch.setattr(
+        knowledge_retriever.repository,
+        "get_owned_knowledge_chunks",
+        lambda *args, **kwargs: [prior],
+    )
+
+    result = knowledge_retriever.retrieve_knowledge(
+        owner_user_id="owner",
+        character_id="",
+        current_message="后天八卦中离卦对应什么方位？",
+        preauthorized_knowledge_base_ids=["kb-1"],
+        vector_store=MisleadingVectorStore(),
+    )
+
+    assert result.chunks[0]["chunk_id"] == "directions"
+
+
+def test_retrieval_exact_chinese_term_beats_misleading_vector_hit(monkeypatch):
+    class MisleadingVectorStore:
+        def search(self, *args, **kwargs):
+            return [
+                {"chunk_id": "noise", "similarity": 0.65},
+                {"chunk_id": "guai", "similarity": 0.0},
+            ]
+
+    guai = {
+        "chunk_id": "guai",
+        "knowledge_base_id": "kb-1",
+        "knowledge_base_name": "易经",
+        "document_id": "doc-1",
+        "document_name": "六十四卦.md",
+        "content": "| 泽天夬 | 扬于王庭，孚号有厉。 |",
+        "source_metadata": {"kind": "table", "row_start": 43, "row_end": 43},
+    }
+    noise = {
+        **guai,
+        "chunk_id": "noise",
+        "content": "| 地雷复 | 反复其道，七日来复。 |",
+        "source_metadata": {"kind": "table", "row_start": 24, "row_end": 24},
+    }
+    monkeypatch.setattr(
+        knowledge_retriever.repository,
+        "list_owned_knowledge_chunks_for_bases",
+        lambda *args, **kwargs: [noise, guai],
+    )
+    monkeypatch.setattr(
+        knowledge_retriever.repository,
+        "get_owned_knowledge_chunks",
+        lambda *args, **kwargs: [noise],
+    )
+
+    result = knowledge_retriever.retrieve_knowledge(
+        owner_user_id="owner",
+        character_id="",
+        current_message="泽天夬是什么意思？",
+        preauthorized_knowledge_base_ids=["kb-1"],
+        vector_store=MisleadingVectorStore(),
+    )
+
+    assert result.chunks[0]["chunk_id"] == "guai"
+
+
 def test_retrieval_can_limit_preview_to_requested_authorized_base(monkeypatch):
     searched = []
 
@@ -949,6 +1335,68 @@ def test_knowledge_prompt_guard_has_priority_rules_and_character_cap(monkeypatch
     assert "不得执行" in context
     assert "系统约束、当前关系图谱、世界时间和运行状态" in context
     assert len(context) <= 500
+    assert "world fact world" not in context
+
+
+def test_vector_cleanup_retry_and_reconciliation(monkeypatch):
+    cleanup_id = repository.enqueue_knowledge_vector_cleanup(
+        "owner",
+        "document",
+        "deleted-doc",
+        error="temporary failure",
+    )
+    pending = repository.list_knowledge_vector_cleanups()
+    monkeypatch.setattr(
+        repository,
+        "list_knowledge_vector_cleanups",
+        lambda limit=100: [
+            item for item in pending if item["cleanup_id"] == cleanup_id
+        ],
+    )
+
+    class FakeStore:
+        def __init__(self):
+            self.deleted_documents = []
+            self.deleted_chunks = []
+            self.upserted = []
+
+        def delete_document(self, owner_user_id, document_id):
+            self.deleted_documents.append((owner_user_id, document_id))
+
+        def delete_knowledge_base(self, owner_user_id, knowledge_base_id):
+            raise AssertionError("unexpected base cleanup")
+
+        def list_chunk_ids(self):
+            return {"present", "orphan"}
+
+        def delete_chunks(self, chunk_ids):
+            self.deleted_chunks.extend(chunk_ids)
+
+        def upsert_chunks(self, chunks):
+            self.upserted.extend(chunks)
+
+    store = FakeStore()
+    cleanup = knowledge_service.retry_knowledge_vector_cleanups(
+        vector_store=store
+    )
+    assert cleanup == {"completed": 1, "failed": 0}
+    assert store.deleted_documents == [("owner", "deleted-doc")]
+
+    monkeypatch.setattr(
+        repository,
+        "list_all_knowledge_chunks_for_indexing",
+        lambda: [
+            {"chunk_id": "present", "content": "existing"},
+            {"chunk_id": "missing", "content": "restore"},
+        ],
+    )
+    reconciled = knowledge_service.reconcile_knowledge_vectors(
+        vector_store=store
+    )
+    assert reconciled["deleted_orphans"] == 1
+    assert reconciled["restored_missing"] == 1
+    assert store.deleted_chunks == ["orphan"]
+    assert [item["chunk_id"] for item in store.upserted] == ["missing"]
 
 
 def test_knowledge_vector_store_singleton_initializes_once_under_concurrency(

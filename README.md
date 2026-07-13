@@ -325,7 +325,7 @@ EMBEDDING_MODEL=./models/sentence-transformers/all-MiniLM-L6-v2  # 嵌入模型
 VECTOR_SEARCH_TOP_K=10                         # 向量检索返回数量
 ```
 
-知识库的存储路径、检索阈值、切块和上传限制由 `config/settings.yaml` 的 `knowledge` 节控制；仓库默认值为 10 MiB、Top-K 6、相似度阈值 0.35、单次注入最多 6000 字符。
+知识库配置统一由 `src/memoria/core/config.py` 的 `Configs` 定义，并通过环境变量或仓库根目录 `.env` 覆盖。默认上传限制为 10 MiB、Top-K 为 6、相似度阈值为 0.60；分块目标为 200 token、重叠 36 token、硬上限 240 token。
 
 Docker 部署文件统一存放在 `deploy/docker/`。运行时 `deploy/docker/docker-compose.yml` 会自动生成容器内 PostgreSQL 连接串；通常只需要通过 `deploy/docker/.env` 配置 `POSTGRES_*`、`LLM_*`、端口和模型参数。
 
