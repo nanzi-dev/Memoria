@@ -13,6 +13,11 @@ import {
   AlertCircle,
   AlertTriangle,
   Wand2,
+  Workflow,
+  Sparkles,
+  Activity,
+  Settings2,
+  ChevronRight,
 } from 'lucide-react';
 import { eventAdmin } from '../api/memoria';
 import { useDialog } from '../context/DialogContext';
@@ -1176,6 +1181,8 @@ export default function EventEditor() {
   const [reloadVersion, setReloadVersion] = useState(0);
   const [form, setForm] = useState(cloneDefaultForm);
 
+  const [activeStep, setActiveStep] = useState('basic');
+  const [templateOpen, setTemplateOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [templates, setTemplates] = useState([]);
   const [templatesLoading, setTemplatesLoading] = useState(true);
@@ -1246,6 +1253,9 @@ export default function EventEditor() {
     if (!isExistingEvent) {
       setForm(cloneDefaultForm());
       setSelectedTemplateId('');
+      setActiveStep('basic');
+      setTemplateOpen(false);
+      setAdvancedOpen(false);
       setLoadedEventId('new');
       setLoading(false);
       return () => { cancelled = true; };
@@ -1253,6 +1263,9 @@ export default function EventEditor() {
 
     setLoading(true);
     setLoadedEventId(null);
+    setActiveStep('basic');
+    setTemplateOpen(false);
+    setAdvancedOpen(false);
     (async () => {
       try {
         const detail = await eventAdmin.get(eventId);
@@ -1397,9 +1410,44 @@ export default function EventEditor() {
     setSaveMsgKind('info');
   };
 
+  const editorSteps = [
+    {
+      id: 'basic',
+      label: '基本信息',
+      description: '名称、范围和基础属性',
+      icon: Zap,
+    },
+    {
+      id: 'trigger',
+      label: '触发条件',
+      description: '定义事件何时发生',
+      icon: Workflow,
+    },
+    {
+      id: 'effects',
+      label: '事件效果',
+      description: `配置触发后的结果${form.effects.length ? ` · ${form.effects.length} 项` : ''}`,
+      icon: Sparkles,
+    },
+    ...(isExistingEvent
+      ? [{
+          id: 'operations',
+          label: '运行管理',
+          description: '查看和控制运行状态',
+          icon: Activity,
+        }]
+      : []),
+  ];
+  const activeStepIndex = Math.max(
+    0,
+    editorSteps.findIndex(step => step.id === activeStep)
+  );
+  const currentStep = editorSteps[activeStepIndex];
+  const previousStep = editorSteps[activeStepIndex - 1];
+  const nextStep = editorSteps[activeStepIndex + 1];
+
   return (
     <div className="min-h-dvh memoria-page memoria-app-page">
-      {/* Header */}
       <div className="memoria-app-header sticky top-0 z-20 border-b">
         <div className="mx-auto grid max-w-6xl grid-cols-[auto_1fr_auto] items-center gap-2 px-4 py-3 sm:gap-4 sm:px-6 sm:py-4">
           <button
@@ -1461,15 +1509,14 @@ export default function EventEditor() {
         </div>
       )}
 
-      {/* Form content */}
-      <div className="mx-auto max-w-5xl px-4 py-5 sm:px-6 sm:py-8">
-        <div className="space-y-6">
+      <div className="mx-auto max-w-6xl px-4 py-5 sm:px-6 sm:py-8">
+        <div className="space-y-4">
           {unavailableConfiguration.length > 0 && (
-            <div className="flex items-start gap-3 rounded border border-amber-300/25 bg-amber-300/5 p-4 text-xs font-mono text-amber-100/75">
+            <div className="flex items-start gap-3 border-y border-amber-300/25 bg-amber-300/5 px-4 py-3 text-xs font-mono text-amber-100/75">
               <AlertTriangle size={16} className="mt-0.5 shrink-0" />
               <div className="min-w-0">
                 <p className="font-medium text-amber-100/90">存在不可用的旧配置，当前禁止保存</p>
-                <p className="mt-1 break-words text-[10px] leading-5">
+                <p className="mt-1 break-words text-[11px] leading-5">
                   {unavailableConfiguration.join('；')}。原字段不会被静默替换，请在对应位置切换类型。
                 </p>
               </div>
@@ -1477,258 +1524,369 @@ export default function EventEditor() {
           )}
 
           {validationWarnings.length > 0 && (
-            <div className="flex items-start gap-3 rounded border border-sky-300/15 bg-sky-300/5 p-4 text-[10px] font-mono text-sky-100/60">
+            <div className="flex items-start gap-3 border-y border-sky-300/15 bg-sky-300/5 px-4 py-3 text-xs font-mono text-sky-100/60">
               <AlertCircle size={14} className="mt-0.5 shrink-0" />
               <p className="min-w-0 break-words">{validationWarnings.join('；')}</p>
             </div>
           )}
 
-          {/* Basic info card */}
-          <div className="space-y-4 rounded-lg border border-cyber-green/15 bg-cyber-surface/40 p-4 sm:p-6">
-            <h2 className="font-mono text-sm text-cyber-green/70 flex items-center gap-2">
-              <Zap size={14} />
-              基本信息
-            </h2>
+          <div className="overflow-hidden border-y border-cyber-green/15 bg-cyber-surface/20 lg:grid lg:grid-cols-[240px_minmax(0,1fr)] lg:border">
+            <aside className="border-b border-cyber-green/10 bg-cyber-bg/30 p-3 lg:border-b-0 lg:border-r lg:p-4">
+              <nav aria-label="事件编辑步骤" className="grid grid-cols-2 gap-2 lg:grid-cols-1">
+                {editorSteps.map((step, index) => {
+                  const StepIcon = step.icon;
+                  const isActive = step.id === currentStep.id;
+                  const isComplete = index < activeStepIndex;
+                  return (
+                    <button
+                      key={step.id}
+                      type="button"
+                      onClick={() => setActiveStep(step.id)}
+                      aria-current={isActive ? 'step' : undefined}
+                      className={`group flex min-h-[64px] min-w-0 items-center gap-3 border-l-2 px-3 py-2 text-left transition-colors ${
+                        isActive
+                          ? 'border-cyber-green bg-cyber-green/8 text-cyber-green'
+                          : 'border-transparent text-cyber-green/45 hover:border-cyber-green/30 hover:bg-cyber-green/5 hover:text-cyber-green/75'
+                      }`}
+                    >
+                      <span className={`flex h-8 w-8 shrink-0 items-center justify-center border ${
+                        isActive || isComplete
+                          ? 'border-cyber-green/30 bg-cyber-green/10'
+                          : 'border-cyber-green/15'
+                      }`}>
+                        <StepIcon size={15} />
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-xs font-mono">{step.label}</span>
+                        <span className="mt-1 hidden truncate text-[10px] font-mono text-cyber-green/30 lg:block">
+                          {step.description}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </nav>
+            </aside>
 
-            <div className="border-b border-cyber-green/10 pb-4">
-              <div className="flex flex-col sm:flex-row sm:items-end gap-3">
-                <div className="flex-1">
-                  <label className="block text-[10px] font-mono text-cyber-green/40 mb-1">系统模板</label>
-                  <select
-                    value={selectedTemplateId}
-                    onChange={e => setSelectedTemplateId(e.target.value)}
-                    disabled={templatesLoading}
-                    className="min-h-[44px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none disabled:opacity-50"
-                  >
-                    <option value="">{templatesLoading ? '加载模板中...' : '不使用模板'}</option>
-                    {templates.map(template => (
-                      <option key={template.template_id} value={template.template_id}>
-                        {template.category ? `[${template.category}] ` : ''}{template.template_name}
-                      </option>
-                    ))}
-                  </select>
+            <main className="min-w-0">
+              <div className="flex min-h-[78px] items-center gap-3 border-b border-cyber-green/10 px-4 py-4 sm:px-6">
+                <span className="font-mono text-xs text-cyber-green/25">
+                  {String(activeStepIndex + 1).padStart(2, '0')}
+                </span>
+                <div className="min-w-0">
+                  <h2 className="font-mono text-base text-cyber-green/85">{currentStep.label}</h2>
+                  <p className="mt-1 text-xs font-mono text-cyber-green/35">{currentStep.description}</p>
                 </div>
+              </div>
+
+              <div className="min-h-[460px] p-4 sm:p-6">
+                {currentStep.id === 'basic' && (
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-mono text-cyber-green/50">事件 ID *</span>
+                        <input
+                          type="text"
+                          value={form.event_id}
+                          onChange={e => updateField('event_id', e.target.value)}
+                          disabled={isExistingEvent}
+                          placeholder="evt_charactername_eventname"
+                          className="min-h-11 w-full rounded border border-cyber-green/30 bg-cyber-surface px-3 text-sm font-mono text-cyber-green focus:border-cyber-green/60 focus:outline-none disabled:opacity-40"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-mono text-cyber-green/50">事件名称 *</span>
+                        <input
+                          type="text"
+                          value={form.event_name}
+                          onChange={e => updateField('event_name', e.target.value)}
+                          placeholder="例如：初次见面的惊喜"
+                          className="min-h-11 w-full rounded border border-cyber-green/30 bg-cyber-surface px-3 text-sm font-mono text-cyber-green focus:border-cyber-green/60 focus:outline-none"
+                        />
+                      </label>
+                    </div>
+
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-mono text-cyber-green/50">描述</span>
+                      <textarea
+                        value={form.description}
+                        onChange={e => updateField('description', e.target.value)}
+                        placeholder="事件的简要描述..."
+                        rows={3}
+                        className="w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 py-2.5 text-sm font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+                      />
+                    </label>
+
+                    <section className="border-t border-cyber-green/10 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setTemplateOpen(value => !value)}
+                        aria-expanded={templateOpen}
+                        className="flex min-h-11 w-full items-center justify-between gap-3 text-left text-xs font-mono text-cyber-green/55 transition-colors hover:text-cyber-green"
+                      >
+                        <span className="flex items-center gap-2">
+                          <Wand2 size={14} />
+                          从模板快速创建
+                        </span>
+                        <ChevronRight
+                          size={15}
+                          className={`shrink-0 transition-transform ${templateOpen ? 'rotate-90' : ''}`}
+                        />
+                      </button>
+                      {templateOpen && (
+                        <div className="space-y-3 pb-4 pt-2">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                            <label className="min-w-0 flex-1">
+                              <span className="mb-1.5 block text-xs font-mono text-cyber-green/45">系统模板</span>
+                              <select
+                                value={selectedTemplateId}
+                                onChange={e => setSelectedTemplateId(e.target.value)}
+                                disabled={templatesLoading}
+                                className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-sm font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none disabled:opacity-50"
+                              >
+                                <option value="">{templatesLoading ? '加载模板中...' : '不使用模板'}</option>
+                                {templates.map(template => (
+                                  <option key={template.template_id} value={template.template_id}>
+                                    {template.category ? `[${template.category}] ` : ''}{template.template_name}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <button
+                              type="button"
+                              onClick={handleApplyTemplate}
+                              disabled={!selectedTemplate || templatesLoading}
+                              className="flex min-h-11 items-center justify-center gap-2 rounded border border-cyber-green/30 px-4 text-xs font-mono text-cyber-green/70 transition-colors hover:border-cyber-green/50 hover:text-cyber-green disabled:opacity-40"
+                            >
+                              <Wand2 size={14} />
+                              应用模板
+                            </button>
+                          </div>
+                          {templatesError && (
+                            <p className="text-xs font-mono text-red-400/70">{templatesError}</p>
+                          )}
+                          {selectedTemplate?.description && (
+                            <p className="text-xs font-mono leading-5 text-cyber-green/40">
+                              {selectedTemplate.description}
+                            </p>
+                          )}
+                          {selectedTemplate && (
+                            <div className="border-l-2 border-cyber-green/15 pl-3">
+                              <PipelinePreview
+                                triggerCondition={selectedTemplate.trigger_config}
+                                effects={selectedTemplate.effects_config || []}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </section>
+
+                    <section className="border-t border-cyber-green/10 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setAdvancedOpen(value => !value)}
+                        aria-expanded={advancedOpen}
+                        className="flex min-h-11 w-full items-center justify-between gap-3 text-left text-xs font-mono text-cyber-green/55 transition-colors hover:text-cyber-green"
+                      >
+                        <span className="flex items-center gap-2">
+                          <Settings2 size={14} />
+                          高级运行参数
+                        </span>
+                        <ChevronRight
+                          size={15}
+                          className={`shrink-0 transition-transform ${advancedOpen ? 'rotate-90' : ''}`}
+                        />
+                      </button>
+                      {advancedOpen && (
+                        <div className="grid grid-cols-1 gap-4 pb-4 pt-3 sm:grid-cols-2">
+                          <label className="block">
+                            <span className="mb-1.5 block text-xs font-mono text-cyber-green/45">关联角色 ID</span>
+                            <input
+                              type="text"
+                              value={form.character_id}
+                              onChange={e => updateField('character_id', e.target.value)}
+                              placeholder="留空表示全局事件"
+                              className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-sm font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+                            />
+                          </label>
+                          <label className="block">
+                            <span className="mb-1.5 block text-xs font-mono text-cyber-green/45">优先级</span>
+                            <input
+                              type="number"
+                              value={form.priority}
+                              onChange={e => updateField('priority', Number(e.target.value))}
+                              className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-sm font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+                            />
+                          </label>
+                          <label className="block">
+                            <span className="mb-1.5 block text-xs font-mono text-cyber-green/45">互斥组</span>
+                            <input
+                              type="text"
+                              value={form.exclusive_group}
+                              onChange={e => updateField('exclusive_group', e.target.value)}
+                              placeholder="同组每轮仅触发最高优先级"
+                              className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-sm font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+                            />
+                          </label>
+                          <label className="block">
+                            <span className="mb-1.5 block text-xs font-mono text-cyber-green/45">每轮最多触发</span>
+                            <input
+                              type="number"
+                              min="1"
+                              max="20"
+                              value={form.max_triggers_per_turn}
+                              onChange={e => updateField('max_triggers_per_turn', Number(e.target.value))}
+                              className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-sm font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+                            />
+                          </label>
+                          <label className="block sm:col-span-2">
+                            <span className="mb-1.5 block text-xs font-mono text-cyber-green/45">调度 Cron（5 字段）</span>
+                            <input
+                              type="text"
+                              value={form.schedule}
+                              onChange={e => updateField('schedule', e.target.value)}
+                              placeholder="0 9 * * *；必须绑定角色"
+                              className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-sm font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+                            />
+                          </label>
+                          <div className="flex flex-col gap-1 sm:col-span-2 sm:flex-row sm:gap-6">
+                            <label className="flex min-h-11 cursor-pointer items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={form.is_active}
+                                onChange={e => updateField('is_active', e.target.checked)}
+                                className="accent-cyber-green"
+                              />
+                              <span className="text-xs font-mono text-cyber-green/50">启用事件</span>
+                            </label>
+                            <label className="flex min-h-11 cursor-pointer items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={form.stop_processing}
+                                onChange={e => updateField('stop_processing', e.target.checked)}
+                                className="accent-cyber-green"
+                              />
+                              <span className="text-xs font-mono text-cyber-green/50">
+                                触发后停止处理后续事件
+                              </span>
+                            </label>
+                          </div>
+                        </div>
+                      )}
+                    </section>
+                  </div>
+                )}
+
+                {currentStep.id === 'trigger' && (
+                  <div className="space-y-5">
+                    {(eventsLoading || eventsError) && (
+                      <div className="border-l-2 border-cyber-green/15 pl-3">
+                        {eventsLoading && (
+                          <p className="text-xs font-mono text-cyber-green/35">正在加载事件依赖...</p>
+                        )}
+                        {eventsError && (
+                          <p className="break-words text-xs font-mono text-red-300/70">{eventsError}</p>
+                        )}
+                      </div>
+                    )}
+                    <TriggerConditionForm
+                      condition={form.trigger_condition}
+                      onChange={value => updateField('trigger_condition', value)}
+                      eventOptions={eventOptions}
+                    />
+                    <div className="border-t border-cyber-green/10 pt-4">
+                      <p className="mb-3 text-[10px] font-mono uppercase tracking-[0.15em] text-cyber-green/30">
+                        事件流程摘要
+                      </p>
+                      <PipelinePreview
+                        triggerCondition={form.trigger_condition}
+                        effects={form.effects}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {currentStep.id === 'effects' && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between gap-3 border-b border-cyber-green/10 pb-4">
+                      <p className="text-xs font-mono text-cyber-green/40">
+                        {form.effects.length > 0
+                          ? `已配置 ${form.effects.length} 项效果，按顺序执行`
+                          : '尚未配置事件效果'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => updateField('effects', [...form.effects, { ...DEFAULT_EFFECT }])}
+                        className="flex min-h-11 shrink-0 items-center justify-center gap-2 rounded border border-cyber-green/25 px-4 text-xs font-mono text-cyber-green/65 transition-colors hover:border-cyber-green/50 hover:text-cyber-green"
+                      >
+                        <Plus size={14} />
+                        添加效果
+                      </button>
+                    </div>
+                    {form.effects.length === 0 && (
+                      <div className="flex min-h-48 flex-col items-center justify-center border border-dashed border-cyber-green/15 px-6 text-center">
+                        <Sparkles size={22} className="text-cyber-green/25" />
+                        <p className="mt-3 text-sm font-mono text-cyber-green/45">此事件暂时不会产生效果</p>
+                        <p className="mt-1 text-xs font-mono text-cyber-green/25">添加一项效果来定义触发后的结果</p>
+                      </div>
+                    )}
+                    {form.effects.map((effect, index) => (
+                      <EffectEditor
+                        key={index}
+                        index={index}
+                        effect={effect}
+                        eventOptions={eventOptions}
+                        onChange={value => {
+                          const effects = [...form.effects];
+                          effects[index] = value;
+                          updateField('effects', effects);
+                        }}
+                        onDelete={() => {
+                          updateField('effects', form.effects.filter((_, itemIndex) => itemIndex !== index));
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {currentStep.id === 'operations' && isExistingEvent && loadedEventId === eventId && (
+                  <EventOperationsPanel eventId={eventId} characterId={form.character_id} />
+                )}
+              </div>
+
+              <div className="flex flex-col-reverse gap-3 border-t border-cyber-green/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
                 <button
                   type="button"
-                  onClick={handleApplyTemplate}
-                  disabled={!selectedTemplate || templatesLoading}
-                  className="flex min-h-[44px] items-center justify-center gap-1 rounded border border-cyber-green/30 px-3 text-xs font-mono text-cyber-green/70 transition-colors hover:border-cyber-green/50 hover:text-cyber-green disabled:opacity-40 disabled:hover:border-cyber-green/30 disabled:hover:text-cyber-green/70"
+                  onClick={() => previousStep && setActiveStep(previousStep.id)}
+                  disabled={!previousStep}
+                  className="flex min-h-11 items-center justify-center gap-2 rounded border border-cyber-green/15 px-4 text-xs font-mono text-cyber-green/50 transition-colors hover:border-cyber-green/35 hover:text-cyber-green disabled:invisible"
                 >
-                  <Wand2 size={14} />
-                  应用模板
+                  <ArrowLeft size={14} />
+                  上一步
                 </button>
+                {nextStep ? (
+                  <button
+                    type="button"
+                    onClick={() => setActiveStep(nextStep.id)}
+                    className="flex min-h-11 items-center justify-center gap-2 rounded border border-cyber-green/30 bg-cyber-green/10 px-5 text-xs font-mono text-cyber-green transition-colors hover:bg-cyber-green/20"
+                  >
+                    下一步
+                    <ChevronRight size={14} />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleSave}
+                    disabled={saveDisabled}
+                    className="flex min-h-11 items-center justify-center gap-2 rounded border border-cyber-green/30 bg-cyber-green/10 px-5 text-xs font-mono text-cyber-green transition-colors hover:bg-cyber-green/20 disabled:opacity-50"
+                  >
+                    {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                    保存事件
+                  </button>
+                )}
               </div>
-              {templatesError && (
-                <p className="mt-2 text-[10px] font-mono text-red-400/70">{templatesError}</p>
-              )}
-              {selectedTemplate?.description && (
-                <p className="mt-2 text-[10px] font-mono text-cyber-green/35">{selectedTemplate.description}</p>
-              )}
-              {selectedTemplate && (
-                <div className="mt-3 border-t border-cyber-green/10 pt-3">
-                  <p className="mb-2 text-[10px] font-mono uppercase tracking-[0.15em] text-cyber-green/30">
-                    模板预览
-                  </p>
-                  <PipelinePreview
-                    triggerCondition={selectedTemplate.trigger_config}
-                    effects={selectedTemplate.effects_config || []}
-                  />
-                </div>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label className="block text-[10px] font-mono text-cyber-green/40 mb-1">事件 ID *</label>
-                <input
-                  type="text"
-                  value={form.event_id}
-                  onChange={e => updateField('event_id', e.target.value)}
-                  disabled={!!(eventId && eventId !== 'new')}
-                  placeholder="evt_charactername_eventname"
-                  className="min-h-[44px] w-full rounded border border-cyber-green/30 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/60 focus:outline-none disabled:opacity-40"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-mono text-cyber-green/40 mb-1">事件名称 *</label>
-                <input
-                  type="text"
-                  value={form.event_name}
-                  onChange={e => updateField('event_name', e.target.value)}
-                  placeholder="例如：初次见面的惊喜"
-                  className="min-h-[44px] w-full rounded border border-cyber-green/30 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/60 focus:outline-none"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-mono text-cyber-green/40 mb-1">描述</label>
-              <textarea
-                value={form.description}
-                onChange={e => updateField('description', e.target.value)}
-                placeholder="事件的简要描述..."
-                rows={2}
-                className="w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 py-2 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
-              />
-            </div>
-
-            {/* Advanced */}
-            <button
-              onClick={() => setAdvancedOpen(!advancedOpen)}
-              type="button"
-              aria-expanded={advancedOpen}
-              className="flex min-h-11 items-center gap-1 text-[10px] font-mono text-cyber-green/40 transition-colors hover:text-cyber-green/70"
-            >
-              {advancedOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-              高级设置
-            </button>
-            {advancedOpen && (
-              <div className="grid grid-cols-1 gap-4 pt-2 sm:grid-cols-2 lg:grid-cols-3">
-                <div>
-                  <label className="block text-[10px] font-mono text-cyber-green/40 mb-1">关联角色 ID</label>
-                  <input
-                    type="text"
-                    value={form.character_id}
-                    onChange={e => updateField('character_id', e.target.value)}
-                    placeholder="留空=全局事件"
-                    className="min-h-[44px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-mono text-cyber-green/40 mb-1">优先级</label>
-                  <input
-                    type="number"
-                    value={form.priority}
-                    onChange={e => updateField('priority', Number(e.target.value))}
-                    className="min-h-[44px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-mono text-cyber-green/40 mb-1">互斥组</label>
-                  <input
-                    type="text"
-                    value={form.exclusive_group}
-                    onChange={e => updateField('exclusive_group', e.target.value)}
-                    placeholder="同组每轮仅触发最高优先级"
-                    className="min-h-[44px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-mono text-cyber-green/40 mb-1">每轮最多触发</label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="20"
-                    value={form.max_triggers_per_turn}
-                    onChange={e => updateField('max_triggers_per_turn', Number(e.target.value))}
-                    className="min-h-[44px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
-                  />
-                </div>
-                <div className="sm:col-span-2 lg:col-span-2">
-                  <label className="block text-[10px] font-mono text-cyber-green/40 mb-1">调度 Cron（5 字段）</label>
-                  <input
-                    type="text"
-                    value={form.schedule}
-                    onChange={e => updateField('schedule', e.target.value)}
-                    placeholder="0 9 * * *；必须绑定角色"
-                    className="min-h-[44px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
-                  />
-                </div>
-                <div className="flex flex-col justify-end gap-2 sm:flex-row sm:items-center lg:flex-col lg:items-start">
-                  <label className="flex min-h-11 cursor-pointer items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={form.is_active}
-                      onChange={e => updateField('is_active', e.target.checked)}
-                      className="accent-cyber-green"
-                    />
-                    <span className="text-[10px] font-mono text-cyber-green/40">启用事件</span>
-                  </label>
-                  <label className="flex min-h-11 cursor-pointer items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={form.stop_processing}
-                      onChange={e => updateField('stop_processing', e.target.checked)}
-                      className="accent-cyber-green"
-                    />
-                    <span className="text-[10px] font-mono text-cyber-green/40">触发后停止处理后续事件</span>
-                  </label>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Trigger condition card */}
-          <div className="space-y-4 rounded-lg border border-cyber-green/15 bg-cyber-surface/40 p-4 sm:p-6">
-            <h2 className="font-mono text-sm text-cyber-green/70">触发条件</h2>
-            {eventsLoading && (
-              <p className="text-[10px] font-mono text-cyber-green/30">正在加载事件依赖...</p>
-            )}
-            {eventsError && (
-              <p className="break-words text-[10px] font-mono text-red-300/70">{eventsError}</p>
-            )}
-            <TriggerConditionForm
-              condition={form.trigger_condition}
-              onChange={v => updateField('trigger_condition', v)}
-              eventOptions={eventOptions}
-            />
-          </div>
-
-          {/* Pipeline preview */}
-          <div className="rounded-lg border border-cyber-green/10 bg-cyber-surface/20 p-4">
-            <p className="text-[10px] font-mono text-cyber-green/30 mb-2 uppercase tracking-[0.15em]">Pipeline Preview</p>
-            <PipelinePreview
-              triggerCondition={form.trigger_condition}
-              effects={form.effects}
-            />
-          </div>
-
-          {/* Effects card */}
-          <div className="space-y-4 rounded-lg border border-cyber-green/15 bg-cyber-surface/40 p-4 sm:p-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <h2 className="font-mono text-sm text-cyber-green/70">事件效果</h2>
-              <button
-                onClick={() => updateField('effects', [...form.effects, { ...DEFAULT_EFFECT }])}
-                className="flex min-h-11 items-center justify-center gap-1 rounded border border-cyber-green/20 px-3 text-[10px] font-mono text-cyber-green/50 transition-colors hover:text-cyber-green"
-              >
-                <Plus size={12} /> 添加效果
-              </button>
-            </div>
-            {form.effects.length === 0 && (
-              <p className="text-xs text-cyber-green/30 font-mono">暂无效果配置，点击上方按钮添加</p>
-            )}
-            {form.effects.map((eff, i) => (
-              <EffectEditor
-                key={i}
-                index={i}
-                effect={eff}
-                eventOptions={eventOptions}
-                onChange={v => {
-                  const effects = [...form.effects];
-                  effects[i] = v;
-                  updateField('effects', effects);
-                }}
-                onDelete={() => {
-                  updateField('effects', form.effects.filter((_, j) => j !== i));
-                }}
-              />
-            ))}
-          </div>
-
-          {isExistingEvent && loadedEventId === eventId && (
-            <EventOperationsPanel eventId={eventId} characterId={form.character_id} />
-          )}
-
-          {/* Bottom save */}
-          <div className="flex justify-stretch sm:justify-end">
-            <button
-              onClick={handleSave}
-              disabled={saveDisabled}
-              className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded border border-cyber-green/30 bg-cyber-green/10 px-6 text-sm font-mono text-cyber-green transition-colors hover:bg-cyber-green/20 disabled:opacity-50 sm:w-auto"
-            >
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              Save Event
-            </button>
+            </main>
           </div>
         </div>
       </div>

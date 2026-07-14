@@ -6,6 +6,7 @@ import {
   useDeferredValue,
   useRef,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -704,7 +705,7 @@ function CreateBaseModal({ show, onClose, onSuccess }) {
 
   if (!show) return null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4 font-mono">
       <div className="absolute inset-0 bg-black/78 backdrop-blur-md" onClick={onClose} />
       <div role="dialog" aria-modal="true" aria-labelledby="create-base-title" className="relative w-full max-w-md overflow-hidden rounded-lg border border-cyber-green/20 bg-[#0d0d14]/95 shadow-[0_0_70px_rgba(167,239,158,0.08)] animate-fade-up">
@@ -778,7 +779,8 @@ function CreateBaseModal({ show, onClose, onSuccess }) {
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -825,7 +827,7 @@ function EditBaseModal({ show, base, onClose, onSuccess }) {
 
   if (!show || !base) return null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4 font-mono">
       <div className="absolute inset-0 bg-black/78 backdrop-blur-md" onClick={onClose} />
       <div role="dialog" aria-modal="true" aria-labelledby="edit-base-title" className="relative w-full max-w-md overflow-hidden rounded-lg border border-cyber-green/20 bg-[#0d0d14]/95 shadow-[0_0_70px_rgba(167,239,158,0.08)] animate-fade-up">
@@ -883,7 +885,8 @@ function EditBaseModal({ show, base, onClose, onSuccess }) {
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -1204,7 +1207,7 @@ function ModalFrame({ show, title, description, onClose, children, maxWidth = 'm
   if (!show) return null;
 
   const titleId = `knowledge-modal-${title.replace(/\s+/g, '-')}`;
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[1300] flex items-center justify-center p-3 font-mono sm:p-5">
       <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={onClose} />
       <div
@@ -1229,7 +1232,8 @@ function ModalFrame({ show, title, description, onClose, children, maxWidth = 'm
         </div>
         <div className="min-h-0 overflow-y-auto p-4 sm:p-5">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

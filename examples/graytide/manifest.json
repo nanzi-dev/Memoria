@@ -1,9 +1,11 @@
 {
   "module_id": "graytide",
   "title": "灰潮港：第十三声钟鸣",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "locale": "zh-CN",
   "demo_username": "memoria_demo",
+  "player_character": "player_character.json",
+  "player_relationship_token": "@player",
   "group": {
     "session_id": "graytide_investigation_session",
     "thread_id": "graytide_investigation_thread",

@@ -105,11 +105,18 @@ def _knowledge_state(owner_user_id: str) -> tuple[dict[str, str], dict[str, dict
 def test_graytide_static_content_is_coherent():
     module = load_module()
     manifest = module["manifest"]
+    player_character = module["player_character"]
+    player_token = manifest["player_relationship_token"]
     character_ids = {card.character_id for _, card, _ in module["cards"]}
     event_ids = {event.event_id for event in module["events"]}
 
+    assert manifest["player_character"] == "player_character.json"
+    assert player_token == "@player"
+    assert player_character["display_name"] == "岑澜"
+    assert player_character["occupation"] == "独立潮痕测绘员"
+    assert "蓝线航图" in player_character["background"]
     assert len(character_ids) == 8
-    assert len(module["relationships"]) == 18
+    assert len(module["relationships"]) == 26
     assert len(module["events"]) == 24
     assert sum(event.is_active for event in module["events"]) == 20
     assert len(manifest["knowledge_bases"]) == 4
@@ -117,16 +124,28 @@ def test_graytide_static_content_is_coherent():
     assert set(manifest["group"]["character_ids"]) == character_ids
 
     relationship_pairs = set()
+    player_relationships = []
+    valid_relationship_nodes = character_ids | {player_token}
     for relationship in module["relationships"]:
         left = relationship["character_id_a"]
         right = relationship["character_id_b"]
-        assert left in character_ids
-        assert right in character_ids
+        assert left in valid_relationship_nodes
+        assert right in valid_relationship_nodes
         assert left != right
         assert -100 <= relationship["affinity"] <= 100
+        if player_token in {left, right}:
+            player_relationships.append(relationship)
+            assert {left, right} - {player_token} <= character_ids
         pair = tuple(sorted((left, right)))
         assert pair not in relationship_pairs
         relationship_pairs.add(pair)
+    assert len(player_relationships) == 8
+    assert {
+        relationship["character_id_b"]
+        if relationship["character_id_a"] == player_token
+        else relationship["character_id_a"]
+        for relationship in player_relationships
+    } == character_ids
 
     disabled_extension_count = 0
     for event in module["events"]:
@@ -181,7 +200,7 @@ def test_graytide_static_content_is_coherent():
     evaluations = json.loads(
         (module["root"] / "retrieval_eval.json").read_text(encoding="utf-8")
     )
-    assert len(evaluations) == 10
+    assert len(evaluations) == 12
     for evaluation in evaluations:
         assert evaluation["expected_facts"]
         assert set(evaluation["expected_documents"]).issubset(document_names)
@@ -197,6 +216,7 @@ def test_graytide_seed_is_idempotent_replaceable_and_isolated(isolated_graytide)
         _hash_password("Otherpass1"),
     )
     _, other_card, other_raw = module["cards"][0]
+    other_player_card = repository.get_user_character_card(other_user_id)
     assert repository.save_character_card_to_db(
         other_user_id,
         other_card.character_id,
@@ -215,15 +235,46 @@ def test_graytide_seed_is_idempotent_replaceable_and_isolated(isolated_graytide)
     )
     owner_user_id = first["user_id"]
     assert first["created_user"] is True
+    assert first["player_character"] == "岑澜"
+    assert first["player_node_id"] == repository.player_node_id(owner_user_id)
     assert _counts(owner_user_id) == {
         "characters": 8,
-        "relationships": 18,
+        "relationships": 26,
         "events": 24,
         "knowledge_bases": 4,
         "knowledge_documents": 8,
         "knowledge_chunks": len(vector_store.chunks),
     }
     assert _counts(owner_user_id)["knowledge_chunks"] > 8
+    player_card = repository.get_user_character_card(owner_user_id)
+    assert player_card["display_name"] == "岑澜"
+    assert player_card["occupation"] == "独立潮痕测绘员"
+    assert "半枚断裂的第七支路复测牌" in player_card["appearance"]
+    player_node_id = repository.player_node_id(owner_user_id)
+    player_relationships = repository.list_character_relationships(
+        owner_user_id,
+        player_node_id,
+    )
+    assert len(player_relationships) == 8
+    assert not any(
+        "@player" in {
+            relationship["character_id_a"],
+            relationship["character_id_b"],
+        }
+        for relationship in repository.list_all_character_relationships(
+            owner_user_id
+        )
+    )
+    with repository.get_conn() as conn:
+        rowan_state = conn.execute(
+            """
+            SELECT affection_level
+            FROM relationship_state
+            WHERE player_id = ? AND character_id = ?
+            """,
+            (owner_user_id, "graytide_rowan_cade"),
+        ).fetchone()
+    assert rowan_state["affection_level"] == 14
     first_base_ids, first_documents = _knowledge_state(owner_user_id)
     assert all(document["status"] == "ready" for document in first_documents.values())
 
@@ -234,6 +285,10 @@ def test_graytide_seed_is_idempotent_replaceable_and_isolated(isolated_graytide)
         for effect in event.effects:
             _validate_effect_semantics(effect, owner_user_id)
 
+    repository.update_user_character_card(
+        owner_user_id,
+        {"display_name": "临时测试身份"},
+    )
     second = seed_graytide_demo(
         module_root=isolated_graytide,
         vector_store=vector_store,
@@ -249,6 +304,7 @@ def test_graytide_seed_is_idempotent_replaceable_and_isolated(isolated_graytide)
         for name, document in first_documents.items()
     }
     assert _counts(owner_user_id)["events"] == 24
+    assert repository.get_user_character_card(owner_user_id)["display_name"] == "岑澜"
 
     changed_path = isolated_graytide / "knowledge" / "city_and_geography.md"
     changed_path.write_text(
@@ -275,7 +331,9 @@ def test_graytide_seed_is_idempotent_replaceable_and_isolated(isolated_graytide)
     )
     assert reset_result["group_thread_id"] == "graytide_investigation_thread"
     assert _counts(owner_user_id)["characters"] == 8
+    assert _counts(owner_user_id)["relationships"] == 26
     assert _counts(owner_user_id)["events"] == 24
+    assert repository.get_user_character_card(other_user_id) == other_player_card
     assert repository.get_character_card_from_db(
         other_user_id,
         other_card.character_id,

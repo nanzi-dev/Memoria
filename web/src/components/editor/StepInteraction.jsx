@@ -1,5 +1,4 @@
 import TagInput from './TagInput';
-import { Clapperboard, Handshake, ShieldCheck } from 'lucide-react';
 
 export default function StepInteraction({ formData, updateField }) {
   const ir = formData.interaction_rules || {};
@@ -7,21 +6,21 @@ export default function StepInteraction({ formData, updateField }) {
 
   return (
     <div className="space-y-6">
-      <div className="memoria-section-heading">
-        <Handshake size={18} />
-        <h3 className="font-mono text-base font-bold text-zinc-100 sm:text-lg">交互规则 Interaction Rules</h3>
+      <div className="flex items-center gap-2 mb-4">
+        <span className="text-lg text-cyber-ink/60">🤝</span>
+        <h3 className="font-mono text-lg font-bold text-cyber-ink">交互规则 Interaction Rules</h3>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Initial Attitude */}
         <div>
-          <label className="memoria-form-label">
+          <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
             初始态度 Initial Attitude
           </label>
           <select
             value={ir.initial_attitude_to_player || 'neutral'}
             onChange={(e) => updateField('interaction_rules.initial_attitude_to_player', e.target.value)}
-            className="memoria-form-control"
+            className="w-full px-2 py-1.5 text-sm font-mono text-cyber-ink bg-transparent border-b border-amber-300/50 focus:border-amber-500 focus:outline-none"
           >
             <option value="friendly">友好 Friendly</option>
             <option value="neutral">中立 Neutral</option>
@@ -34,7 +33,7 @@ export default function StepInteraction({ formData, updateField }) {
 
       {/* Topics to Avoid Unless Trusted */}
       <div>
-        <label className="memoria-form-label">
+        <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
           需要信任才能讨论的话题 Topics to Avoid Unless Trusted
         </label>
         <TagInput
@@ -46,7 +45,7 @@ export default function StepInteraction({ formData, updateField }) {
 
       {/* Topics Loves to Discuss */}
       <div>
-        <label className="memoria-form-label">
+        <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
           喜欢讨论的话题 Topics Loves to Discuss
         </label>
         <TagInput
@@ -58,7 +57,7 @@ export default function StepInteraction({ formData, updateField }) {
 
       {/* Response to Rudeness */}
       <div>
-        <label className="memoria-form-label">
+        <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
           对粗鲁行为的反应 Response to Rudeness
         </label>
         <TagInput
@@ -70,7 +69,7 @@ export default function StepInteraction({ formData, updateField }) {
 
       {/* Gift Reactions */}
       <div>
-        <label className="memoria-form-label">
+        <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
           礼物反应 Gift Reactions (格式: 礼物类型, 反应)
         </label>
         <TagInput
@@ -84,15 +83,15 @@ export default function StepInteraction({ formData, updateField }) {
       </div>
 
       {/* Safety Constraints */}
-      <div className="border-t border-cyber-green/10 pt-5">
-        <div className="memoria-section-heading mb-4">
-          <ShieldCheck size={18} />
-          <h3 className="font-mono text-base font-bold text-zinc-100 sm:text-lg">安全约束 Safety Constraints</h3>
+      <div className="border-t pt-4" style={{ borderColor: '#C4B594' }}>
+        <div className="flex items-center gap-2 mb-4">
+          <span className="text-lg text-cyber-ink/60">🛡️</span>
+          <h3 className="font-mono text-lg font-bold text-cyber-ink">安全约束 Safety Constraints</h3>
         </div>
 
         <div className="space-y-4">
           <div>
-            <label className="memoria-form-label">
+            <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
               需要避免的话题 Topics to Avoid
             </label>
             <TagInput
@@ -102,14 +101,14 @@ export default function StepInteraction({ formData, updateField }) {
             />
           </div>
           <div>
-            <label className="memoria-form-label">
+            <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
               OOC处理方式 Out-of-Character Handling
             </label>
             <input
               type="text"
               value={sc.out_of_character_handling || ''}
               onChange={(e) => updateField('safety_constraints.out_of_character_handling', e.target.value)}
-              className="memoria-form-control"
+              className="w-full px-2 py-1.5 text-sm font-mono text-cyber-ink bg-transparent border-b border-amber-300/50 focus:border-amber-500 focus:outline-none focus:bg-amber-50/50 transition-colors"
               placeholder="How to handle out-of-character situations..."
             />
           </div>
@@ -117,15 +116,15 @@ export default function StepInteraction({ formData, updateField }) {
       </div>
 
       {/* Action Vocabulary (simplified) */}
-      <div className="border-t border-cyber-green/10 pt-5">
-        <div className="memoria-section-heading mb-4">
-          <Clapperboard size={18} />
-          <h3 className="font-mono text-base font-bold text-zinc-100 sm:text-lg">行为动作词库 Action Vocabulary</h3>
+      <div className="border-t pt-4" style={{ borderColor: '#C4B594' }}>
+        <div className="flex items-center gap-2 mb-4">
+          <span className="text-lg text-cyber-ink/60">🎬</span>
+          <h3 className="font-mono text-lg font-bold text-cyber-ink">行为动作词库 Action Vocabulary</h3>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="memoria-form-label">
+            <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
               打招呼 Greeting
             </label>
             <TagInput
@@ -135,7 +134,7 @@ export default function StepInteraction({ formData, updateField }) {
             />
           </div>
           <div>
-            <label className="memoria-form-label">
+            <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
               告别 Farewell
             </label>
             <TagInput
@@ -145,7 +144,7 @@ export default function StepInteraction({ formData, updateField }) {
             />
           </div>
           <div>
-            <label className="memoria-form-label">
+            <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
               同意 Agreement
             </label>
             <TagInput
@@ -155,7 +154,7 @@ export default function StepInteraction({ formData, updateField }) {
             />
           </div>
           <div>
-            <label className="memoria-form-label">
+            <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
               反对 Disagreement
             </label>
             <TagInput
@@ -165,7 +164,7 @@ export default function StepInteraction({ formData, updateField }) {
             />
           </div>
           <div className="md:col-span-2">
-            <label className="memoria-form-label">
+            <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
               情绪反应 Emotional Reactions
             </label>
             <TagInput

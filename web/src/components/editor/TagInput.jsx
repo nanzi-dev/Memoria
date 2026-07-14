@@ -21,18 +21,17 @@ export default function TagInput({ tags = [], onChange, placeholder = 'Add item.
   }
 
   return (
-    <div className="flex min-h-[44px] flex-wrap items-center gap-1.5 rounded-md border border-cyber-green/15 bg-black/25 p-1.5 transition-colors focus-within:border-cyber-green/50 focus-within:ring-2 focus-within:ring-cyber-green/[0.08]">
+    <div className="flex flex-wrap gap-1.5 items-center p-1.5 min-h-[36px] bg-amber-50/50 rounded border border-amber-300/30 focus-within:border-amber-500 transition-colors">
       {tags.map((tag, idx) => (
         <span
           key={idx}
-          className="inline-flex min-h-8 items-center gap-1 rounded-md border border-cyber-green/15 bg-cyber-green/[0.07] px-2 text-xs font-mono text-cyber-green/80"
+          className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-mono bg-amber-200/60 text-amber-900 rounded-full"
         >
           {tag}
           <button
             type="button"
             onClick={() => removeTag(idx)}
-            className="flex h-7 w-7 items-center justify-center rounded text-cyber-green/45 transition-colors hover:bg-red-400/10 hover:text-red-300"
-            aria-label={`移除 ${tag}`}
+            className="hover:text-red-600 transition-colors"
           >
             <X size={10} />
           </button>
@@ -44,7 +43,7 @@ export default function TagInput({ tags = [], onChange, placeholder = 'Add item.
         value={inputValue}
         onChange={(e) => setInputValue(e.target.value)}
         onKeyDown={handleKeyDown}
-        className="min-h-8 min-w-[120px] flex-1 border-none bg-transparent px-1 text-sm font-mono text-zinc-200 outline-none placeholder:text-cyber-green/20"
+        className="flex-1 min-w-[120px] px-1 py-0.5 text-sm font-mono text-cyber-ink bg-transparent border-none focus:outline-none"
         placeholder={tags.length === 0 ? placeholder : ''}
       />
     </div>

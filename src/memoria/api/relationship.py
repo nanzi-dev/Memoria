@@ -372,6 +372,10 @@ def get_relationship_network(
                 avatar_url=(card or {}).get("avatar_url"),
                 is_active=bool((card or {}).get("is_active", True)),
             )
+
+        if not target_ids:
+            for character_id in character_cards:
+                add_character_node(character_id)
         
         for rel in all_relationships:
             char_a = rel["character_id_a"]

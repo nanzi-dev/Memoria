@@ -17,7 +17,11 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from memoria.api.user import _hash_password, _validate_password
+from memoria.api.user import (
+    UserCharacterCardUpdate,
+    _hash_password,
+    _validate_password,
+)
 from memoria.core.character_schema import CharacterCard
 from memoria.core.event_runtime import register_time_event_schedule
 from memoria.core.event_schema import EventDefinition
@@ -41,6 +45,21 @@ def _read_json(path: Path) -> Any:
 def load_module(module_root: Path = DEFAULT_MODULE_ROOT) -> dict[str, Any]:
     module_root = Path(module_root).resolve()
     manifest = _read_json(module_root / "manifest.json")
+    player_character_path = module_root / manifest["player_character"]
+    player_character_raw = _read_json(player_character_path)
+    unknown_player_fields = (
+        set(player_character_raw) - set(UserCharacterCardUpdate.model_fields)
+    )
+    if unknown_player_fields:
+        raise ValueError(
+            "玩家角色卡包含不支持的字段: "
+            + ", ".join(sorted(unknown_player_fields))
+        )
+    player_character = UserCharacterCardUpdate.model_validate(
+        player_character_raw
+    ).model_dump(exclude_unset=True)
+    if not player_character.get("display_name"):
+        raise ValueError("玩家角色卡必须提供 display_name")
     cards = []
     for path in sorted((module_root / "characters").glob("*.json")):
         raw = _read_json(path)
@@ -52,6 +71,7 @@ def load_module(module_root: Path = DEFAULT_MODULE_ROOT) -> dict[str, Any]:
     return {
         "root": module_root,
         "manifest": manifest,
+        "player_character": player_character,
         "cards": cards,
         "relationships": _read_json(module_root / "relationships.json"),
         "events": events,
@@ -104,12 +124,50 @@ def _seed_characters(owner_user_id: str, cards: list[tuple]) -> None:
             raise RuntimeError(f"保存角色卡失败: {card.character_id}")
 
 
-def _seed_relationships(owner_user_id: str, relationships: list[dict]) -> None:
+def _seed_player_character(
+    owner_user_id: str,
+    player_character: dict,
+) -> dict:
+    saved = repository.update_user_character_card(
+        owner_user_id,
+        player_character,
+    )
+    if not saved:
+        raise RuntimeError("保存玩家角色卡失败")
+    return saved
+
+
+def _resolve_relationship_endpoint(
+    owner_user_id: str,
+    endpoint: str,
+    player_relationship_token: str,
+) -> str:
+    if endpoint == player_relationship_token:
+        return repository.player_node_id(owner_user_id)
+    return endpoint
+
+
+def _seed_relationships(
+    owner_user_id: str,
+    relationships: list[dict],
+    *,
+    player_relationship_token: str,
+) -> None:
     for relationship in relationships:
+        character_id_a = _resolve_relationship_endpoint(
+            owner_user_id,
+            relationship["character_id_a"],
+            player_relationship_token,
+        )
+        character_id_b = _resolve_relationship_endpoint(
+            owner_user_id,
+            relationship["character_id_b"],
+            player_relationship_token,
+        )
         success = repository.save_character_relationship(
             owner_user_id=owner_user_id,
-            character_id_a=relationship["character_id_a"],
-            character_id_b=relationship["character_id_b"],
+            character_id_a=character_id_a,
+            character_id_b=character_id_b,
             relationship_type=relationship["relationship_type"],
             affinity=relationship.get("affinity", 0),
             description=relationship.get("description"),
@@ -117,7 +175,7 @@ def _seed_relationships(owner_user_id: str, relationships: list[dict]) -> None:
         if not success:
             raise RuntimeError(
                 "保存角色关系失败: "
-                f"{relationship['character_id_a']}/{relationship['character_id_b']}"
+                f"{character_id_a}/{character_id_b}"
             )
 
 
@@ -389,6 +447,7 @@ def reset_graytide_module(
     vector_store=None,
 ) -> None:
     manifest = module["manifest"]
+    player_relationship_token = manifest["player_relationship_token"]
     knowledge_names = {
         definition["name"] for definition in manifest["knowledge_bases"]
     }
@@ -401,10 +460,20 @@ def reset_graytide_module(
     for event in module["events"]:
         repository.delete_event_definition(owner_user_id, event.event_id)
     for relationship in module["relationships"]:
-        repository.delete_character_relationship(
+        character_id_a = _resolve_relationship_endpoint(
             owner_user_id,
             relationship["character_id_a"],
+            player_relationship_token,
+        )
+        character_id_b = _resolve_relationship_endpoint(
+            owner_user_id,
             relationship["character_id_b"],
+            player_relationship_token,
+        )
+        repository.delete_character_relationship(
+            owner_user_id,
+            character_id_a,
+            character_id_b,
         )
     for _, card, _ in module["cards"]:
         repository.delete_character_card_from_db(
@@ -443,8 +512,16 @@ def seed_graytide_demo(
             vector_store=resolved_vector_store,
         )
 
+    player_character = _seed_player_character(
+        owner_user_id,
+        module["player_character"],
+    )
     _seed_characters(owner_user_id, module["cards"])
-    _seed_relationships(owner_user_id, module["relationships"])
+    _seed_relationships(
+        owner_user_id,
+        module["relationships"],
+        player_relationship_token=manifest["player_relationship_token"],
+    )
     group_session = _ensure_group_session(
         owner_user_id, username, manifest["group"]
     )
@@ -460,6 +537,8 @@ def seed_graytide_demo(
         "username": username,
         "user_id": owner_user_id,
         "created_user": created_user,
+        "player_character": player_character["display_name"],
+        "player_node_id": repository.player_node_id(owner_user_id),
         "characters": len(module["cards"]),
         "relationships": len(module["relationships"]),
         "events": len(module["events"]),

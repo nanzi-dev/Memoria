@@ -166,19 +166,31 @@ def test_relationship_validation_rejects_foreign_player_node():
     assert exc_info.value.status_code == 403
 
 
-def test_relationship_network_always_contains_isolated_player_node():
+def test_relationship_network_contains_isolated_player_and_character_nodes():
     from memoria.api.relationship import get_relationship_network
 
     user_id, _ = _create_user()
+    character_id = f"npc_{uuid.uuid4().hex[:8]}"
     repository.update_user_character_card(
         user_id,
         {"display_name": "无名旅人", "avatar_url": "data:image/png;base64,role"},
     )
+    repository.save_character_card_to_db(
+        user_id,
+        character_id,
+        json.dumps({"character_id": character_id, "meta": {"name": "守门人"}}),
+        name="守门人",
+        display_name="旧城守门人",
+        avatar_url="data:image/png;base64,character",
+    )
 
     network = get_relationship_network(current_user_id=user_id)
+    nodes = {node.character_id: node for node in network.nodes}
 
     assert network.edges == []
-    assert len(network.nodes) == 1
-    assert network.nodes[0].character_id == repository.player_node_id(user_id)
-    assert network.nodes[0].node_type == "player"
-    assert network.nodes[0].name == "无名旅人"
+    assert set(nodes) == {repository.player_node_id(user_id), character_id}
+    assert nodes[repository.player_node_id(user_id)].node_type == "player"
+    assert nodes[repository.player_node_id(user_id)].name == "无名旅人"
+    assert nodes[character_id].node_type == "character"
+    assert nodes[character_id].name == "旧城守门人"
+    assert nodes[character_id].avatar_url == "data:image/png;base64,character"

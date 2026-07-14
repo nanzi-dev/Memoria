@@ -124,5 +124,61 @@
     "relationship_type": "信号伙伴",
     "affinity": 44,
     "description": "诺娅能用电报码与阿特拉斯损坏的听觉继电器交流。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "graytide_erin_voss",
+    "relationship_type": "调查委托人与现场测绘员",
+    "affinity": 32,
+    "description": "艾琳需要岑澜辨认第七支路的旧测绘标记；岑澜认可她区分事实与推论的办案方式。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "graytide_rowan_cade",
+    "relationship_type": "互相试探的旧航路熟人",
+    "affinity": 14,
+    "description": "罗文曾载岑澜勘测外海浮标，但两人都没有说明自己掌握多少被删除的航线。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "graytide_mira_thorne",
+    "relationship_type": "档案复核伙伴",
+    "affinity": 38,
+    "description": "米拉曾帮助岑澜核对复测章的年代，岑澜则为她解释蓝线航图上的压力网符号。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "graytide_oskar_bell",
+    "relationship_type": "谨慎合作的工程同行",
+    "affinity": 31,
+    "description": "奥斯卡相信岑澜的现场读图能力，但担心半枚测绘牌会把贝尔家族检修口暴露给议会。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "graytide_evelyn_moor",
+    "relationship_type": "受助者与可信医生",
+    "affinity": 44,
+    "description": "伊芙琳曾处理岑澜在旧支路勘测时留下的轻度以太暴露，因此了解那件防潮斗篷上的旧污染痕迹。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "graytide_silas_crowe",
+    "relationship_type": "记录争议当事人",
+    "affinity": -46,
+    "description": "塞拉斯坚持六年前的复测报告已经依法归档；岑澜认为原始蓝线和复测结论被人有意拆开保存。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "graytide_noa_finch",
+    "relationship_type": "匿名电报笔友",
+    "affinity": 24,
+    "description": "诺娅曾替岑澜转送无法通过公开邮路的测绘询证，但双方直到调查开始才确认彼此身份。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "graytide_atlas_07",
+    "relationship_type": "旧登记员与复测见证人",
+    "affinity": 36,
+    "description": "阿特拉斯仍能识别岑澜半枚测绘牌的冲压纹，并记得六年前复测队进入第七码头的登记格式。"
   }
 ]

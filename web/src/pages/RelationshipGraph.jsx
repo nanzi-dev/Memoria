@@ -948,7 +948,7 @@ export default function RelationshipGraph() {
         {/* 浮动控件 */}
         {!loading && network.nodes.length > 0 && (
           <>
-            <div className="absolute bottom-24 right-3 flex flex-col gap-1.5 z-10 animate-fade-up sm:bottom-6 sm:right-6">
+            <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-1.5 animate-fade-up sm:bottom-6 sm:right-6">
               <button onClick={zoomIn} className="memoria-glass flex h-11 w-11 items-center justify-center rounded-lg text-cyber-green/50 hover:text-cyber-green hover:border-cyber-green/30 active:scale-95 transition-all" title="放大" aria-label="放大关系图">
                 <ZoomIn size={16} />
               </button>
@@ -959,8 +959,9 @@ export default function RelationshipGraph() {
                 <Maximize2 size={16} />
               </button>
             </div>
-            <div className="absolute bottom-4 left-3 right-3 z-10 animate-fade-up sm:bottom-6 sm:left-6 sm:right-auto">
-              <div className="memoria-glass rounded-lg px-3 py-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px]">
+            <div className="absolute bottom-3 left-3 right-[4.5rem] z-10 animate-fade-up sm:bottom-6 sm:left-6 sm:right-24 lg:right-auto lg:w-[min(48rem,calc(100%-7.5rem))]">
+              <div className="memoria-glass max-h-40 overflow-y-auto overscroll-contain rounded-lg p-2 font-mono text-[10px] sm:max-h-32 sm:p-2.5">
+                <div className="grid grid-cols-[repeat(auto-fit,minmax(7rem,1fr))] gap-1">
                 {relationTypes.map(rt => {
                   const active = activeRelationType === rt.value;
                   const dimmed = activeRelationType && !active;
@@ -968,7 +969,7 @@ export default function RelationshipGraph() {
                     <div
                       key={rt.value}
                       className={[
-                        'flex items-center gap-1.5 rounded-full border px-2 py-1 transition-all duration-200',
+                        'flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1.5 transition-all duration-200',
                         active
                           ? 'border-cyber-green/45 bg-cyber-green/10 text-cyber-green shadow-[0_0_18px_rgba(167,239,158,0.16)] scale-[1.03]'
                           : 'border-transparent text-cyber-green/50',
@@ -977,13 +978,14 @@ export default function RelationshipGraph() {
                       style={active ? { borderColor: `${rt.color}99`, boxShadow: `0 0 18px ${rt.color}2b` } : undefined}
                     >
                       <span
-                        className="w-2.5 h-2.5 rounded-full transition-all duration-200"
+                        className="h-2.5 w-2.5 shrink-0 rounded-full transition-all duration-200"
                         style={{ backgroundColor: rt.color, boxShadow: active ? `0 0 12px ${rt.color}` : 'none' }}
                       />
-                      <span>{rt.label}</span>
+                      <span className="truncate" title={rt.label}>{rt.label}</span>
                     </div>
                   );
                 })}
+                </div>
               </div>
             </div>
           </>

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Contact, Upload, Link, X, Image as ImageIcon } from 'lucide-react';
+import { Upload, Link, X, Image as ImageIcon } from 'lucide-react';
 import TagInput from './TagInput';
 import { useDialog } from '../../context/DialogContext';
 
@@ -27,15 +27,15 @@ export default function StepIdentity({ formData, updateField, showAvatar = true 
 
   return (
     <div className="space-y-6">
-      <div className="memoria-section-heading">
-        <Contact size={18} />
-        <h3 className="font-mono text-base font-bold text-zinc-100 sm:text-lg">身份信息 Identity</h3>
+      <div className="flex items-center gap-2 mb-4">
+        <span className="text-lg text-cyber-ink/60">👤</span>
+        <h3 className="font-mono text-lg font-bold text-cyber-ink">身份信息 Identity</h3>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {infoFields.map(({ key, label, value, multiline }) => (
           <div key={key} className={multiline ? 'md:col-span-2' : ''}>
-            <label className="memoria-form-label">
+            <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
               {label}
             </label>
             {multiline ? (
@@ -43,7 +43,7 @@ export default function StepIdentity({ formData, updateField, showAvatar = true 
                 value={value}
                 onChange={(e) => updateField(key, e.target.value)}
                 rows={3}
-                className="memoria-form-control"
+                className="w-full px-2 py-1.5 text-sm font-mono text-cyber-ink bg-amber-50/50 border-b border-amber-300/50 focus:border-amber-500 focus:outline-none focus:bg-amber-50 rounded-t resize-none transition-colors"
                 placeholder={`Enter ${label.toLowerCase()}...`}
               />
             ) : (
@@ -51,7 +51,7 @@ export default function StepIdentity({ formData, updateField, showAvatar = true 
                 type="text"
                 value={value}
                 onChange={(e) => updateField(key, e.target.value)}
-                className="memoria-form-control"
+                className="w-full px-2 py-1.5 text-sm font-mono text-cyber-ink bg-transparent border-b border-amber-300/50 focus:border-amber-500 focus:outline-none focus:bg-amber-50/50 transition-colors"
                 placeholder={`Enter ${label.toLowerCase()}...`}
               />
             )}
@@ -61,7 +61,7 @@ export default function StepIdentity({ formData, updateField, showAvatar = true 
 
       {/* Aliases */}
       <div>
-        <label className="memoria-form-label">
+        <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
           别名 Aliases
         </label>
         <TagInput
@@ -73,16 +73,15 @@ export default function StepIdentity({ formData, updateField, showAvatar = true 
 
       {/* Avatar */}
       {showAvatar && <div className="space-y-3">
-        <label className="memoria-form-label">
+        <label className="block text-[11px] text-amber-700/60 font-mono uppercase tracking-wider">
           头像 Avatar
         </label>
 
         <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-4">
           {/* Preview */}
           <div
-            className={`relative h-24 w-24 flex-shrink-0 overflow-hidden rounded-lg border-2 border-dashed bg-black/25 ${
-              dragOver ? 'border-cyber-green/60' : 'border-cyber-green/20'
-            }`}
+            className="relative w-24 h-24 flex-shrink-0 rounded-lg overflow-hidden border-2 border-dashed"
+            style={{ borderColor: dragOver ? '#D4A574' : '#C4B594' }}
           >
             {avatarUrl && !imgError ? (
               <img
@@ -92,8 +91,8 @@ export default function StepIdentity({ formData, updateField, showAvatar = true 
                 onError={() => setImgError(true)}
               />
             ) : (
-              <div className="flex h-full w-full items-center justify-center">
-                <ImageIcon size={28} className="text-cyber-green/25" />
+              <div className="w-full h-full flex items-center justify-center bg-amber-100/30">
+                <ImageIcon size={28} className="text-amber-700/30" />
               </div>
             )}
           </div>
@@ -103,16 +102,16 @@ export default function StepIdentity({ formData, updateField, showAvatar = true 
             <div
               className={`relative rounded border-2 border-dashed px-3 py-4 text-center cursor-pointer transition-colors ${
                 dragOver
-                  ? 'border-cyber-green/55 bg-cyber-green/[0.08]'
-                  : 'border-cyber-green/20 bg-black/15 hover:border-cyber-green/40 hover:bg-cyber-green/[0.04]'
+                  ? 'border-amber-500 bg-amber-100/50'
+                  : 'border-amber-300/40 hover:border-amber-400/60 bg-amber-50/30'
               }`}
               onClick={() => fileInputRef.current?.click()}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
               onDrop={handleDrop}
             >
-              <Upload size={16} className="mx-auto mb-1 text-cyber-green/55" />
-              <p className="text-[10px] font-mono text-cyber-green/45">
+              <Upload size={16} className="mx-auto text-amber-600/50 mb-1" />
+              <p className="text-[10px] font-mono text-amber-700/50">
                 点击或拖放上传 (PNG/JPEG/WebP ≤2MB)
               </p>
               <input
@@ -126,20 +125,20 @@ export default function StepIdentity({ formData, updateField, showAvatar = true 
 
             <div className="flex gap-2">
               <div className="flex-1 relative">
-                <Link size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-cyber-green/35" />
+                <Link size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-amber-700/40" />
                 <input
                   type="text"
                   value={urlInput}
                   onChange={(e) => setUrlInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleUrlSubmit(); }}
                   placeholder="或粘贴网络图片 URL..."
-                  className="memoria-form-control pl-8 text-xs"
+                  className="w-full pl-7 pr-2 py-1 text-xs font-mono text-cyber-ink bg-transparent border-b border-amber-300/50 focus:border-amber-500 focus:outline-none transition-colors"
                 />
               </div>
               <button
                 onClick={handleUrlSubmit}
                 disabled={!urlInput.trim()}
-                className="memoria-button px-3 disabled:opacity-30"
+                className="px-2 py-1 text-[10px] font-mono text-amber-700/60 hover:text-amber-800 border border-amber-300/30 rounded hover:bg-amber-100/50 disabled:opacity-30 transition-colors"
               >
                 设置
               </button>
@@ -148,7 +147,7 @@ export default function StepIdentity({ formData, updateField, showAvatar = true 
             {avatarUrl && (
               <button
                 onClick={handleClear}
-                className="flex min-h-[44px] items-center gap-1 text-[10px] font-mono text-red-300/60 transition-colors hover:text-red-300"
+                className="flex items-center gap-1 text-[10px] font-mono text-red-600/60 hover:text-red-700 transition-colors"
               >
                 <X size={10} />
                 清除头像

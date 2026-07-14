@@ -1,33 +1,32 @@
 import TagInput from './TagInput';
-import { Brain } from 'lucide-react';
 
 export default function StepPersonality({ formData, updateField }) {
   const p = formData.personality || {};
 
   return (
     <div className="space-y-6">
-      <div className="memoria-section-heading">
-        <Brain size={18} />
-        <h3 className="font-mono text-base font-bold text-zinc-100 sm:text-lg">性格特征 Personality</h3>
+      <div className="flex items-center gap-2 mb-4">
+        <span className="text-lg text-cyber-ink/60">🎭</span>
+        <h3 className="font-mono text-lg font-bold text-cyber-ink">性格特征 Personality</h3>
       </div>
 
       {/* MBTI / Archetype */}
       <div>
-        <label className="memoria-form-label">
+        <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
           MBTI / 性格原型 MBTI or Archetype
         </label>
         <input
           type="text"
           value={p.mbti_or_archetype || ''}
           onChange={(e) => updateField('personality.mbti_or_archetype', e.target.value)}
-          className="memoria-form-control"
+          className="w-full px-2 py-1.5 text-sm font-mono text-cyber-ink bg-transparent border-b border-amber-300/50 focus:border-amber-500 focus:outline-none focus:bg-amber-50/50 transition-colors"
           placeholder="e.g. ISTJ, The Caregiver..."
         />
       </div>
 
       {/* Core Traits */}
       <div>
-        <label className="memoria-form-label">
+        <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
           核心性格特征 Core Traits
         </label>
         <TagInput
@@ -39,21 +38,21 @@ export default function StepPersonality({ formData, updateField }) {
 
       {/* Moral Alignment */}
       <div>
-        <label className="memoria-form-label">
+        <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
           道德取向 Moral Alignment
         </label>
         <input
           type="text"
           value={p.moral_alignment || ''}
           onChange={(e) => updateField('personality.moral_alignment', e.target.value)}
-          className="memoria-form-control"
+          className="w-full px-2 py-1.5 text-sm font-mono text-cyber-ink bg-transparent border-b border-amber-300/50 focus:border-amber-500 focus:outline-none focus:bg-amber-50/50 transition-colors"
           placeholder="e.g. 中立善良..."
         />
       </div>
 
       {/* Values & Beliefs */}
       <div>
-        <label className="memoria-form-label">
+        <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
           价值观与信念 Values & Beliefs
         </label>
         <TagInput
@@ -65,7 +64,7 @@ export default function StepPersonality({ formData, updateField }) {
 
       {/* Fears & Taboos */}
       <div>
-        <label className="memoria-form-label">
+        <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
           恐惧与禁忌 Fears & Taboos
         </label>
         <TagInput
@@ -77,7 +76,7 @@ export default function StepPersonality({ formData, updateField }) {
 
       {/* Quirks & Habits */}
       <div>
-        <label className="memoria-form-label">
+        <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
           怪癖与习惯 Quirks & Habits
         </label>
         <TagInput

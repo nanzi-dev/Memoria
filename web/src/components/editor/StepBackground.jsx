@@ -1,5 +1,5 @@
 import TagInput from './TagInput';
-import { BookOpen, Plus, Target, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 
 export default function StepBackground({ formData, updateField, showRelationships = true }) {
   const bg = formData.background || {};
@@ -47,14 +47,14 @@ export default function StepBackground({ formData, updateField, showRelationship
     updateField('background.secrets', (bg.secrets || []).filter((_, i) => i !== idx));
   }
 
-  const fieldStyle = 'memoria-form-control';
-  const labelStyle = 'memoria-form-label';
+  const fieldStyle = "w-full px-2 py-1 text-sm font-mono text-cyber-ink bg-transparent border-b border-amber-300/50 focus:border-amber-500 focus:outline-none focus:bg-amber-50/50 transition-colors";
+  const labelStyle = "block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider";
 
   return (
     <div className="space-y-6">
-      <div className="memoria-section-heading">
-        <BookOpen size={18} />
-        <h3 className="font-mono text-base font-bold text-zinc-100 sm:text-lg">背景故事 Background</h3>
+      <div className="flex items-center gap-2 mb-4">
+        <span className="text-lg text-cyber-ink/60">📖</span>
+        <h3 className="font-mono text-lg font-bold text-cyber-ink">背景故事 Background</h3>
       </div>
 
       {/* Story Bio */}
@@ -64,7 +64,7 @@ export default function StepBackground({ formData, updateField, showRelationship
           value={bg.story_bio || ''}
           onChange={(e) => updateField('background.story_bio', e.target.value)}
           rows={5}
-          className={fieldStyle}
+          className={`${fieldStyle} bg-amber-50/50 rounded-t resize-none`}
           placeholder="Describe the character's backstory..."
         />
       </div>
@@ -73,13 +73,13 @@ export default function StepBackground({ formData, updateField, showRelationship
       <div>
         <div className="flex items-center justify-between mb-2">
           <label className={labelStyle}>关键事件 Key Events</label>
-          <button type="button" onClick={addKeyEvent} className="memoria-button px-3">
+          <button onClick={addKeyEvent} className="flex items-center gap-1 text-[10px] text-amber-700/60 hover:text-amber-700 font-mono">
             <Plus size={12} /> Add
           </button>
         </div>
         <div className="space-y-3">
           {(bg.key_events || []).map((event, idx) => (
-            <div key={idx} className="memoria-editor-item flex items-start gap-2">
+            <div key={idx} className="flex items-start gap-2 p-2 bg-amber-50/40 rounded border border-amber-300/20">
               <div className="flex-1 space-y-2">
                 <input
                   type="text" value={event.event || ''}
@@ -92,15 +92,15 @@ export default function StepBackground({ formData, updateField, showRelationship
                   className={fieldStyle} placeholder="Description"
                 />
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-cyber-green/40 font-mono">Weight:</span>
+                  <span className="text-[10px] text-amber-700/40 font-mono">Weight:</span>
                   <input
                     type="number" value={event.emotional_weight || 0}
                     onChange={(e) => updateKeyEvent(idx, 'emotional_weight', parseInt(e.target.value) || 0)}
-                    className="memoria-form-control w-20"
+                    className="w-16 px-1 py-0.5 text-xs font-mono text-cyber-ink border-b border-amber-300/50 focus:outline-none bg-transparent"
                   />
                 </div>
               </div>
-              <button type="button" onClick={() => removeKeyEvent(idx)} className="memoria-icon-button mt-1 text-zinc-600 hover:bg-red-400/10 hover:text-red-300" aria-label="删除关键事件">
+              <button onClick={() => removeKeyEvent(idx)} className="text-amber-700/30 hover:text-red-600 transition-colors mt-1">
                 <Trash2 size={14} />
               </button>
             </div>
@@ -112,13 +112,13 @@ export default function StepBackground({ formData, updateField, showRelationship
       {showRelationships && <div>
         <div className="flex items-center justify-between mb-2">
           <label className={labelStyle}>人物关系 Relationships</label>
-          <button type="button" onClick={addRelationship} className="memoria-button px-3">
+          <button onClick={addRelationship} className="flex items-center gap-1 text-[10px] text-amber-700/60 hover:text-amber-700 font-mono">
             <Plus size={12} /> Add
           </button>
         </div>
         <div className="space-y-3">
           {(bg.relationships || []).map((rel, idx) => (
-            <div key={idx} className="memoria-editor-item flex items-start gap-2">
+            <div key={idx} className="flex items-start gap-2 p-2 bg-amber-50/40 rounded border border-amber-300/20">
               <div className="flex-1 space-y-2">
                 <div className="grid grid-cols-2 gap-2">
                   <input type="text" value={rel.target || ''} onChange={(e) => updateRelationship(idx, 'target', e.target.value)} className={fieldStyle} placeholder="Target" />
@@ -126,11 +126,11 @@ export default function StepBackground({ formData, updateField, showRelationship
                 </div>
                 <input type="text" value={rel.description || ''} onChange={(e) => updateRelationship(idx, 'description', e.target.value)} className={fieldStyle} placeholder="Description" />
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-cyber-green/40 font-mono">Weight:</span>
-                  <input type="number" value={rel.emotional_weight || 0} onChange={(e) => updateRelationship(idx, 'emotional_weight', parseInt(e.target.value) || 0)} className="memoria-form-control w-20" />
+                  <span className="text-[10px] text-amber-700/40 font-mono">Weight:</span>
+                  <input type="number" value={rel.emotional_weight || 0} onChange={(e) => updateRelationship(idx, 'emotional_weight', parseInt(e.target.value) || 0)} className="w-16 px-1 py-0.5 text-xs font-mono text-cyber-ink border-b border-amber-300/50 focus:outline-none bg-transparent" />
                 </div>
               </div>
-              <button type="button" onClick={() => removeRelationship(idx)} className="memoria-icon-button mt-1 text-zinc-600 hover:bg-red-400/10 hover:text-red-300" aria-label="删除人物关系">
+              <button onClick={() => removeRelationship(idx)} className="text-amber-700/30 hover:text-red-600 transition-colors mt-1">
                 <Trash2 size={14} />
               </button>
             </div>
@@ -142,18 +142,18 @@ export default function StepBackground({ formData, updateField, showRelationship
       <div>
         <div className="flex items-center justify-between mb-2">
           <label className={labelStyle}>秘密 Secrets</label>
-          <button type="button" onClick={addSecret} className="memoria-button px-3">
+          <button onClick={addSecret} className="flex items-center gap-1 text-[10px] text-amber-700/60 hover:text-amber-700 font-mono">
             <Plus size={12} /> Add
           </button>
         </div>
         <div className="space-y-3">
           {(bg.secrets || []).map((sec, idx) => (
-            <div key={idx} className="memoria-editor-item flex items-start gap-2">
+            <div key={idx} className="flex items-start gap-2 p-2 bg-amber-50/40 rounded border border-amber-300/20">
               <div className="flex-1 space-y-2">
                 <input type="text" value={sec.secret || ''} onChange={(e) => updateSecret(idx, 'secret', e.target.value)} className={fieldStyle} placeholder="Secret" />
                 <input type="text" value={sec.reveal_conditions || ''} onChange={(e) => updateSecret(idx, 'reveal_conditions', e.target.value)} className={fieldStyle} placeholder="Reveal conditions" />
               </div>
-              <button type="button" onClick={() => removeSecret(idx)} className="memoria-icon-button mt-1 text-zinc-600 hover:bg-red-400/10 hover:text-red-300" aria-label="删除秘密">
+              <button onClick={() => removeSecret(idx)} className="text-amber-700/30 hover:text-red-600 transition-colors mt-1">
                 <Trash2 size={14} />
               </button>
             </div>
@@ -162,10 +162,10 @@ export default function StepBackground({ formData, updateField, showRelationship
       </div>
 
       {/* Goals & Motivations */}
-      <div className="border-t border-cyber-green/10 pt-5">
-        <div className="memoria-section-heading mb-4">
-          <Target size={18} />
-          <h3 className="font-mono text-base font-bold text-zinc-100 sm:text-lg">目标与动机 Goals & Motivations</h3>
+      <div className="border-t pt-4" style={{ borderColor: '#C4B594' }}>
+        <div className="flex items-center gap-2 mb-4">
+          <span className="text-lg text-cyber-ink/60">🎯</span>
+          <h3 className="font-mono text-lg font-bold text-cyber-ink">目标与动机 Goals & Motivations</h3>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
