@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, Check, ChevronLeft, ChevronRight, Upload, Download, RefreshCw, Languages } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Check, ChevronLeft, ChevronRight, Upload, Download, RefreshCw } from 'lucide-react';
 import { characterAdmin } from '../api/memoria';
 import StepIdentity from '../components/editor/StepIdentity';
 import StepPersonality from '../components/editor/StepPersonality';
@@ -17,11 +17,7 @@ const STEPS = [
   { id: 'interaction', label: '交互规则 Rules', Icon: null },
 ];
 
-const EDITOR_LOCALES = [
-  { value: 'default', label: 'Default' },
-  { value: 'zh-CN', label: 'zh-CN' },
-  { value: 'en-US', label: 'en-US' },
-];
+const SUPPORTED_I18N_LOCALES = ['zh-CN', 'en-US'];
 
 const LOCALIZABLE_FIELDS = {
   meta: new Set(['name', 'display_name', 'aliases', 'game_module', 'created_by']),
@@ -92,9 +88,9 @@ function sanitizeLocaleOverride(override) {
 function sanitizeI18n(i18n) {
   if (!isPlainObject(i18n)) return {};
   return Object.fromEntries(
-    EDITOR_LOCALES
-      .filter(({ value }) => value !== 'default' && isPlainObject(i18n[value]))
-      .map(({ value }) => [value, sanitizeLocaleOverride(i18n[value])]),
+    SUPPORTED_I18N_LOCALES
+      .filter(locale => isPlainObject(i18n[locale]))
+      .map(locale => [locale, sanitizeLocaleOverride(i18n[locale])]),
   );
 }
 
@@ -102,11 +98,6 @@ function mergeCharacterData(importedData) {
   const merged = deepMerge(DEFAULT_DATA, isPlainObject(importedData) ? importedData : {});
   merged.i18n = sanitizeI18n(merged.i18n);
   return merged;
-}
-
-function isLocalizablePath(path) {
-  const [root, field] = path.split('.');
-  return Boolean(field && LOCALIZABLE_FIELDS[root]?.has(field));
 }
 
 function normalizeImportedCharacter(rawData) {
@@ -135,7 +126,6 @@ export default function CharacterEditor() {
   const dialog = useDialog();
   const fileInputRef = useRef(null);
   const [currentStep, setCurrentStep] = useState(0);
-  const [activeLocale, setActiveLocale] = useState('default');
   const [formData, setFormData] = useState(() => mergeCharacterData({}));
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(!!characterId);
@@ -158,7 +148,6 @@ export default function CharacterEditor() {
     let cancelled = false;
     if (!characterId) {
       setFormData(mergeCharacterData({}));
-      setActiveLocale('default');
       setLoading(false);
       setLoadedCharacterId('');
       setLoadError('');
@@ -171,7 +160,6 @@ export default function CharacterEditor() {
     setLoadError('');
     setSaveMessage('');
     setCurrentStep(0);
-    setActiveLocale('default');
 
     (async () => {
       try {
@@ -217,20 +205,6 @@ export default function CharacterEditor() {
       return updated;
     });
   }, []);
-
-  const localizedUpdateField = useCallback((path, value) => {
-    if (activeLocale === 'default') {
-      updateField(path, value);
-      return;
-    }
-    if (!isLocalizablePath(path)) return;
-    updateField(`i18n.${activeLocale}.${path}`, value);
-  }, [activeLocale, updateField]);
-
-  const editorData = useMemo(() => {
-    if (activeLocale === 'default') return formData;
-    return deepMerge(formData, sanitizeLocaleOverride(formData.i18n?.[activeLocale]));
-  }, [activeLocale, formData]);
 
   async function handleSave() {
     if (characterId && loadedCharacterId !== characterId) return;
@@ -287,7 +261,6 @@ export default function CharacterEditor() {
       setFormData(data);
       setIsActive(true);
       setCurrentStep(0);
-      setActiveLocale('default');
       setSaveMessage('Imported character JSON. Review and save.');
     } catch (e) {
       setSaveMessage(`Error: ${e.message}`);
@@ -572,34 +545,13 @@ export default function CharacterEditor() {
 
               {/* Form body */}
               <div className="p-4 sm:p-6">
-                <div className="mb-6 flex items-center gap-3 border-b border-amber-700/20 pb-4">
-                  <Languages size={17} className="shrink-0 text-amber-900/55" />
-                  <div className="grid min-w-0 flex-1 grid-cols-3 overflow-hidden rounded border border-amber-700/20 bg-amber-50/35">
-                    {EDITOR_LOCALES.map(locale => (
-                      <button
-                        key={locale.value}
-                        type="button"
-                        onClick={() => setActiveLocale(locale.value)}
-                        aria-pressed={activeLocale === locale.value}
-                        className={`min-h-[44px] min-w-0 border-r border-amber-700/15 px-2 font-mono text-xs last:border-r-0 transition-colors ${
-                          activeLocale === locale.value
-                            ? 'bg-amber-200/60 font-bold text-amber-950'
-                            : 'text-amber-900/50 hover:bg-amber-100/45 hover:text-amber-950/75'
-                        }`}
-                      >
-                        {locale.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
                 <StepComponent
-                  formData={editorData}
-                  updateField={localizedUpdateField}
+                  formData={formData}
+                  updateField={updateField}
                   characterId={characterId}
-                  showAvatar={activeLocale === 'default'}
-                  showRelationships={activeLocale === 'default'}
-                  showVoice={activeLocale === 'default'}
+                  showAvatar
+                  showRelationships
+                  showVoice
                 />
               </div>
 

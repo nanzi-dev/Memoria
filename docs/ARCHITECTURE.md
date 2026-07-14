@@ -63,7 +63,7 @@ Memoria/
 │   ├── chat.sh                 # CLI 快捷启动
 │   └── run_tests.sh            # 测试执行
 ├── web/                        # React + Vite 前端
-│   ├── src/pages/              # Home、ChatRoom、CharacterEditor、EventList、RelationshipGraph
+│   ├── src/pages/              # Home、ChatRoom、CharacterEditor、PersonaEditor、EventList、EventEditor、RelationshipGraph、KnowledgeManager
 │   ├── src/components/         # 通用组件与编辑器步骤组件
 │   ├── src/context/            # 登录态与对话上下文
 │   ├── src/api/                # 前端 API 客户端
@@ -204,6 +204,8 @@ Web 管理页在选中知识库存在 `queued` 或 `processing` 文档时每 1.5
 
 角色声音工作流包含授权录音、供应商自定义声音创建、状态查询和解绑。工作流文件位于 `data/speech/workflows`；供应商不支持 Custom Voices 或角色未绑定自定义声音时，TTS 回退到角色卡的 `builtinVoice`。用户级 `tts_auto_play` 与 `stt_auto_send` 只控制 Web 交互偏好，不改变服务端鉴权。
 
+Web 端的角色编辑器只编辑基础角色卡，不提供 `Default` / `zh-CN` / `en-US` 版本切换；导入或数据库中已有的 `i18n` 覆盖数据在清洗和保存时继续保留。会话语言选择仍位于单聊和群聊流程中，不影响上述角色卡编辑界面。事件与知识库管理页采用列表/详情分栏工作台，玩家角色卡由独立的 `PersonaEditor` 页面维护。
+
 ### 三层容错机制
 
 1. **JSON 解析** — 直接解析 LLM 返回的 JSON
@@ -214,7 +216,7 @@ Web 管理页在选中知识库存在 `queued` 或 `processing` 文档时每 1.5
 
 ## 数据库设计
 
-Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=postgresql://...` 切换 PostgreSQL。当前 schema 初始化后共有 30 张表和 30 个显式索引。
+Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=postgresql://...` 切换 PostgreSQL。当前 schema 初始化后共有 32 张表和 32 个显式索引。
 
 ### 1. users（用户表）
 
@@ -225,6 +227,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 | user_id | TEXT PRIMARY KEY | 用户 ID，格式为 `usr_<8字符>` |
 | username | TEXT NOT NULL UNIQUE | 用户名 |
 | password_hash | TEXT NOT NULL | PBKDF2-SHA256 密码哈希；旧 SHA256 登录后会自动升级 |
+| is_admin | INTEGER NOT NULL DEFAULT 0 | 是否为管理员 |
 | gender | TEXT DEFAULT 'unknown' | 性别：male/female/unknown |
 | avatar_url | TEXT | 头像 data URL |
 | tts_auto_play | INTEGER NOT NULL DEFAULT 0 | Web 是否自动播放角色语音 |
@@ -234,7 +237,32 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 2. auth_token（认证 token 表）
+### 2. user_character_card（玩家角色卡表）
+
+存储当前用户在剧情中的玩家身份。首次访问玩家角色卡 API 时会按账户资料创建默认记录；更新后从下一条单聊或群聊消息开始进入 Prompt，并作为玩家节点参与关系图。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| user_id | TEXT PRIMARY KEY | 用户 ID，同时作为稳定的玩家角色卡归属 |
+| display_name | TEXT NOT NULL | 玩家角色显示名称 |
+| avatar_url | TEXT | 玩家角色头像 data URL |
+| gender | TEXT DEFAULT 'unknown' | 性别或身份描述 |
+| pronouns | TEXT DEFAULT '' | 代词 |
+| age | INTEGER | 年龄 |
+| species | TEXT DEFAULT '' | 种族 |
+| occupation | TEXT DEFAULT '' | 职业 |
+| appearance | TEXT DEFAULT '' | 外观描述 |
+| personality | TEXT DEFAULT '' | 性格描述 |
+| background | TEXT DEFAULT '' | 背景故事 |
+| goals | TEXT DEFAULT '' | 当前目标 |
+| created_at | TEXT NOT NULL | 创建时间 |
+| updated_at | TEXT NOT NULL | 更新时间 |
+
+**外键：** `FOREIGN KEY (user_id) REFERENCES users(user_id)`
+
+---
+
+### 3. auth_token（认证 token 表）
 
 存储用户登录态 token，支持服务重启后继续识别有效登录态。
 
@@ -250,7 +278,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 3. character_card（角色卡表）
+### 4. character_card（角色卡表）
 
 存储角色卡的完整 JSON 数据。角色卡按用户隔离；`src/memoria/characters/` 下的静态 JSON 只作为开发和导入模板，不会在用户第一次使用时自动复制到 `character_card`。
 
@@ -276,7 +304,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 4. relationship_state（关系状态表）
+### 5. relationship_state（关系状态表）
 
 存储玩家与角色的运行时关系状态。使用显式列而非 JSON，因为好感度和信任度在每次对话中都会高频更新。
 
@@ -295,7 +323,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 5. long_term_fact（长期记忆表）
+### 6. long_term_fact（长期记忆表）
 
 存储从对话中萃取出的长期记忆事实，同时同步到 ChromaDB 向量数据库。
 
@@ -313,7 +341,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 6. session（会话表）
+### 7. session（会话表）
 
 管理对话会话的生命周期，通过 `is_multi_character` 字段区分单角色和多角色会话。
 
@@ -338,7 +366,32 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 7. multi_session_participant（多角色会话参与者表）
+### 8. dialogue_turn（对话轮次幂等表）
+
+保存单聊和群聊玩家轮次的幂等声明、执行租约、完成响应和错误。客户端在同一会话内重试相同 `request_id` 时可复用已完成结果，不会重复写入消息或提交事件、关系和通知副作用。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| session_id | TEXT NOT NULL | 会话 ID（联合主键） |
+| request_id | TEXT NOT NULL | 客户端生成的轮次幂等 ID（联合主键） |
+| player_id | TEXT NOT NULL | 当前用户 ID |
+| turn_kind | TEXT NOT NULL | 轮次类型：`single` / `multi` |
+| status | TEXT NOT NULL | 执行状态：`processing` / `completed` / `failed` |
+| lease_owner | TEXT | 当前执行租约持有者 |
+| lease_expires_at | TEXT | 租约过期时间 |
+| response_data | TEXT | 已完成响应（JSON） |
+| error | TEXT | 最近错误 |
+| created_at | TEXT NOT NULL | 创建时间 |
+| updated_at | TEXT NOT NULL | 更新时间 |
+| completed_at | TEXT | 完成时间 |
+
+**主键：** `PRIMARY KEY (session_id, request_id)`
+**外键：** `FOREIGN KEY (session_id) REFERENCES session(session_id)`；`FOREIGN KEY (player_id) REFERENCES users(user_id)`
+**索引：** `idx_dialogue_turn_session_lease ON dialogue_turn(session_id, status, lease_expires_at)`
+
+---
+
+### 9. multi_session_participant（多角色会话参与者表）
 
 记录多角色群聊中每个会话的参与角色，支持动态添加/移除。
 
@@ -362,9 +415,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
----
-
-### 8. shared_memory（角色间共享记忆表）
+### 10. shared_memory（角色间共享记忆表）
 
 存储同一用户下两个角色之间共同经历的记忆，用于多角色对话中查询角色间的历史互动信息。隔离维度是 `owner_user_id`，因此不同用户可以拥有相同的 `character_id` 组合而不会共享角色间记忆。
 
@@ -379,6 +430,9 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 | owner_user_id | TEXT NOT NULL | 记忆归属用户 ID |
 | character_a_id | TEXT NOT NULL | 角色 A ID |
 | character_b_id | TEXT NOT NULL | 角色 B ID |
+| observer_character_id | TEXT | 形成印象的观察者角色 ID |
+| target_character_id | TEXT | 被观察的目标角色 ID |
+| memory_kind | TEXT NOT NULL DEFAULT 'legacy_archived' | 记忆类型，用于区分方向性印象与旧数据 |
 | memory_text | TEXT NOT NULL | 记忆内容 |
 | context | TEXT | 记忆产生的对话上下文 |
 | importance | REAL DEFAULT 0.5 | 重要性权重（0.0 ~ 1.0）|
@@ -386,9 +440,13 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 | last_referenced | TEXT | 最后被检索时间 |
 | reference_count | INTEGER DEFAULT 0 | 被引用次数 |
 
+**索引：**
+- `idx_shared_memory_owner_pair ON shared_memory(owner_user_id, character_a_id, character_b_id, importance DESC)`
+- `idx_shared_memory_directional ON shared_memory(owner_user_id, observer_character_id, target_character_id, importance DESC)`
+
 ---
 
-### 9. group_memory（群体记忆表）
+### 11. group_memory（群体记忆表）
 
 存储多角色会话中的群体共同记忆，以 session 为粒度记录所有参与者的集体经历。群聊结束且有效消息数大于 6 条、摘要模型返回非空内容时，`save_multi_character_summary()` 会把整场摘要同步保存为群体记忆，`memory_text` 通常带有 `会话摘要：` 前缀。开发或内部逻辑也可以调用 `save_group_event_memory()` 写入 `群体事件：` 类型的记录。
 
@@ -406,7 +464,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 10. short_term_message（短期记忆表）
+### 12. short_term_message（短期记忆表）
 
 存储对话历史消息。多角色会话场景下，`character_id` 和 `character_name` 字段记录发言人信息。
 
@@ -440,7 +498,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 11. session_summary（会话摘要表）
+### 13. session_summary（会话摘要表）
 
 存储会话摘要（中期记忆），在会话结束时由 AI 自动生成。
 
@@ -462,7 +520,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 12. event_definition（事件定义表）
+### 14. event_definition（事件定义表）
 
 存储事件的配置和定义。事件定义按用户隔离；`character_id` 为 NULL 时表示该用户下的全局事件。管理 API 创建、更新或切换事件时，会与该事件唯一的 `event_schedule_state` 在同一个数据库事务中保存；调度计算或持久化失败不会留下新定义配旧调度的半状态。
 
@@ -493,7 +551,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 13. event_trigger_log（事件触发日志表）
+### 15. event_trigger_log（事件触发日志表）
 
 记录每次事件触发的详细信息，用于调试和分析。
 
@@ -515,7 +573,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 14. event_execution_batch（事件执行批次表）
+### 16. event_execution_batch（事件执行批次表）
 
 保存一次事件运行请求的幂等结果和去重统计。
 
@@ -534,7 +592,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 15. event_execution（逐事件执行表）
+### 17. event_execution（逐事件执行表）
 
 保存每个事件的幂等执行结果、耗时和错误，用于指标与历史查询。
 
@@ -560,7 +618,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 16. event_unlock（事件解锁表）
+### 18. event_unlock（事件解锁表）
 
 持久化事件效果解锁的角色内容，供后续 Prompt 和运行时状态读取。
 
@@ -577,7 +635,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 17. event_context_state（事件上下文状态表）
+### 19. event_context_state（事件上下文状态表）
 
 持久化事件链和跨会话事件进度，确保剧情事件可以在后续会话继续推进。
 
@@ -599,7 +657,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 18. event_schedule_state（事件调度状态表）
+### 20. event_schedule_state（事件调度状态表）
 
 记录时间驱动事件的检查和运行状态，用于 cron 式事件调度。调度执行只有在事件链规划和效果提交成功后才推进 cron；规划失败会保留当前 `next_run_at` / `next_due_real_at`，写入 `last_error` / `last_failed_at` 并释放租约，供修复配置后重试。
 
@@ -627,7 +685,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 19. event_template（事件模板表）
+### 21. event_template（事件模板表）
 
 存储可复用事件模板，用于快速创建常见事件配置。
 
@@ -647,7 +705,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 20. character_relationship（角色关系网络表）
+### 22. character_relationship（角色关系网络表）
 
 存储角色之间的相互关系，用于单聊、群聊互动和关系图谱。关系按用户隔离，同一对角色 ID 可以在不同用户下有不同关系。写入时会按角色 ID 排序保存为无向边。
 
@@ -669,7 +727,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 21. character_relationship_revision（角色关系修订表）
+### 23. character_relationship_revision（角色关系修订表）
 
 记录每对角色关系最近一次图谱变更时间，包含已经删除的关系边。该表不保存关系内容，只保存“这对角色的图谱在什么时候被改过”，用于多角色记忆和历史召回的截止过滤。
 
@@ -686,7 +744,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 22. player_world_clock（玩家世界时钟表）
+### 24. player_world_clock（玩家世界时钟表）
 
 存储每个用户独立的世界时间锚点。世界时间按“世界锚点 + 真实经过时间 × 时间倍率”计算；倍率 `0` 表示暂停，API 支持 `0/1/2/5/10`。
 
@@ -707,7 +765,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 23. knowledge_base（知识库表）
+### 25. knowledge_base（知识库表）
 
 存储当前用户创建的知识库及总开关。
 
@@ -725,7 +783,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 24. knowledge_binding（知识库绑定表）
+### 26. knowledge_binding（知识库绑定表）
 
 定义知识库的可见范围。`target_type` 为 `global` 时 `target_id` 为空；`character` 和 `group_thread` 分别绑定当前用户的角色或群聊线程。
 
@@ -743,7 +801,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 25. knowledge_document（知识文档表）
+### 27. knowledge_document（知识文档表）
 
 记录上传或粘贴的原始文档及异步处理状态。新粘贴文档使用 `source_type=pasted_text`；旧数据中的 `paste` 仍可兼容显示。
 
@@ -769,7 +827,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 26. knowledge_chunk（知识文本块表）
+### 28. knowledge_chunk（知识文本块表）
 
 保存文档提取后的文本块和来源元数据，并同步写入独立的知识向量集合。
 
@@ -790,7 +848,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 27. knowledge_vector_cleanup（知识向量清理队列表）
+### 29. knowledge_vector_cleanup（知识向量清理队列表）
 
 记录数据库删除已完成但向量存储仍需重试的清理任务，避免跨存储操作只完成一半。
 
@@ -810,7 +868,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 28. player_event_inbox（玩家事件收件箱表）
+### 30. player_event_inbox（玩家事件收件箱表）
 
 持久化事件系统产生的用户通知，可按未读状态查询并标记已读。
 
@@ -835,7 +893,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 29. group_dialogue_state（逻辑群聊自主对话状态表）
+### 31. group_dialogue_state（逻辑群聊自主对话状态表）
 
 按 `group_thread_id` 保存跨 session 的群聊主题、回复目标、自主对话限额和租约。脉冲完成状态与该次生成的消息、关系/参与者更新和未读通知在同一事务内提交。
 
@@ -864,7 +922,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
-### 30. event_trigger_guard（事件触发并发保护表）
+### 32. event_trigger_guard（事件触发并发保护表）
 
 保存 once/cooldown 事件的最近成功触发时间和短期 claim。检测线程先按玩家、事件和角色范围竞争 claim；只有持有 claim 的执行可以在副作用事务中完成提交，失败或规划异常会释放 claim。
 
@@ -884,13 +942,14 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ### 完整索引汇总
 
-共 30 个显式索引，覆盖高频查询、任务恢复、调度租约与未读通知路径：
+共 32 个显式索引，覆盖高频查询、任务恢复、调度租约与未读通知路径：
 
 | 索引名 | 表 | 列 |
 |--------|-----|-----|
 | `idx_session_lookup` | session | (character_id, player_id, created_at DESC) |
 | `idx_session_multi` | session | (is_multi_character, player_id, created_at DESC) |
 | `idx_session_group_thread` | session | (group_thread_id, created_at DESC) |
+| `idx_dialogue_turn_session_lease` | dialogue_turn | (session_id, status, lease_expires_at) |
 | `idx_multi_participant` | multi_session_participant | (session_id, is_active) |
 | `idx_message_session` | short_term_message | (session_id, id ASC) |
 | `idx_message_character` | short_term_message | (session_id, character_id, created_at DESC) |
@@ -916,6 +975,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 | `idx_knowledge_chunk_document` | knowledge_chunk | (owner_user_id, document_id, chunk_index) |
 | `idx_knowledge_vector_cleanup_pending` | knowledge_vector_cleanup | (updated_at, attempts) |
 | `idx_shared_memory_owner_pair` | shared_memory | (owner_user_id, character_a_id, character_b_id, importance DESC) |
+| `idx_shared_memory_directional` | shared_memory | (owner_user_id, observer_character_id, target_character_id, importance DESC) |
 | `idx_relationship_lookup` | character_relationship | (owner_user_id, character_id_a, character_id_b) |
 | `idx_relationship_revision_lookup` | character_relationship_revision | (owner_user_id, character_id_a, character_id_b) |
 
@@ -928,12 +988,12 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 3. **软删除设计** — `is_active` 字段实现逻辑删除，支持数据恢复
 4. **多角色扩展** — `session.is_multi_character` + `multi_session_participant` 表支持群聊；`short_term_message` 扩展 `character_id` / `character_name` 列区分发言人；`shared_memory` 存储用户隔离的角色间互动记忆，`group_memory` 存储群聊结束摘要和内部显式写入的群体事件记忆，单聊也会召回同一用户下相关的 shared/group 记忆
 5. **关系图谱权威** — `character_relationship` 保存当前图谱，`character_relationship_revision` 保存修订截止点；单聊和多角色上下文会保留普通长期记忆和共同经历，只剔除图谱变更前的旧关系事实，原始群聊历史按修订时间截止
-6. **用户资源隔离** — `character_card`、`event_definition`、`character_relationship`、`character_relationship_revision`、`shared_memory` 和全部知识库表都带用户归属；API 只读写当前登录用户的数据。`event_template` 是经过认证访问的全局系统模板，不属于用户资源
+6. **用户资源隔离与玩家身份** — `character_card`、`event_definition`、`character_relationship`、`character_relationship_revision`、`shared_memory` 和全部知识库表都带用户归属；`user_character_card` 保存玩家在 Prompt 与关系图中的独立身份。API 只读写当前登录用户的数据，`event_template` 是经过认证访问的全局系统模板，不属于用户资源
 7. **知识任务可恢复** — 文档状态和错误持久化到 `knowledge_document`；原子状态声明防止重复处理，启动恢复继续排队或中断任务
 8. **世界时间与通知持久化** — `player_world_clock` 保存带修订号的用户世界时间锚点，Web 单调应用时钟修订；调度表保存真实到期时间和租约，`player_event_inbox` 保存单聊或群聊聚合通知
-9. **事务一致性与恢复** — 群聊脉冲消息/状态/通知、事件定义/调度分别原子提交；`event_trigger_guard` 串行化 once/cooldown 副作用，`knowledge_vector_cleanup`、`group_dialogue_state` 和事件执行表保存可恢复任务状态、幂等结果与租约
+9. **事务一致性、幂等与恢复** — `dialogue_turn` 为单聊和群聊轮次保存请求幂等结果与租约；群聊脉冲消息/状态/通知、事件定义/调度分别原子提交；`event_trigger_guard` 串行化 once/cooldown 副作用，`knowledge_vector_cleanup`、`group_dialogue_state` 和事件执行表保存可恢复任务状态、幂等结果与租约
 10. **轻量迁移** — 启动时为旧库补齐角色、会话、事件、认证、世界时钟、通知收件箱、关系修订和知识库相关结构；`owner_user_id` 相关主键重建不做旧数据迁移，升级前需要删除旧 SQLite 数据库或手动重建表
-11. **完整索引覆盖** — 30 个显式索引覆盖常用查询、调度和恢复路径
+11. **完整索引覆盖** — 32 个显式索引覆盖常用查询、对话幂等、调度和恢复路径
 12. **可迁移性** — Repository 层适配 SQLite/PostgreSQL 占位符、自增主键和少量 UPSERT 差异
 
 ## 角色卡规范

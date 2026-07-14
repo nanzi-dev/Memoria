@@ -118,6 +118,7 @@ export default function UserSettingsModal({ onClose }) {
   const [worldDateTime, setWorldDateTime] = useState(() => (
     worldDateTimeInput(getWorldNow?.() || new Date(worldClock?.world_now || Date.now()))
   ));
+  const [activeSection, setActiveSection] = useState('account');
   const [syncConfirming, setSyncConfirming] = useState(false);
   const [speechLoading, setSpeechLoading] = useState(false);
   const [ttsAutoPlay, setTtsAutoPlay] = useState(Boolean(user?.tts_auto_play));
@@ -134,6 +135,14 @@ export default function UserSettingsModal({ onClose }) {
     const t = setTimeout(() => setSuccess(null), 4000);
     return () => clearTimeout(t);
   }, [success]);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
 
   useEffect(() => {
     if (!worldClock) return;
@@ -221,6 +230,7 @@ export default function UserSettingsModal({ onClose }) {
 
   const handleScaleChange = async (timeScale) => {
     setApiError(null);
+    setSuccess(null);
     setClockLoading(true);
     try {
       await updateWorldClock({ timeScale });
@@ -234,6 +244,7 @@ export default function UserSettingsModal({ onClose }) {
 
   const handleClockSync = async () => {
     setApiError(null);
+    setSuccess(null);
     setClockLoading(true);
     try {
       await syncWorldClock();
@@ -247,6 +258,7 @@ export default function UserSettingsModal({ onClose }) {
   };
 
   const handleSetWorldTime = async (value = worldDateTime) => {
+    setSuccess(null);
     if (!value) {
       setApiError('请选择世界日期和时间');
       return;
@@ -270,6 +282,7 @@ export default function UserSettingsModal({ onClose }) {
 
   const handleAdvance = async (seconds, label) => {
     setApiError(null);
+    setSuccess(null);
     setClockLoading(true);
     try {
       await advanceWorldClock(seconds);
@@ -305,43 +318,57 @@ export default function UserSettingsModal({ onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-0 sm:p-4">
       <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={onClose} />
 
       <div
-        className="relative w-full max-w-lg bg-[#0d0d14] border border-cyber-green/20 rounded-lg shadow-[0_0_60px_rgba(167,239,158,0.06)] overflow-hidden font-mono animate-fade-up"
+        className="relative flex h-dvh w-full flex-col overflow-hidden border-cyber-green/20 bg-[#0d0d14] font-mono shadow-[0_0_60px_rgba(167,239,158,0.06)] sm:h-auto sm:max-h-[min(88dvh,760px)] sm:max-w-xl sm:rounded-lg sm:border"
         role="dialog"
         aria-modal="true"
         aria-label="用户设置"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-cyber-green/10">
-          <h2 className="text-xs font-bold text-cyber-green uppercase tracking-wider">用户设置</h2>
+        <div className="flex min-h-16 items-center justify-between border-b border-cyber-green/10 px-4 sm:px-5">
+          <h2 className="text-sm font-bold text-cyber-green">用户设置</h2>
           <button
+            type="button"
             onClick={onClose}
-            className="text-cyber-green/25 hover:text-cyber-green/70 transition-colors p-1 rounded-full hover:bg-cyber-green/5"
+            className="flex h-11 w-11 items-center justify-center rounded-lg text-cyber-green/35 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/30"
             aria-label="关闭"
           >
             <X size={18} />
           </button>
         </div>
 
-        <div className="px-5 py-5 space-y-5 max-h-[70vh] overflow-y-auto">
-          {/* Notifications */}
-          {apiError && (
-            <div className="flex items-start gap-2 text-[11px] text-red-400/85 bg-red-500/5 border border-red-500/10 rounded-lg px-3 py-2.5" role="alert">
-              <AlertCircle size={14} className="shrink-0 mt-0.5" />
-              <span>{apiError}</span>
-            </div>
-          )}
-          {success && (
-            <div className="flex items-center gap-2 text-[11px] text-emerald-400/85 bg-emerald-500/5 border border-emerald-500/10 rounded-lg px-3 py-2.5 animate-in fade-in" role="status">
-              <Check size={14} className="shrink-0" />
-              <span>{success}</span>
-            </div>
-          )}
+        <nav className="grid grid-cols-3 border-b border-white/[0.06] bg-black/15 px-3 sm:px-5" aria-label="设置分类">
+          {[
+            { id: 'account', label: '账户', icon: User },
+            { id: 'clock', label: '世界时间', icon: CalendarClock },
+            { id: 'speech', label: '语音', icon: Volume2 },
+          ].map(item => {
+            const Icon = item.icon;
+            const active = activeSection === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveSection(item.id)}
+                aria-current={active ? 'page' : undefined}
+                className={`relative flex min-h-12 items-center justify-center gap-2 border-b-2 px-2 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyber-green/30 ${
+                  active
+                    ? 'border-cyber-green text-cyber-green'
+                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                <Icon size={14} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
 
-          <section className="rounded-lg border border-cyan-300/15 bg-cyan-300/[0.035] px-4 py-4">
+        <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable] sm:px-5 sm:py-5">
+          <section className={`${activeSection === 'account' ? '' : 'hidden'} rounded-lg border border-cyan-300/15 bg-cyan-300/[0.035] px-4 py-4`}>
             <div className="flex items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-cyan-300/30 bg-[#0b0b0c]">
@@ -376,7 +403,7 @@ export default function UserSettingsModal({ onClose }) {
           </section>
 
           {/* ── Avatar Section ── */}
-          <fieldset className="border border-cyber-green/10 rounded-lg px-4 py-4">
+          <fieldset className={`${activeSection === 'account' ? '' : 'hidden'} rounded-lg border border-cyber-green/10 px-4 py-4`}>
             <legend className="text-[10px] text-cyber-green/50 uppercase tracking-wider px-1.5">账户头像</legend>
             <div className="flex flex-col items-center gap-3">
               <div className="w-[72px] h-[72px] rounded-full overflow-hidden border-2 border-cyber-green/25 bg-[#0b0b0c] relative group">
@@ -390,7 +417,7 @@ export default function UserSettingsModal({ onClose }) {
                 <button
                   type="button"
                   onClick={() => fileRef.current?.click()}
-                  className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+                  className="absolute inset-0 flex cursor-pointer flex-col items-center justify-center gap-1 bg-black/55 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
                   aria-label="上传头像"
                 >
                   <Upload size={16} className="text-cyber-green" />
@@ -420,7 +447,7 @@ export default function UserSettingsModal({ onClose }) {
                   type="button"
                   onClick={handleAvatarUrl}
                   disabled={!avatarUrl.trim() || loading}
-                  className="px-3 py-2 bg-cyber-green/10 hover:bg-cyber-green/20 border border-cyber-green/20 rounded-lg text-cyber-green disabled:opacity-25 disabled:cursor-not-allowed transition-colors shrink-0"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-cyber-green/20 bg-cyber-green/10 text-cyber-green transition-colors hover:bg-cyber-green/20 disabled:cursor-not-allowed disabled:opacity-25"
                   aria-label="设置头像链接"
                 >
                   <Link size={14} />
@@ -430,7 +457,7 @@ export default function UserSettingsModal({ onClose }) {
           </fieldset>
 
           {/* ── Profile Form ── */}
-          <form onSubmit={handleSaveProfile} className="space-y-4">
+          <form onSubmit={handleSaveProfile} className={`${activeSection === 'account' ? '' : 'hidden'} space-y-4`}>
             <fieldset className="border border-cyber-green/10 rounded-lg px-4 py-4 space-y-4">
               <legend className="text-[10px] text-cyber-green/50 uppercase tracking-wider px-1.5">资料</legend>
 
@@ -461,16 +488,17 @@ export default function UserSettingsModal({ onClose }) {
               {/* Gender */}
               <div>
                 <label className="text-[10px] text-cyber-green/50 uppercase tracking-wider mb-1.5 block">性别</label>
-                <div className="flex gap-1.5">
+                <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-cyber-green/15 bg-black/15">
                   {GENDERS.map(g => (
                     <button
                       key={g.value}
                       type="button"
                       onClick={() => setGender(g.value)}
-                      className={`text-xs px-3 py-1.5 rounded-full border transition-all duration-200 ${
+                      aria-pressed={gender === g.value}
+                      className={`min-h-11 border-r border-cyber-green/10 px-3 text-xs transition-colors last:border-r-0 ${
                         gender === g.value
-                          ? 'border-cyber-green/40 bg-cyber-green/10 text-cyber-green shadow-[0_0_10px_rgba(167,239,158,0.08)]'
-                          : 'border-cyber-green/10 text-cyber-green/35 hover:border-cyber-green/25 hover:text-cyber-green/55'
+                          ? 'bg-cyber-green/10 text-cyber-green'
+                          : 'text-cyber-green/40 hover:bg-cyber-green/[0.04] hover:text-cyber-green/70'
                       }`}
                     >
                       {g.label}
@@ -490,20 +518,29 @@ export default function UserSettingsModal({ onClose }) {
             </button>
           </form>
 
-          <fieldset className="border border-cyan-300/12 rounded-lg px-4 py-4 space-y-4">
+          <fieldset
+            aria-busy={clockLoading}
+            className={`${activeSection === 'clock' ? '' : 'hidden'} space-y-4 rounded-lg border border-cyan-300/12 px-4 py-4`}
+          >
             <legend className="text-[10px] text-cyan-200/50 uppercase tracking-wider px-1.5">世界时间</legend>
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 border-b border-white/[0.06] pb-3 text-[10px]">
               <div>
-                <div className="text-zinc-600">世界与现实偏移</div>
+                <div className="text-zinc-600">与现实偏移</div>
                 <div className="mt-1 tabular-nums text-amber-200/80">{formatOffset(worldClock?.real_offset_seconds)}</div>
               </div>
               <div>
-                <div className="text-zinc-600">时钟状态</div>
-                <div className={`mt-1 ${['error', 'offline', 'stale', 'conflict'].includes(clockStatus.state) ? 'text-amber-300' : 'text-cyan-200/75'}`}>
-                  {clockStatus.message || `修订版本 ${worldClock?.clock_revision ?? '-'}`}
+                <div className="text-zinc-600">当前流速</div>
+                <div className={`mt-1 tabular-nums ${Number(worldClock?.time_scale) === 0 ? 'text-amber-300' : 'text-cyan-200/75'}`}>
+                  {Number(worldClock?.time_scale) === 0 ? '已暂停' : `${worldClock?.time_scale ?? 1}x`}
                 </div>
               </div>
             </div>
+            {['error', 'offline', 'stale', 'conflict'].includes(clockStatus.state) && clockStatus.message && (
+              <div className="flex items-start gap-2 rounded-md border border-amber-300/15 bg-amber-300/[0.035] px-3 py-2.5 text-[10px] leading-4 text-amber-100/75" role="status">
+                <AlertCircle size={13} className="mt-0.5 shrink-0" />
+                <span>{clockStatus.message}</span>
+              </div>
+            )}
 
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-[11px] text-zinc-300">
@@ -519,7 +556,7 @@ export default function UserSettingsModal({ onClose }) {
                     type="button"
                     onClick={() => handleScaleChange(scale)}
                     disabled={clockLoading}
-                    className={`flex min-h-[44px] min-w-0 items-center justify-center gap-1 border-r border-white/10 px-1 text-[10px] last:border-r-0 disabled:opacity-30 ${
+                    className={`flex min-h-[44px] min-w-0 items-center justify-center gap-1 border-r border-white/10 px-1 text-[10px] last:border-r-0 disabled:cursor-wait ${
                       selected
                         ? 'bg-cyan-300/12 text-cyan-100'
                         : 'text-zinc-500 hover:bg-white/[0.03] hover:text-zinc-300'
@@ -548,13 +585,13 @@ export default function UserSettingsModal({ onClose }) {
                   value={worldDateTime}
                   onChange={event => setWorldDateTime(event.target.value)}
                   disabled={clockLoading}
-                  className="min-h-[44px] min-w-0 flex-1 rounded-md border border-cyan-300/15 bg-[#0b0b0c] px-3 text-xs text-zinc-300 outline-none focus:border-cyan-300/40 focus:ring-2 focus:ring-cyan-300/10 disabled:opacity-40"
+                  className="min-h-[44px] min-w-0 flex-1 rounded-md border border-cyan-300/15 bg-[#0b0b0c] px-3 text-xs text-zinc-300 outline-none focus:border-cyan-300/40 focus:ring-2 focus:ring-cyan-300/10 disabled:cursor-wait disabled:opacity-100 disabled:text-zinc-300"
                 />
                 <button
                   type="button"
                   onClick={() => handleSetWorldTime()}
                   disabled={clockLoading || !worldDateTime}
-                  className="min-h-[44px] rounded-md border border-cyan-300/20 px-3 text-[11px] text-cyan-100/80 hover:bg-cyan-300/8 disabled:opacity-30"
+                  className="min-h-[44px] rounded-md border border-cyan-300/20 px-3 text-[11px] text-cyan-100/80 hover:bg-cyan-300/8 disabled:cursor-wait"
                 >
                   设置
                 </button>
@@ -564,7 +601,7 @@ export default function UserSettingsModal({ onClose }) {
                   type="button"
                   onClick={() => handleAdvance(3600, ' 1 小时')}
                   disabled={clockLoading}
-                  className="min-h-[44px] rounded-md border border-white/10 text-[10px] text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200 disabled:opacity-30"
+                  className="min-h-[44px] rounded-md border border-white/10 text-[10px] text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200 disabled:cursor-wait"
                 >
                   +1 小时
                 </button>
@@ -572,7 +609,7 @@ export default function UserSettingsModal({ onClose }) {
                   type="button"
                   onClick={() => handleAdvance(86400, ' 1 天')}
                   disabled={clockLoading}
-                  className="min-h-[44px] rounded-md border border-white/10 text-[10px] text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200 disabled:opacity-30"
+                  className="min-h-[44px] rounded-md border border-white/10 text-[10px] text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200 disabled:cursor-wait"
                 >
                   +1 天
                 </button>
@@ -580,7 +617,7 @@ export default function UserSettingsModal({ onClose }) {
                   type="button"
                   onClick={handleNextMorning}
                   disabled={clockLoading}
-                  className="flex min-h-[44px] items-center justify-center gap-1 rounded-md border border-amber-300/15 text-[10px] text-amber-200/70 hover:bg-amber-300/[0.05] disabled:opacity-30"
+                  className="flex min-h-[44px] items-center justify-center gap-1 rounded-md border border-amber-300/15 text-[10px] text-amber-200/70 hover:bg-amber-300/[0.05] disabled:cursor-wait"
                 >
                   <Sunrise size={12} /> 清晨 06:00
                 </button>
@@ -611,7 +648,7 @@ export default function UserSettingsModal({ onClose }) {
                       type="button"
                       onClick={handleClockSync}
                       disabled={clockLoading}
-                      className="flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-md border border-amber-300/25 bg-amber-300/8 text-[11px] text-amber-100 disabled:opacity-30"
+                      className="flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-md border border-amber-300/25 bg-amber-300/8 text-[11px] text-amber-100 disabled:cursor-wait"
                     >
                       {clockLoading ? <Loader2 size={14} className="animate-spin" /> : <RotateCw size={14} />}
                       确认同步
@@ -620,7 +657,7 @@ export default function UserSettingsModal({ onClose }) {
                       type="button"
                       onClick={() => setSyncConfirming(false)}
                       disabled={clockLoading}
-                      className="min-h-[44px] px-4 text-[11px] text-zinc-500 hover:text-zinc-300 disabled:opacity-30"
+                      className="min-h-[44px] px-4 text-[11px] text-zinc-500 hover:text-zinc-300 disabled:cursor-wait"
                     >
                       取消
                     </button>
@@ -631,7 +668,7 @@ export default function UserSettingsModal({ onClose }) {
                   type="button"
                   onClick={() => setSyncConfirming(true)}
                   disabled={clockLoading}
-                  className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-md border border-amber-300/15 text-[11px] text-amber-200/70 hover:bg-amber-300/[0.04] disabled:opacity-30"
+                  className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-md border border-amber-300/15 text-[11px] text-amber-200/70 hover:bg-amber-300/[0.04] disabled:cursor-wait"
                 >
                   <RotateCw size={14} /> 同步至现实时间
                 </button>
@@ -639,7 +676,7 @@ export default function UserSettingsModal({ onClose }) {
             </div>
           </fieldset>
 
-          <fieldset className="border border-cyber-green/10 rounded-lg px-4 py-4 space-y-4">
+          <fieldset className={`${activeSection === 'speech' ? '' : 'hidden'} space-y-4 rounded-lg border border-cyber-green/10 px-4 py-4`}>
             <legend className="text-[10px] text-cyber-green/50 uppercase tracking-wider px-1.5">语音</legend>
             <div className="space-y-2">
               <button
@@ -706,7 +743,7 @@ export default function UserSettingsModal({ onClose }) {
           </fieldset>
 
           {/* ── Account Info & Logout ── */}
-          <div className="pt-2 border-t border-cyber-green/10 space-y-3">
+          <div className={`${activeSection === 'account' ? '' : 'hidden'} space-y-3 border-t border-cyber-green/10 pt-2`}>
             <div className="flex items-center justify-between text-[9px]">
               <span className="text-cyber-green/20 uppercase">用户 ID</span>
               <code className="text-cyber-green/35 bg-[#0b0b0c] px-2 py-0.5 rounded">{user?.user_id || '-'}</code>
@@ -714,12 +751,37 @@ export default function UserSettingsModal({ onClose }) {
             <button
               type="button"
               onClick={handleLogout}
-              className="w-full py-2.5 border border-red-500/15 rounded-lg text-xs text-red-400/70 hover:bg-red-500/5 hover:text-red-400 hover:border-red-500/25 transition-all duration-200 flex items-center justify-center gap-1.5 active:scale-[0.98] min-h-[40px]"
+              className="flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg border border-red-500/15 py-2.5 text-xs text-red-400/70 transition-all duration-200 hover:border-red-500/25 hover:bg-red-500/5 hover:text-red-400 active:scale-[0.98]"
             >
               <LogOut size={14} />
               退出登录
             </button>
           </div>
+        </div>
+
+        <div
+          data-settings-feedback
+          className="pointer-events-none absolute inset-x-0 top-[7.125rem] z-20 flex h-9 justify-center px-4 sm:px-5"
+        >
+          {apiError && (
+            <div
+              className="flex min-h-9 w-full max-w-md items-start gap-2 rounded-lg border border-red-400/20 bg-[#181014]/95 px-3 py-2 text-[11px] leading-4 text-red-300 shadow-[0_8px_28px_rgba(0,0,0,0.45)] backdrop-blur-md"
+              role="alert"
+            >
+              <AlertCircle size={14} className="mt-0.5 shrink-0" />
+              <span>{apiError}</span>
+            </div>
+          )}
+          {!apiError && success && (
+            <div
+              className="flex min-h-9 w-full max-w-md items-center gap-2 rounded-lg border border-emerald-300/20 bg-[#0f1814]/95 px-3 py-2 text-[11px] leading-4 text-emerald-300 shadow-[0_8px_28px_rgba(0,0,0,0.45)] backdrop-blur-md"
+              role="status"
+              aria-live="polite"
+            >
+              <Check size={14} className="shrink-0" />
+              <span>{success}</span>
+            </div>
+          )}
         </div>
       </div>
     </div>

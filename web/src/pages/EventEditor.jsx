@@ -19,7 +19,7 @@ import {
   Settings2,
   ChevronRight,
 } from 'lucide-react';
-import { eventAdmin } from '../api/memoria';
+import { characterAdmin, eventAdmin } from '../api/memoria';
 import { useDialog } from '../context/DialogContext';
 import EventOperationsPanel from '../components/EventOperationsPanel';
 
@@ -1191,6 +1191,9 @@ export default function EventEditor() {
   const [events, setEvents] = useState([]);
   const [eventsLoading, setEventsLoading] = useState(true);
   const [eventsError, setEventsError] = useState('');
+  const [characters, setCharacters] = useState([]);
+  const [charactersLoading, setCharactersLoading] = useState(true);
+  const [charactersError, setCharactersError] = useState('');
 
   const selectedTemplate = useMemo(
     () => templates.find(t => t.template_id === selectedTemplateId),
@@ -1199,6 +1202,20 @@ export default function EventEditor() {
   const eventOptions = useMemo(
     () => events.filter(event => event.event_id !== (eventId && eventId !== 'new' ? eventId : form.event_id)),
     [events, eventId, form.event_id]
+  );
+  const characterOptions = useMemo(
+    () => [...characters].sort((a, b) => {
+      const activeDifference = Number(Boolean(b.is_active)) - Number(Boolean(a.is_active));
+      if (activeDifference) return activeDifference;
+      const aName = a.display_name || a.name || a.character_id;
+      const bName = b.display_name || b.name || b.character_id;
+      return aName.localeCompare(bName, 'zh-CN');
+    }),
+    [characters]
+  );
+  const selectedCharacterMissing = Boolean(
+    form.character_id
+    && !characters.some(character => character.character_id === form.character_id)
   );
   const unavailableConfiguration = useMemo(
     () => collectUnavailableConfiguration(form.trigger_condition, form.effects, []),
@@ -1218,6 +1235,25 @@ export default function EventEditor() {
         setTemplatesError(e.message || '模板加载失败');
       } finally {
         if (!cancelled) setTemplatesLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await characterAdmin.list(false);
+        if (cancelled) return;
+        setCharacters(Array.isArray(rows) ? rows : []);
+        setCharactersError('');
+      } catch (e) {
+        if (cancelled) return;
+        setCharacters([]);
+        setCharactersError(e.message || '角色列表加载失败');
+      } finally {
+        if (!cancelled) setCharactersLoading(false);
       }
     })();
     return () => { cancelled = true; };
@@ -1702,13 +1738,43 @@ export default function EventEditor() {
                         <div className="grid grid-cols-1 gap-4 pb-4 pt-3 sm:grid-cols-2">
                           <label className="block">
                             <span className="mb-1.5 block text-xs font-mono text-cyber-green/45">关联角色 ID</span>
-                            <input
-                              type="text"
+                            <select
                               value={form.character_id}
                               onChange={e => updateField('character_id', e.target.value)}
-                              placeholder="留空表示全局事件"
-                              className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-sm font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
-                            />
+                              disabled={charactersLoading}
+                              aria-describedby={charactersError ? 'event-character-error' : undefined}
+                              className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-sm font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none disabled:cursor-wait disabled:opacity-50"
+                            >
+                              <option value="">
+                                {charactersLoading ? '正在加载角色...' : '全局事件（不关联角色）'}
+                              </option>
+                              {selectedCharacterMissing && (
+                                <option value={form.character_id}>
+                                  {form.character_id}（角色不存在或不可用）
+                                </option>
+                              )}
+                              {characterOptions.map(character => {
+                                const name = character.display_name || character.name || character.character_id;
+                                const isActive = Boolean(character.is_active);
+                                return (
+                                  <option
+                                    key={character.character_id}
+                                    value={character.character_id}
+                                    disabled={!isActive}
+                                  >
+                                    {name}（{character.character_id}）{isActive ? '' : ' · 已停用'}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                            {charactersError && (
+                              <span
+                                id="event-character-error"
+                                className="mt-1.5 block text-xs font-mono leading-5 text-red-300/70"
+                              >
+                                角色列表加载失败：{charactersError}
+                              </span>
+                            )}
                           </label>
                           <label className="block">
                             <span className="mb-1.5 block text-xs font-mono text-cyber-green/45">优先级</span>

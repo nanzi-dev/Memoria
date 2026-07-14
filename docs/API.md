@@ -79,9 +79,12 @@ Content-Type: application/json
 
 {
   "session_id": "550e8400-e29b-41d4-a716-446655440000",
-  "player_message": "你好，小黑！"
+  "player_message": "你好，小黑！",
+  "request_id": "turn-550e8400-001"
 }
 ```
+
+`request_id` 可选，建议由客户端为每次玩家发送生成唯一值。同一会话使用相同 `request_id` 重试时会返回已完成的同一结果，不会重复写入消息或执行事件。服务端不会用消息内容区分同一 ID，客户端不得把已使用的 ID 分配给另一条逻辑消息。
 
 **响应示例：**
 ```json
@@ -1054,11 +1057,14 @@ Content-Type: application/json
   "session_id": "multi-session-uuid",
   "player_message": "大家好！",
   "discussion_mode": true,
-  "max_responses": 4
+  "max_responses": 4,
+  "request_id": "group-turn-001"
 }
 ```
 
 每次玩家发起的多角色轮次会保存玩家消息和角色回复。群聊结束且有效消息数大于 6 条、摘要模型返回非空内容时，系统会将整场对话统一摘要写入 `session_summary`，并同步保存到 `group_memory` 作为群聊会话记忆；后续多角色 Prompt 会召回这些群体记忆，帮助参与角色延续共同经历。若群聊期间关系图谱被修改或删除，结束摘要和角色间印象提取只处理图谱修订时间之后的消息，避免旧关系被重新萃取。
+
+`request_id` 与单聊语义一致：可选，同一会话内用于安全重试和去重。相同 ID 的已完成请求返回原结果，不会再次生成角色回复或重复提交群聊副作用。
 
 根据讨论触发条件，响应可能是单角色回复，也可能是多角色连续讨论回复。`discussion_mode` 默认启用；`max_responses` 可传 1-5，但编排器会结合语境、参与人数和内部上限动态决定实际接话人数，当前最多 4 个角色发言。讨论模式下返回结构包含 `responses` 数组，每个元素对应一个角色发言。发送轮次前会重新校验全部会话参与者；任一参与角色卡不存在或被禁用时返回 400，避免以不完整参与者集合继续生成。
 
@@ -1429,7 +1435,7 @@ DELETE /api/v1/admin/characters/{character_id}/voice
 
 ## 用户 API
 
-用户接口用于 Web 前端登录态、玩家资料、语音偏好和头像管理。登录成功后服务端会同时返回 token 并写入 `memoria-token` HttpOnly Cookie；通用 API 客户端支持 Bearer、查询参数或 Cookie，仓库内 Web 前端只使用 Cookie。
+用户接口用于 Web 前端登录态、账户资料、玩家角色卡、语音偏好、世界时钟和头像管理。登录成功后服务端会同时返回 token 并写入 `memoria-token` HttpOnly Cookie；通用 API 客户端支持 Bearer、查询参数或 Cookie，仓库内 Web 前端只使用 Cookie。
 
 ### 1. 注册
 ```http
@@ -1535,7 +1541,61 @@ Content-Type: application/json
 
 响应为更新后的用户资料。`tts_auto_play` 控制角色消息自动播放，`stt_auto_send` 控制录音转写后是否自动发送。
 
-### 9. 获取或更新世界时钟
+### 9. 获取玩家角色卡
+
+```http
+GET /api/v1/user/character-card
+```
+
+首次读取会为当前用户创建默认玩家角色卡。响应包含稳定的关系图节点 ID `node_id`，以及 `display_name`、`avatar_url`、`gender`、`pronouns`、`age`、`species`、`occupation`、`appearance`、`personality`、`background` 和 `goals`。
+
+### 10. 更新玩家角色卡
+
+```http
+PUT /api/v1/user/character-card
+Content-Type: application/json
+
+{
+  "display_name": "旅行者",
+  "gender": "unknown",
+  "pronouns": "TA",
+  "age": 24,
+  "species": "人类",
+  "occupation": "调查员",
+  "appearance": "常穿深色旅行外套",
+  "personality": "冷静、好奇",
+  "background": "正在追查一段失落的历史",
+  "goals": "找到真相并保护同伴"
+}
+```
+
+所有字段均可选，只更新请求中出现的字段。保存后的玩家角色卡从下一条单聊或群聊消息开始进入 Prompt，并作为玩家节点参与关系图。
+
+### 11. 上传玩家角色卡头像
+
+```http
+POST /api/v1/user/character-card/avatar/upload
+Content-Type: multipart/form-data
+
+file=@persona.png
+```
+
+支持 PNG / JPEG / GIF / WebP，上传大小上限为 8 MB；响应为更新后的完整玩家角色卡。
+
+### 12. 通过 URL 设置玩家角色卡头像
+
+```http
+POST /api/v1/user/character-card/avatar/url
+Content-Type: application/json
+
+{
+  "url": "https://example.com/persona.png"
+}
+```
+
+服务端会下载并校验图片后保存为 data URL。传空字符串会清除玩家角色卡头像。
+
+### 13. 获取或更新世界时钟
 
 ```http
 GET /api/v1/user/world-clock
@@ -1555,7 +1615,7 @@ PUT /api/v1/user/world-clock
 
 响应包含 `world_now`、`real_now`、`timezone`、`timezone_mode`、`time_scale`、`paused`、`clock_revision`、`real_offset_seconds` 和最近待执行事件 `next_event`。Web 客户端只接受不低于当前本地 `clock_revision` 的响应，因此较旧的 GET 即使晚于更新请求返回，也不会覆盖新的时钟状态。
 
-### 10. 修改世界时间
+### 14. 修改世界时间
 
 ```http
 POST /api/v1/user/world-clock/sync
@@ -1565,7 +1625,7 @@ POST /api/v1/user/world-clock/advance
 
 三个接口都必须提交 `expected_revision`。`sync` 保留当前时区和倍率，把世界时间锚点重置为当前真实 UTC 时间；`set` 额外提交 ISO 8601 `world_now`；`advance` 提交正整数 `seconds`，上限为 366 天。
 
-### 11. 查询事件收件箱
+### 15. 查询事件收件箱
 
 ```http
 GET /api/v1/user/event-inbox?unread_only=true&limit=50
@@ -1573,7 +1633,7 @@ GET /api/v1/user/event-inbox?unread_only=true&limit=50
 
 `limit` 范围为 1-100。通知包含来源事件/角色/会话、内容、世界创建时间、真实创建时间和 `read_at`。
 
-### 12. 标记事件通知已读
+### 16. 标记事件通知已读
 
 ```http
 POST /api/v1/user/event-inbox/{inbox_id}/read

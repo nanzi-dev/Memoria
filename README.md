@@ -101,9 +101,11 @@
 
 ### Web 前端
 - **登录与用户资料**：支持用户注册、登录、资料编辑和头像设置；浏览器登录态只使用 HttpOnly Cookie，不把 token 持久化到 `localStorage`
-- **角色卡编辑器**：分步编辑角色身份、性格、语言风格、背景和交互规则
+- **玩家角色卡**：独立编辑玩家名称、头像、身份、外观、性格、背景和目标，并从下一条单聊或群聊消息开始参与 Prompt 与关系图谱
+- **角色卡编辑器**：分步编辑角色身份、性格、语言风格、背景和交互规则；界面只编辑基础角色卡，不提供 i18n 版本切换，导入或已有的中英文覆盖数据会继续保留
 - **会话体验**：支持单角色对话、会话恢复、多角色群聊、会话语言选择、录音转写和角色语音播放；好感度/信任度变化只在当前会话新回复上展示，历史加载消息不回放旧变化提示
-- **管理视图**：提供事件列表/编辑器、角色关系图谱和知识库管理页面
+- **管理工作台**：事件与知识库页面采用左右分栏工作台，支持汇总、搜索、筛选、排序、详情查看及编辑；事件关联角色可直接选择当前用户已有角色
+- **用户设置**：账户、世界时间和语音设置分区管理；世界时钟按 IANA 时区展示，支持暂停、同步、设置、推进及 `0/1/2/5/10` 倍速
 
 ---
 
@@ -169,7 +171,7 @@ Memoria/
 │   ├── cli_chat.py             # 命令行对话工具
 │   └── run_tests.sh            # 测试执行脚本
 ├── web/                        # React + Vite 前端
-│   ├── src/pages/              # Home、ChatRoom、CharacterEditor、EventList、RelationshipGraph
+│   ├── src/pages/              # Home、ChatRoom、CharacterEditor、PersonaEditor、EventList、EventEditor、RelationshipGraph、KnowledgeManager
 │   ├── src/components/         # 通用组件与编辑器步骤组件
 │   ├── src/context/            # 登录态与对话上下文
 │   ├── src/api/                # 前端 API 客户端
@@ -302,7 +304,7 @@ npm run dev
 | 文档 | 内容 |
 |------|------|
 | [API 文档](docs/API.md) | 完整 REST API 参考（对话/角色卡/事件/关系/多角色/知识库/语音/用户/系统管理），含请求/响应示例 |
-| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（30 张表）、记忆、知识检索与语音架构、角色卡开发规范 |
+| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（32 张表）、记忆、知识检索与语音架构、角色卡开发规范 |
 | [开发路线图](docs/ROADMAP.md) | 已完成功能和未来规划 |
 | [故障排查](docs/FAQ.md) | 常见问题解决方案、调试技巧、性能优化建议 |
 | [贡献指南](docs/CONTRIBUTING.md) | 如何贡献代码、Commit 规范、代码审查标准 |
@@ -369,7 +371,7 @@ PYTHONPATH=src pytest tests/test_multi_dialogue_api.py -v # 多角色 API
 PYTHONPATH=src pytest tests/test_system.py -v            # 系统端点与限流
 ```
 
-当前测试集合以 `pytest --collect-only -q` 为准；当前项目收集到 448 个测试，覆盖核心编排、持久化、事件、单聊/群聊 API、安全、知识库、语音、向量存储、世界时钟和系统端点。
+当前测试集合以 `pytest --collect-only -q` 为准；当前项目收集到 464 个测试，覆盖核心编排、持久化、事件、单聊/群聊 API、安全、知识库、语音、向量存储、世界时钟和系统端点。前端还包含 API 客户端与世界时钟状态、格式化测试。
 
 ---
 

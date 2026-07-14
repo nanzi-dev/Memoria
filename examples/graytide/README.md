@@ -20,7 +20,7 @@
 首次创建演示账户时必须通过参数或环境变量提供密码：
 
 ```bash
-python scripts/seed_graytide_demo.py --password 'your-local-password'
+python scripts/seed_graytide_demo.py --password 'a1008611'
 ```
 
 也可以设置 `MEMORIA_DEMO_PASSWORD`。账户已经存在时不会修改密码。默认会使用项目配置的本地向量模型建立知识索引；只需要结构数据时可运行：
