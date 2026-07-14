@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, Check, ChevronLeft, ChevronRight, Upload, Download, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Check, ChevronLeft, ChevronRight, Upload, Download, RefreshCw, Languages } from 'lucide-react';
 import { characterAdmin } from '../api/memoria';
 import StepIdentity from '../components/editor/StepIdentity';
 import StepPersonality from '../components/editor/StepPersonality';
@@ -17,6 +17,24 @@ const STEPS = [
   { id: 'interaction', label: '交互规则 Rules', Icon: null },
 ];
 
+const EDITOR_LOCALES = [
+  { value: 'default', label: 'Default' },
+  { value: 'zh-CN', label: 'zh-CN' },
+  { value: 'en-US', label: 'en-US' },
+];
+
+const LOCALIZABLE_FIELDS = {
+  meta: new Set(['name', 'display_name', 'aliases', 'game_module', 'created_by']),
+  identity: new Set(['age', 'gender', 'occupation', 'race_or_species', 'appearance', 'social_status', 'core_identity_summary']),
+  personality: new Set(['mbti_or_archetype', 'core_traits', 'values_and_beliefs', 'fears_and_tabooes', 'quirks_and_habits', 'moral_alignment']),
+  speech_style: new Set(['tone_register', 'vocabulary_notes', 'sentence_patterns', 'catchphrases', 'things_never_to_say', 'language', 'formality_default']),
+  background: new Set(['story_bio', 'key_events', 'secrets']),
+  goals_and_motivations: new Set(['current_goals', 'long_term_goals', 'what_triggers_anger', 'what_brings_joy']),
+  interaction_rules: new Set(['initial_attitude_to_player', 'topics_to_avoid_unless_trusted', 'topics_he_or_she_loves_to_discuss', 'response_to_rudeness', 'gift_reactions']),
+  action_vocabulary: new Set(['greeting_actions', 'farewell_actions', 'agreement_actions', 'disagreement_actions', 'emotional_reactions', 'default_action', 'fallback_priority']),
+  safety_constraints: new Set(['topics_to_avoid', 'out_of_character_handling']),
+};
+
 const DEFAULT_DATA = {
   character_id: '',
   avatar_url: null,
@@ -31,26 +49,64 @@ const DEFAULT_DATA = {
   action_vocabulary: { greeting_actions: [], farewell_actions: [], agreement_actions: [], disagreement_actions: [], emotional_reactions: [], default_action: 'neutral', fallback_priority: ['emotional_reactions', 'agreement_actions', 'disagreement_actions', 'greeting_actions', 'farewell_actions'] },
   runtime_state_schema: { relationships: [], current_mood: { type: 'enum', emotions: [], intensity: 0, default_mood: 'neutral' } },
   safety_constraints: { topics_to_avoid: [], out_of_character_handling: '' },
+  voice: { builtinVoice: 'alloy', customVoiceId: null, customVoiceStatus: 'unconfigured', ttsInstructions: '' },
+  i18n: {},
 };
 
-function mergeCharacterData(importedData) {
-  const merged = JSON.parse(JSON.stringify(DEFAULT_DATA));
-  for (const [key, value] of Object.entries(importedData)) {
-    const baseValue = merged[key];
-    if (
-      value &&
-      typeof value === 'object' &&
-      !Array.isArray(value) &&
-      baseValue &&
-      typeof baseValue === 'object' &&
-      !Array.isArray(baseValue)
-    ) {
-      merged[key] = { ...baseValue, ...value };
-    } else {
-      merged[key] = value;
-    }
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function cloneData(value) {
+  if (Array.isArray(value)) return value.map(cloneData);
+  if (!isPlainObject(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, cloneData(entry)]));
+}
+
+function deepMerge(base, override) {
+  const merged = isPlainObject(base) ? cloneData(base) : {};
+  if (!isPlainObject(override)) return merged;
+  for (const [key, value] of Object.entries(override)) {
+    merged[key] = isPlainObject(value) && isPlainObject(merged[key])
+      ? deepMerge(merged[key], value)
+      : cloneData(value);
   }
   return merged;
+}
+
+function sanitizeLocaleOverride(override) {
+  if (!isPlainObject(override)) return {};
+  const sanitized = {};
+  for (const [root, allowedFields] of Object.entries(LOCALIZABLE_FIELDS)) {
+    const source = override[root];
+    if (!isPlainObject(source)) continue;
+    const fields = {};
+    for (const [field, value] of Object.entries(source)) {
+      if (allowedFields.has(field)) fields[field] = cloneData(value);
+    }
+    if (Object.keys(fields).length) sanitized[root] = fields;
+  }
+  return sanitized;
+}
+
+function sanitizeI18n(i18n) {
+  if (!isPlainObject(i18n)) return {};
+  return Object.fromEntries(
+    EDITOR_LOCALES
+      .filter(({ value }) => value !== 'default' && isPlainObject(i18n[value]))
+      .map(({ value }) => [value, sanitizeLocaleOverride(i18n[value])]),
+  );
+}
+
+function mergeCharacterData(importedData) {
+  const merged = deepMerge(DEFAULT_DATA, isPlainObject(importedData) ? importedData : {});
+  merged.i18n = sanitizeI18n(merged.i18n);
+  return merged;
+}
+
+function isLocalizablePath(path) {
+  const [root, field] = path.split('.');
+  return Boolean(field && LOCALIZABLE_FIELDS[root]?.has(field));
 }
 
 function normalizeImportedCharacter(rawData) {
@@ -79,6 +135,7 @@ export default function CharacterEditor() {
   const dialog = useDialog();
   const fileInputRef = useRef(null);
   const [currentStep, setCurrentStep] = useState(0);
+  const [activeLocale, setActiveLocale] = useState('default');
   const [formData, setFormData] = useState(() => mergeCharacterData({}));
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(!!characterId);
@@ -101,6 +158,7 @@ export default function CharacterEditor() {
     let cancelled = false;
     if (!characterId) {
       setFormData(mergeCharacterData({}));
+      setActiveLocale('default');
       setLoading(false);
       setLoadedCharacterId('');
       setLoadError('');
@@ -113,6 +171,7 @@ export default function CharacterEditor() {
     setLoadError('');
     setSaveMessage('');
     setCurrentStep(0);
+    setActiveLocale('default');
 
     (async () => {
       try {
@@ -128,7 +187,7 @@ export default function CharacterEditor() {
           }
         }
         if (cancelled) return;
-        setFormData(detail.card_data);
+        setFormData(mergeCharacterData(detail.card_data));
         // is_active: 1=active, 0=disabled (int)
         const active = detail.is_active === undefined ? true : (detail.is_active === 1 || detail.is_active === true);
         setIsActive(active);
@@ -147,24 +206,38 @@ export default function CharacterEditor() {
 
   const updateField = useCallback((path, value) => {
     setFormData(prev => {
-      // deep path update
       const keys = path.split('.');
-      const updated = JSON.parse(JSON.stringify(prev));
+      const updated = cloneData(prev);
       let obj = updated;
       for (let i = 0; i < keys.length - 1; i++) {
+        if (!isPlainObject(obj[keys[i]])) obj[keys[i]] = {};
         obj = obj[keys[i]];
       }
-      obj[keys[keys.length - 1]] = value;
+      obj[keys[keys.length - 1]] = cloneData(value);
       return updated;
     });
   }, []);
+
+  const localizedUpdateField = useCallback((path, value) => {
+    if (activeLocale === 'default') {
+      updateField(path, value);
+      return;
+    }
+    if (!isLocalizablePath(path)) return;
+    updateField(`i18n.${activeLocale}.${path}`, value);
+  }, [activeLocale, updateField]);
+
+  const editorData = useMemo(() => {
+    if (activeLocale === 'default') return formData;
+    return deepMerge(formData, sanitizeLocaleOverride(formData.i18n?.[activeLocale]));
+  }, [activeLocale, formData]);
 
   async function handleSave() {
     if (characterId && loadedCharacterId !== characterId) return;
     setSaving(true);
     setSaveMessage('');
     try {
-      const data = JSON.parse(JSON.stringify(formData));
+      const data = cloneData(formData);
       // Auto-generate character_id from name if empty
       if (!data.character_id || data.character_id === '') {
         const name = data.meta?.name || 'new_character';
@@ -190,7 +263,7 @@ export default function CharacterEditor() {
 
       setSaveMessage('Saved successfully!');
       setTimeout(() => {
-        navigate('/');
+        navigate(characterId ? '/' : `/editor/${encodeURIComponent(data.character_id)}`);
       }, 800);
     } catch (e) {
       setSaveMessage(`Error: ${e.message}`);
@@ -214,6 +287,7 @@ export default function CharacterEditor() {
       setFormData(data);
       setIsActive(true);
       setCurrentStep(0);
+      setActiveLocale('default');
       setSaveMessage('Imported character JSON. Review and save.');
     } catch (e) {
       setSaveMessage(`Error: ${e.message}`);
@@ -498,7 +572,35 @@ export default function CharacterEditor() {
 
               {/* Form body */}
               <div className="p-4 sm:p-6">
-                <StepComponent formData={formData} updateField={updateField} />
+                <div className="mb-6 flex items-center gap-3 border-b border-amber-700/20 pb-4">
+                  <Languages size={17} className="shrink-0 text-amber-900/55" />
+                  <div className="grid min-w-0 flex-1 grid-cols-3 overflow-hidden rounded border border-amber-700/20 bg-amber-50/35">
+                    {EDITOR_LOCALES.map(locale => (
+                      <button
+                        key={locale.value}
+                        type="button"
+                        onClick={() => setActiveLocale(locale.value)}
+                        aria-pressed={activeLocale === locale.value}
+                        className={`min-h-[44px] min-w-0 border-r border-amber-700/15 px-2 font-mono text-xs last:border-r-0 transition-colors ${
+                          activeLocale === locale.value
+                            ? 'bg-amber-200/60 font-bold text-amber-950'
+                            : 'text-amber-900/50 hover:bg-amber-100/45 hover:text-amber-950/75'
+                        }`}
+                      >
+                        {locale.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <StepComponent
+                  formData={editorData}
+                  updateField={localizedUpdateField}
+                  characterId={characterId}
+                  showAvatar={activeLocale === 'default'}
+                  showRelationships={activeLocale === 'default'}
+                  showVoice={activeLocale === 'default'}
+                />
               </div>
 
               {/* Card footer - status + stamp */}

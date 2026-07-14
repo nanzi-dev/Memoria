@@ -25,6 +25,7 @@ from memoria.core import (
 )
 from memoria.core.config import configs
 from memoria.core.knowledge_retriever import retrieve_knowledge
+from memoria.core.locale import DEFAULT_LOCALE, Locale
 from memoria.core.memory_extractor import extract_player_memory
 from memoria.core.speaking_strategy import HybridStrategy, SpeakingStrategy
 from memoria.db import repository
@@ -62,6 +63,29 @@ def _clock_snapshot_for_player(player_id: str | None):
     )
 
 
+def _load_character_card(character_id: str, player_id: str, locale: Locale):
+    """Load a localized card while tolerating legacy test doubles."""
+    try:
+        return character_loader.load_character_card(character_id, player_id, locale)
+    except TypeError as exc:
+        if "positional" not in str(exc) and "unexpected keyword argument" not in str(exc):
+            raise
+        return character_loader.load_character_card(character_id, player_id)
+
+
+def _build_multi_character_system_prompt(*, locale: Locale, **kwargs) -> str:
+    """Build a locale-aware prompt while tolerating legacy test doubles."""
+    try:
+        return prompt_builder.build_multi_character_system_prompt(
+            locale=locale,
+            **kwargs,
+        )
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return prompt_builder.build_multi_character_system_prompt(**kwargs)
+
+
 # =========================
 # 多角色对话编排器
 # =========================
@@ -97,6 +121,7 @@ class MultiCharacterOrchestrator:
         
         self.player_id = self.session["player_id"]
         self.player_name = self.session["player_name"]
+        self.locale = self.session.get("locale") or DEFAULT_LOCALE
         
         # 加载参与者
         self.participants = repository.get_session_participants(session_id, only_active=True)
@@ -106,7 +131,7 @@ class MultiCharacterOrchestrator:
         self.character_cards = {}
         for char_id in self.character_ids:
             try:
-                card = character_loader.load_character_card(char_id, self.player_id)
+                card = _load_character_card(char_id, self.player_id, self.locale)
                 self.character_cards[char_id] = card
             except Exception as e:
                 logger.error(f"加载角色卡失败 {char_id}: {e}")
@@ -217,6 +242,7 @@ class MultiCharacterOrchestrator:
                 if response.get("character_id") and response.get("character_name"):
                     self._persist_generated_response(response, clock_snapshot)
 
+        self._save_checkpoint_memory_for_participants()
         if allow_multiple_responses:
             return responses
         return responses[0]
@@ -307,7 +333,7 @@ class MultiCharacterOrchestrator:
 
 
     def _persist_generated_response(self, response: dict, clock_snapshot) -> None:
-        repository.append_multi_character_message(
+        response["message_id"] = repository.append_multi_character_message(
             self.session_id,
             role="assistant",
             content=response["dialogue"],
@@ -338,6 +364,24 @@ class MultiCharacterOrchestrator:
             limit_messages=max(12, configs.long_term_memory_interval_turns * 4),
         )
         self._checkpoint_memory_fact = extract_player_memory(history)
+
+
+    def _save_checkpoint_memory_for_participants(self) -> None:
+        """将本轮提取的玩家记忆同步给所有当前群聊参与角色。"""
+        if not getattr(self, "_checkpoint_memory_ready", False):
+            self._prepare_checkpoint_memory()
+
+        fact = getattr(self, "_checkpoint_memory_fact", None)
+        if not fact:
+            return
+
+        saved_character_ids = set()
+        for participant in self.participants:
+            character_id = participant.get("character_id")
+            if not character_id or character_id in saved_character_ids:
+                continue
+            repository.save_long_term_fact(character_id, self.player_id, fact)
+            saved_character_ids.add(character_id)
 
 
     def _decide_group_response_count(self, player_message: str, max_responses: int | None = None) -> int:
@@ -790,7 +834,8 @@ class MultiCharacterOrchestrator:
                     })
         
         # 使用 prompt_builder 构建系统提示
-        system_prompt = prompt_builder.build_multi_character_system_prompt(
+        system_prompt = _build_multi_character_system_prompt(
+            locale=getattr(self, "locale", DEFAULT_LOCALE),
             card=card,
             runtime_state=runtime_state,
             player_name=self.player_name,
@@ -811,7 +856,7 @@ class MultiCharacterOrchestrator:
         
         # 记录消息
         character_name = card.meta.display_name or card.meta.name
-        repository.append_multi_character_message(
+        message_id = repository.append_multi_character_message(
             self.session_id,
             role="assistant",
             content=dialogue,
@@ -828,6 +873,7 @@ class MultiCharacterOrchestrator:
             "current_affinity": runtime_state.get("affection_level", 0),
             "current_mood": runtime_state.get("current_mood", "neutral"),
             "world_created_at": clock_snapshot.world_now.isoformat(),
+            "message_id": message_id,
         }
     
     
@@ -903,7 +949,8 @@ class MultiCharacterOrchestrator:
                     })
         
         # 使用 prompt_builder 构建系统提示
-        system_prompt = prompt_builder.build_multi_character_system_prompt(
+        system_prompt = _build_multi_character_system_prompt(
+            locale=getattr(self, "locale", DEFAULT_LOCALE),
             card=card,
             runtime_state=runtime_state,
             player_name=self.player_name,
@@ -1053,7 +1100,8 @@ class MultiCharacterOrchestrator:
                     })
         
         # 使用 prompt_builder 构建系统提示
-        system_prompt = prompt_builder.build_multi_character_system_prompt(
+        system_prompt = _build_multi_character_system_prompt(
+            locale=getattr(self, "locale", DEFAULT_LOCALE),
             card=card,
             runtime_state=runtime_state,
             player_name=self.player_name,
@@ -1088,8 +1136,9 @@ class MultiCharacterOrchestrator:
         
         # 记录消息
         character_name = card.meta.display_name or card.meta.name
+        message_id = None
         if persist:
-            repository.append_multi_character_message(
+            message_id = repository.append_multi_character_message(
                 self.session_id,
                 role="assistant",
                 content=dialogue,
@@ -1106,6 +1155,7 @@ class MultiCharacterOrchestrator:
             "action": action,
             "world_created_at": clock_snapshot.world_now.isoformat(),
             "knowledge_sources": knowledge.sources,
+            "message_id": message_id,
         }
     
     
@@ -1321,6 +1371,7 @@ def start_multi_character_session(
     character_ids: list[str],
     group_name: str | None = None,
     group_thread_id: str | None = None,
+    locale: Locale = DEFAULT_LOCALE,
 ) -> dict:
     """
     创建并启动多角色会话
@@ -1343,6 +1394,7 @@ def start_multi_character_session(
         character_ids=character_ids,
         group_name=group_name,
         group_thread_id=group_thread_id,
+        locale=locale,
     )
     
     if not success:
@@ -1359,6 +1411,7 @@ def start_multi_character_session(
         "opening": opening_result,
         "group_name": group_name,
         "group_thread_id": group_thread_id or session_id,
+        "locale": locale,
     }
 
 

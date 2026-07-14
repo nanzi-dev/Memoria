@@ -3,24 +3,67 @@
  */
 const API_BASE = '/api/v1';
 
+function formatApiError(errorBody, status) {
+  const detail = errorBody?.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (detail && typeof detail.message === 'string' && detail.message.trim()) {
+    return detail.message;
+  }
+  if (Array.isArray(detail)) {
+    const validationMessages = detail.map(item => {
+      if (typeof item === 'string') return item;
+      const location = Array.isArray(item?.loc)
+        ? item.loc.filter(part => part !== 'body').join('.')
+        : '';
+      const message = item?.msg || item?.message;
+      if (!message) return null;
+      return location ? `${location}: ${message}` : message;
+    }).filter(Boolean);
+    if (validationMessages.length) return validationMessages.join('; ');
+  }
+  if (typeof errorBody?.message === 'string' && errorBody.message.trim()) {
+    return errorBody.message;
+  }
+  return `HTTP ${status}`;
+}
+
+async function throwResponseError(resp) {
+  const errorBody = await resp.json().catch(() => ({}));
+  const error = new Error(formatApiError(errorBody, resp.status));
+  error.status = resp.status;
+  error.body = errorBody;
+  throw error;
+}
+
+function authenticatedHeaders(headers = {}) {
+  const authenticated = { ...headers };
+  const token = localStorage.getItem('memoria-token');
+  if (token) authenticated.Authorization = `Bearer ${token}`;
+  return authenticated;
+}
+
 async function request(url, options = {}) {
   const headers = { ...options.headers };
   if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
   }
-  const token = localStorage.getItem('memoria-token');
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  const resp = await fetch(`${API_BASE}${url}`, { ...options, credentials: 'include', headers });
-  if (!resp.ok) {
-    const errBody = await resp.json().catch(() => ({}));
-    const error = new Error(errBody.detail || `HTTP ${resp.status}`);
-    error.status = resp.status;
-    error.body = errBody;
-    throw error;
-  }
+  const resp = await fetch(`${API_BASE}${url}`, {
+    ...options,
+    credentials: 'include',
+    headers: authenticatedHeaders(headers),
+  });
+  if (!resp.ok) await throwResponseError(resp);
   return resp.json();
+}
+
+async function requestBlob(url, options = {}) {
+  const resp = await fetch(`${API_BASE}${url}`, {
+    ...options,
+    credentials: 'include',
+    headers: authenticatedHeaders(options.headers),
+  });
+  if (!resp.ok) await throwResponseError(resp);
+  return resp.blob();
 }
 
 // ═══════════════════════════════════════════════
@@ -51,6 +94,15 @@ export const userApi = {
       body: JSON.stringify({ username, gender }),
     });
   },
+  updateSpeechSettings(ttsAutoPlay, sttAutoSend) {
+    return request('/user/speech-settings', {
+      method: 'PUT',
+      body: JSON.stringify({
+        tts_auto_play: ttsAutoPlay,
+        stt_auto_send: sttAutoSend,
+      }),
+    });
+  },
   async uploadAvatar(file) {
     const formData = new FormData();
     formData.append('file', file);
@@ -65,7 +117,7 @@ export const userApi = {
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
-      const error = new Error(err.detail || `HTTP ${resp.status}`);
+      const error = new Error(formatApiError(err, resp.status));
       error.status = resp.status;
       error.body = err;
       throw error;
@@ -156,6 +208,31 @@ export const characterAdmin = {
   setAvatarUrl(characterId, url) {
     return request(`/admin/characters/${characterId}/avatar/url`, {
       method: 'POST', body: JSON.stringify({ url }) });
+  },
+  getVoiceStatus(characterId) {
+    return request(`/admin/characters/${characterId}/voice`);
+  },
+  uploadVoiceConsent(characterId, locale, recording, name = null) {
+    const formData = new FormData();
+    formData.append('locale', locale);
+    formData.append('recording', recording);
+    if (name?.trim()) formData.append('name', name.trim());
+    return request(`/admin/characters/${characterId}/voice/consent`, {
+      method: 'POST',
+      body: formData,
+    });
+  },
+  createCustomVoice(characterId, audioSample, name = null) {
+    const formData = new FormData();
+    formData.append('audio_sample', audioSample);
+    if (name?.trim()) formData.append('name', name.trim());
+    return request(`/admin/characters/${characterId}/voice`, {
+      method: 'POST',
+      body: formData,
+    });
+  },
+  unbindCustomVoice(characterId) {
+    return request(`/admin/characters/${characterId}/voice`, { method: 'DELETE' });
   },
 };
 
@@ -354,10 +431,15 @@ export const knowledgeApi = {
 // ═══════════════════════════════════════════════
 export const dialogue = {
   /** 开始单角色对话会话 */
-  startSession(characterId, playerId, playerName = '旅行者') {
+  startSession(characterId, playerId, playerName = '旅行者', locale = 'zh-CN') {
     return request('/dialogue/session/start', {
       method: 'POST',
-      body: JSON.stringify({ character_id: characterId, player_id: playerId, player_name: playerName }),
+      body: JSON.stringify({
+        character_id: characterId,
+        player_id: playerId,
+        player_name: playerName,
+        locale,
+      }),
     });
   },
   /** 发送消息并获取回复 */
@@ -408,7 +490,7 @@ export const dialogue = {
 // ═══════════════════════════════════════════════
 export const multiDialogue = {
   /** 开始多角色群聊 */
-  startSession(playerId, playerName, characterIds, groupName = null) {
+  startSession(playerId, playerName, characterIds, groupName = null, locale = 'zh-CN') {
     return request('/multi-dialogue/session/start', {
       method: 'POST',
       body: JSON.stringify({
@@ -416,6 +498,7 @@ export const multiDialogue = {
         player_name: playerName,
         group_name: groupName,
         character_ids: characterIds,
+        locale,
       }),
     });
   },
@@ -466,5 +549,29 @@ export const multiDialogue = {
   /** 获取多角色对话历史 */
   getHistory(sessionId, offset = 0, limit = 20) {
     return request(`/multi-dialogue/history/${sessionId}?offset=${offset}&limit=${limit}`);
+  },
+};
+
+// ═══════════════════════════════════════════════
+// Speech API
+// ═══════════════════════════════════════════════
+export const speechApi = {
+  transcribe(sessionId, mode, file, signal = undefined) {
+    const formData = new FormData();
+    formData.append('session_id', sessionId);
+    formData.append('mode', mode);
+    formData.append('file', file);
+    return request('/speech/transcriptions', {
+      method: 'POST',
+      body: formData,
+      signal,
+    });
+  },
+  getMessageAudio(mode, sessionId, messageId, signal = undefined) {
+    const routeMode = mode === 'group' ? 'group' : 'single';
+    return requestBlob(
+      `/speech/${routeMode}/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/audio`,
+      { signal },
+    );
   },
 };

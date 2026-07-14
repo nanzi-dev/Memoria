@@ -17,6 +17,9 @@ import {
   Upload,
   User,
   X,
+  Volume2,
+  Mic,
+  Save,
 } from 'lucide-react';
 
 const GENDERS = [
@@ -141,6 +144,9 @@ export default function UserSettingsModal({ onClose }) {
   ));
   const [timezoneError, setTimezoneError] = useState('');
   const [syncConfirming, setSyncConfirming] = useState(false);
+  const [speechLoading, setSpeechLoading] = useState(false);
+  const [ttsAutoPlay, setTtsAutoPlay] = useState(Boolean(user?.tts_auto_play));
+  const [sttAutoSend, setSttAutoSend] = useState(Boolean(user?.stt_auto_send));
   const fileRef = useRef(null);
   const usernameRef = useRef(null);
 
@@ -160,6 +166,11 @@ export default function UserSettingsModal({ onClose }) {
     setTimezone(worldClock.timezone || browserTimezone());
     setWorldDateTime(worldDateTimeInput(getWorldNow() || new Date(worldClock.world_now), worldClock.timezone));
   }, [worldClock?.clock_revision, getWorldNow]);
+
+  useEffect(() => {
+    setTtsAutoPlay(Boolean(user?.tts_auto_play));
+    setSttAutoSend(Boolean(user?.stt_auto_send));
+  }, [user?.tts_auto_play, user?.stt_auto_send]);
 
   const handleSaveProfile = async (e) => {
     e.preventDefault();
@@ -312,6 +323,21 @@ export default function UserSettingsModal({ onClose }) {
     const target = nextMorningLocal(current, worldClock.timezone);
     setWorldDateTime(target);
     await handleSetWorldTime(target);
+  };
+
+  const handleSaveSpeechSettings = async () => {
+    setApiError(null);
+    setSuccess(null);
+    setSpeechLoading(true);
+    try {
+      await userApi.updateSpeechSettings(ttsAutoPlay, sttAutoSend);
+      await refresh();
+      setSuccess('语音偏好已保存');
+    } catch (err) {
+      setApiError(err.message);
+    } finally {
+      setSpeechLoading(false);
+    }
   };
 
   return (
@@ -676,6 +702,72 @@ export default function UserSettingsModal({ onClose }) {
                 </button>
               )}
             </div>
+          </fieldset>
+
+          <fieldset className="border border-cyber-green/10 rounded-lg px-4 py-4 space-y-4">
+            <legend className="text-[10px] text-cyber-green/50 uppercase tracking-wider px-1.5">语音</legend>
+            <div className="space-y-2">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={ttsAutoPlay}
+                onClick={() => setTtsAutoPlay(value => !value)}
+                disabled={speechLoading}
+                className="flex min-h-[52px] w-full items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-black/15 px-3 text-left transition-colors hover:border-cyber-green/20 hover:bg-cyber-green/[0.025] disabled:opacity-40"
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <Volume2 size={16} className="shrink-0 text-cyber-green/60" />
+                  <span className="min-w-0">
+                    <span className="block text-[11px] text-zinc-300">自动播放回复</span>
+                    <span className="mt-0.5 block text-[9px] leading-4 text-zinc-600">仅播放当前收到的新回复</span>
+                  </span>
+                </span>
+                <span className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${
+                  ttsAutoPlay
+                    ? 'border-cyber-green/40 bg-cyber-green/20'
+                    : 'border-white/10 bg-white/[0.035]'
+                }`}>
+                  <span className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 rounded-full transition-all ${
+                    ttsAutoPlay ? 'left-6 bg-cyber-green' : 'left-1 bg-zinc-600'
+                  }`} />
+                </span>
+              </button>
+
+              <button
+                type="button"
+                role="switch"
+                aria-checked={sttAutoSend}
+                onClick={() => setSttAutoSend(value => !value)}
+                disabled={speechLoading}
+                className="flex min-h-[52px] w-full items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-black/15 px-3 text-left transition-colors hover:border-cyber-green/20 hover:bg-cyber-green/[0.025] disabled:opacity-40"
+              >
+                <span className="flex min-w-0 items-center gap-3">
+                  <Mic size={16} className="shrink-0 text-cyan-200/60" />
+                  <span className="min-w-0">
+                    <span className="block text-[11px] text-zinc-300">转写后自动发送</span>
+                    <span className="mt-0.5 block text-[9px] leading-4 text-zinc-600">录音完成后直接发送识别文本</span>
+                  </span>
+                </span>
+                <span className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${
+                  sttAutoSend
+                    ? 'border-cyan-200/40 bg-cyan-200/15'
+                    : 'border-white/10 bg-white/[0.035]'
+                }`}>
+                  <span className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 rounded-full transition-all ${
+                    sttAutoSend ? 'left-6 bg-cyan-200' : 'left-1 bg-zinc-600'
+                  }`} />
+                </span>
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={handleSaveSpeechSettings}
+              disabled={speechLoading}
+              className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-cyber-green/20 bg-cyber-green/10 text-xs font-bold text-cyber-green transition-colors hover:bg-cyber-green/[0.18] disabled:cursor-not-allowed disabled:opacity-35"
+            >
+              {speechLoading ? <Loader2 size={15} className="animate-spin" /> : <Save size={14} />}
+              {speechLoading ? '保存中...' : '保存语音偏好'}
+            </button>
           </fieldset>
 
           {/* ── Account Info & Logout ── */}

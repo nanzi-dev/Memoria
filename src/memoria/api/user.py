@@ -177,6 +177,11 @@ class UpdateProfileRequest(BaseModel):
     username: str | None = None
     gender: str | None = None
 
+
+class UpdateSpeechSettingsRequest(BaseModel):
+    tts_auto_play: bool
+    stt_auto_send: bool
+
 class SetAvatarUrlRequest(BaseModel):
     url: str
 
@@ -233,6 +238,8 @@ class UserResponse(BaseModel):
     clock_revision: int
     real_offset_seconds: int
     next_event: NextScheduledEventResponse | None = None
+    tts_auto_play: bool = False
+    stt_auto_send: bool = False
 
 class EventInboxItem(BaseModel):
     id: int
@@ -265,6 +272,8 @@ def _build_user_response(user: dict) -> UserResponse:
         username=user["username"],
         gender=user["gender"],
         avatar_url=user.get("avatar_url"),
+        tts_auto_play=bool(user.get("tts_auto_play", False)),
+        stt_auto_send=bool(user.get("stt_auto_send", False)),
         **clock.model_dump(),
     )
 
@@ -398,6 +407,22 @@ def update_profile(
         raise HTTPException(400, "性别只能是 male/female/unknown")
     repository.update_user_profile(uid, username=req.username, gender=req.gender)
     user = repository.get_user_by_id(uid)
+    return _build_user_response(user)
+
+
+@router.put("/user/speech-settings", response_model=UserResponse)
+def update_speech_settings(
+    req: UpdateSpeechSettingsRequest,
+    user_id: str = Depends(require_current_user_id),
+):
+    repository.update_user_speech_settings(
+        user_id,
+        tts_auto_play=req.tts_auto_play,
+        stt_auto_send=req.stt_auto_send,
+    )
+    user = repository.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(404, "用户不存在")
     return _build_user_response(user)
 
 

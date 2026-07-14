@@ -84,6 +84,62 @@ class TestMigrations:
         assert "idx_event_schedule_lease" in indexes
         assert "idx_event_schedule_due_real" in indexes
 
+    def test_init_db_adds_locale_and_speech_defaults(self, tmp_path, monkeypatch):
+        database_path = tmp_path / "legacy_speech.db"
+        with sqlite3.connect(database_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE session (
+                    session_id TEXT PRIMARY KEY,
+                    character_id TEXT,
+                    player_id TEXT,
+                    player_name TEXT,
+                    created_at TEXT,
+                    status TEXT,
+                    group_name TEXT,
+                    group_thread_id TEXT,
+                    is_multi_character INTEGER DEFAULT 0
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO session VALUES ('legacy-session', 'c1', 'p1', 'P', 'now', 'active', NULL, NULL, 0)"
+            )
+            conn.execute(
+                """
+                CREATE TABLE users (
+                    user_id TEXT PRIMARY KEY,
+                    username TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    gender TEXT DEFAULT 'unknown',
+                    avatar_url TEXT,
+                    created_at TEXT,
+                    updated_at TEXT
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO users (user_id, username, password_hash) VALUES ('legacy-user', 'legacy', 'hash')"
+            )
+
+        monkeypatch.setattr(configs, "database_url", "")
+        monkeypatch.setattr(configs, "database_path", str(database_path))
+
+        repository.init_db()
+
+        with sqlite3.connect(database_path) as conn:
+            conn.row_factory = sqlite3.Row
+            session = conn.execute(
+                "SELECT locale FROM session WHERE session_id='legacy-session'"
+            ).fetchone()
+            user = conn.execute(
+                "SELECT tts_auto_play, stt_auto_send FROM users WHERE user_id='legacy-user'"
+            ).fetchone()
+
+        assert session["locale"] == "zh-CN"
+        assert user["tts_auto_play"] == 0
+        assert user["stt_auto_send"] == 0
+
 
 class TestRuntimeState:
     def test_get_state_new_player(self):
@@ -119,6 +175,14 @@ class TestSession:
         assert s is not None
         assert s["status"] == "active"
         assert s["player_name"] == "Tester"
+
+    def test_create_persists_locale(self):
+        sid = str(uuid.uuid4())
+        repository.create_session(sid, "tc-locale", "tp-locale", "Tester", "en-US")
+
+        session = repository.get_session(sid)
+
+        assert session["locale"] == "en-US"
 
     def test_end_session(self):
         sid = str(uuid.uuid4())
@@ -390,6 +454,45 @@ class TestMultiSession:
         repository.update_participant_speak_time(sid,"c1")
         hist = repository.get_multi_character_history(sid,5)
         assert len(hist) >= 1
+
+    def test_multi_message_returns_stable_id_and_history_exposes_it(self):
+        sid = str(uuid.uuid4())
+        player_id = f"group_ids_{uuid.uuid4().hex[:8]}"
+        assert repository.create_multi_character_session(
+            sid,
+            player_id,
+            "Player",
+            ["stable-c1", "stable-c2"],
+            locale="en-US",
+        )
+
+        message_id = repository.append_multi_character_message(
+            sid, "assistant", "Hello", "stable-c1", "One"
+        )
+        history = repository.get_multi_character_history(sid, 10)
+
+        assert repository.get_session(sid)["locale"] == "en-US"
+        assert isinstance(message_id, int)
+        assert history[-1]["message_id"] == message_id
+
+
+class TestSpeechSettings:
+    def test_defaults_and_updates_persist(self):
+        user_id = f"speech_user_{uuid.uuid4().hex[:8]}"
+        repository.create_user(user_id, f"speech_{uuid.uuid4().hex[:8]}", "hash")
+
+        initial = repository.get_user_by_id(user_id)
+        repository.update_user_speech_settings(
+            user_id,
+            tts_auto_play=True,
+            stt_auto_send=True,
+        )
+        updated = repository.get_user_by_id(user_id)
+
+        assert initial["tts_auto_play"] == 0
+        assert initial["stt_auto_send"] == 0
+        assert updated["tts_auto_play"] == 1
+        assert updated["stt_auto_send"] == 1
 
     def test_disabled_character_stays_in_group_but_is_not_active_participant(self):
         sid = str(uuid.uuid4())

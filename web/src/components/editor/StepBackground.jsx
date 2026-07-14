@@ -1,7 +1,7 @@
 import TagInput from './TagInput';
 import { Plus, Trash2 } from 'lucide-react';
 
-export default function StepBackground({ formData, updateField }) {
+export default function StepBackground({ formData, updateField, showRelationships = true }) {
   const bg = formData.background || {};
   const gm = formData.goals_and_motivations || {};
 
@@ -109,7 +109,7 @@ export default function StepBackground({ formData, updateField }) {
       </div>
 
       {/* Relationships */}
-      <div>
+      {showRelationships && <div>
         <div className="flex items-center justify-between mb-2">
           <label className={labelStyle}>人物关系 Relationships</label>
           <button onClick={addRelationship} className="flex items-center gap-1 text-[10px] text-amber-700/60 hover:text-amber-700 font-mono">
@@ -136,7 +136,7 @@ export default function StepBackground({ formData, updateField }) {
             </div>
           ))}
         </div>
-      </div>
+      </div>}
 
       {/* Secrets */}
       <div>

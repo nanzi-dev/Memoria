@@ -3,7 +3,7 @@ import { Upload, Link, X, Image as ImageIcon } from 'lucide-react';
 import TagInput from './TagInput';
 import { useDialog } from '../../context/DialogContext';
 
-export default function StepIdentity({ formData, updateField }) {
+export default function StepIdentity({ formData, updateField, showAvatar = true }) {
   const dialog = useDialog();
   const meta = formData.meta || {};
   const identity = formData.identity || {};
@@ -72,7 +72,7 @@ export default function StepIdentity({ formData, updateField }) {
       </div>
 
       {/* Avatar */}
-      <div className="space-y-3">
+      {showAvatar && <div className="space-y-3">
         <label className="block text-[11px] text-amber-700/60 font-mono uppercase tracking-wider">
           头像 Avatar
         </label>
@@ -155,7 +155,7 @@ export default function StepIdentity({ formData, updateField }) {
             )}
           </div>
         </div>
-      </div>
+      </div>}
     </div>
   );
 

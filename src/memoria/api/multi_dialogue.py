@@ -11,6 +11,7 @@ import logging
 import uuid
 
 from memoria.core import multi_character_memory
+from memoria.core.locale import DEFAULT_LOCALE, Locale
 from memoria.core.multi_character_orchestrator import (
     start_multi_character_session,
     process_multi_character_turn,
@@ -38,6 +39,7 @@ class StartMultiSessionRequest(BaseModel):
     player_name: str = Field(..., description="玩家名称")
     group_name: Optional[str] = Field(None, description="群聊名称")
     character_ids: list[str] = Field(..., min_length=2, description="参与角色ID列表（至少2个）")
+    locale: Locale = DEFAULT_LOCALE
 
 
 class StartMultiSessionResponse(BaseModel):
@@ -46,6 +48,7 @@ class StartMultiSessionResponse(BaseModel):
     group_name: Optional[str] = None
     group_thread_id: Optional[str] = None
     opening: dict = Field(..., description="开场白信息")
+    locale: Locale = DEFAULT_LOCALE
 
 
 class MultiDialogueTurnRequest(BaseModel):
@@ -82,6 +85,7 @@ class MultiDialogueTurnResponse(BaseModel):
     event_notification: Optional[str] = None
     world_created_at: Optional[str] = None
     knowledge_sources: list[KnowledgeSource] = Field(default_factory=list)
+    message_id: int | None = None
 
 
 class MultiDialogueGroupResponse(BaseModel):
@@ -131,6 +135,7 @@ class MultiSessionInfo(BaseModel):
     created_at: str
     status: str
     participants: list[SessionParticipant]
+    locale: Locale = DEFAULT_LOCALE
 
 
 class ContinueMultiSessionResponse(BaseModel):
@@ -140,6 +145,7 @@ class ContinueMultiSessionResponse(BaseModel):
     group_thread_id: str
     status: str
     participants: list[SessionParticipant]
+    locale: Locale = DEFAULT_LOCALE
 
 
 class MultiDialogueHistory(BaseModel):
@@ -409,13 +415,15 @@ async def start_multi_session(
             player_name=request.player_name,
             character_ids=request.character_ids,
             group_name=clean_group_name or request.group_name,
+            locale=request.locale,
         )
         
         return StartMultiSessionResponse(
             session_id=result["session_id"],
             group_name=result.get("group_name"),
             group_thread_id=result.get("group_thread_id"),
-            opening=result["opening"]
+            opening=result["opening"],
+            locale=result.get("locale") or request.locale,
         )
     
     except HTTPException:
@@ -585,7 +593,8 @@ async def get_multi_session_info(
             group_thread_id=session.get("group_thread_id") or session["session_id"],
             created_at=session["created_at"],
             status=session["status"],
-            participants=[SessionParticipant(**p) for p in participants]
+            participants=[SessionParticipant(**p) for p in participants],
+            locale=session.get("locale") or DEFAULT_LOCALE,
         )
     
     except HTTPException:
@@ -619,6 +628,7 @@ async def continue_multi_session(
                 group_thread_id=active_session.get("group_thread_id") or source_session.get("group_thread_id") or session_id,
                 status="active",
                 participants=[SessionParticipant(**p) for p in participants],
+                locale=active_session.get("locale") or source_session.get("locale") or DEFAULT_LOCALE,
             )
 
         participants = _require_active_session_participants(session_id)
@@ -633,6 +643,7 @@ async def continue_multi_session(
             character_ids=character_ids,
             group_name=source_session.get("group_name"),
             group_thread_id=group_thread_id,
+            locale=source_session.get("locale") or DEFAULT_LOCALE,
         )
         if not ok:
             raise HTTPException(status_code=500, detail="继续群聊失败")
@@ -644,6 +655,7 @@ async def continue_multi_session(
             group_thread_id=group_thread_id,
             status="active",
             participants=[SessionParticipant(**p) for p in new_participants],
+            locale=source_session.get("locale") or DEFAULT_LOCALE,
         )
 
     except HTTPException:
@@ -695,6 +707,7 @@ async def get_multi_dialogue_history(
                 "group_name": session.get("group_name"),
                 "created_at": session["created_at"],
                 "status": session["status"],
+                "locale": session.get("locale") or DEFAULT_LOCALE,
                 "participants": participants,
                 "sessions": repository.get_multi_character_thread_sessions(session_id),
             }

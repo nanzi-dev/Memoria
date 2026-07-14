@@ -65,6 +65,87 @@ class TestCharacterSchema:
         with pytest.raises(ValidationError):
             CharacterCard(character_id="", version="1.0.0", meta={})
 
+    def test_character_voice_aliases_and_status_validation(self):
+        from memoria.core.character_schema import CharacterVoice
+
+        voice = CharacterVoice.model_validate({
+            "builtinVoice": "coral",
+            "customVoiceId": "voice_123",
+            "customVoiceStatus": "ready",
+            "ttsInstructions": "Speak calmly.",
+        })
+
+        assert voice.builtin_voice == "coral"
+        assert voice.custom_voice_id == "voice_123"
+        assert voice.model_dump(by_alias=True)["ttsInstructions"] == "Speak calmly."
+
+        with pytest.raises(ValidationError):
+            CharacterVoice(customVoiceStatus="processing")
+
+    def test_character_i18n_rejects_invalid_locale_and_protected_fields(self):
+        from memoria.core.character_schema import CharacterCard
+
+        raw = json.loads(
+            (Path(__file__).resolve().parent.parent / "src/memoria/characters/npc_luo_xiaohei.json")
+            .read_text(encoding="utf-8")
+        )
+
+        invalid_locale = {**raw, "i18n": {"fr-FR": {"meta": {"name": "Noir"}}}}
+        with pytest.raises(ValidationError):
+            CharacterCard.model_validate(invalid_locale)
+
+        protected_field = {**raw, "i18n": {"en-US": {"character_id": "other"}}}
+        with pytest.raises(ValidationError):
+            CharacterCard.model_validate(protected_field)
+
+    def test_character_i18n_deep_merge_replaces_lists_and_falls_back(self):
+        from memoria.core.character_loader import _localized_character_card, normalize_character_data
+
+        raw = normalize_character_data(
+            json.loads(
+                (Path(__file__).resolve().parent.parent / "src/memoria/characters/npc_luo_xiaohei.json")
+                .read_text(encoding="utf-8")
+            )
+        )
+        original_occupation = raw["identity"]["occupation"]
+        raw["i18n"] = {
+            "en-US": {
+                "meta": {"display_name": "Luo Xiaohei"},
+                "identity": {"appearance": "A small black cat."},
+                "personality": {"core_traits": ["curious"]},
+            }
+        }
+
+        localized = _localized_character_card(raw, "en-US")
+        fallback = _localized_character_card(raw, "zh-CN")
+
+        assert localized.meta.display_name == "Luo Xiaohei"
+        assert localized.identity.appearance == "A small black cat."
+        assert localized.identity.occupation == original_occupation
+        assert localized.personality.core_traits == ["curious"]
+        assert localized.i18n == {}
+        assert fallback.meta.display_name == raw["meta"]["display_name"]
+        assert "en-US" in fallback.i18n
+
+    def test_prompt_language_instruction_preserves_protocol_keys(self):
+        from memoria.core import character_loader, prompt_builder
+
+        card = character_loader.load_character_card("npc_luo_xiaohei")
+        runtime = {"affection_level": 0, "trust_level": 0, "current_mood": "neutral"}
+
+        english = prompt_builder.build_system_prompt(card, runtime, "Player", locale="en-US")
+        chinese = prompt_builder.build_multi_character_system_prompt(
+            card,
+            runtime,
+            "玩家",
+            [],
+            locale="zh-CN",
+        )
+
+        assert "All dialogue content must be written in American English." in english
+        assert "Keep JSON keys" in english
+        assert "所有 dialogue 对话内容必须使用简体中文" in chinese
+
     def test_identity_model(self):
         """测试 Identity 模型"""
         from memoria.core.character_schema import Identity

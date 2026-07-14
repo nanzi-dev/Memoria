@@ -26,6 +26,7 @@ from memoria.core import (
 from memoria.core.config import configs
 from memoria.core import event_runtime, relationship_context
 from memoria.core.knowledge_retriever import retrieve_knowledge
+from memoria.core.locale import DEFAULT_LOCALE, Locale
 from memoria.core.memory_extractor import extract_player_memory
 from memoria.db import repository
 
@@ -110,6 +111,7 @@ def _build_system_prompt(
     relationship_graph_lines: list[str],
     time_context: dict,
     knowledge_context: str = "",
+    locale: Locale = DEFAULT_LOCALE,
 ) -> str:
     """Call the prompt builder while tolerating legacy test doubles."""
     try:
@@ -121,6 +123,7 @@ def _build_system_prompt(
             relationship_graph_lines=relationship_graph_lines,
             time_context=time_context,
             knowledge_context=knowledge_context,
+            locale=locale,
         )
     except TypeError as exc:
         if "unexpected keyword argument" not in str(exc):
@@ -144,6 +147,36 @@ def _build_system_prompt(
                 past_summaries=past_summaries,
                 relationship_graph_lines=relationship_graph_lines,
             )
+
+
+def _load_character_card(character_id: str, player_id: str, locale: Locale):
+    """Load a localized card while tolerating legacy test doubles."""
+    try:
+        return character_loader.load_character_card(character_id, player_id, locale)
+    except TypeError as exc:
+        if "positional" not in str(exc) and "unexpected keyword argument" not in str(exc):
+            raise
+        return character_loader.load_character_card(character_id, player_id)
+
+
+def _build_opening_line_prompt(
+    card,
+    runtime_state: dict,
+    player_name: str,
+    locale: Locale,
+) -> str:
+    """Build a locale-aware opening instruction for legacy test doubles."""
+    try:
+        return prompt_builder.build_opening_line_prompt(
+            card,
+            runtime_state,
+            player_name,
+            locale=locale,
+        )
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return prompt_builder.build_opening_line_prompt(card, runtime_state, player_name)
     
 
 def _aliases_for_card(character_id: str, card) -> list[str]:
@@ -544,10 +577,11 @@ def start_session(
     player_name: str,
     debug: bool = False,
     debug_sink: DebugSink | None = None,
+    locale: Locale = DEFAULT_LOCALE,
 ) -> dict:
     """对应 /dialogue/session/start"""
     
-    card = character_loader.load_character_card(character_id, player_id)
+    card = _load_character_card(character_id, player_id, locale)
     runtime_state = repository.get_runtime_state(character_id, player_id, card)
     clock_snapshot = world_clock.get_clock_snapshot(player_id)
     time_context = clock_snapshot.prompt_context(
@@ -556,7 +590,7 @@ def start_session(
     )
     
     session_id = str(uuid.uuid4())
-    repository.create_session(session_id, character_id, player_id, player_name)
+    repository.create_session(session_id, character_id, player_id, player_name, locale)
     
     # 获取历史会话摘要（最近3次）
     past_summaries_raw = repository.get_recent_summaries(character_id, player_id, limit=3)
@@ -577,8 +611,11 @@ def start_session(
         past_summaries=past_summaries,
         relationship_graph_lines=prompt_context["relationship_graph_lines"],
         time_context=time_context,
+        locale=locale,
     )
-    opening_instruction = prompt_builder.build_opening_line_prompt(card, runtime_state, player_name)
+    opening_instruction = _build_opening_line_prompt(
+        card, runtime_state, player_name, locale
+    )
     
     result = llm_client.call_role_turn(
         system_prompt = system_prompt + opening_instruction,
@@ -610,6 +647,7 @@ def start_session(
         "current_trust": runtime_state.get("trust_level", 0),
         "world_created_at": clock_snapshot.world_now.isoformat(),
         "assistant_message_id": assistant_msg_id,
+        "locale": locale,
     }
     
 
@@ -634,13 +672,14 @@ def run_dialogue_turn(
     character_id = session["character_id"]
     player_id = session["player_id"]
     player_name = session["player_name"]
-    card = character_loader.load_character_card(character_id, player_id)
+    locale = session.get("locale") or DEFAULT_LOCALE
+    card = _load_character_card(character_id, player_id, locale)
     clock_snapshot = world_clock.get_clock_snapshot(player_id)
     time_context = clock_snapshot.prompt_context(
         repository.get_last_character_interaction_world_at(player_id, character_id),
         locale=getattr(getattr(card, "speech_style", None), "language", "zh-CN"),
     )
-    
+
     # 使用玩家消息作为查询上下文，进行向量检索
     runtime_state = repository.get_runtime_state(
         character_id, 
@@ -686,6 +725,7 @@ def run_dialogue_turn(
         relationship_graph_lines=prompt_context["relationship_graph_lines"],
         time_context=time_context,
         knowledge_context=knowledge.prompt_section,
+        locale=locale,
     )
     
     messages = history + [

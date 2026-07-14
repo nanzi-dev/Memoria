@@ -11,12 +11,14 @@ import { EventInboxBanner, WorldClockDisplay } from '../components/WorldClock';
 import UserSettingsModal from '../components/UserSettingsModal';
 
 import { splitAssistantReply } from '../utils/chatMessages';
+import useBrowserSpeech from '../hooks/useBrowserSpeech';
 
 import {
 
   Send, ArrowLeft, Heart, Zap, AlertTriangle, Loader2, User, X, Plus, Users,
 
-  Search, Cpu, Activity, TrendingUp, MessageSquare
+  Search, Cpu, Activity, TrendingUp, MessageSquare, Mic, Square, Volume2,
+  Pause, RotateCw, Languages
 
 } from 'lucide-react';
 
@@ -49,6 +51,14 @@ const MOOD_BUBBLE = { happy: 'bg-emerald-950 border-emerald-400/20 text-zinc-200
 
 const IDLE_SESSION_END_MS = 5 * 60 * 1000;
 const HISTORY_PAGE_SIZE = 20;
+const DEFAULT_BROWSER_LOCALE = typeof navigator !== 'undefined'
+  && navigator.language?.toLowerCase().startsWith('en')
+  ? 'en-US'
+  : 'zh-CN';
+const LOCALES = [
+  { value: 'zh-CN', label: '中文', shortLabel: 'ZH' },
+  { value: 'en-US', label: 'English', shortLabel: 'EN' },
+];
 
 const CHAT_RAYS_PROPS = {
   speed: 2.1,
@@ -312,6 +322,118 @@ function RelationshipDeltaLine({ affinityDelta = 0, trustDelta = 0 }) {
   );
 }
 
+function MessageAudioControl({ messageId, getAudioState, onToggle, onRetry }) {
+  const audioState = getAudioState(messageId);
+  const status = audioState.status || 'idle';
+  const isLoading = status === 'loading';
+  const isPlaying = status === 'playing';
+  const isError = status === 'error';
+  const label = isLoading
+    ? '正在生成语音'
+    : isPlaying
+      ? '暂停语音'
+      : isError
+        ? '重试语音'
+        : status === 'paused'
+          ? '继续播放语音'
+          : '播放语音';
+
+  return (
+    <button
+      type="button"
+      onClick={() => isError ? onRetry(messageId) : onToggle(messageId)}
+      disabled={isLoading}
+      className={`mt-1 flex h-11 w-11 items-center justify-center rounded-lg border transition-colors disabled:cursor-wait ${
+        isError
+          ? 'border-red-400/20 text-red-300/70 hover:border-red-400/40 hover:bg-red-400/5'
+          : 'border-cyber-green/10 text-cyber-green/35 hover:border-cyber-green/30 hover:bg-cyber-green/5 hover:text-cyber-green/70'
+      }`}
+      aria-label={label}
+      title={audioState.error || label}
+    >
+      {isLoading ? <Loader2 size={15} className="animate-spin" />
+        : isPlaying ? <Pause size={15} />
+          : isError ? <RotateCw size={15} />
+            : <Volume2 size={15} />}
+    </button>
+  );
+}
+
+function SpeechRecorderButton({ status, supported, disabled, onStart, onStop }) {
+  const isRecording = status === 'recording';
+  const isTranscribing = status === 'transcribing';
+  const label = isRecording
+    ? '停止录音并转写'
+    : isTranscribing
+      ? '正在转写录音'
+      : supported
+        ? '开始语音输入'
+        : '当前浏览器不支持录音';
+
+  return (
+    <button
+      type="button"
+      onClick={isRecording ? onStop : onStart}
+      disabled={disabled || isTranscribing || (!supported && !isRecording)}
+      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-all disabled:cursor-not-allowed disabled:opacity-25 ${
+        isRecording
+          ? 'border-red-400/35 bg-red-400/10 text-red-300 hover:bg-red-400/15'
+          : 'border-cyan-200/15 bg-cyan-200/[0.035] text-cyan-100/55 hover:border-cyan-200/35 hover:bg-cyan-200/[0.07] hover:text-cyan-100'
+      }`}
+      aria-label={label}
+      title={label}
+    >
+      {isTranscribing ? <Loader2 size={16} className="animate-spin" />
+        : isRecording ? <Square size={15} fill="currentColor" />
+          : <Mic size={17} />}
+    </button>
+  );
+}
+
+function LocaleSelector({ value, onChange, label = '会话语言' }) {
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-cyber-green/40">
+        <Languages size={13} />
+        {label}
+      </div>
+      <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-cyber-green/15 bg-black/20">
+        {LOCALES.map(locale => (
+          <button
+            key={locale.value}
+            type="button"
+            onClick={() => onChange(locale.value)}
+            className={`min-h-[44px] border-r border-cyber-green/10 px-3 text-xs last:border-r-0 ${
+              value === locale.value
+                ? 'bg-cyber-green/12 text-cyber-green'
+                : 'text-zinc-500 hover:bg-white/[0.03] hover:text-zinc-300'
+            }`}
+            aria-pressed={value === locale.value}
+          >
+            {locale.label} <span className="text-[10px] opacity-55">{locale.value}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SpeechErrorNotice({ error, onDismiss, onRetry }) {
+  if (!error) return null;
+  return (
+    <div role="alert" className="mb-2 flex items-center gap-2 rounded-lg border border-red-400/15 bg-red-400/[0.055] px-3 py-2 text-[11px] leading-5 text-red-200/75">
+      <AlertTriangle size={13} className="shrink-0" />
+      <span className="min-w-0 flex-1 break-words">{error}</span>
+      <button type="button" onClick={onRetry} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-red-200/55 hover:bg-red-400/10 hover:text-red-100" aria-label="重试语音输入" title="重试语音输入">
+        <RotateCw size={14} />
+      </button>
+      <button type="button" onClick={onDismiss} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-red-200/35 hover:bg-red-400/10 hover:text-red-100" aria-label="关闭语音错误">
+        <X size={15} />
+      </button>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════
 
 // ChatRoom — Main Container
@@ -352,9 +474,19 @@ export default function ChatRoom() {
 
   const [chatItems, setChatItems] = useState([]); // session-based chat list
 
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
+
   const [searchQuery, setSearchQuery] = useState('');
 
   const [error, setError] = useState(null);
+
+  const [groupLocale, setGroupLocale] = useState(DEFAULT_BROWSER_LOCALE);
+
+  const [newSessionLocale, setNewSessionLocale] = useState(DEFAULT_BROWSER_LOCALE);
+
+  const [sessionLocale, setSessionLocale] = useState(DEFAULT_BROWSER_LOCALE);
+
+  const [pendingSingleCharacter, setPendingSingleCharacter] = useState(null);
 
 
 
@@ -430,6 +562,38 @@ export default function ChatRoom() {
   const pendingInitialSingleScrollRef = useRef(false);
 
   const pendingHistoryScrollRef = useRef(null);
+
+  const sendMessageRef = useRef(null);
+
+  const directCharacterHandledRef = useRef(null);
+
+  const handleTranscription = useCallback((text) => {
+    const cleanText = String(text || '').trim();
+    if (!cleanText) return;
+    setInput(cleanText);
+    if (user?.stt_auto_send) {
+      queueMicrotask(() => sendMessageRef.current?.(cleanText));
+    }
+  }, [user?.stt_auto_send]);
+
+  const {
+    speechStatus,
+    speechError,
+    isRecordingSupported,
+    startRecording,
+    stopRecording,
+    cancelRecording,
+    clearSpeechError,
+    getAudioState,
+    toggleAudio,
+    retryAudio,
+    enqueueAutoplay,
+    stopAudio,
+  } = useBrowserSpeech({
+    sessionId: view === 'single' ? singleSessionId : view === 'group' ? multiSessionId : null,
+    mode: view === 'single' ? 'single' : view === 'group' ? 'group' : null,
+    onTranscription: handleTranscription,
+  });
 
 
 
@@ -565,10 +729,12 @@ export default function ChatRoom() {
     if (userLoading || !PLAYER_ID) {
       setAllChars([]);
       setChatItems([]);
+      setSessionsLoaded(false);
       return;
     }
 
     let cancelled = false;
+    setSessionsLoaded(false);
 
     (async () => {
 
@@ -603,7 +769,9 @@ export default function ChatRoom() {
 
       // Load sessions after characters are loaded (so we can resolve names/avatars from cache)
 
-      if (!cancelled) loadSessions(chars);
+      if (!cancelled) await loadSessions(chars);
+
+      if (!cancelled) setSessionsLoaded(true);
 
     })();
 
@@ -659,6 +827,7 @@ export default function ChatRoom() {
             message_count: s.message_count,
             participants: groupParticipants,
             group_name: resolvedGroupName,
+            locale: s.locale || info?.locale || DEFAULT_BROWSER_LOCALE,
           };
           const groupKey = resolvedGroupName.trim().toLowerCase() || String(groupItem.group_thread_id).toLowerCase();
           const existing = groupItemsByName.get(groupKey);
@@ -681,6 +850,8 @@ export default function ChatRoom() {
 
             session_id: s.session_id,
 
+            status: s.status,
+
             character_id: s.character_id,
 
             last_message: s.last_message,
@@ -700,6 +871,8 @@ export default function ChatRoom() {
             core_identity: cached?.core_identity || '',
 
             is_active: cached?.is_active ?? 1,
+
+            locale: s.locale || DEFAULT_BROWSER_LOCALE,
 
           });
 
@@ -757,31 +930,25 @@ export default function ChatRoom() {
 
 
 
-  // ── Direct single chat from URL param ──
-
-  useEffect(() => {
-
-    if (!PLAYER_ID || !characterIdParam || allChars.length === 0) return;
-
-    const c = allChars.find(ch => ch.character_id === characterIdParam);
-
-    if (c) enterSingleChat(c);
-
-  }, [PLAYER_ID, characterIdParam, allChars]);
-
-
-
   // ── Navigation helpers ──
 
   function goToList() {
 
     const sessionToIdle = singleSessionId || multiSessionId || activeSessionRef.current;
 
+    cancelRecording();
+
+    stopAudio();
+
     setMessages([]); setCharacter(null); setSingleSessionId(null);
 
     setMultiSessionId(null); setParticipants([]); setGroupName(''); setAffinity(0); setTrust(0);
 
     setMood('neutral'); setEvents([]); setView('list'); setError(null);
+
+    setPendingSingleCharacter(null);
+
+    setSessionLocale(DEFAULT_BROWSER_LOCALE);
 
     setMultiSessionStatus('active');
 
@@ -795,7 +962,7 @@ export default function ChatRoom() {
 
 
 
-  const enterSingleChat = useCallback(async (char) => {
+  const enterSingleChat = useCallback(async (char, localeOverride = null) => {
 
     if (!PLAYER_ID) { setError('请先登录后使用对话功能'); return; }
 
@@ -803,6 +970,12 @@ export default function ChatRoom() {
       setError('角色已离线，不能新建聊天');
       return;
     }
+
+    cancelRecording();
+
+    stopAudio();
+
+    setPendingSingleCharacter(null);
 
     setError(null);
 
@@ -839,6 +1012,7 @@ export default function ChatRoom() {
 
       if (!isCharacterActive(nextCharacter)) {
         const hist = await dialogue.getHistory(char.character_id, PLAYER_ID, 0, 20);
+        setSessionLocale(hist?.locale || char.locale || DEFAULT_BROWSER_LOCALE);
         if (hist?.messages?.length) {
           setMessages(sortMessagesChronologically(hist.messages.map(normalizeDialogueMessage)));
           setIsRecovered(true);
@@ -849,7 +1023,7 @@ export default function ChatRoom() {
           setHistoryOffset(0);
           setHasMoreHistory(false);
         }
-        setSingleSessionId(null);
+        setSingleSessionId(char.session_id);
         activeSessionRef.current = null;
         setAffinity(0);
         setTrust(0);
@@ -858,9 +1032,15 @@ export default function ChatRoom() {
         return;
       }
 
-      const session = await dialogue.startSession(char.character_id, PLAYER_ID, PLAYER_NAME);
+      const session = await dialogue.startSession(
+        char.character_id,
+        PLAYER_ID,
+        PLAYER_NAME,
+        localeOverride || char.locale || DEFAULT_BROWSER_LOCALE,
+      );
 
       setSingleSessionId(session.session_id);
+      setSessionLocale(session.locale || localeOverride || char.locale || DEFAULT_BROWSER_LOCALE);
       activeSessionRef.current = session.session_id;
       sessionKindRef.current.set(session.session_id, 'single');
       clearIdleSessionEnd(session.session_id);
@@ -869,6 +1049,7 @@ export default function ChatRoom() {
 
       const hist = await dialogue.getHistory(char.character_id, PLAYER_ID, 0, 20);
       if (hist?.messages?.length) {
+        setSessionLocale(hist.locale || session.locale || localeOverride || char.locale || DEFAULT_BROWSER_LOCALE);
         setMessages(sortMessagesChronologically(hist.messages.map(normalizeDialogueMessage)));
         setIsRecovered(session.recovered || hist.messages.length > 0);
         nextHistoryOffset = hist.messages.length;
@@ -883,6 +1064,7 @@ export default function ChatRoom() {
           content: session.opening_line,
           action: session.action || '',
           world_created_at: session.world_created_at,
+          message_id: session.assistant_message_id,
         }]);
       }
 
@@ -895,14 +1077,61 @@ export default function ChatRoom() {
 
     } catch (e) { setError(e.message); setView('list'); }
 
-  }, [PLAYER_ID, PLAYER_NAME]);
+  }, [PLAYER_ID, PLAYER_NAME, cancelRecording, stopAudio]);
+
+  const requestSingleChat = useCallback((char) => {
+    if (!isCharacterActive(char)) {
+      if (char.session_id) {
+        enterSingleChat(char);
+      } else {
+        setPendingSingleCharacter(null);
+        setError('角色已离线，不能新建聊天');
+      }
+      return;
+    }
+    const activeItem = chatItems.find(item => (
+      item.type === 'single'
+      && item.character_id === char.character_id
+      && item.status === 'active'
+    ));
+    if (activeItem) {
+      enterSingleChat(activeItem);
+      return;
+    }
+    setPendingSingleCharacter(char);
+    setNewSessionLocale(DEFAULT_BROWSER_LOCALE);
+    setError(null);
+  }, [chatItems, enterSingleChat]);
+
+  // ── Direct single chat from URL param ──
+
+  useEffect(() => {
+    if (!characterIdParam) {
+      directCharacterHandledRef.current = null;
+      return;
+    }
+    if (!PLAYER_ID || !sessionsLoaded || allChars.length === 0) return;
+
+    const directKey = `${PLAYER_ID}:${characterIdParam}`;
+    if (directCharacterHandledRef.current === directKey) return;
+
+    const nextCharacter = allChars.find(char => char.character_id === characterIdParam);
+    if (!nextCharacter) return;
+
+    directCharacterHandledRef.current = directKey;
+    requestSingleChat(nextCharacter);
+  }, [PLAYER_ID, allChars, characterIdParam, requestSingleChat, sessionsLoaded]);
 
 
 
   const enterGroupSetup = useCallback(() => {
     if (!PLAYER_ID) { setError('请先登录后使用对话功能'); return; }
+    cancelRecording();
+    stopAudio();
+    setPendingSingleCharacter(null);
+    setGroupLocale(DEFAULT_BROWSER_LOCALE);
     setMessages([]); setParticipants([]); setGroupName(''); setView('group-setup');
-  }, [PLAYER_ID]);
+  }, [PLAYER_ID, cancelRecording, stopAudio]);
 
 
 
@@ -1026,10 +1255,17 @@ export default function ChatRoom() {
 
     try {
 
-      const res = await multiDialogue.startSession(PLAYER_ID, PLAYER_NAME, selectedParticipants.map(p => p.character_id), cleanGroupName);
+      const res = await multiDialogue.startSession(
+        PLAYER_ID,
+        PLAYER_NAME,
+        selectedParticipants.map(p => p.character_id),
+        cleanGroupName,
+        groupLocale,
+      );
 
       setMultiSessionId(res.session_id);
       setMultiSessionStatus('active');
+      setSessionLocale(res.locale || groupLocale);
       activeSessionRef.current = res.session_id;
       sessionKindRef.current.set(res.session_id, 'group');
       clearIdleSessionEnd(res.session_id);
@@ -1051,9 +1287,9 @@ export default function ChatRoom() {
 
   // ── Send message ──
 
-  const sendMessage = useCallback(async () => {
+  const sendMessage = useCallback(async (textOverride = null) => {
 
-    const text = input.trim();
+    const text = String(textOverride ?? input).trim();
 
     if (!PLAYER_ID) { setError('请先登录后使用对话功能'); return; }
 
@@ -1091,7 +1327,12 @@ export default function ChatRoom() {
           trust_delta: trustDelta,
           showRelationshipDelta: true,
           world_created_at: res.world_created_at,
+          message_id: res.assistant_message_id,
         }]);
+
+        if (user?.tts_auto_play && res.assistant_message_id != null) {
+          enqueueAutoplay(res.assistant_message_id, singleSessionId, 'single');
+        }
 
         setHistoryOffset(prev => prev + 2);
 
@@ -1124,6 +1365,7 @@ export default function ChatRoom() {
           setMultiSessionId(continued.session_id);
           setMultiSessionStatus('active');
           setGroupName(continued.group_name || groupName);
+          setSessionLocale(continued.locale || sessionLocale);
           if (continued.participants?.length) {
             setParticipants(continued.participants.map(p => normalizeParticipant(p)));
           }
@@ -1154,13 +1396,22 @@ export default function ChatRoom() {
         ]);
         setHistoryOffset(prev => prev + 1 + groupResponses.length);
 
+        const messageIds = groupResponses
+          .map(response => response.message_id)
+          .filter(messageId => messageId != null);
+        if (user?.tts_auto_play && messageIds.length) {
+          enqueueAutoplay(messageIds, targetSessionId, 'group');
+        }
+
       }
 
     } catch (e) { setError(e.message); }
 
     finally { setSending(false); setSendingMulti(false); }
 
-  }, [input, sending, sendingMulti, view, singleSessionId, multiSessionId, multiSessionStatus, groupName, affinity, trust, character, participants, allChars, PLAYER_ID, PLAYER_NAME, getWorldNow]);
+  }, [input, sending, sendingMulti, view, singleSessionId, multiSessionId, multiSessionStatus, groupName, affinity, trust, character, participants, allChars, PLAYER_ID, PLAYER_NAME, getWorldNow, user?.tts_auto_play, enqueueAutoplay, sessionLocale]);
+
+  sendMessageRef.current = sendMessage;
 
 
 
@@ -1346,11 +1597,14 @@ export default function ChatRoom() {
                     const groupParts = (item.participants || []).map(p => normalizeParticipant(p));
                     return (
                       <div key={`group-${item.group_name || item.session_id || i}`} onClick={async () => {
+                        cancelRecording();
+                        stopAudio();
                         clearIdleSessionEnd(item.session_id);
                         setMessages([]);
                         setGroupName(item.group_name || '');
                         setMultiSessionId(item.session_id);
                         setMultiSessionStatus(item.status || 'active');
+                        setSessionLocale(item.locale || DEFAULT_BROWSER_LOCALE);
                         setHistoryOffset(0);
                         setHasMoreHistory(true);
                         activeSessionRef.current = item.session_id;
@@ -1361,6 +1615,7 @@ export default function ChatRoom() {
                           const info = await multiDialogue.getSessionInfo(item.session_id);
                           setMultiSessionStatus(info.status || item.status || 'active');
                           setGroupName(info.group_name || item.group_name || '');
+                          setSessionLocale(info.locale || item.locale || DEFAULT_BROWSER_LOCALE);
                           loadedParticipants = info.participants?.map(p => normalizeParticipant(p)) || loadedParticipants;
                           setParticipants(loadedParticipants);
                         } catch {
@@ -1397,7 +1652,7 @@ export default function ChatRoom() {
                   }
                   const itemActive = isCharacterActive(item);
                   return (
-                    <div key={item.session_id || i} onClick={() => enterSingleChat(item)} className="memoria-glass memoria-card-hover animate-fade-up flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer group relative overflow-hidden" style={{ animationDelay: `${Math.min(i, 12) * 24}ms` }}>
+                    <div key={item.session_id || i} onClick={() => requestSingleChat(item)} className="memoria-glass memoria-card-hover animate-fade-up flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer group relative overflow-hidden" style={{ animationDelay: `${Math.min(i, 12) * 24}ms` }}>
                       <div className={`memoria-avatar-ring w-10 h-10 rounded-full overflow-hidden border-2 bg-[#0b0b0c] shrink-0 group-hover:border-cyber-green/45 transition-all group-hover:scale-105 ${itemActive ? 'border-slate-700/30' : 'border-zinc-700/30 opacity-60 grayscale'}`}>
                         {item.avatar_url ? <img src={item.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-sm font-bold">{item.name?.charAt(0)}</div>}
                       </div>
@@ -1421,7 +1676,7 @@ export default function ChatRoom() {
           {activeTab === 'contacts' && (
             <div className="p-3 space-y-0.5">
               {allChars.filter(c => isCharacterActive(c)).map((char, i) => (
-                <div key={char.character_id} onClick={() => enterSingleChat(char)} className="memoria-glass memoria-card-hover animate-fade-up flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer group" style={{ animationDelay: `${Math.min(i, 12) * 22}ms` }}>
+                <div key={char.character_id} onClick={() => requestSingleChat(char)} className="memoria-glass memoria-card-hover animate-fade-up flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer group" style={{ animationDelay: `${Math.min(i, 12) * 22}ms` }}>
                   <div className="memoria-avatar-ring w-10 h-10 rounded-full overflow-hidden border-2 border-slate-700/30 bg-[#0b0b0c] shrink-0 group-hover:border-cyber-green/40 transition-all group-hover:scale-105">
                     {char.avatar_url ? <img src={char.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-sm font-bold">{char.name?.charAt(0)}</div>}
                   </div>
@@ -1453,6 +1708,32 @@ export default function ChatRoom() {
             </div>
           )}
         </div>
+
+        {pendingSingleCharacter && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={() => setPendingSingleCharacter(null)} />
+            <div role="dialog" aria-modal="true" aria-labelledby="new-session-language" className="memoria-glass relative w-full max-w-sm rounded-xl p-5 shadow-[0_24px_80px_rgba(0,0,0,0.55)]">
+              <div className="mb-5 flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <h2 id="new-session-language" className="truncate font-character text-xl text-zinc-100">{pendingSingleCharacter.name}</h2>
+                  <p className="mt-1 text-[11px] leading-5 text-cyber-green/30">选择新会话语言，创建后不可更改。</p>
+                </div>
+                <button type="button" onClick={() => setPendingSingleCharacter(null)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-cyber-green/35 hover:bg-cyber-green/5 hover:text-cyber-green" aria-label="关闭语言选择">
+                  <X size={17} />
+                </button>
+              </div>
+              <LocaleSelector value={newSessionLocale} onChange={setNewSessionLocale} />
+              <button
+                type="button"
+                onClick={() => enterSingleChat(pendingSingleCharacter, newSessionLocale)}
+                className="mt-5 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-cyber-green/25 bg-cyber-green/10 text-sm font-bold text-cyber-green transition-colors hover:bg-cyber-green/[0.18]"
+              >
+                <MessageSquare size={15} />
+                开始对话
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1509,6 +1790,11 @@ export default function ChatRoom() {
               <p className="mt-2 text-[12px] text-red-400/75">群聊名称已存在，请换一个名称</p>
             )}
 
+          </div>
+
+          <div className="memoria-glass rounded-xl p-4">
+            <LocaleSelector value={groupLocale} onChange={setGroupLocale} />
+            <p className="mt-2 text-[11px] leading-5 text-cyber-green/20">群聊创建后会固定使用此语言。</p>
           </div>
 
           {/* Character selection */}
@@ -1665,6 +1951,11 @@ export default function ChatRoom() {
             onClick={() => setShowClockSettings(true)}
           />
 
+          <span className="hidden shrink-0 items-center gap-1 rounded-md border border-cyber-green/10 bg-black/15 px-2 py-1 text-[10px] text-cyber-green/35 sm:flex" title="会话语言创建后不可更改">
+            <Languages size={11} />
+            {LOCALES.find(locale => locale.value === sessionLocale)?.shortLabel || sessionLocale}
+          </span>
+
           {/* 事件通知 */}
           {events.length > 0 && (
             <button onClick={() => setEvents([])} className="relative shrink-0" title="事件通知">
@@ -1751,7 +2042,7 @@ export default function ChatRoom() {
             return replyBubbles.map((bubble, bubbleIndex) => {
               const isLastBubble = bubbleIndex === replyBubbles.length - 1;
               return (
-              <Fragment key={`${msg.message_id || i}-${bubbleIndex}`}>
+              <Fragment key={`${msg.message_id != null ? `message-${msg.message_id}` : `local-${i}`}-${bubbleIndex}`}>
               {bubbleIndex === 0 && showWorldDate && (
                 <WorldDateSeparator value={msg.world_created_at} timezone={worldClock?.timezone} />
               )}
@@ -1802,6 +2093,14 @@ export default function ChatRoom() {
                       align={isUser ? 'right' : 'left'}
                     />
                   )}
+                  {!isUser && isLastBubble && msg.message_id != null && (
+                    <MessageAudioControl
+                      messageId={msg.message_id}
+                      getAudioState={getAudioState}
+                      onToggle={toggleAudio}
+                      onRetry={retryAudio}
+                    />
+                  )}
                 </div>
               </div>
               </Fragment>
@@ -1842,7 +2141,15 @@ export default function ChatRoom() {
 
         {/* ═══ 底部输入栏 — 功能型 ═══ */}
         <div className="px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] border-t border-white/5 bg-[#0d0d14]/60 backdrop-blur-md shrink-0">
+          <SpeechErrorNotice error={speechError} onDismiss={clearSpeechError} onRetry={startRecording} />
           <div className="flex items-end gap-1.5">
+            <SpeechRecorderButton
+              status={speechStatus}
+              supported={isRecordingSupported}
+              disabled={singleReadOnly || sending || sendingMulti}
+              onStart={startRecording}
+              onStop={stopRecording}
+            />
             {/* 输入框 */}
             <textarea
               ref={inputRef}
@@ -1918,6 +2225,11 @@ export default function ChatRoom() {
             className="max-w-[178px] sm:max-w-[260px]"
             onClick={() => setShowClockSettings(true)}
           />
+
+          <span className="hidden shrink-0 items-center gap-1 rounded-md border border-cyber-green/10 bg-black/15 px-2 py-1 text-[10px] text-cyber-green/35 sm:flex" title="会话语言创建后不可更改">
+            <Languages size={11} />
+            {LOCALES.find(locale => locale.value === sessionLocale)?.shortLabel || sessionLocale}
+          </span>
 
         </header>
 
@@ -2082,7 +2394,7 @@ export default function ChatRoom() {
 
               return (
 
-              <Fragment key={`${msg.message_id || i}-${bubbleIndex}`}>
+              <Fragment key={`${msg.message_id != null ? `message-${msg.message_id}` : `local-${i}`}-${bubbleIndex}`}>
 
               {bubbleIndex === 0 && showWorldDate && (
 
@@ -2172,6 +2484,15 @@ export default function ChatRoom() {
 
                     />
 
+                  )}
+
+                  {!isUser && isLastBubble && msg.message_id != null && (
+                    <MessageAudioControl
+                      messageId={msg.message_id}
+                      getAudioState={getAudioState}
+                      onToggle={toggleAudio}
+                      onRetry={retryAudio}
+                    />
                   )}
 
                 </div>
@@ -2274,7 +2595,17 @@ export default function ChatRoom() {
 
         <div className="px-3 sm:px-4 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] border-t border-white/5 bg-[#0d0d14]/60 backdrop-blur-md shrink-0">
 
+          <SpeechErrorNotice error={speechError} onDismiss={clearSpeechError} onRetry={startRecording} />
+
           <div className="flex gap-2">
+
+            <SpeechRecorderButton
+              status={speechStatus}
+              supported={isRecordingSupported}
+              disabled={sending || sendingMulti}
+              onStart={startRecording}
+              onStop={stopRecording}
+            />
 
             <textarea
 
