@@ -5,7 +5,7 @@
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException
 
-from memoria.api.user import require_current_user_id
+from memoria.api.user import require_admin_user_id, require_current_user_id
 from memoria.core import performance, quality_scorer, replay
 from memoria.db import repository
 
@@ -43,7 +43,7 @@ def replay_session(
 
 
 @router.get("/performance")
-def performance_snapshot(_current_user_id: str = Depends(require_current_user_id)):
+def performance_snapshot(_current_user_id: str = Depends(require_admin_user_id)):
     """查看关键路径耗时分布。"""
     return {
         "metrics": performance.snapshot(),
@@ -52,7 +52,7 @@ def performance_snapshot(_current_user_id: str = Depends(require_current_user_id
 
 
 @router.post("/performance/reset")
-def reset_performance_metrics(_current_user_id: str = Depends(require_current_user_id)):
+def reset_performance_metrics(_current_user_id: str = Depends(require_admin_user_id)):
     """重置开发者性能采样。"""
     performance.reset()
     return {"status": "reset"}

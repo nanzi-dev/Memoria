@@ -5,7 +5,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
+from memoria.api.upload_utils import read_upload_limited
 from memoria.api.user import require_current_user_id
+from memoria.core.config import configs
 from memoria.core.locale import Locale
 from memoria.core.speech_service import (
     SpeechMode,
@@ -40,7 +42,11 @@ async def create_transcription(
     file: Annotated[UploadFile, File(...)],
     current_user_id: str = Depends(require_current_user_id),
 ):
-    audio = await file.read()
+    audio = await read_upload_limited(
+        file,
+        configs.speech_stt_upload_max_bytes,
+        detail="语音文件超过上传大小限制",
+    )
     try:
         return await speech_service.transcribe(
             session_id=session_id,
@@ -131,7 +137,11 @@ async def upload_character_voice_consent(
     name: Annotated[str | None, Form()] = None,
     current_user_id: str = Depends(require_current_user_id),
 ):
-    audio = await recording.read()
+    audio = await read_upload_limited(
+        recording,
+        configs.speech_custom_voice_upload_max_bytes,
+        detail="声音授权录音超过上传大小限制",
+    )
     try:
         return await speech_service.upload_voice_consent(
             owner_user_id=current_user_id,
@@ -153,7 +163,11 @@ async def create_character_custom_voice(
     name: Annotated[str | None, Form()] = None,
     current_user_id: str = Depends(require_current_user_id),
 ):
-    audio = await audio_sample.read()
+    audio = await read_upload_limited(
+        audio_sample,
+        configs.speech_custom_voice_upload_max_bytes,
+        detail="自定义声音样本超过上传大小限制",
+    )
     try:
         return await speech_service.create_custom_voice(
             owner_user_id=current_user_id,

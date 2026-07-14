@@ -335,8 +335,13 @@ class TestMultiCharacterGroupMemory:
 
         monkeypatch.setattr(
             multi_character_orchestrator.repository,
-            "append_multi_character_message",
-            lambda *args, **kwargs: 1,
+            "claim_dialogue_turn",
+            lambda **kwargs: {"completed": False, "lease_owner": "lease"},
+        )
+        monkeypatch.setattr(
+            multi_character_orchestrator.repository,
+            "commit_dialogue_turn",
+            lambda **kwargs: kwargs["dialogue_turn"]["response"],
         )
         monkeypatch.setattr(
             multi_character_orchestrator.multi_character_memory,
@@ -348,11 +353,13 @@ class TestMultiCharacterGroupMemory:
             multi_character_orchestrator.MultiCharacterOrchestrator
         )
         orch.session_id = "session-2"
+        orch.player_id = "player-1"
         orch.player_name = "Player"
         orch.participants = [{"character_id": "c1"}, {"character_id": "c2"}]
         orch.character_ids = ["c1", "c2"]
         orch._decide_next_speaker = lambda player_message: "c1"
-        orch._generate_character_response = lambda character_id, player_message: {
+        orch._build_pulse_state = lambda *args, **kwargs: {}
+        orch._generate_character_response = lambda character_id, player_message, **kwargs: {
             "character_id": character_id,
             "character_name": "角色一",
             "dialogue": "我们马上出发。",
@@ -368,8 +375,13 @@ class TestMultiCharacterGroupMemory:
 
         monkeypatch.setattr(
             multi_character_orchestrator.repository,
-            "append_multi_character_message",
-            lambda *args, **kwargs: 1,
+            "claim_dialogue_turn",
+            lambda **kwargs: {"completed": False, "lease_owner": "lease"},
+        )
+        monkeypatch.setattr(
+            multi_character_orchestrator.repository,
+            "commit_dialogue_turn",
+            lambda **kwargs: kwargs["dialogue_turn"]["response"],
         )
         monkeypatch.setattr(
             multi_character_orchestrator.multi_character_memory,
@@ -381,11 +393,12 @@ class TestMultiCharacterGroupMemory:
             multi_character_orchestrator.MultiCharacterOrchestrator
         )
         orch.session_id = "session-3"
+        orch.player_id = "player-1"
         orch.player_name = "Player"
         orch.participants = [{"character_id": "c1"}, {"character_id": "c2"}, {"character_id": "c3"}]
         orch.character_ids = ["c1", "c2", "c3"]
         orch.character_cards = {}
-        orch._generate_group_discussion = lambda player_message, max_responses: [
+        orch._generate_group_discussion = lambda player_message, max_responses, **kwargs: [
             {"character_id": "c1", "character_name": "角色一", "dialogue": "我去侦查。"},
             {"character_id": "c2", "character_name": "角色二", "dialogue": "我准备装备。"},
         ]
@@ -493,20 +506,28 @@ class TestDialogueTurn:
 
         monkeypatch.setattr(
             orchestrator.repository,
-            "save_runtime_state",
-            lambda character_id, player_id, affection_level, trust_level, current_mood: saved_state.update(
-                character_id=character_id,
-                player_id=player_id,
-                affection_level=affection_level,
-                trust_level=trust_level,
-                current_mood=current_mood,
-            ),
+            "claim_dialogue_turn",
+            lambda **kwargs: {"completed": False, "lease_owner": "lease"},
         )
-        monkeypatch.setattr(
-            orchestrator.repository,
-            "append_short_term_message",
-            lambda session_id, role, content: saved_messages.append((session_id, role, content)) or len(saved_messages),
-        )
+
+        def commit_turn(*, dialogue_turn, runtime_states):
+            state = runtime_states[0]
+            saved_state.update(
+                character_id=state["character_id"],
+                player_id=dialogue_turn["player_id"],
+                affection_level=state["affection_level"],
+                trust_level=state["trust_level"],
+                current_mood=state["current_mood"],
+            )
+            saved_messages.extend(
+                (dialogue_turn["session_id"], message["role"], message["content"])
+                for message in dialogue_turn["messages"]
+            )
+            dialogue_turn["response"]["user_message_id"] = 1
+            dialogue_turn["response"]["assistant_message_id"] = 2
+            return dialogue_turn["response"]
+
+        monkeypatch.setattr(orchestrator.repository, "commit_dialogue_turn", commit_turn)
         monkeypatch.setattr(
             orchestrator.repository,
             "is_long_term_memory_checkpoint",
@@ -776,11 +797,16 @@ class TestDialogueTurn:
         )
         monkeypatch.setattr(orchestrator.repository, "save_runtime_state", lambda *args, **kwargs: None)
 
-        def append_message(session_id, role, content, **kwargs):
-            saved_messages.append({"role": role, "content": content, **kwargs})
-            return len(saved_messages)
+        def commit_turn(*, dialogue_turn, runtime_states):
+            saved_messages.extend(dialogue_turn["messages"])
+            return dialogue_turn["response"]
 
-        monkeypatch.setattr(orchestrator.repository, "append_short_term_message", append_message)
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "claim_dialogue_turn",
+            lambda **kwargs: {"completed": False, "lease_owner": "lease"},
+        )
+        monkeypatch.setattr(orchestrator.repository, "commit_dialogue_turn", commit_turn)
 
         result = orchestrator.run_dialogue_turn("sid", "你好")
 
@@ -842,14 +868,19 @@ class TestDialogueTurn:
             "apply_event_results_to_dialogue_state",
             lambda event_results, dialogue, affinity, trust, mood: (dialogue, affinity, trust, mood, [], None),
         )
-        monkeypatch.setattr(orchestrator.repository, "save_runtime_state", lambda *args, **kwargs: None)
         monkeypatch.setattr(
             orchestrator.repository,
-            "append_short_term_message",
+            "commit_dialogue_turn",
             lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("db write failed")),
         )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "claim_dialogue_turn",
+            lambda **kwargs: {"completed": False, "lease_owner": "lease"},
+        )
+        monkeypatch.setattr(orchestrator.repository, "fail_dialogue_turn", lambda *args: None)
 
-        with pytest.raises(RuntimeError, match="对话持久化失败"):
+        with pytest.raises(RuntimeError, match="db write failed"):
             orchestrator.run_dialogue_turn("sid", "你好")
 
 
@@ -863,19 +894,26 @@ def test_group_dialogue_saves_player_memory_for_all_participants(monkeypatch):
     orchestrator.session_id = "group-session"
     orchestrator.player_id = "player"
     orchestrator.participants = [{"character_id": "char-a"}, {"character_id": "char-b"}]
+    orchestrator.character_ids = ["char-a", "char-b"]
 
     clock_snapshot = SimpleNamespace(
         world_now=SimpleNamespace(isoformat=lambda: "2026-07-12T12:00:00+08:00")
     )
     extracted_histories = []
-    observed_facts = []
     saved_facts = []
+    operation_order = []
 
     monkeypatch.setattr(module, "_clock_snapshot_for_player", lambda player_id: clock_snapshot)
     monkeypatch.setattr(
         module.repository,
-        "append_multi_character_message",
-        lambda *args, **kwargs: 1,
+        "claim_dialogue_turn",
+        lambda **kwargs: {"completed": False, "lease_owner": "lease"},
+    )
+    monkeypatch.setattr(
+        module.repository,
+        "commit_dialogue_turn",
+        lambda **kwargs: operation_order.append("commit")
+        or kwargs["dialogue_turn"]["response"],
     )
     monkeypatch.setattr(
         module.repository,
@@ -892,16 +930,16 @@ def test_group_dialogue_saves_player_memory_for_all_participants(monkeypatch):
         extracted_histories.append(history)
         return "玩家喜欢茉莉花茶"
 
-    def generate_group_discussion(player_message, response_count, *, clock_snapshot=None):
-        observed_facts.append(orchestrator._checkpoint_memory_fact)
+    def generate_group_discussion(player_message, response_count, **kwargs):
         return [{"dialogue": "记住了"}]
 
     monkeypatch.setattr(module, "extract_player_memory", extract_player_memory)
     monkeypatch.setattr(
         module.repository,
         "save_long_term_fact",
-        lambda character_id, player_id, fact: saved_facts.append(
-            (character_id, player_id, fact)
+        lambda character_id, player_id, fact: (
+            operation_order.append(f"memory:{character_id}"),
+            saved_facts.append((character_id, player_id, fact)),
         ),
     )
     monkeypatch.setattr(orchestrator, "_ensure_has_active_participants", lambda: None)
@@ -915,11 +953,11 @@ def test_group_dialogue_saves_player_memory_for_all_participants(monkeypatch):
 
     assert result == [{"dialogue": "记住了"}]
     assert len(extracted_histories) == 1
-    assert observed_facts == ["玩家喜欢茉莉花茶"]
     assert saved_facts == [
         ("char-a", "player", "玩家喜欢茉莉花茶"),
         ("char-b", "player", "玩家喜欢茉莉花茶"),
     ]
+    assert operation_order == ["commit", "memory:char-a", "memory:char-b"]
 
 
 def test_group_dialogue_single_response_saves_memory_for_non_speakers(monkeypatch):
@@ -936,6 +974,7 @@ def test_group_dialogue_single_response_saves_memory_for_non_speakers(monkeypatc
         {"character_id": "listener-a"},
         {"character_id": "listener-b"},
     ]
+    orchestrator.character_ids = ["speaker", "listener-a", "listener-b"]
 
     clock_snapshot = SimpleNamespace(
         world_now=SimpleNamespace(isoformat=lambda: "2026-07-12T12:00:00+08:00")
@@ -945,8 +984,13 @@ def test_group_dialogue_single_response_saves_memory_for_non_speakers(monkeypatc
     monkeypatch.setattr(module, "_clock_snapshot_for_player", lambda player_id: clock_snapshot)
     monkeypatch.setattr(
         module.repository,
-        "append_multi_character_message",
-        lambda *args, **kwargs: 1,
+        "claim_dialogue_turn",
+        lambda **kwargs: {"completed": False, "lease_owner": "lease"},
+    )
+    monkeypatch.setattr(
+        module.repository,
+        "commit_dialogue_turn",
+        lambda **kwargs: kwargs["dialogue_turn"]["response"],
     )
     monkeypatch.setattr(
         module.repository,
@@ -966,10 +1010,11 @@ def test_group_dialogue_single_response_saves_memory_for_non_speakers(monkeypatc
     monkeypatch.setattr(module, "extract_player_memory", lambda history: "玩家周末会带蛋糕来")
     monkeypatch.setattr(orchestrator, "_ensure_has_active_participants", lambda: None)
     monkeypatch.setattr(orchestrator, "_decide_next_speaker", lambda player_message: "speaker")
+    monkeypatch.setattr(orchestrator, "_build_pulse_state", lambda *args, **kwargs: {})
     monkeypatch.setattr(
         orchestrator,
         "_generate_character_response",
-        lambda character_id, player_message, *, clock_snapshot=None: {
+        lambda character_id, player_message, **kwargs: {
             "character_id": character_id,
             "dialogue": "我等你。",
         },

@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi import HTTPException, Response
 from pydantic import SecretStr
@@ -23,8 +24,9 @@ def _route_dependencies(router, path: str, method: str) -> list[str]:
     raise AssertionError(f"route not found: {method} {path}")
 
 
-def test_admin_and_relationship_write_routes_require_auth_dependency():
+def test_admin_and_relationship_write_routes_require_expected_auth_dependency():
     from memoria.api.character_admin import router as character_router
+    from memoria.api.developer import router as developer_router
     from memoria.api.event_admin import router as event_router
     from memoria.api.relationship import router as relationship_router
     from memoria.main import app
@@ -32,8 +34,8 @@ def test_admin_and_relationship_write_routes_require_auth_dependency():
     assert "require_current_user_id" in _route_dependencies(character_router, "/admin/characters", "POST")
     assert "require_current_user_id" in _route_dependencies(event_router, "/admin/events", "POST")
     assert "require_current_user_id" in _route_dependencies(event_router, "/admin/event-templates", "GET")
-    assert "require_current_user_id" in _route_dependencies(event_router, "/admin/event-templates", "POST")
-    assert "require_current_user_id" in _route_dependencies(
+    assert "require_admin_user_id" in _route_dependencies(event_router, "/admin/event-templates", "POST")
+    assert "require_admin_user_id" in _route_dependencies(
         event_router,
         "/admin/event-templates/{template_id}",
         "DELETE",
@@ -54,10 +56,20 @@ def test_admin_and_relationship_write_routes_require_auth_dependency():
         "/relationships/batch",
         "POST",
     )
+    assert "require_admin_user_id" in _route_dependencies(
+        developer_router,
+        "/developer/performance",
+        "GET",
+    )
+    assert "require_admin_user_id" in _route_dependencies(
+        developer_router,
+        "/developer/performance/reset",
+        "POST",
+    )
 
     for route in app.routes:
         if getattr(route, "path", None) == "/admin/log-level":
-            assert "require_current_user_id" in [
+            assert "require_admin_user_id" in [
                 getattr(dep.call, "__name__", "") for dep in route.dependant.dependencies
             ]
             break
@@ -84,23 +96,79 @@ def test_avatar_downloader_rejects_private_ip(monkeypatch):
 def test_avatar_downloader_closes_rejected_response(monkeypatch):
     from memoria.api import avatar_fetcher
 
+    peer_socket = SimpleNamespace(getpeername=lambda: ("93.184.216.34", 443))
     response = SimpleNamespace(
         is_redirect=False,
         headers={"Content-Type": "text/html"},
         close=lambda: setattr(response, "closed", True),
         raise_for_status=lambda: None,
+        raw=SimpleNamespace(_connection=SimpleNamespace(sock=peer_socket)),
         closed=False,
     )
+    sessions = []
+
+    class FakeSession:
+        def __init__(self):
+            self.trust_env = True
+            self.closed = False
+            sessions.append(self)
+
+        def get(self, *args, **kwargs):
+            return response
+
+        def close(self):
+            self.closed = True
+
     monkeypatch.setattr(
         avatar_fetcher.socket,
         "getaddrinfo",
-        lambda *args, **kwargs: [(None, None, None, None, ("93.184.216.34", 443))],
+        lambda *args, **kwargs: [
+            (avatar_fetcher.socket.AF_INET, avatar_fetcher.socket.SOCK_STREAM, 0, "", ("93.184.216.34", 443))
+        ],
     )
-    monkeypatch.setattr(avatar_fetcher.requests, "get", lambda *args, **kwargs: response)
+    monkeypatch.setattr(avatar_fetcher.requests, "Session", FakeSession)
 
     with pytest.raises(HTTPException):
         avatar_fetcher.download_remote_image("https://example.test/avatar")
 
+    assert response.closed is True
+    assert sessions[0].trust_env is False
+    assert sessions[0].closed is True
+
+
+def test_avatar_downloader_rejects_private_connected_peer(monkeypatch):
+    from memoria.api import avatar_fetcher
+
+    peer_socket = SimpleNamespace(getpeername=lambda: ("127.0.0.1", 443))
+    response = SimpleNamespace(
+        raw=SimpleNamespace(_connection=SimpleNamespace(sock=peer_socket)),
+        close=lambda: setattr(response, "closed", True),
+        closed=False,
+    )
+
+    class FakeSession:
+        trust_env = True
+
+        def get(self, *args, **kwargs):
+            return response
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        avatar_fetcher.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (avatar_fetcher.socket.AF_INET, avatar_fetcher.socket.SOCK_STREAM, 0, "", ("93.184.216.34", 443))
+        ],
+    )
+    monkeypatch.setattr(avatar_fetcher.requests, "Session", FakeSession)
+
+    with pytest.raises(HTTPException) as exc_info:
+        avatar_fetcher.download_remote_image("https://example.test/avatar")
+
+    assert exc_info.value.status_code == 400
+    assert "内网" in exc_info.value.detail
     assert response.closed is True
 
 
@@ -114,7 +182,6 @@ def test_user_avatar_url_rejects_url_when_remote_fetch_is_blocked(monkeypatch):
         raise HTTPException(400, "不允许访问内网或保留地址")
 
     monkeypatch.setattr(user, "download_remote_image", fake_download_remote_image)
-    monkeypatch.setattr(user, "get_current_user_id", lambda token: "usr_1")
     monkeypatch.setattr(
         user.repository,
         "update_user_profile",
@@ -124,9 +191,7 @@ def test_user_avatar_url_rejects_url_when_remote_fetch_is_blocked(monkeypatch):
     with pytest.raises(HTTPException) as exc_info:
         user.set_avatar_url(
             user.SetAvatarUrlRequest(url=url),
-            token="token",
-            authorization=None,
-            cookie_token=None,
+            uid="usr_1",
         )
 
     assert exc_info.value.status_code == 400
@@ -159,11 +224,14 @@ def test_legacy_password_login_upgrades_hash_and_persists_token(monkeypatch):
         expires_at=expires_at,
     ))
 
-    res = user.login(user.LoginRequest(username="alice", password=password), Response())
+    response = Response()
+    res = user.login(user.LoginRequest(username="alice", password=password), response)
 
     assert res.user.user_id == "usr_test"
     assert updates["password_hash"].startswith("pbkdf2_sha256$")
-    assert tokens["token"] == res.token
+    assert not hasattr(res, "token")
+    assert tokens["token"] in response.headers["set-cookie"]
+    assert "HttpOnly" in response.headers["set-cookie"]
     assert tokens["user_id"] == "usr_test"
 
 
@@ -315,3 +383,69 @@ def test_call_light_task_can_ignore_reasoning_content(monkeypatch):
     monkeypatch.setattr(llm_client, "_retry_call", lambda fn, *args, **kwargs: fn(*args, **kwargs))
 
     assert llm_client.call_light_task("summarize", allow_reasoning_fallback=False) == ""
+
+
+def test_retry_call_does_not_retry_non_retryable_4xx(monkeypatch):
+    from memoria.core import llm_client
+
+    attempts = []
+    request = httpx.Request("POST", "https://api.example.test/v1/chat")
+    response = httpx.Response(400, request=request)
+    error = llm_client.APIStatusError("bad request", response=response, body={})
+    monkeypatch.setattr(
+        llm_client._time,
+        "sleep",
+        lambda delay: pytest.fail(f"unexpected retry delay: {delay}"),
+    )
+
+    def fail():
+        attempts.append(1)
+        raise error
+
+    with pytest.raises(llm_client.APIStatusError):
+        llm_client._retry_call(fail)
+
+    assert len(attempts) == 1
+
+
+@pytest.mark.parametrize("status_code", [429, 500])
+def test_retry_call_retries_rate_limit_and_server_errors(monkeypatch, status_code):
+    from memoria.core import llm_client
+
+    attempts = []
+    delays = []
+    request = httpx.Request("POST", "https://api.example.test/v1/chat")
+    response = httpx.Response(status_code, request=request)
+    error = llm_client.APIStatusError("retryable", response=response, body={})
+    monkeypatch.setattr(llm_client._time, "sleep", delays.append)
+
+    def flaky():
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise error
+        return "ok"
+
+    assert llm_client._retry_call(flaky) == "ok"
+    assert len(attempts) == 3
+    assert delays == [1.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_read_upload_limited_reads_once_and_rejects_oversize():
+    from memoria.api.upload_utils import read_upload_limited
+
+    class FakeUpload:
+        def __init__(self, data):
+            self.data = data
+            self.read_sizes = []
+
+        async def read(self, size):
+            self.read_sizes.append(size)
+            return self.data[:size]
+
+    upload = FakeUpload(b"123456")
+    with pytest.raises(HTTPException) as exc_info:
+        await read_upload_limited(upload, 5, detail="too large")
+
+    assert exc_info.value.status_code == 413
+    assert upload.read_sizes == [6]

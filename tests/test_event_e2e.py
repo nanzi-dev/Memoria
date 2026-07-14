@@ -202,10 +202,7 @@ async def test_single_dialogue_http_event_execution_persists_to_database(monkeyp
     assert [item["message"] for item in body["event_notifications"]] == [notification]
     assert replay.status_code == 200, replay.text
     replay_body = replay.json()
-    assert replay_body["current_affinity"] == 4
-    assert replay_body["event_executions"][0]["status"] == "skipped"
-    assert replay_body["event_executions"][0]["deduplicated"] is True
-    assert replay_body["event_notifications"] == []
+    assert replay_body == body
 
     runtime = repository.get_runtime_state(
         character_id,
@@ -220,7 +217,7 @@ async def test_single_dialogue_http_event_execution_persists_to_database(monkeyp
     assert [
         message["role"]
         for message in repository.get_short_term_history(session_id, limit_turns=2)
-    ] == ["user", "assistant", "user", "assistant"]
+    ] == ["user", "assistant"]
 
 
 @pytest.mark.asyncio
@@ -231,9 +228,7 @@ async def test_group_dialogue_http_event_execution_persists_to_database(monkeypa
         self,
         character_id,
         _player_message,
-        *,
-        clock_snapshot=None,
-        persist=True,
+        **_kwargs,
     ):
         return {
             "character_id": character_id,

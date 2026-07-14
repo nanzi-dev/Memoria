@@ -435,6 +435,8 @@ def dialogue_turn(
 
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except repository.DialogueTurnConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 # =========================
 # Session list

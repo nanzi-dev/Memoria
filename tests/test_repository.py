@@ -378,6 +378,48 @@ class TestCharacterCard:
         assert not repository.is_character_card_active(owner_a, cid)
         assert repository.is_character_card_active(owner_b, cid)
 
+    def test_soft_delete_preserves_relationship_and_hard_delete_removes_it(self):
+        owner = f"user_{uuid.uuid4().hex[:8]}"
+        character_id = f"tc_{uuid.uuid4().hex[:8]}"
+        other_id = f"tc_{uuid.uuid4().hex[:8]}"
+        for cid in (character_id, other_id):
+            card = json.dumps(
+                {"character_id": cid, "meta": {"name": cid, "display_name": cid}}
+            )
+            assert repository.save_character_card_to_db(
+                owner,
+                cid,
+                card,
+                name=cid,
+                display_name=cid,
+            )
+        assert repository.save_character_relationship(
+            owner,
+            character_id,
+            other_id,
+            "friend",
+            50.0,
+            "friends",
+        )
+
+        assert repository.delete_character_card_from_db(owner, character_id)
+        assert repository.get_character_relationship(owner, character_id, other_id)
+
+        assert repository.delete_character_card_from_db(
+            owner,
+            character_id,
+            soft_delete=False,
+        )
+        assert repository.get_character_relationship(owner, character_id, other_id) is None
+        assert (
+            repository.get_character_relationship_updated_at(
+                owner,
+                character_id,
+                other_id,
+            )
+            is not None
+        )
+
 class TestEventDefinition:
     def test_crud(self):
         owner = f"user_{uuid.uuid4().hex[:8]}"

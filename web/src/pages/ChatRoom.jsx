@@ -244,9 +244,13 @@ function maxGroupMessageId(messages, fallback = 0) {
   }, fallback);
 }
 
-function createClientMessageId() {
+function createRequestId(prefix = 'request') {
   return globalThis.crypto?.randomUUID?.()
-    ?? `group-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    ?? `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function createClientMessageId() {
+  return createRequestId('group-message');
 }
 
 function formatChatTime(value) {
@@ -668,6 +672,10 @@ export default function ChatRoom() {
 
   const groupRequestGenerationRef = useRef(0);
 
+  const singleRequestGenerationRef = useRef(0);
+
+  const activeSendRequestRef = useRef(null);
+
   const sendMessageRef = useRef(null);
 
   const directCharacterHandledRef = useRef(null);
@@ -733,6 +741,18 @@ export default function ChatRoom() {
     activeGroupThreadIdRef.current = null;
     activeGroupSessionIdRef.current = null;
     setGroupHistoryReady(false);
+  }
+
+  function invalidatePendingSend() {
+    activeSendRequestRef.current = null;
+    setSending(false);
+    setSendingMulti(false);
+  }
+
+  function nextSingleRequestGeneration() {
+    singleRequestGenerationRef.current += 1;
+    invalidatePendingSend();
+    return singleRequestGenerationRef.current;
   }
 
   function registerLoadedGroupMessages(groupMessages) {
@@ -1059,6 +1079,7 @@ export default function ChatRoom() {
 
     const sessionToIdle = singleSessionId || multiSessionId || activeSessionRef.current;
 
+    nextSingleRequestGeneration();
     resetGroupSyncState();
     cancelRecording();
 
@@ -1095,6 +1116,9 @@ export default function ChatRoom() {
       return;
     }
 
+    const generation = nextSingleRequestGeneration();
+    resetGroupSyncState();
+
     cancelRecording();
 
     stopAudio();
@@ -1113,6 +1137,7 @@ export default function ChatRoom() {
     try {
 
       const detail = await characterAdmin.get(char.character_id);
+      if (generation !== singleRequestGenerationRef.current) return;
 
       const cd = detail.card_data || {};
 
@@ -1136,6 +1161,7 @@ export default function ChatRoom() {
 
       if (!isCharacterActive(nextCharacter)) {
         const hist = await dialogue.getHistory(char.character_id, PLAYER_ID, 0, 20);
+        if (generation !== singleRequestGenerationRef.current) return;
         setSessionLocale(hist?.locale || char.locale || DEFAULT_BROWSER_LOCALE);
         if (hist?.messages?.length) {
           setMessages(sortMessagesChronologically(hist.messages.map(normalizeDialogueMessage)));
@@ -1162,6 +1188,7 @@ export default function ChatRoom() {
         PLAYER_NAME,
         localeOverride || char.locale || DEFAULT_BROWSER_LOCALE,
       );
+      if (generation !== singleRequestGenerationRef.current) return;
 
       setSingleSessionId(session.session_id);
       setSessionLocale(session.locale || localeOverride || char.locale || DEFAULT_BROWSER_LOCALE);
@@ -1172,6 +1199,7 @@ export default function ChatRoom() {
       let nextHasMoreHistory = true;
 
       const hist = await dialogue.getHistory(char.character_id, PLAYER_ID, 0, 20);
+      if (generation !== singleRequestGenerationRef.current) return;
       if (hist?.messages?.length) {
         setSessionLocale(hist.locale || session.locale || localeOverride || char.locale || DEFAULT_BROWSER_LOCALE);
         setMessages(sortMessagesChronologically(hist.messages.map(normalizeDialogueMessage)));
@@ -1199,7 +1227,12 @@ export default function ChatRoom() {
 
       setView('single');
 
-    } catch (e) { setError(e.message); setView('list'); }
+    } catch (e) {
+      if (generation === singleRequestGenerationRef.current) {
+        setError(e.message);
+        setView('list');
+      }
+    }
 
   }, [PLAYER_ID, PLAYER_NAME, cancelRecording, stopAudio]);
 
@@ -1250,6 +1283,7 @@ export default function ChatRoom() {
 
   const enterGroupSetup = useCallback(() => {
     if (!PLAYER_ID) { setError('请先登录后使用对话功能'); return; }
+    nextSingleRequestGeneration();
     resetGroupSyncState();
     cancelRecording();
     stopAudio();
@@ -1271,6 +1305,7 @@ export default function ChatRoom() {
   async function enterGroupChat(item, initialParticipants = []) {
     if (!item?.session_id) return;
 
+    nextSingleRequestGeneration();
     cancelRecording();
     stopAudio();
     clearIdleSessionEnd(item.session_id);
@@ -1553,6 +1588,7 @@ export default function ChatRoom() {
     const selectedParticipants = participants.map(p => normalizeParticipant(p));
     if (selectedParticipants.some(p => !isCharacterActive(p))) { setError('离线角色不能用于新建群聊'); return; }
 
+    nextSingleRequestGeneration();
     setError(null); setView('single-loading');
 
     try {
@@ -1616,6 +1652,13 @@ export default function ChatRoom() {
 
     setError(null);
 
+    const requestId = createRequestId('dialogue-turn');
+    const requestMode = view;
+    const requestToken = { requestId, mode: requestMode };
+    const singleGeneration = singleRequestGenerationRef.current;
+    const singleSessionAtSend = singleSessionId;
+    activeSendRequestRef.current = requestToken;
+
     setInput(''); setSending(true); setSendingMulti(true);
 
     const optimisticWorldCreatedAt = getWorldNow()?.toISOString();
@@ -1641,7 +1684,11 @@ export default function ChatRoom() {
 
       if (view === 'single') {
 
-        const res = await dialogue.sendMessage(singleSessionId, text);
+        const res = await dialogue.sendMessage(singleSessionAtSend, text, requestId);
+        if (
+          singleGeneration !== singleRequestGenerationRef.current
+          || activeSessionRef.current !== singleSessionAtSend
+        ) return;
 
         const affinityDelta = currentDelta(res.current_affinity, affinity, res.affinity_delta);
         const trustDelta = currentDelta(res.current_trust, trust, res.trust_delta);
@@ -1704,7 +1751,9 @@ export default function ChatRoom() {
           return continued.session_id;
         };
 
-        const sendGroupTurn = (sessionId) => multiDialogue.discussMessage(sessionId, text);
+        const sendGroupTurn = (sessionId) => (
+          multiDialogue.discussMessage(sessionId, text, null, requestId)
+        );
 
         if (multiSessionStatus !== 'active') {
           targetSessionId = await continueGroupSession();
@@ -1750,12 +1799,21 @@ export default function ChatRoom() {
         ));
         setInput(current => current || text);
       }
-      if (view !== 'group' || isCurrentGroupRequest) {
+      const isCurrentSingleRequest = view === 'single'
+        && singleGeneration === singleRequestGenerationRef.current
+        && activeSessionRef.current === singleSessionAtSend;
+      if (isCurrentSingleRequest || isCurrentGroupRequest) {
         setError(e.message);
       }
     }
 
-    finally { setSending(false); setSendingMulti(false); }
+    finally {
+      if (activeSendRequestRef.current === requestToken) {
+        activeSendRequestRef.current = null;
+        setSending(false);
+        setSendingMulti(false);
+      }
+    }
 
   }, [input, sending, sendingMulti, view, singleSessionId, multiSessionId, multiSessionStatus, groupName, affinity, trust, character, participants, allChars, PLAYER_ID, PLAYER_NAME, getWorldNow, syncGroupHistory, user?.tts_auto_play, enqueueAutoplay, sessionLocale]);
 

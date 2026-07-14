@@ -437,10 +437,14 @@ export const dialogue = {
     });
   },
   /** 发送消息并获取回复 */
-  sendMessage(sessionId, playerMessage) {
+  sendMessage(sessionId, playerMessage, requestId) {
     return request('/dialogue/turn', {
       method: 'POST',
-      body: JSON.stringify({ session_id: sessionId, player_message: playerMessage }),
+      body: JSON.stringify({
+        session_id: sessionId,
+        player_message: playerMessage,
+        request_id: requestId,
+      }),
     });
   },
   /** 结束会话 */
@@ -503,11 +507,12 @@ export const multiDialogue = {
     });
   },
   /** 发送群聊消息，后端按语境决定实际回复人数 */
-  discussMessage(sessionId, playerMessage, maxResponses = null) {
+  discussMessage(sessionId, playerMessage, maxResponses = null, requestId = null) {
     const body = {
       session_id: sessionId,
       player_message: playerMessage,
       discussion_mode: true,
+      request_id: requestId,
     };
     if (maxResponses) body.max_responses = maxResponses;
     return request('/multi-dialogue/turn', {

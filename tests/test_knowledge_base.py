@@ -7,6 +7,7 @@ from pathlib import Path
 import threading
 import time
 import uuid
+import zipfile
 
 import pytest
 
@@ -364,6 +365,15 @@ def test_document_validation_rejects_empty_spoofed_scanned_and_oversized(monkeyp
     monkeypatch.setattr(configs, "knowledge_upload_max_bytes", 3)
     with pytest.raises(KnowledgeDocumentError, match="10 MB"):
         extract_document("large.txt", b"four")
+
+
+def test_docx_validation_rejects_abnormal_zip_compression_ratio():
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", b"0" * 100_000)
+
+    with pytest.raises(KnowledgeDocumentError, match="压缩比异常"):
+        extract_document("bomb.docx", buffer.getvalue())
 
 
 def test_pdf_validation_rejects_encrypted_and_too_many_pages(monkeypatch):

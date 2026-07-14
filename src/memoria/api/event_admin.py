@@ -16,7 +16,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException
 
-from memoria.api.user import require_current_user_id
+from memoria.api.user import require_admin_user_id, require_current_user_id
 from memoria.core.event_schema import (
     EventDefinition,
     TriggerCondition,
@@ -966,7 +966,7 @@ def list_event_templates(
 @router.post("/admin/event-templates", response_model=OperationResponse)
 def create_event_template(
     req: EventTemplateCreateRequest,
-    current_user_id: str = Depends(require_current_user_id),
+    current_user_id: str = Depends(require_admin_user_id),
 ):
     """创建或更新系统事件模板。仅作为开发维护 API 使用。"""
     _validate_event_configuration(
@@ -997,7 +997,7 @@ def create_event_template(
 @router.delete("/admin/event-templates/{template_id}", response_model=OperationResponse)
 def delete_event_template(
     template_id: str,
-    current_user_id: str = Depends(require_current_user_id),
+    current_user_id: str = Depends(require_admin_user_id),
 ):
     """删除系统事件模板。仅作为开发维护 API 使用。"""
     existing = repository.get_event_template(template_id)

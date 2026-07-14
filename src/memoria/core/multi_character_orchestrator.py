@@ -229,21 +229,36 @@ class MultiCharacterOrchestrator:
         Returns:
             dict | list[dict]: 单个角色回应或多个角色回应列表
         """
-        # 记录玩家消息
-        clock_snapshot = _clock_snapshot_for_player(getattr(self, "player_id", None))
-        player_message_id = repository.append_multi_character_message(
-            self.session_id,
-            role="user",
-            content=player_message,
-            world_created_at=clock_snapshot.world_now.isoformat(),
-            trigger_source="player",
+        request_id = request_id or uuid.uuid4().hex
+        claim = repository.claim_dialogue_turn(
+            session_id=self.session_id,
+            request_id=request_id,
+            player_id=self.player_id,
+            turn_kind="multi",
         )
-        self._prepare_checkpoint_memory()
+        if claim["completed"]:
+            return claim["response"]
+        lease_owner = claim["lease_owner"]
+        clock_snapshot = _clock_snapshot_for_player(getattr(self, "player_id", None))
+        world_created_at = clock_snapshot.world_now.isoformat()
+        player_message_id = -1
+        staged_player_message = {
+            "message_id": player_message_id,
+            "role": "user",
+            "content": player_message,
+            "world_created_at": world_created_at,
+            "trigger_source": "player",
+        }
 
-        self._ensure_has_active_participants()
-        if not allow_multiple_responses:
-            speaker_id = self._decide_next_speaker(player_message)
-            try:
+        try:
+            self._ensure_has_active_participants()
+            if not allow_multiple_responses:
+                speaker_id = self._decide_next_speaker(player_message)
+                history = repository.get_multi_character_thread_history(
+                    self.session_id,
+                    limit_messages=30,
+                )
+                history = [*history, staged_player_message]
                 result = self._generate_character_response(
                     speaker_id,
                     player_message,
@@ -255,59 +270,72 @@ class MultiCharacterOrchestrator:
                         topic=player_message[:120] or None,
                     ),
                     trigger_source="player",
+                    target_message=staged_player_message,
                     clock_snapshot=clock_snapshot,
                     persist=False,
+                    history_override=history,
                 )
-            except TypeError as exc:
-                if "unexpected keyword argument" not in str(exc):
-                    raise
-                result = self._generate_character_response(speaker_id, player_message)
-            responses = [result]
-
-        else:
-            response_count = min(
-                3,
-                self._decide_group_response_count(player_message, max_responses),
-            )
-            try:
+                result["message_id"] = -2
+                responses = [result]
+                self.last_pulse_state = self._build_pulse_state(
+                    [
+                        DialogueDecision(
+                            action="speak",
+                            speaker_id=speaker_id,
+                            reply_to_message_id=player_message_id,
+                            intent="answer",
+                            topic=player_message[:120] or None,
+                            wait_for_player=True,
+                        )
+                    ],
+                    responses,
+                    "player",
+                )
+            else:
+                response_count = min(
+                    3,
+                    self._decide_group_response_count(player_message, max_responses),
+                )
                 responses = self._generate_group_discussion(
                     player_message,
                     response_count,
                     clock_snapshot=clock_snapshot,
                     trigger_message_id=player_message_id,
+                    staged_history=[staged_player_message],
                 )
-            except TypeError as exc:
-                if "unexpected keyword argument" not in str(exc):
-                    raise
-                responses = self._generate_group_discussion(player_message, response_count)
 
-        self._apply_group_event_results(
-            player_message,
-            responses,
-            clock_snapshot=clock_snapshot,
-            request_id=request_id,
-        )
-        if getattr(self, "player_id", None):
-            for response in responses:
-                if response.get("character_id") and response.get("character_name"):
-                    self._persist_generated_response(response, clock_snapshot)
-        self._save_player_checkpoint_memory_once()
-        if allow_multiple_responses:
-            return responses
-        return responses[0]
+            self._apply_group_event_results(
+                player_message,
+                responses,
+                clock_snapshot=clock_snapshot,
+                request_id=request_id,
+                lease_owner=lease_owner,
+                player_message=staged_player_message,
+            )
+            committed_response = responses if allow_multiple_responses else responses[0]
+            self._save_player_checkpoint_memory_after_commit()
+            return committed_response
+        except Exception as exc:
+            repository.fail_dialogue_turn(
+                self.session_id,
+                request_id,
+                lease_owner,
+                str(exc),
+            )
+            raise
 
 
     def _apply_group_event_results(
         self,
-        player_message: str,
+        player_text: str,
         responses: list[dict],
         *,
         clock_snapshot,
-        request_id: str | None,
+        request_id: str,
+        lease_owner: str,
+        player_message: dict,
     ) -> list:
-        if not getattr(self, "player_id", None):
-            return []
-        if any(
+        has_event_context = bool(getattr(self, "player_id", None)) and not any(
             not response.get("character_id")
             or "current_affinity" not in response
             or "current_trust" not in response
@@ -315,72 +343,149 @@ class MultiCharacterOrchestrator:
             or "_previous_affinity" not in response
             or "_previous_trust" not in response
             for response in responses
-        ):
-            return []
-        execution_key = (
-            f"multi:{self.session_id}:{request_id}"
-            if request_id
-            else f"multi:{self.session_id}:{uuid.uuid4().hex}"
         )
-        relationships = self._load_all_relationships()
         contexts = []
-        for response in responses:
-            previous_affinity = response.pop("_previous_affinity")
-            previous_trust = response.pop("_previous_trust")
-            contexts.append(event_runtime.build_event_context(
-                character_id=response["character_id"],
-                player_id=self.player_id,
-                session_id=self.session_id,
-                current_affinity=response["current_affinity"],
-                current_trust=response["current_trust"],
-                current_mood=response["current_mood"],
-                previous_affinity=previous_affinity,
-                previous_trust=previous_trust,
-                affinity_delta=response["affinity_delta"],
-                trust_delta=response["trust_delta"],
-                player_message=player_message,
-                npc_response=response["dialogue"],
-                character_relationships=relationships,
-                world_time=clock_snapshot.world_now.isoformat(),
-                execution_key=execution_key,
-                trigger_source="multi_dialogue",
-                current_user_turn_persisted=True,
-            ))
+        if has_event_context:
+            relationships = self._load_all_relationships()
+            for response in responses:
+                contexts.append(event_runtime.build_event_context(
+                    character_id=response["character_id"],
+                    player_id=self.player_id,
+                    session_id=self.session_id,
+                    current_affinity=response["current_affinity"],
+                    current_trust=response["current_trust"],
+                    current_mood=response["current_mood"],
+                    previous_affinity=response["_previous_affinity"],
+                    previous_trust=response["_previous_trust"],
+                    affinity_delta=response["affinity_delta"],
+                    trust_delta=response["trust_delta"],
+                    player_message=player_text,
+                    npc_response=response["dialogue"],
+                    character_relationships=relationships,
+                    world_time=clock_snapshot.world_now.isoformat(),
+                    execution_key=f"multi:{self.session_id}:{request_id}",
+                    trigger_source="multi_dialogue",
+                    current_user_turn_persisted=False,
+                ))
 
-        event_results = event_runtime.detect_and_execute_event_contexts(contexts)
-        for response, context in zip(responses, contexts):
-            character_results = [
-                result
-                for result in event_results
-                if result.character_id == response["character_id"]
+        turn_holder: dict = {}
+
+        def build_dialogue_turn(event_results: list) -> dict:
+            if turn_holder:
+                return turn_holder["turn"]
+            for response, context in zip(responses, contexts):
+                character_results = [
+                    result
+                    for result in event_results
+                    if result.character_id == response["character_id"]
+                ]
+                (
+                    response["dialogue"],
+                    response["current_affinity"],
+                    response["current_trust"],
+                    response["current_mood"],
+                    response["triggered_events"],
+                    response["event_notification"],
+                ) = event_runtime.apply_event_results_to_dialogue_state(
+                    character_results,
+                    response["dialogue"],
+                    response["current_affinity"],
+                    response["current_trust"],
+                    response["current_mood"],
+                )
+                response["affinity_delta"] = round(
+                    response["current_affinity"] - float(context.previous_affinity or 0),
+                    6,
+                )
+                response["trust_delta"] = round(
+                    response["current_trust"] - float(context.previous_trust or 0),
+                    6,
+                )
+                response["event_executions"] = [
+                    result.model_dump(mode="json") for result in character_results
+                ]
+                response["event_notifications"] = (
+                    event_runtime.collect_event_notifications(character_results)
+                )
+
+            runtime_states = [
+                {
+                    "character_id": response["character_id"],
+                    "affection_level": response["current_affinity"],
+                    "trust_level": response["current_trust"],
+                    "current_mood": response["current_mood"],
+                }
+                for response in responses
+                if all(
+                    key in response
+                    for key in (
+                        "character_id",
+                        "current_affinity",
+                        "current_trust",
+                        "current_mood",
+                    )
+                )
             ]
-            (
-                response["dialogue"],
-                response["current_affinity"],
-                response["current_trust"],
-                response["current_mood"],
-                response["triggered_events"],
-                response["event_notification"],
-            ) = event_runtime.apply_event_results_to_dialogue_state(
-                character_results,
-                response["dialogue"],
-                response["current_affinity"],
-                response["current_trust"],
-                response["current_mood"],
+            messages = [{
+                **player_message,
+                "temporary_id": player_message["message_id"],
+            }]
+            for index, response in enumerate(responses):
+                response.pop("_previous_affinity", None)
+                response.pop("_previous_trust", None)
+                messages.append({
+                    "role": "assistant",
+                    "content": response.get("dialogue", ""),
+                    "character_id": response.get("character_id"),
+                    "character_name": response.get("character_name"),
+                    "action": response.get("action"),
+                    "affinity_delta": response.get("affinity_delta"),
+                    "trust_delta": response.get("trust_delta"),
+                    "current_affinity": response.get("current_affinity"),
+                    "current_trust": response.get("current_trust"),
+                    "current_mood": response.get("current_mood"),
+                    "event_notification": response.get("event_notification"),
+                    "world_created_at": response.get("world_created_at"),
+                    "knowledge_sources": response.get("knowledge_sources") or [],
+                    "reply_to_message_id": response.get("reply_to_message_id"),
+                    "reply_to_character_id": response.get("reply_to_character_id"),
+                    "intent": response.get("intent"),
+                    "topic": response.get("topic"),
+                    "trigger_source": response.get("trigger_source"),
+                    "temporary_id": response.get("message_id"),
+                    "response_index": index,
+                    "response_field": "message_id",
+                })
+            group_state = {
+                **getattr(self, "last_pulse_state", {}),
+                "group_thread_id": (
+                    repository.get_group_thread_id(self.session_id) or self.session_id
+                ),
+            }
+            turn = {
+                "session_id": self.session_id,
+                "request_id": request_id,
+                "player_id": self.player_id,
+                "lease_owner": lease_owner,
+                "response": responses,
+                "runtime_states": runtime_states,
+                "messages": messages,
+                "group_state": group_state,
+            }
+            turn_holder["turn"] = turn
+            return turn
+
+        event_results = []
+        if contexts:
+            event_results = event_runtime.detect_and_execute_event_contexts(
+                contexts,
+                dialogue_turn_factory=build_dialogue_turn,
             )
-            response["affinity_delta"] = round(
-                response["current_affinity"] - float(context.previous_affinity or 0),
-                6,
-            )
-            response["trust_delta"] = round(
-                response["current_trust"] - float(context.previous_trust or 0),
-                6,
-            )
-            response["event_executions"] = [
-                result.model_dump(mode="json") for result in character_results
-            ]
-            response["event_notifications"] = (
-                event_runtime.collect_event_notifications(character_results)
+        if not turn_holder:
+            turn = build_dialogue_turn(event_results)
+            repository.commit_dialogue_turn(
+                dialogue_turn=turn,
+                runtime_states=turn["runtime_states"],
             )
         return event_results
 
@@ -421,33 +526,28 @@ class MultiCharacterOrchestrator:
         return message_id
 
 
-    def _prepare_checkpoint_memory(self) -> None:
-        self._checkpoint_memory_fact = None
-        self._checkpoint_memory_ready = True
-        if not repository.is_long_term_memory_checkpoint(
-            self.session_id, configs.long_term_memory_interval_turns
-        ):
-            return
-        history = repository.get_multi_character_thread_history(
-            self.session_id,
-            limit_messages=max(12, configs.long_term_memory_interval_turns * 4),
-        )
-        self._checkpoint_memory_fact = extract_player_memory(history)
-
-
-    def _save_player_checkpoint_memory_once(self) -> None:
-        fact = getattr(self, "_checkpoint_memory_fact", None)
-        player_id = getattr(self, "player_id", None)
-        if not fact or not player_id:
-            return
-        character_ids = getattr(self, "character_ids", None) or [
-            participant.get("character_id")
-            for participant in getattr(self, "participants", [])
-            if participant.get("character_id")
-        ]
-        for character_id in dict.fromkeys(character_ids):
-            repository.save_long_term_fact(character_id, player_id, fact)
-        self._checkpoint_memory_fact = None
+    def _save_player_checkpoint_memory_after_commit(self) -> None:
+        try:
+            if not repository.is_long_term_memory_checkpoint(
+                self.session_id, configs.long_term_memory_interval_turns
+            ):
+                return
+            history = repository.get_multi_character_thread_history(
+                self.session_id,
+                limit_messages=max(12, configs.long_term_memory_interval_turns * 4),
+            )
+            fact = extract_player_memory(history)
+            player_id = self.player_id
+            if not fact or not player_id:
+                return
+            for character_id in dict.fromkeys(self.character_ids):
+                repository.save_long_term_fact(character_id, player_id, fact)
+        except Exception:
+            logger.error(
+                "群聊长期记忆保存失败: session=%s",
+                self.session_id,
+                exc_info=True,
+            )
 
     def _decide_group_response_count(self, player_message: str, max_responses: int | None = None) -> int:
         """按群聊语境决定本轮实际接话人数。"""
@@ -561,6 +661,7 @@ class MultiCharacterOrchestrator:
         *,
         clock_snapshot=None,
         trigger_message_id: int | None = None,
+        staged_history: list[dict] | None = None,
     ) -> list[dict]:
         """兼容旧调用名，内部执行逐条重决策的对话脉冲。"""
         return self.run_dialogue_pulse(
@@ -569,6 +670,9 @@ class MultiCharacterOrchestrator:
             trigger_message_id=trigger_message_id,
             max_messages=max_responses,
             clock_snapshot=clock_snapshot,
+            persist_state=False,
+            persist_messages=False,
+            staged_history=staged_history,
         )
 
 
@@ -584,6 +688,7 @@ class MultiCharacterOrchestrator:
         persist_state: bool = True,
         persist_messages: bool = True,
         extract_memory: bool = False,
+        staged_history: list[dict] | None = None,
     ) -> list[dict]:
         """每生成一条消息后重读数据库历史，并重新决定下一动作。"""
         self._ensure_has_active_participants()
@@ -598,8 +703,8 @@ class MultiCharacterOrchestrator:
                 self.session_id,
                 limit_messages=30,
             )
-            if not persist_messages and staged_messages:
-                history = [*history, *staged_messages]
+            if not persist_messages:
+                history = [*history, *(staged_history or []), *staged_messages]
             decision = self._decide_dialogue_action(
                 history=history,
                 trigger_source=trigger_source,
@@ -650,7 +755,9 @@ class MultiCharacterOrchestrator:
                 ):
                     self._persist_generated_response(result, clock_snapshot)
             else:
-                temporary_message_id = -(len(staged_messages) + 1)
+                temporary_message_id = -(
+                    len(staged_messages) + len(staged_history or []) + 1
+                )
                 result["message_id"] = temporary_message_id
                 staged_messages.append({
                     "message_id": temporary_message_id,

@@ -11,7 +11,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 
 from memoria.core import character_loader, world_clock
 from memoria.core.config import configs
@@ -488,10 +488,17 @@ def _commit_planned_batch(
     *,
     runtime_states: list[dict[str, Any]] | None = None,
     schedule_completion: dict[str, Any] | None = None,
+    dialogue_turn_factory: Callable[[list[EventTriggerResult]], dict] | None = None,
 ) -> list[EventTriggerResult]:
     results_data = json.dumps(
         [result.model_dump(mode="json") for result in results],
         ensure_ascii=False,
+    )
+    dialogue_turn = dialogue_turn_factory(results) if dialogue_turn_factory else None
+    effective_runtime_states = (
+        dialogue_turn.get("runtime_states")
+        if dialogue_turn and "runtime_states" in dialogue_turn
+        else runtime_states
     )
     try:
         commit = repository.commit_event_execution_batch(
@@ -500,8 +507,9 @@ def _commit_planned_batch(
             trigger_source=context.trigger_source,
             results_data=results_data,
             executions=executions,
-            runtime_states=runtime_states,
+            runtime_states=effective_runtime_states,
             schedule_completion=schedule_completion,
+            dialogue_turn=dialogue_turn,
         )
     except Exception:
         for execution in executions:
@@ -561,6 +569,7 @@ def detect_and_execute_events(
     *,
     runtime_states: list[dict[str, Any]] | None = None,
     schedule_completion: dict[str, Any] | None = None,
+    dialogue_turn_factory: Callable[[list[EventTriggerResult]], dict] | None = None,
 ) -> list[EventTriggerResult]:
     """Detect, plan, and atomically commit one idempotent event batch."""
     execution_key = context.execution_key or (
@@ -569,7 +578,17 @@ def detect_and_execute_events(
     context = context.model_copy(update={"execution_key": execution_key})
     existing = repository.get_event_execution_batch(context.player_id, execution_key)
     if existing:
-        return _replay_batch_results(context.player_id, execution_key, existing)
+        restored = _replay_batch_results(context.player_id, execution_key, existing)
+        if not dialogue_turn_factory:
+            return restored
+        return _commit_planned_batch(
+            context,
+            restored,
+            [],
+            runtime_states=runtime_states,
+            schedule_completion=schedule_completion,
+            dialogue_turn_factory=dialogue_turn_factory,
+        )
 
     definitions = event_definitions or load_event_definitions(context.player_id, context.character_id, only_active=True)
     detector = get_event_detector()
@@ -595,12 +614,15 @@ def detect_and_execute_events(
         executions,
         runtime_states=runtime_states,
         schedule_completion=schedule_completion,
+        dialogue_turn_factory=dialogue_turn_factory,
     )
 
 
 def detect_and_execute_event_contexts(
     contexts: list[EventContext],
     event_definitions: list[EventDefinition] | None = None,
+    *,
+    dialogue_turn_factory: Callable[[list[EventTriggerResult]], dict] | None = None,
 ) -> list[EventTriggerResult]:
     """Execute one group-chat turn across multiple character contexts."""
     if not contexts:
@@ -623,7 +645,16 @@ def detect_and_execute_event_contexts(
 
     existing = repository.get_event_execution_batch(player_id, execution_key)
     if existing:
-        return _replay_batch_results(player_id, execution_key, existing)
+        restored = _replay_batch_results(player_id, execution_key, existing)
+        if not dialogue_turn_factory:
+            return restored
+        return _commit_planned_batch(
+            normalized_contexts[0],
+            restored,
+            [],
+            runtime_states=_runtime_states_after_contexts(normalized_contexts, restored),
+            dialogue_turn_factory=dialogue_turn_factory,
+        )
 
     definitions = event_definitions or load_event_definitions(
         player_id,
@@ -685,6 +716,7 @@ def detect_and_execute_event_contexts(
         results,
         executions,
         runtime_states=_runtime_states_after_contexts(normalized_contexts, results),
+        dialogue_turn_factory=dialogue_turn_factory,
     )
 
 

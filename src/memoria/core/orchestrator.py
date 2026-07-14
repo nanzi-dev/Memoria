@@ -662,266 +662,249 @@ def run_dialogue_turn(
     debug_sink: DebugSink | None = None,
 ) -> dict:
     """对应 /dialogue/turn"""
-    
     session = repository.get_session(session_id)
     if not session:
         raise ValueError(f"会话不存在: {session_id}")
     if session.get("status") == "ended":
         raise ValueError("会话已经结束")
-    
+
     character_id = session["character_id"]
     player_id = session["player_id"]
     player_name = session["player_name"]
     locale = session.get("locale") or DEFAULT_LOCALE
-    card = _load_character_card(character_id, player_id, locale)
-    clock_snapshot = world_clock.get_clock_snapshot(player_id)
-    time_context = clock_snapshot.prompt_context(
-        repository.get_last_character_interaction_world_at(player_id, character_id),
-        locale=getattr(getattr(card, "speech_style", None), "language", "zh-CN"),
+    request_id = request_id or uuid.uuid4().hex
+    claim = repository.claim_dialogue_turn(
+        session_id=session_id,
+        request_id=request_id,
+        player_id=player_id,
+        turn_kind="single",
     )
+    if claim["completed"]:
+        return claim["response"]
+    lease_owner = claim["lease_owner"]
 
-    # 使用玩家消息作为查询上下文，进行向量检索
-    runtime_state = repository.get_runtime_state(
-        character_id, 
-        player_id, 
-        card,
-        query_context=player_message
-    )
-    previous_affinity = _safe_float(runtime_state.get("affection_level", 0))
-    previous_trust = _safe_float(runtime_state.get("trust_level", 0))
-    
-    # =========================
-    # 短期记忆
-    # =========================
-    history = repository.get_short_term_history(
-        session_id,
-        limit_turns = 8
-    )
-    knowledge = retrieve_knowledge(
-        owner_user_id=player_id,
-        character_id=character_id,
-        current_message=player_message,
-        recent_history=history,
-    )
-    
-    # 获取历史会话摘要（最近3次，用于上下文增强）
-    past_summaries_raw = repository.get_recent_summaries(character_id, player_id, limit=3)
-    past_summaries = [s["summary_text"] for s in past_summaries_raw] if past_summaries_raw else []
-    prompt_context = _load_single_character_prompt_context(
-        character_id,
-        player_id,
-        card,
-        query_context=player_message,
-        fallback_known_player_facts=runtime_state.get("known_player_facts"),
-    )
-    runtime_state["known_player_facts"] = prompt_context["known_player_facts"]
-    past_summaries.extend(prompt_context["cross_mode_memories"])
-    
-    system_prompt = _build_system_prompt(
-        card,
-        runtime_state,
-        player_name,
-        past_summaries=past_summaries,
-        relationship_graph_lines=prompt_context["relationship_graph_lines"],
-        time_context=time_context,
-        knowledge_context=knowledge.prompt_section,
-        locale=locale,
-    )
-    
-    messages = history + [
-        {"role": "user", "content": player_message}
-    ]
-    
-    result = llm_client.call_role_turn(
-        system_prompt = system_prompt,
-        history = messages,
-        debug = debug,
-        debug_sink = debug_sink,
-    )
-    
-    # =========================
-    # fallback 监控
-    # =========================
-    if result.get("_fallback_mode"):
-        logger.warning(
-            "LLM JSON降级触发 (character_id=%s, session_id=%s)",
-            character_id,
-            session_id,
-        )
-        
-    # =========================
-    # dialogue 安全过滤
-    # =========================
-    dialogue = _safety_check(result.get("dialogue", ""))
-    
-    # =========================
-    # action 校验（兼容新结构）
-    # =========================
-    action = result.get("action") or card.action_vocabulary.default_action
-    
-    valid_actions = (
-        getattr(card.action_vocabulary, "greeting_actions", [])
-        + getattr(card.action_vocabulary, "farewell_actions", [])
-        + getattr(card.action_vocabulary, "agreement_actions", [])
-        + getattr(card.action_vocabulary, "disagreement_actions", [])
-        + getattr(card.action_vocabulary, "emotional_reactions", [])
-    )
-    
-    if valid_actions and action not in valid_actions:
-        action = card.action_vocabulary.default_action
-        
-    # =========================
-    # affection_level 计算（裁剪）
-    # =========================
-    affinity_delta = _clip(_safe_float(result.get("affinity_delta", 0)), -10, 10)
-    new_affinity = _clip(
-        runtime_state.get("affection_level", 0) + affinity_delta,
-        -100,
-        100
-    )
-    
-    # =========================
-    # trust 处理
-    # =========================
-    trust_delta = _clip(_safe_float(result.get("trust_delta", 0)), -10, 10)
-    new_trust = _clip(
-        runtime_state.get("trust_level", 0) + trust_delta,
-        0,
-        100
-    )
-    
-    # =========================
-    # mood 处理（兼容 schema）
-    # =========================
-    mood_after = result.get("mood_after") or runtime_state.get("current_mood", "neutral")
-    
-    mood_values = getattr(card.runtime_state_schema.current_mood, "emotions", [])
-    if mood_values and mood_after not in mood_values:
-        mood_after = runtime_state.get("current_mood", "neutral")
-        
-    # =========================
-    # 暂缓持久化——先执行事件，成功后统一写入，避免事件失败时数据不一致
-    # =========================
-    # =========================
-    # 事件系统检测和执行
-    # =========================
-    triggered_events_info = []
-    event_notification = None
-    event_notifications = []
-    event_results = []
-    user_msg_id = None
-    assistant_msg_id = None
-    
     try:
+        card = _load_character_card(character_id, player_id, locale)
+        clock_snapshot = world_clock.get_clock_snapshot(player_id)
+        world_created_at = clock_snapshot.world_now.isoformat()
+        time_context = clock_snapshot.prompt_context(
+            repository.get_last_character_interaction_world_at(player_id, character_id),
+            locale=getattr(getattr(card, "speech_style", None), "language", "zh-CN"),
+        )
+        runtime_state = repository.get_runtime_state(
+            character_id,
+            player_id,
+            card,
+            query_context=player_message,
+        )
+        previous_affinity = _safe_float(runtime_state.get("affection_level", 0))
+        previous_trust = _safe_float(runtime_state.get("trust_level", 0))
+        history = repository.get_short_term_history(session_id, limit_turns=8)
+        knowledge = retrieve_knowledge(
+            owner_user_id=player_id,
+            character_id=character_id,
+            current_message=player_message,
+            recent_history=history,
+        )
+        past_summaries_raw = repository.get_recent_summaries(
+            character_id, player_id, limit=3
+        )
+        past_summaries = [
+            summary["summary_text"] for summary in past_summaries_raw or []
+        ]
+        prompt_context = _load_single_character_prompt_context(
+            character_id,
+            player_id,
+            card,
+            query_context=player_message,
+            fallback_known_player_facts=runtime_state.get("known_player_facts"),
+        )
+        runtime_state["known_player_facts"] = prompt_context["known_player_facts"]
+        past_summaries.extend(prompt_context["cross_mode_memories"])
+        system_prompt = _build_system_prompt(
+            card,
+            runtime_state,
+            player_name,
+            past_summaries=past_summaries,
+            relationship_graph_lines=prompt_context["relationship_graph_lines"],
+            time_context=time_context,
+            knowledge_context=knowledge.prompt_section,
+            locale=locale,
+        )
+        result = llm_client.call_role_turn(
+            system_prompt=system_prompt,
+            history=history + [{"role": "user", "content": player_message}],
+            debug=debug,
+            debug_sink=debug_sink,
+        )
+        if result.get("_fallback_mode"):
+            logger.warning(
+                "LLM JSON降级触发 (character_id=%s, session_id=%s)",
+                character_id,
+                session_id,
+            )
+
+        base_dialogue = _safety_check(result.get("dialogue", ""))
+        action = result.get("action") or card.action_vocabulary.default_action
+        valid_actions = (
+            getattr(card.action_vocabulary, "greeting_actions", [])
+            + getattr(card.action_vocabulary, "farewell_actions", [])
+            + getattr(card.action_vocabulary, "agreement_actions", [])
+            + getattr(card.action_vocabulary, "disagreement_actions", [])
+            + getattr(card.action_vocabulary, "emotional_reactions", [])
+        )
+        if valid_actions and action not in valid_actions:
+            action = card.action_vocabulary.default_action
+
+        affinity_delta = _clip(_safe_float(result.get("affinity_delta", 0)), -10, 10)
+        trust_delta = _clip(_safe_float(result.get("trust_delta", 0)), -10, 10)
+        base_affinity = _clip(previous_affinity + affinity_delta, -100, 100)
+        base_trust = _clip(previous_trust + trust_delta, 0, 100)
+        base_mood = result.get("mood_after") or runtime_state.get(
+            "current_mood", "neutral"
+        )
+        mood_values = getattr(card.runtime_state_schema.current_mood, "emotions", [])
+        if mood_values and base_mood not in mood_values:
+            base_mood = runtime_state.get("current_mood", "neutral")
+
         event_context = event_runtime.build_event_context(
             character_id=character_id,
             player_id=player_id,
             session_id=session_id,
-            current_affinity=new_affinity,
-            current_trust=new_trust,
-            current_mood=mood_after,
+            current_affinity=base_affinity,
+            current_trust=base_trust,
+            current_mood=base_mood,
             previous_affinity=previous_affinity,
             previous_trust=previous_trust,
             affinity_delta=affinity_delta,
             trust_delta=trust_delta,
             player_message=player_message,
-            npc_response=dialogue,
+            npc_response=base_dialogue,
             character_relationships=prompt_context.get("character_relationships", {}),
-            world_time=clock_snapshot.world_now.isoformat(),
-            execution_key=(
-                f"dialogue:{session_id}:{request_id}"
-                if request_id
-                else None
-            ),
+            world_time=world_created_at,
+            execution_key=f"dialogue:{session_id}:{request_id}",
             trigger_source="dialogue",
         )
-        
-        event_results = event_runtime.detect_and_execute_events(event_context)
-        dialogue, new_affinity, new_trust, mood_after, triggered_events_info, event_notification = (
-            event_runtime.apply_event_results_to_dialogue_state(
-                event_results,
+
+        turn_holder: dict = {}
+
+        def build_turn(event_results: list) -> dict:
+            (
                 dialogue,
                 new_affinity,
                 new_trust,
                 mood_after,
+                triggered_events,
+                event_notification,
+            ) = event_runtime.apply_event_results_to_dialogue_state(
+                event_results,
+                base_dialogue,
+                base_affinity,
+                base_trust,
+                base_mood,
             )
-        )
-        event_notifications = event_runtime.collect_event_notifications(event_results)
-        
-    except Exception as e:
-        logger.error(f"事件系统处理失败: {e}", exc_info=True)
+            final_affinity_delta = round(new_affinity - previous_affinity, 6)
+            final_trust_delta = round(new_trust - previous_trust, 6)
+            response = {
+                "dialogue": dialogue,
+                "action": action,
+                "affinity_delta": final_affinity_delta,
+                "trust_delta": final_trust_delta,
+                "current_affinity": new_affinity,
+                "current_trust": new_trust,
+                "current_mood": mood_after,
+                "triggered_events": triggered_events,
+                "event_executions": [
+                    item.model_dump(mode="json")
+                    for item in event_results
+                    if hasattr(item, "model_dump")
+                ],
+                "event_notifications": event_runtime.collect_event_notifications(
+                    event_results
+                ),
+                "event_notification": event_notification,
+                "user_message_id": None,
+                "assistant_message_id": None,
+                "world_created_at": world_created_at,
+                "knowledge_sources": knowledge.sources,
+            }
+            turn = {
+                "session_id": session_id,
+                "request_id": request_id,
+                "player_id": player_id,
+                "lease_owner": lease_owner,
+                "response": response,
+                "runtime_states": [{
+                    "character_id": character_id,
+                    "affection_level": new_affinity,
+                    "trust_level": new_trust,
+                    "current_mood": mood_after,
+                }],
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": player_message,
+                        "world_created_at": world_created_at,
+                        "response_field": "user_message_id",
+                    },
+                    {
+                        "role": "assistant",
+                        "content": dialogue,
+                        "action": action,
+                        "affinity_delta": final_affinity_delta,
+                        "trust_delta": final_trust_delta,
+                        "current_affinity": new_affinity,
+                        "current_trust": new_trust,
+                        "current_mood": mood_after,
+                        "event_notification": event_notification,
+                        "world_created_at": world_created_at,
+                        "knowledge_sources": knowledge.sources,
+                        "response_field": "assistant_message_id",
+                    },
+                ],
+            }
+            turn_holder["turn"] = turn
+            return turn
 
-    final_affinity_delta = round(new_affinity - previous_affinity, 6)
-    final_trust_delta = round(new_trust - previous_trust, 6)
+        try:
+            event_results = event_runtime.detect_and_execute_events(
+                event_context,
+                dialogue_turn_factory=build_turn,
+            )
+        except Exception:
+            logger.exception("事件系统处理失败，提交无事件结果的对话轮次")
+            event_results = []
 
-    try:
-        # 更新最终状态
-        repository.save_runtime_state(
-            character_id,
-            player_id,
-            new_affinity,
-            new_trust,
-            mood_after
-        )
+        if "turn" not in turn_holder:
+            turn = build_turn(event_results)
+            response = repository.commit_dialogue_turn(
+                dialogue_turn=turn,
+                runtime_states=turn["runtime_states"],
+            )
+        else:
+            response = turn_holder["turn"]["response"]
 
-        user_msg_id = _append_short_term_message(
+        try:
+            if repository.is_long_term_memory_checkpoint(
+                session_id, configs.long_term_memory_interval_turns
+            ):
+                player_history = repository.get_short_term_history(
+                    session_id,
+                    limit_turns=configs.long_term_memory_interval_turns,
+                )
+                repository.save_long_term_fact(
+                    character_id,
+                    player_id,
+                    extract_player_memory(player_history),
+                )
+        except Exception:
+            logger.exception("长期记忆检查点保存失败")
+        return response
+    except Exception as exc:
+        repository.fail_dialogue_turn(
             session_id,
-            "user",
-            player_message,
-            world_created_at=clock_snapshot.world_now.isoformat(),
+            request_id,
+            lease_owner,
+            str(exc),
         )
-        assistant_msg_id = _append_short_term_message(
-            session_id,
-            "assistant",
-            dialogue,
-            action=action,
-            affinity_delta=final_affinity_delta,
-            trust_delta=final_trust_delta,
-            current_affinity=new_affinity,
-            current_trust=new_trust,
-            current_mood=mood_after,
-            event_notification=event_notification,
-            world_created_at=clock_snapshot.world_now.isoformat(),
-            knowledge_sources=knowledge.sources,
-        )
-
-        if repository.is_long_term_memory_checkpoint(
-            session_id, configs.long_term_memory_interval_turns
-        ):
-            player_history = repository.get_short_term_history(
-                session_id,
-                limit_turns=configs.long_term_memory_interval_turns,
-            )
-            repository.save_long_term_fact(
-                character_id,
-                player_id,
-                extract_player_memory(player_history),
-            )
-    except Exception as e:
-        logger.error(f"对话持久化失败: {e}", exc_info=True)
-        raise RuntimeError("对话持久化失败") from e
-        
-    # =========================
-    # 返回结果
-    # =========================
-    return {
-        "dialogue": dialogue,
-        "action": action,
-        "affinity_delta": final_affinity_delta,
-        "trust_delta": final_trust_delta,
-        "current_affinity": new_affinity,
-        "current_trust": new_trust,
-        "current_mood": mood_after,
-        "triggered_events": triggered_events_info,
-        "event_executions": [
-            result.model_dump(mode="json")
-            for result in event_results
-            if hasattr(result, "model_dump")
-        ],
-        "event_notifications": event_notifications,
-        "event_notification": event_notification,
-        "user_message_id": user_msg_id,
-        "assistant_message_id": assistant_msg_id,
-        "world_created_at": clock_snapshot.world_now.isoformat(),
-        "knowledge_sources": knowledge.sources,
-    }
+        raise

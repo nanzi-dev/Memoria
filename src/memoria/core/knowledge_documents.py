@@ -7,6 +7,7 @@ from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 import re
+import stat
 import zipfile
 
 from memoria.core.config import configs
@@ -42,6 +43,10 @@ _MARKDOWN_TABLE_SEPARATOR_RE = re.compile(
     r"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$"
 )
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[。！？!?；;])|(?<=\.)\s+|\n+")
+_DOCX_MAX_ENTRIES = 2048
+_DOCX_MAX_ENTRY_BYTES = 32 * 1024 * 1024
+_DOCX_MAX_TOTAL_BYTES = 64 * 1024 * 1024
+_DOCX_MAX_COMPRESSION_RATIO = 100
 
 
 def validate_document_filename(filename: str) -> None:
@@ -258,7 +263,38 @@ def _extract_docx(data: bytes) -> ExtractedDocument:
         raise KnowledgeDocumentError("文件内容与 DOCX 扩展名不匹配")
     try:
         with zipfile.ZipFile(BytesIO(data)) as archive:
-            if "word/document.xml" not in archive.namelist():
+            entries = archive.infolist()
+            if len(entries) > _DOCX_MAX_ENTRIES:
+                raise KnowledgeDocumentError("DOCX 包含过多 ZIP 条目")
+            total_size = 0
+            names = set()
+            for entry in entries:
+                name = entry.filename
+                path = Path(name.replace("\\", "/"))
+                if (
+                    not name
+                    or "\x00" in name
+                    or path.is_absolute()
+                    or ".." in path.parts
+                    or stat.S_ISLNK(entry.external_attr >> 16)
+                ):
+                    raise KnowledgeDocumentError("DOCX 包含不安全的 ZIP 条目")
+                if entry.flag_bits & 0x1:
+                    raise KnowledgeDocumentError("不支持加密 DOCX")
+                if entry.file_size < 0 or entry.compress_size < 0:
+                    raise KnowledgeDocumentError("DOCX ZIP 元数据无效")
+                if entry.file_size > _DOCX_MAX_ENTRY_BYTES:
+                    raise KnowledgeDocumentError("DOCX 单个 ZIP 条目解压后过大")
+                total_size += entry.file_size
+                if total_size > _DOCX_MAX_TOTAL_BYTES:
+                    raise KnowledgeDocumentError("DOCX 解压后总大小超过限制")
+                if entry.file_size:
+                    if entry.compress_size == 0:
+                        raise KnowledgeDocumentError("DOCX ZIP 压缩比异常")
+                    if entry.file_size / entry.compress_size > _DOCX_MAX_COMPRESSION_RATIO:
+                        raise KnowledgeDocumentError("DOCX ZIP 压缩比异常")
+                names.add(name)
+            if "word/document.xml" not in names:
                 raise KnowledgeDocumentError("文件不是有效的 DOCX 文档")
         from docx import Document
 

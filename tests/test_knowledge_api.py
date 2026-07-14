@@ -43,7 +43,6 @@ def test_knowledge_routes_require_authentication():
     assert knowledge_api.router.dependencies
     with pytest.raises(HTTPException) as exc_info:
         require_current_user_id(
-            token=None,
             authorization=None,
             cookie_token=None,
         )

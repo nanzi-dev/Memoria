@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from memoria.api.avatar_fetcher import download_remote_image
+from memoria.api.upload_utils import read_upload_limited
 from memoria.api.user import require_current_user_id
 from memoria.core import character_loader
 from memoria.core.character_schema import CharacterCard
@@ -289,10 +290,7 @@ def delete_character(
         if not existing:
             raise HTTPException(status_code=404, detail=f"角色卡 '{character_id}' 不存在")
         
-        # 删除角色关系
-        repository.delete_all_relationships_of_character(current_user_id, character_id)
-        
-        # 删除角色
+        # 永久删除时由仓储层在同一事务中清理角色关系；软禁用保留关系。
         success = repository.delete_character_card_from_db(
             owner_user_id=current_user_id,
             character_id=character_id,
@@ -421,6 +419,7 @@ def import_character_from_file(
 # 头像管理
 # =========================
 MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2MB
+MAX_AVATAR_UPLOAD_SIZE = 8 * 1024 * 1024  # 输入上限；较大图片再压缩到 2MB
 MAX_AVATAR_DIMENSION = 512  # 最大宽/高，超出等比缩放
 ALLOWED_MIME_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 
@@ -548,7 +547,11 @@ async def upload_character_avatar(
         if not db_card:
             raise HTTPException(status_code=404, detail=f"角色卡 '{character_id}' 不存在")
         
-        contents = await file.read()
+        contents = await read_upload_limited(
+            file,
+            MAX_AVATAR_UPLOAD_SIZE,
+            detail="头像文件超过 8 MB 上传限制",
+        )
         
         # 校验 MIME 类型
         mime_type = file.content_type or mimetypes.guess_type(file.filename)[0]

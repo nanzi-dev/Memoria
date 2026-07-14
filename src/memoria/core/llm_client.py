@@ -18,7 +18,13 @@ from urllib.parse import urlsplit
 from urllib.request import getproxies, proxy_bypass
 
 import httpx
-from openai import BadRequestError, DefaultHttpxClient, OpenAI
+from openai import (
+    APIConnectionError,
+    APIStatusError,
+    BadRequestError,
+    DefaultHttpxClient,
+    OpenAI,
+)
 
 from memoria.core import performance, tracing
 from memoria.core.config import configs
@@ -426,6 +432,15 @@ import time as _time
 _MAX_RETRIES = 3
 _BASE_DELAY = 1.0
 
+
+def _is_retryable_error(exc: Exception) -> bool:
+    if isinstance(exc, (APIConnectionError, httpx.TransportError)):
+        return True
+    if isinstance(exc, APIStatusError):
+        return exc.status_code == 429 or exc.status_code >= 500
+    return False
+
+
 def _retry_call(fn, *args, **kwargs):
     last_err = None
     for attempt in range(_MAX_RETRIES):
@@ -433,6 +448,8 @@ def _retry_call(fn, *args, **kwargs):
             return fn(*args, **kwargs)
         except Exception as e:
             last_err = e
+            if not _is_retryable_error(e) or attempt >= _MAX_RETRIES - 1:
+                raise
             if attempt < _MAX_RETRIES - 1:
                 delay = _BASE_DELAY * (2 ** attempt)
                 logger.warning("LLM重试 %d/%d (%.1fs后): %s", attempt + 1, _MAX_RETRIES, delay, e)

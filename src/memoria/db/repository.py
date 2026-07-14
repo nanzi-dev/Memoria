@@ -256,6 +256,7 @@ CREATE TABLE IF NOT EXISTS users (
     user_id         TEXT PRIMARY KEY,      -- usr_xxxxxxxx 格式
     username        TEXT NOT NULL UNIQUE,
     password_hash   TEXT NOT NULL,         -- sha256 hash
+    is_admin        INTEGER NOT NULL DEFAULT 0,
     gender          TEXT DEFAULT 'unknown', -- male/female/unknown
     avatar_url      TEXT,                  -- base64 data URL
     tts_auto_play   INTEGER NOT NULL DEFAULT 0,
@@ -636,6 +637,27 @@ CREATE TABLE IF NOT EXISTS short_term_message (
     world_created_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS dialogue_turn (
+    session_id       TEXT NOT NULL,
+    request_id       TEXT NOT NULL,
+    player_id        TEXT NOT NULL,
+    turn_kind        TEXT NOT NULL,
+    status           TEXT NOT NULL,
+    lease_owner      TEXT,
+    lease_expires_at TEXT,
+    response_data    TEXT,
+    error            TEXT,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL,
+    completed_at     TEXT,
+    PRIMARY KEY (session_id, request_id),
+    FOREIGN KEY (session_id) REFERENCES session(session_id),
+    FOREIGN KEY (player_id) REFERENCES users(user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dialogue_turn_session_lease
+ON dialogue_turn(session_id, status, lease_expires_at);
+
 -- =========================
 -- 世界观知识库
 -- =========================
@@ -993,6 +1015,24 @@ def _migrate(conn):
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         );
 
+        CREATE TABLE IF NOT EXISTS dialogue_turn (
+            session_id       TEXT NOT NULL,
+            request_id       TEXT NOT NULL,
+            player_id        TEXT NOT NULL,
+            turn_kind        TEXT NOT NULL,
+            status           TEXT NOT NULL,
+            lease_owner      TEXT,
+            lease_expires_at TEXT,
+            response_data    TEXT,
+            error            TEXT,
+            created_at       TEXT NOT NULL,
+            updated_at       TEXT NOT NULL,
+            completed_at     TEXT,
+            PRIMARY KEY (session_id, request_id),
+            FOREIGN KEY (session_id) REFERENCES session(session_id),
+            FOREIGN KEY (player_id) REFERENCES users(user_id)
+        );
+
         CREATE TABLE IF NOT EXISTS player_world_clock (
             player_id        TEXT PRIMARY KEY,
             timezone         TEXT NOT NULL DEFAULT 'UTC',
@@ -1126,6 +1166,9 @@ def _migrate(conn):
         CREATE INDEX IF NOT EXISTS idx_auth_token_user
         ON auth_token(user_id, expires_at);
 
+        CREATE INDEX IF NOT EXISTS idx_dialogue_turn_session_lease
+        ON dialogue_turn(session_id, status, lease_expires_at);
+
         CREATE INDEX IF NOT EXISTS idx_relationship_revision_lookup
         ON character_relationship_revision(owner_user_id, character_id_a, character_id_b);
 
@@ -1173,6 +1216,7 @@ def _migrate(conn):
     add_column("session", "locale TEXT NOT NULL DEFAULT 'zh-CN'")
     add_column("users", "tts_auto_play INTEGER NOT NULL DEFAULT 0")
     add_column("users", "stt_auto_send INTEGER NOT NULL DEFAULT 0")
+    add_column("users", "is_admin INTEGER NOT NULL DEFAULT 0")
     add_column("event_definition", "schedule TEXT")
     add_column("event_definition", "template_id TEXT")
     add_column("event_definition", "exclusive_group TEXT")
@@ -1255,6 +1299,21 @@ def _migrate(conn):
         SET group_thread_id = session_id
         WHERE COALESCE(is_multi_character, 0) = 1
           AND (group_thread_id IS NULL OR TRIM(group_thread_id) = '')
+        """
+    )
+    conn.execute(
+        """
+        UPDATE users
+        SET is_admin = 1
+        WHERE user_id = (
+            SELECT user_id
+            FROM users
+            ORDER BY created_at ASC, user_id ASC
+            LIMIT 1
+        )
+          AND NOT EXISTS (
+            SELECT 1 FROM users WHERE is_admin = 1
+        )
         """
     )
 
@@ -2872,7 +2931,33 @@ def delete_character_card_from_db(owner_user_id: str, character_id: str, soft_de
                     (_now(), owner_user_id, character_id),
                 )
             else:
-                # 硬删除：真实删除记录
+                # 硬删除：关系和角色卡必须在同一事务内删除。
+                rows = conn.execute(
+                    """
+                    SELECT character_id_a, character_id_b
+                    FROM character_relationship
+                    WHERE owner_user_id = ?
+                      AND (character_id_a = ? OR character_id_b = ?)
+                    """,
+                    (owner_user_id, character_id, character_id),
+                ).fetchall()
+                now = _now()
+                for row in rows:
+                    _touch_character_relationship_revision(
+                        conn,
+                        owner_user_id,
+                        row["character_id_a"],
+                        row["character_id_b"],
+                        now,
+                    )
+                conn.execute(
+                    """
+                    DELETE FROM character_relationship
+                    WHERE owner_user_id = ?
+                      AND (character_id_a = ? OR character_id_b = ?)
+                    """,
+                    (owner_user_id, character_id, character_id),
+                )
                 conn.execute(
                     "DELETE FROM character_card WHERE owner_user_id = ? AND character_id = ?",
                     (owner_user_id, character_id),
@@ -3466,6 +3551,342 @@ def _complete_event_schedule_in_transaction(
         raise RuntimeError("schedule lease was lost before atomic completion")
 
 
+class DialogueTurnConflictError(RuntimeError):
+    """A session already has an active dialogue turn."""
+
+
+def claim_dialogue_turn(
+    *,
+    session_id: str,
+    request_id: str,
+    player_id: str,
+    turn_kind: str,
+    lease_seconds: int = 120,
+) -> dict:
+    """Claim one idempotent turn, or return its completed response."""
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    lease_owner = uuid.uuid4().hex
+    lease_expires_at = (now + timedelta(seconds=max(30, lease_seconds))).isoformat()
+    with get_conn() as conn:
+        if _is_postgres_enabled():
+            conn.execute(
+                "SELECT session_id FROM session WHERE session_id = ? FOR UPDATE",
+                (session_id,),
+            ).fetchone()
+        else:
+            conn.execute("BEGIN IMMEDIATE")
+
+        existing = conn.execute(
+            """
+            SELECT * FROM dialogue_turn
+            WHERE session_id = ? AND request_id = ?
+            """,
+            (session_id, request_id),
+        ).fetchone()
+        if existing and existing["status"] == "completed":
+            return {
+                "completed": True,
+                "response": json.loads(existing["response_data"]),
+            }
+        if existing and (
+            existing["player_id"] != player_id
+            or existing["turn_kind"] != turn_kind
+        ):
+            raise DialogueTurnConflictError("request_id 已用于其他对话请求")
+        if (
+            existing
+            and existing["status"] == "processing"
+            and existing["lease_expires_at"]
+            and existing["lease_expires_at"] > now_iso
+        ):
+            raise DialogueTurnConflictError("该请求正在处理中")
+
+        active = conn.execute(
+            """
+            SELECT request_id
+            FROM dialogue_turn
+            WHERE session_id = ? AND status = 'processing'
+              AND lease_expires_at > ? AND request_id <> ?
+            LIMIT 1
+            """,
+            (session_id, now_iso, request_id),
+        ).fetchone()
+        if active:
+            raise DialogueTurnConflictError("该会话已有消息正在处理中")
+
+        conn.execute(
+            """
+            INSERT INTO dialogue_turn
+            (session_id, request_id, player_id, turn_kind, status,
+             lease_owner, lease_expires_at, response_data, error,
+             created_at, updated_at, completed_at)
+            VALUES (?, ?, ?, ?, 'processing', ?, ?, NULL, NULL, ?, ?, NULL)
+            ON CONFLICT(session_id, request_id)
+            DO UPDATE SET
+                status='processing',
+                lease_owner=excluded.lease_owner,
+                lease_expires_at=excluded.lease_expires_at,
+                response_data=NULL,
+                error=NULL,
+                updated_at=excluded.updated_at,
+                completed_at=NULL
+            """,
+            (
+                session_id,
+                request_id,
+                player_id,
+                turn_kind,
+                lease_owner,
+                lease_expires_at,
+                now_iso,
+                now_iso,
+            ),
+        )
+    return {
+        "completed": False,
+        "lease_owner": lease_owner,
+        "request_id": request_id,
+    }
+
+
+def fail_dialogue_turn(
+    session_id: str,
+    request_id: str,
+    lease_owner: str,
+    error: str,
+) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE dialogue_turn
+            SET status = 'failed', lease_owner = NULL, lease_expires_at = NULL,
+                error = ?, updated_at = ?
+            WHERE session_id = ? AND request_id = ?
+              AND status = 'processing' AND lease_owner = ?
+            """,
+            (error[:1000], _now(), session_id, request_id, lease_owner),
+        )
+
+
+def _save_runtime_states_in_transaction(
+    conn,
+    *,
+    player_id: str,
+    runtime_states: list[dict] | None,
+    now: str,
+) -> None:
+    for state in runtime_states or []:
+        conn.execute(
+            """
+            INSERT INTO relationship_state
+            (character_id, player_id, affection_level, trust_level,
+             current_mood, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(character_id, player_id)
+            DO UPDATE SET
+                affection_level=excluded.affection_level,
+                trust_level=excluded.trust_level,
+                current_mood=excluded.current_mood,
+                updated_at=excluded.updated_at
+            """,
+            (
+                state["character_id"],
+                player_id,
+                state["affection_level"],
+                state["trust_level"],
+                state["current_mood"],
+                now,
+            ),
+        )
+
+
+def _commit_dialogue_turn_in_transaction(
+    conn,
+    dialogue_turn: dict,
+    *,
+    now: str,
+) -> dict | list:
+    session_id = dialogue_turn["session_id"]
+    request_id = dialogue_turn["request_id"]
+    lease_owner = dialogue_turn["lease_owner"]
+    row = conn.execute(
+        """
+        SELECT status, lease_owner, response_data
+        FROM dialogue_turn
+        WHERE session_id = ? AND request_id = ?
+        """,
+        (session_id, request_id),
+    ).fetchone()
+    if not row:
+        raise RuntimeError("dialogue turn claim does not exist")
+    if row["status"] == "completed":
+        return json.loads(row["response_data"])
+    if row["status"] != "processing" or row["lease_owner"] != lease_owner:
+        raise DialogueTurnConflictError("对话轮次租约已失效")
+
+    response = dialogue_turn["response"]
+    temporary_ids: dict[int, int] = {}
+    _ensure_short_term_message_state_columns(conn)
+    for message in dialogue_turn.get("messages") or []:
+        reply_to_message_id = message.get("reply_to_message_id")
+        if isinstance(reply_to_message_id, int) and reply_to_message_id < 0:
+            reply_to_message_id = temporary_ids.get(reply_to_message_id)
+        insert_sql = """
+            INSERT INTO short_term_message
+            (session_id, role, content, character_id, character_name,
+             action, affinity_delta, trust_delta, current_affinity,
+             current_trust, current_mood, event_notification,
+             knowledge_sources, reply_to_message_id, reply_to_character_id,
+             intent, topic, trigger_source, created_at, world_created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        if _is_postgres_enabled():
+            insert_sql += " RETURNING id"
+        cursor = conn.execute(
+            insert_sql,
+            (
+                session_id,
+                message["role"],
+                message["content"],
+                message.get("character_id"),
+                message.get("character_name"),
+                message.get("action"),
+                message.get("affinity_delta"),
+                message.get("trust_delta"),
+                message.get("current_affinity"),
+                message.get("current_trust"),
+                message.get("current_mood"),
+                message.get("event_notification"),
+                _encode_knowledge_sources(message.get("knowledge_sources")),
+                reply_to_message_id,
+                message.get("reply_to_character_id"),
+                message.get("intent"),
+                message.get("topic"),
+                message.get("trigger_source"),
+                now,
+                message.get("world_created_at"),
+            ),
+        )
+        message_id = cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
+        temporary_id = message.get("temporary_id")
+        if isinstance(temporary_id, int):
+            temporary_ids[temporary_id] = message_id
+        response_field = message.get("response_field")
+        response_index = message.get("response_index")
+        if response_field and response_index is None and isinstance(response, dict):
+            response[response_field] = message_id
+        elif (
+            response_field
+            and isinstance(response_index, int)
+            and isinstance(response, list)
+            and response_index < len(response)
+        ):
+            response[response_index][response_field] = message_id
+        if message.get("character_id"):
+            conn.execute(
+                """
+                UPDATE multi_session_participant
+                SET last_spoke_at = ?, message_count = message_count + 1
+                WHERE session_id = ? AND character_id = ?
+                """,
+                (now, session_id, message["character_id"]),
+            )
+
+    if isinstance(response, list):
+        for item in response:
+            reply_to_message_id = item.get("reply_to_message_id")
+            if isinstance(reply_to_message_id, int) and reply_to_message_id < 0:
+                item["reply_to_message_id"] = temporary_ids.get(reply_to_message_id)
+
+    group_state = dialogue_turn.get("group_state")
+    if group_state:
+        last_reply_to_message_id = group_state.get("last_reply_to_message_id")
+        if isinstance(last_reply_to_message_id, int) and last_reply_to_message_id < 0:
+            last_reply_to_message_id = temporary_ids.get(last_reply_to_message_id)
+        unresolved_hooks = []
+        for hook in group_state.get("unresolved_hooks") or []:
+            mapped_hook = dict(hook)
+            message_id = mapped_hook.get("message_id")
+            if isinstance(message_id, int) and message_id < 0:
+                mapped_hook["message_id"] = temporary_ids.get(message_id)
+            unresolved_hooks.append(mapped_hook)
+        conn.execute(
+            """
+            INSERT INTO group_dialogue_state
+            (group_thread_id, player_id, current_topic, topic_source,
+             last_reply_to_message_id, last_reply_to_character_id,
+             last_speaker_id, waiting_for_player, unresolved_hooks,
+             last_autonomous_pulse_at, last_autonomous_world_at,
+             daily_message_date, daily_message_count, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(group_thread_id)
+            DO UPDATE SET
+                current_topic=excluded.current_topic,
+                topic_source=excluded.topic_source,
+                last_reply_to_message_id=excluded.last_reply_to_message_id,
+                last_reply_to_character_id=excluded.last_reply_to_character_id,
+                last_speaker_id=excluded.last_speaker_id,
+                waiting_for_player=excluded.waiting_for_player,
+                unresolved_hooks=excluded.unresolved_hooks,
+                last_autonomous_pulse_at=excluded.last_autonomous_pulse_at,
+                last_autonomous_world_at=excluded.last_autonomous_world_at,
+                daily_message_date=excluded.daily_message_date,
+                daily_message_count=excluded.daily_message_count,
+                updated_at=excluded.updated_at
+            """,
+            (
+                group_state["group_thread_id"],
+                dialogue_turn["player_id"],
+                group_state.get("current_topic"),
+                group_state.get("topic_source"),
+                last_reply_to_message_id,
+                group_state.get("last_reply_to_character_id"),
+                group_state.get("last_speaker_id"),
+                int(bool(group_state.get("waiting_for_player"))),
+                json.dumps(unresolved_hooks, ensure_ascii=False),
+                group_state.get("last_autonomous_pulse_at"),
+                group_state.get("last_autonomous_world_at"),
+                group_state.get("daily_message_date"),
+                int(group_state.get("daily_message_count") or 0),
+                now,
+                now,
+            ),
+        )
+
+    response_data = json.dumps(response, ensure_ascii=False)
+    completed = conn.execute(
+        """
+        UPDATE dialogue_turn
+        SET status = 'completed', lease_owner = NULL, lease_expires_at = NULL,
+            response_data = ?, error = NULL, updated_at = ?, completed_at = ?
+        WHERE session_id = ? AND request_id = ?
+          AND status = 'processing' AND lease_owner = ?
+        """,
+        (response_data, now, now, session_id, request_id, lease_owner),
+    )
+    if completed.rowcount != 1:
+        raise DialogueTurnConflictError("对话轮次租约已失效")
+    return response
+
+
+def commit_dialogue_turn(
+    *,
+    dialogue_turn: dict,
+    runtime_states: list[dict] | None = None,
+) -> dict | list:
+    """Atomically persist a turn without an event execution batch."""
+    now = _now()
+    with get_conn() as conn:
+        _save_runtime_states_in_transaction(
+            conn,
+            player_id=dialogue_turn["player_id"],
+            runtime_states=runtime_states,
+            now=now,
+        )
+        return _commit_dialogue_turn_in_transaction(conn, dialogue_turn, now=now)
+
+
 def commit_event_execution_batch(
     *,
     player_id: str,
@@ -3475,6 +3896,7 @@ def commit_event_execution_batch(
     executions: list[dict],
     runtime_states: list[dict] | None = None,
     schedule_completion: dict | None = None,
+    dialogue_turn: dict | None = None,
 ) -> dict:
     """在一个数据库事务中提交整轮事件执行及全部数据库副作用。"""
     inserted_memories: list[dict] = []
@@ -3539,7 +3961,17 @@ def commit_event_execution_batch(
                         claim_token,
                     ),
                 )
-            return {"deduplicated": True, "batch": dict(row), "inserted_memories": []}
+            dialogue_response = (
+                _commit_dialogue_turn_in_transaction(conn, dialogue_turn, now=now)
+                if dialogue_turn
+                else None
+            )
+            return {
+                "deduplicated": True,
+                "batch": dict(row),
+                "inserted_memories": [],
+                "dialogue_response": dialogue_response,
+            }
 
         for execution in executions:
             conn.execute(
@@ -3722,29 +4154,12 @@ def commit_event_execution_batch(
                     (now, message["session_id"], message["character_id"]),
                 )
 
-        for state in runtime_states or []:
-            conn.execute(
-                """
-                INSERT INTO relationship_state
-                (character_id, player_id, affection_level, trust_level,
-                 current_mood, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(character_id, player_id)
-                DO UPDATE SET
-                    affection_level=excluded.affection_level,
-                    trust_level=excluded.trust_level,
-                    current_mood=excluded.current_mood,
-                    updated_at=excluded.updated_at
-                """,
-                (
-                    state["character_id"],
-                    player_id,
-                    state["affection_level"],
-                    state["trust_level"],
-                    state["current_mood"],
-                    now,
-                ),
-            )
+        _save_runtime_states_in_transaction(
+            conn,
+            player_id=player_id,
+            runtime_states=runtime_states,
+            now=now,
+        )
 
         if schedule_completion:
             _complete_event_schedule_in_transaction(
@@ -3753,6 +4168,11 @@ def commit_event_execution_batch(
                 schedule_completion=schedule_completion,
                 now=now,
             )
+        dialogue_response = (
+            _commit_dialogue_turn_in_transaction(conn, dialogue_turn, now=now)
+            if dialogue_turn
+            else None
+        )
 
     return {
         "deduplicated": False,
@@ -3763,6 +4183,7 @@ def commit_event_execution_batch(
             "status": batch_status,
         },
         "inserted_memories": inserted_memories,
+        "dialogue_response": dialogue_response,
     }
 
 
@@ -6809,8 +7230,14 @@ def create_user(user_id: str, username: str, password_hash: str, gender: str = "
     """创建新用户"""
     with get_conn() as conn:
         conn.execute(
-            """INSERT INTO users (user_id, username, password_hash, gender, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+            """
+            INSERT INTO users
+            (user_id, username, password_hash, is_admin, gender, created_at, updated_at)
+            SELECT ?, ?, ?,
+                   CASE WHEN EXISTS (SELECT 1 FROM users WHERE is_admin = 1)
+                        THEN 0 ELSE 1 END,
+                   ?, ?, ?
+            """,
             (user_id, username, password_hash, gender, _now(), _now()),
         )
 

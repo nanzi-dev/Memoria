@@ -1338,7 +1338,7 @@ def test_single_dialogue_uses_elapsed_world_time_and_shared_message_timestamp(
         world_now=datetime(2026, 7, 12, 6, 0, tzinfo=UTC),
     )
     captured_time_context = []
-    saved_messages = []
+    committed_messages = []
     card = SimpleNamespace(
         action_vocabulary=SimpleNamespace(
             default_action="idle",
@@ -1429,14 +1429,16 @@ def test_single_dialogue_uses_elapsed_world_time_and_shared_message_timestamp(
     )
     monkeypatch.setattr(
         orchestrator.repository,
-        "save_runtime_state",
-        lambda *args, **kwargs: None,
+        "commit_dialogue_turn",
+        lambda *, dialogue_turn, runtime_states: (
+            committed_messages.extend(dialogue_turn["messages"])
+            or dialogue_turn["response"]
+        ),
     )
     monkeypatch.setattr(
         orchestrator.repository,
-        "append_short_term_message",
-        lambda *args, **kwargs: saved_messages.append((args, kwargs))
-        or len(saved_messages),
+        "claim_dialogue_turn",
+        lambda **kwargs: {"completed": False, "lease_owner": "lease"},
     )
     monkeypatch.setattr(
         orchestrator.repository,
@@ -1448,7 +1450,7 @@ def test_single_dialogue_uses_elapsed_world_time_and_shared_message_timestamp(
 
     assert result["dialogue"] == "我记得。"
     assert captured_time_context[0]["last_interaction_elapsed"] == "2 小时"
-    assert [message[1]["world_created_at"] for message in saved_messages] == [
+    assert [message["world_created_at"] for message in committed_messages] == [
         snapshot.world_now.isoformat(),
         snapshot.world_now.isoformat(),
     ]
@@ -1587,18 +1589,15 @@ def test_world_clock_api_auth_isolation_and_inbox_ownership():
 
     with pytest.raises(HTTPException) as unauthorized:
         user_api.require_current_user_id(
-            token=None,
             authorization=None,
             cookie_token=None,
         )
     assert unauthorized.value.status_code == 401
     assert user_api.require_current_user_id(
-        token=None,
         authorization=f"Bearer {token_a}",
         cookie_token=None,
     ) == player_a
     assert user_api.require_current_user_id(
-        token=None,
         authorization=f"Bearer {token_b}",
         cookie_token=None,
     ) == player_b

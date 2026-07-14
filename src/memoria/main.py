@@ -28,6 +28,7 @@ from memoria.api.speech import router as speech_router
 from memoria.api.user import (
     AUTH_COOKIE_NAME,
     get_current_user_id,
+    require_admin_user_id,
     router as user_router,
     require_current_user_id,
 )
@@ -131,6 +132,8 @@ def _resume_incomplete_knowledge_documents(
         )
     except Exception:
         logger.exception("知识向量清理或启动对账失败")
+    if stop_event is not None and stop_event.is_set():
+        return
     documents = repository.list_incomplete_knowledge_documents()
     if not documents:
         return
@@ -151,6 +154,8 @@ def _resume_incomplete_knowledge_documents(
                 "恢复知识文档处理任务失败: document=%s",
                 document["document_id"],
             )
+        if stop_event is not None and stop_event.is_set():
+            return
 
 
 @asynccontextmanager
@@ -195,6 +200,9 @@ async def lifespan(app: FastAPI):
             await scheduler_task
         except asyncio.CancelledError:
             pass
+        await asyncio.to_thread(knowledge_recovery_thread.join, 5.0)
+        if knowledge_recovery_thread.is_alive():
+            logger.warning("知识文档恢复线程未能在 5 秒内停止")
         logger.info("Memoria 服务正在关闭...")
 
 
@@ -237,7 +245,7 @@ async def ready():
 # 日志级别动态调整
 # =========================
 @app.post("/admin/log-level", tags=["system"])
-async def set_log_level(level: str = "INFO", _current_user_id: str = Depends(require_current_user_id)):
+async def set_log_level(level: str = "INFO", _current_user_id: str = Depends(require_admin_user_id)):
     """动态调整日志级别（DEBUG/INFO/WARNING/ERROR）"""
     level = level.upper()
     if level not in ("DEBUG", "INFO", "WARNING", "ERROR"):

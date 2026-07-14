@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Header, Response
 from pydantic import BaseModel, Field, StrictInt
 
 from memoria.api.avatar_fetcher import download_remote_image
+from memoria.api.upload_utils import read_upload_limited
 from memoria.core.config import configs
 from memoria.core import world_clock
 from memoria.db import repository
@@ -26,6 +27,7 @@ _tokens: dict[str, str] = {}  # token -> user_id
 
 ALLOWED_MIME_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2MB
+MAX_AVATAR_UPLOAD_SIZE = 8 * 1024 * 1024
 AUTH_COOKIE_NAME = "memoria-token"
 AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 天
 PASSWORD_HASH_ALGORITHM = "pbkdf2_sha256"
@@ -93,14 +95,11 @@ def _store_auth_token(token: str, user_id: str) -> None:
 
 def _get_token_from_request(
     authorization: str | None = None,
-    token: str | None = None,
     cookie_token: str | None = None,
 ) -> str:
-    """从 Authorization header、query param 或 Cookie 提取 token"""
+    """从 Authorization header 或 HttpOnly Cookie 提取 token。"""
     if authorization and authorization.startswith("Bearer "):
         return authorization[7:]
-    if token:
-        return token
     if cookie_token:
         return cookie_token
     raise HTTPException(401, "未提供认证信息")
@@ -152,16 +151,25 @@ def get_current_user_id(token: str) -> str | None:
 
 
 def require_current_user_id(
-    token: str | None = None,
     authorization: str | None = Header(None),
     cookie_token: str | None = Cookie(None, alias=AUTH_COOKIE_NAME),
 ) -> str:
     """要求请求已登录，并返回当前 user_id。"""
-    auth_token = _get_token_from_request(authorization, token, cookie_token)
+    auth_token = _get_token_from_request(authorization, cookie_token)
     uid = get_current_user_id(auth_token)
     if not uid:
         raise HTTPException(401, "未登录或 token 已过期")
     return uid
+
+
+def require_admin_user_id(
+    user_id: str = Depends(require_current_user_id),
+) -> str:
+    """要求当前用户具有系统管理员权限。"""
+    user = repository.get_user_by_id(user_id)
+    if not user or not bool(user.get("is_admin")):
+        raise HTTPException(403, "需要管理员权限")
+    return user_id
 
 
 # =========================
@@ -230,6 +238,7 @@ class AdvanceWorldClockRequest(ClockRevisionRequest):
 class UserResponse(BaseModel):
     user_id: str
     username: str
+    is_admin: bool = False
     gender: str
     avatar_url: str | None = None
     timezone: str
@@ -258,7 +267,6 @@ class EventInboxItem(BaseModel):
     read_at: str | None = None
 
 class AuthResponse(BaseModel):
-    token: str
     user: UserResponse
 
 class OperationResponse(BaseModel):
@@ -273,6 +281,7 @@ def _build_user_response(user: dict) -> UserResponse:
     return UserResponse(
         user_id=user["user_id"],
         username=user["username"],
+        is_admin=bool(user.get("is_admin", False)),
         gender=user["gender"],
         avatar_url=user.get("avatar_url"),
         tts_auto_play=bool(user.get("tts_auto_play", False)),
@@ -327,7 +336,7 @@ def register(req: RegisterRequest, response: Response):
     _store_auth_token(token, uid)
     _set_auth_cookie(response, token)
     user = repository.get_user_by_id(uid)
-    return AuthResponse(token=token, user=_build_user_response(user))
+    return AuthResponse(user=_build_user_response(user))
 
 
 # =========================
@@ -345,7 +354,7 @@ def login(req: LoginRequest, response: Response):
     token = _gen_token()
     _store_auth_token(token, user["user_id"])
     _set_auth_cookie(response, token)
-    return AuthResponse(token=token, user=_build_user_response(user))
+    return AuthResponse(user=_build_user_response(user))
 
 
 # =========================
@@ -354,12 +363,11 @@ def login(req: LoginRequest, response: Response):
 @router.post("/user/logout", response_model=OperationResponse)
 def logout(
     response: Response,
-    token: str | None = None,
     authorization: str | None = Header(None),
     cookie_token: str | None = Cookie(None, alias=AUTH_COOKIE_NAME),
 ):
     try:
-        auth_token = _get_token_from_request(authorization, token, cookie_token)
+        auth_token = _get_token_from_request(authorization, cookie_token)
         _tokens.pop(auth_token, None)
         repository.delete_auth_token(auth_token)
     except HTTPException:
@@ -373,14 +381,8 @@ def logout(
 # =========================
 @router.get("/user/me", response_model=UserResponse)
 def get_me(
-    token: str | None = None,
-    authorization: str | None = Header(None),
-    cookie_token: str | None = Cookie(None, alias=AUTH_COOKIE_NAME),
+    uid: str = Depends(require_current_user_id),
 ):
-    token = _get_token_from_request(authorization, token, cookie_token)
-    uid = get_current_user_id(token)
-    if not uid:
-        raise HTTPException(401, "未登录或 token 已过期")
     user = repository.get_user_by_id(uid)
     if not user:
         raise HTTPException(404, "用户不存在")
@@ -393,14 +395,8 @@ def get_me(
 @router.put("/user/profile", response_model=UserResponse)
 def update_profile(
     req: UpdateProfileRequest,
-    token: str | None = None,
-    authorization: str | None = Header(None),
-    cookie_token: str | None = Cookie(None, alias=AUTH_COOKIE_NAME),
+    uid: str = Depends(require_current_user_id),
 ):
-    token = _get_token_from_request(authorization, token, cookie_token)
-    uid = get_current_user_id(token)
-    if not uid:
-        raise HTTPException(401, "未登录")
     if req.username:
         _validate_username(req.username)
         existing = repository.get_user_by_username(req.username)
@@ -528,17 +524,14 @@ def read_event_inbox_item(
 # =========================
 @router.post("/user/avatar/upload", response_model=OperationResponse)
 async def upload_avatar(
-    token: str | None = None,
     file: UploadFile = File(...),
-    authorization: str | None = Header(None),
-    cookie_token: str | None = Cookie(None, alias=AUTH_COOKIE_NAME),
+    uid: str = Depends(require_current_user_id),
 ):
-    token = _get_token_from_request(authorization, token, cookie_token)
-    uid = get_current_user_id(token)
-    if not uid:
-        raise HTTPException(401, "未登录")
-
-    contents = await file.read()
+    contents = await read_upload_limited(
+        file,
+        MAX_AVATAR_UPLOAD_SIZE,
+        detail="头像文件超过 8 MB 上传限制",
+    )
     mime_type = file.content_type or mimetypes.guess_type(file.filename)[0]
     if mime_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(400, f"不支持的图片格式: {mime_type}")
@@ -559,15 +552,8 @@ async def upload_avatar(
 @router.post("/user/avatar/url", response_model=OperationResponse)
 def set_avatar_url(
     req: SetAvatarUrlRequest,
-    token: str | None = None,
-    authorization: str | None = Header(None),
-    cookie_token: str | None = Cookie(None, alias=AUTH_COOKIE_NAME),
+    uid: str = Depends(require_current_user_id),
 ):
-    token = _get_token_from_request(authorization, token, cookie_token)
-    uid = get_current_user_id(token)
-    if not uid:
-        raise HTTPException(401, "未登录")
-
     url = req.url.strip()
     if not url:
         repository.update_user_profile(uid, avatar_url=None)
