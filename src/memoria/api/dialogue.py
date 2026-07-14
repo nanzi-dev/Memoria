@@ -112,10 +112,13 @@ class SessionInfo(BaseModel):
     ended_at: str | None = None
     status: str
     group_name: str | None = None
+    group_thread_id: str | None = None
     is_multi_character: bool = False
     last_message: str | None = None
     last_message_at: str | None = None
+    latest_message_id: int | None = None
     message_count: int = 0
+    unread_count: int = 0
     name: str | None = None
     display_name: str | None = None
     avatar_url: str | None = None

@@ -155,6 +155,125 @@ async def test_multi_dialogue_history_returns_paginated_thread_messages(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_multi_dialogue_history_uses_incremental_message_id(monkeypatch):
+    from memoria.api import multi_dialogue
+
+    requested_page = {}
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session",
+        lambda session_id: _multi_session(session_id),
+    )
+
+    def fake_incremental_history(session_id, after_message_id, limit):
+        requested_page.update(
+            session_id=session_id,
+            after_message_id=after_message_id,
+            limit=limit,
+        )
+        return (
+            [
+                {
+                    "message_id": 42,
+                    "session_id": "new-session",
+                    "role": "assistant",
+                    "content": "增量消息",
+                    "character_id": "c2",
+                    "character_name": "角色二",
+                    "reply_to_message_id": 41,
+                    "reply_to_character_id": "c1",
+                    "intent": "challenge",
+                    "topic": "计划",
+                    "trigger_source": "npc_follow_up",
+                    "world_created_at": "2026-01-01T01:00:00+00:00",
+                }
+            ],
+            True,
+            45,
+        )
+
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_multi_character_thread_history_after",
+        fake_incremental_history,
+    )
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session_participants",
+        lambda session_id, only_active=False: [],
+    )
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_multi_character_thread_sessions",
+        lambda session_id: [],
+    )
+
+    response = await multi_dialogue.get_multi_dialogue_history(
+        "session-1",
+        offset=99,
+        limit=3,
+        after_message_id=41,
+        current_user_id="player-1",
+    )
+
+    assert requested_page == {
+        "session_id": "session-1",
+        "after_message_id": 41,
+        "limit": 3,
+    }
+    assert response.has_more is True
+    assert response.latest_message_id == 45
+    assert response.messages[0]["reply_to_message_id"] == 41
+    assert response.messages[0]["trigger_source"] == "npc_follow_up"
+
+
+@pytest.mark.asyncio
+async def test_mark_group_thread_read_handles_not_found_forbidden_and_success(monkeypatch):
+    from memoria.api import multi_dialogue
+
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_latest_group_thread_session",
+        lambda group_thread_id: None,
+    )
+    with pytest.raises(HTTPException) as missing:
+        await multi_dialogue.mark_group_thread_read(
+            "missing-thread",
+            current_user_id="player-1",
+        )
+    assert missing.value.status_code == 404
+
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_latest_group_thread_session",
+        lambda group_thread_id: _multi_session("session-1"),
+    )
+    with pytest.raises(HTTPException) as forbidden:
+        await multi_dialogue.mark_group_thread_read(
+            "thread-1",
+            current_user_id="other-player",
+        )
+    assert forbidden.value.status_code == 403
+
+    marked = {}
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "mark_group_thread_notifications_read",
+        lambda player_id, group_thread_id: marked.update(
+            player_id=player_id,
+            group_thread_id=group_thread_id,
+        ) or 2,
+    )
+    response = await multi_dialogue.mark_group_thread_read(
+        "thread-1",
+        current_user_id="player-1",
+    )
+    assert marked == {"player_id": "player-1", "group_thread_id": "thread-1"}
+    assert response.group_thread_id == "thread-1"
+    assert response.marked_read == 2
+
+
+@pytest.mark.asyncio
 async def test_start_multi_session_rejects_duplicate_group_name(monkeypatch):
     from memoria.api import multi_dialogue
 

@@ -13,6 +13,9 @@ import json
 import logging
 import random
 import uuid
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from memoria.core import (
     character_loader,
@@ -29,6 +32,35 @@ from memoria.core.speaking_strategy import HybridStrategy, SpeakingStrategy
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
+
+
+DialogueIntent = Literal[
+    "answer",
+    "ask",
+    "agree",
+    "challenge",
+    "reveal",
+    "invite",
+    "interrupt",
+    "topic_shift",
+]
+
+
+class DialogueDecision(BaseModel):
+    """单步群聊动作。模型输出先经过该结构验证，再允许生成正文。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["speak", "wait"]
+    speaker_id: str | None = None
+    reply_to_message_id: int | None = Field(default=None, ge=1)
+    reply_to_character_id: str | None = None
+    intent: DialogueIntent | None = None
+    topic: str | None = None
+    preferred_next_character_id: str | None = None
+    follow_up_expected: bool = False
+    wait_for_player: bool = False
+    stop_reason: str | None = None
 
 
 # =========================
@@ -161,45 +193,56 @@ class MultiCharacterOrchestrator:
         """
         # 记录玩家消息
         clock_snapshot = _clock_snapshot_for_player(getattr(self, "player_id", None))
-        repository.append_multi_character_message(
+        player_message_id = repository.append_multi_character_message(
             self.session_id,
             role="user",
             content=player_message,
             world_created_at=clock_snapshot.world_now.isoformat(),
+            trigger_source="player",
         )
         self._prepare_checkpoint_memory()
-        
+
+        self._ensure_has_active_participants()
         if not allow_multiple_responses:
-            # 单角色回应模式（原有逻辑）
-            self._ensure_has_active_participants()
             speaker_id = self._decide_next_speaker(player_message)
             try:
                 result = self._generate_character_response(
                     speaker_id,
                     player_message,
+                    decision=DialogueDecision(
+                        action="speak",
+                        speaker_id=speaker_id,
+                        reply_to_message_id=player_message_id,
+                        intent="answer",
+                        topic=player_message[:120] or None,
+                    ),
+                    trigger_source="player",
                     clock_snapshot=clock_snapshot,
                 )
             except TypeError as exc:
-                if "unexpected keyword argument 'clock_snapshot'" not in str(exc):
+                if "unexpected keyword argument" not in str(exc):
                     raise
                 result = self._generate_character_response(speaker_id, player_message)
+            self._save_player_checkpoint_memory_once()
             return result
-        
-        else:
-            # 多角色讨论模式
-            self._ensure_has_active_participants()
-            response_count = self._decide_group_response_count(player_message, max_responses)
-            try:
-                responses = self._generate_group_discussion(
-                    player_message,
-                    response_count,
-                    clock_snapshot=clock_snapshot,
-                )
-            except TypeError as exc:
-                if "unexpected keyword argument 'clock_snapshot'" not in str(exc):
-                    raise
-                responses = self._generate_group_discussion(player_message, response_count)
-            return responses
+
+        response_count = min(
+            3,
+            self._decide_group_response_count(player_message, max_responses),
+        )
+        try:
+            responses = self._generate_group_discussion(
+                player_message,
+                response_count,
+                clock_snapshot=clock_snapshot,
+                trigger_message_id=player_message_id,
+            )
+        except TypeError as exc:
+            if "unexpected keyword argument" not in str(exc):
+                raise
+            responses = self._generate_group_discussion(player_message, response_count)
+        self._save_player_checkpoint_memory_once()
+        return responses
 
 
     def _prepare_checkpoint_memory(self) -> None:
@@ -214,6 +257,16 @@ class MultiCharacterOrchestrator:
             limit_messages=max(12, configs.long_term_memory_interval_turns * 4),
         )
         self._checkpoint_memory_fact = extract_player_memory(history)
+
+
+    def _save_player_checkpoint_memory_once(self) -> None:
+        fact = getattr(self, "_checkpoint_memory_fact", None)
+        player_id = getattr(self, "player_id", None)
+        if not fact or not player_id:
+            return
+        for character_id in dict.fromkeys(getattr(self, "character_ids", [])):
+            repository.save_long_term_fact(character_id, player_id, fact)
+        self._checkpoint_memory_fact = None
 
 
     def _decide_group_response_count(self, player_message: str, max_responses: int | None = None) -> int:
@@ -327,70 +380,338 @@ class MultiCharacterOrchestrator:
         max_responses: int = 3,
         *,
         clock_snapshot=None,
+        trigger_message_id: int | None = None,
     ) -> list[dict]:
-        """
-        生成多角色讨论（多个角色连续发言）
-        
-        Args:
-            player_message: 玩家消息
-            max_responses: 最多几个角色发言
-        
-        Returns:
-            list[dict]: 角色回应列表
-        """
-        responses = []
-        used_speakers = set()
-        
-        # 限制回应数量不超过参与者数量
-        max_responses = min(max_responses, len(self.participants))
-        
-        for i in range(max_responses):
-            # 选择下一个发言角色（排除已发言的）
-            available_participants = [
-                p for p in self.participants 
-                if p["character_id"] not in used_speakers
-            ]
-            
-            if not available_participants:
-                break
-            
-            # 构建上下文（包含前面角色的发言）
-            context = {
-                "player_message": player_message,
-                "last_speaker_id": self.last_speaker_id,
-                "character_relationships": self._load_all_relationships(),
-                "previous_responses": responses  # 添加之前的回应作为上下文
-            }
-            
-            # 使用策略选择发言角色
-            speaker_id = self.speaking_strategy.select_speaker(
-                available_participants,
-                self.character_cards,
-                context
+        """兼容旧调用名，内部执行逐条重决策的对话脉冲。"""
+        return self.run_dialogue_pulse(
+            trigger_source="player",
+            trigger_text=player_message,
+            trigger_message_id=trigger_message_id,
+            max_messages=max_responses,
+            clock_snapshot=clock_snapshot,
+        )
+
+
+    def run_dialogue_pulse(
+        self,
+        *,
+        trigger_source: str,
+        trigger_text: str | None = None,
+        trigger_message_id: int | None = None,
+        initial_speaker_id: str | None = None,
+        max_messages: int = 3,
+        clock_snapshot=None,
+        persist_state: bool = True,
+        extract_memory: bool = False,
+    ) -> list[dict]:
+        """每生成一条消息后重读数据库历史，并重新决定下一动作。"""
+        self._ensure_has_active_participants()
+        clock_snapshot = clock_snapshot or _clock_snapshot_for_player(self.player_id)
+        max_messages = min(3, max(1, int(max_messages or 1)))
+        responses: list[dict] = []
+        decisions: list[DialogueDecision] = []
+
+        for step in range(max_messages):
+            history = repository.get_multi_character_thread_history(
+                self.session_id,
+                limit_messages=30,
             )
-            
-            # 生成回应
+            decision = self._decide_dialogue_action(
+                history=history,
+                trigger_source=trigger_source,
+                trigger_text=trigger_text or "",
+                trigger_message_id=trigger_message_id,
+                initial_speaker_id=initial_speaker_id if step == 0 else None,
+                previous_responses=responses,
+            )
+            decisions.append(decision)
+            if decision.action == "wait":
+                break
+
+            target = next(
+                (msg for msg in reversed(history) if msg.get("message_id") == decision.reply_to_message_id),
+                history[-1] if history else None,
+            )
             result = self._generate_character_response(
-                speaker_id,
-                player_message,
+                decision.speaker_id,
+                str((target or {}).get("content") or trigger_text or ""),
+                decision=decision,
+                trigger_source=trigger_source if step == 0 else "npc_follow_up",
+                target_message=target,
                 clock_snapshot=clock_snapshot,
             )
             responses.append(result)
-            
-            # 标记已使用
-            used_speakers.add(speaker_id)
-            self.last_speaker_id = speaker_id
-            
-            # 判断是否需要继续（基于对话内容的自然结束）
-            dialogue = result.get("dialogue", "")
-            
-            # 如果对话包含明确的结束语或疑问句，可能不需要更多回应
-            ending_phrases = ["就这样吧", "好的", "明白了", "我知道了", "没问题"]
-            if i >= 1 and any(phrase in dialogue for phrase in ending_phrases):
-                # 至少有2个角色发言后，如果出现结束语，可以停止
+            self.last_speaker_id = decision.speaker_id
+            if decision.wait_for_player:
                 break
-        
+
+        pulse_state = self._build_pulse_state(decisions, responses, trigger_source)
+        self.last_pulse_state = pulse_state
+        if persist_state:
+            repository.save_group_dialogue_state(
+                repository.get_group_thread_id(self.session_id) or self.session_id,
+                self.player_id,
+                **pulse_state,
+            )
+        if extract_memory and responses:
+            multi_character_memory.process_dialogue_pulse_memories(
+                session_id=self.session_id,
+                recent_messages=[
+                    {
+                        "role": "assistant",
+                        "content": response.get("dialogue", ""),
+                        "character_id": response.get("character_id"),
+                        "character_name": response.get("character_name"),
+                    }
+                    for response in responses
+                ],
+                character_ids=self.character_ids,
+                player_id=self.player_id,
+            )
         return responses
+
+
+    def _decide_dialogue_action(
+        self,
+        *,
+        history: list[dict],
+        trigger_source: str,
+        trigger_text: str,
+        trigger_message_id: int | None,
+        initial_speaker_id: str | None,
+        previous_responses: list[dict],
+    ) -> DialogueDecision:
+        prompt = self._build_dialogue_decision_prompt(
+            history=history,
+            trigger_source=trigger_source,
+            trigger_text=trigger_text,
+            initial_speaker_id=initial_speaker_id,
+        )
+        try:
+            raw = llm_client.call_light_task(prompt, allow_reasoning_fallback=False)
+            decision = self._parse_dialogue_decision(raw)
+            return self._validate_dialogue_decision(
+                decision,
+                history=history,
+                trigger_message_id=trigger_message_id,
+            )
+        except Exception as exc:
+            logger.warning("群聊动作决策失败，使用确定性降级: %s", exc)
+            return self._fallback_dialogue_decision(
+                history=history,
+                trigger_text=trigger_text,
+                trigger_message_id=trigger_message_id,
+                initial_speaker_id=initial_speaker_id,
+                previous_responses=previous_responses,
+            )
+
+
+    def _build_dialogue_decision_prompt(
+        self,
+        *,
+        history: list[dict],
+        trigger_source: str,
+        trigger_text: str,
+        initial_speaker_id: str | None,
+    ) -> str:
+        participants = []
+        for participant in self.participants:
+            character_id = participant["character_id"]
+            card = self.character_cards.get(character_id)
+            if not card:
+                continue
+            goals = getattr(card, "goals_and_motivations", None)
+            rules = getattr(card, "interaction_rules", None)
+            background = getattr(card, "background", None)
+            participants.append({
+                "character_id": character_id,
+                "name": card.meta.display_name or card.meta.name,
+                "current_goals": list(getattr(goals, "current_goals", []) or []),
+                "long_term_goals": list(getattr(goals, "long_term_goals", []) or []),
+                "loved_topics": list(getattr(rules, "topics_he_or_she_loves_to_discuss", []) or []),
+                "avoid_topics": list(getattr(rules, "topics_to_avoid_unless_trusted", []) or []),
+                "anger_triggers": list(getattr(goals, "what_triggers_anger", []) or []),
+                "joy_triggers": list(getattr(goals, "what_brings_joy", []) or []),
+                "secrets": [
+                    str(getattr(secret, "secret", "") or "")
+                    for secret in list(getattr(background, "secrets", []) or [])[:3]
+                ],
+                "relationships": [
+                    {
+                        "target": getattr(relation, "target", ""),
+                        "type": getattr(relation, "relationship_type", ""),
+                        "description": getattr(relation, "description", ""),
+                    }
+                    for relation in list(getattr(background, "relationships", []) or [])[:5]
+                ],
+                "message_count": int(participant.get("message_count") or 0),
+            })
+
+        recent_history = [
+            {
+                "message_id": message.get("message_id"),
+                "speaker_id": message.get("character_id") or "player",
+                "speaker_name": message.get("character_name") or self.player_name,
+                "content": str(message.get("content") or "")[:500],
+                "reply_to_message_id": message.get("reply_to_message_id"),
+                "intent": message.get("intent"),
+                "topic": message.get("topic"),
+            }
+            for message in history[-12:]
+        ]
+        thread_state = repository.get_group_dialogue_state(
+            repository.get_group_thread_id(self.session_id) or self.session_id
+        ) or {}
+        schema_example = {
+            "action": "speak",
+            "speaker_id": "character_id",
+            "reply_to_message_id": 123,
+            "reply_to_character_id": "character_id_or_null",
+            "intent": "answer",
+            "topic": "当前话题",
+            "preferred_next_character_id": None,
+            "follow_up_expected": False,
+            "wait_for_player": False,
+            "stop_reason": None,
+        }
+        return "\n".join([
+            "你是多角色剧情群聊的单步动作决策器，只决定下一步，不生成对白。",
+            "话题优先级：明确事件/未解决钩子 > 目标、秘密、关系冲突 > 最新问题或点名 > 情绪关系延伸 > 喜爱话题。",
+            "普通闲聊不能连续开启无剧情价值的新话题。连续发言和发言次数只降低优先级，不得硬性排除角色。",
+            "若最新发言明确等待某角色、追问、反驳或点名，允许同一角色再次发言。没有自然后续时 action=wait。",
+            "回复必须指向历史中真实 message_id；面向玩家时 reply_to_character_id=null，面向 NPC 时填其 character_id。",
+            f"触发来源: {trigger_source}",
+            f"触发文本: {trigger_text[:800]}",
+            f"首步指定发言者: {initial_speaker_id or '无'}",
+            f"线程状态: {json.dumps(thread_state, ensure_ascii=False)}",
+            f"参与角色: {json.dumps(participants, ensure_ascii=False)}",
+            f"最近历史: {json.dumps(recent_history, ensure_ascii=False)}",
+            "intent 只能是 answer/ask/agree/challenge/reveal/invite/interrupt/topic_shift。",
+            "只返回合法 JSON 对象，不使用 Markdown。wait 动作可将其余可选字段设为 null。",
+            f"格式示例: {json.dumps(schema_example, ensure_ascii=False)}",
+        ])
+
+
+    @staticmethod
+    def _parse_dialogue_decision(raw: str) -> DialogueDecision:
+        text = str(raw or "").strip()
+        if text.startswith("```"):
+            lines = text.splitlines()[1:]
+            if lines and lines[-1].startswith("```"):
+                lines.pop()
+            text = "\n".join(lines).strip()
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            start, end = text.find("{"), text.rfind("}")
+            if start < 0 or end <= start:
+                raise
+            payload = json.loads(text[start:end + 1])
+        return DialogueDecision.model_validate(payload)
+
+
+    def _validate_dialogue_decision(
+        self,
+        decision: DialogueDecision,
+        *,
+        history: list[dict],
+        trigger_message_id: int | None,
+    ) -> DialogueDecision:
+        if decision.action == "wait":
+            return decision.model_copy(update={"speaker_id": None})
+        if decision.speaker_id not in self.character_ids:
+            raise ValueError("决策发言者不在群聊中")
+
+        valid_targets = {
+            int(message["message_id"]): message
+            for message in history
+            if message.get("message_id") is not None
+        }
+        target_id = decision.reply_to_message_id or trigger_message_id
+        if target_id not in valid_targets:
+            if not history:
+                raise ValueError("没有可回复的群聊消息")
+            target_id = int(history[-1]["message_id"])
+        target = valid_targets[target_id]
+        target_character_id = target.get("character_id")
+        if decision.reply_to_character_id not in {None, *self.character_ids}:
+            raise ValueError("决策回复目标角色不在群聊中")
+        return decision.model_copy(update={
+            "reply_to_message_id": target_id,
+            "reply_to_character_id": target_character_id,
+            "intent": decision.intent or "answer",
+            "topic": (decision.topic or str(target.get("topic") or "").strip() or None),
+        })
+
+
+    def _fallback_dialogue_decision(
+        self,
+        *,
+        history: list[dict],
+        trigger_text: str,
+        trigger_message_id: int | None,
+        initial_speaker_id: str | None,
+        previous_responses: list[dict],
+    ) -> DialogueDecision:
+        latest = history[-1] if history else {}
+        if previous_responses:
+            latest_text = str(latest.get("content") or "")
+            mentioned = self._find_mentioned_character_ids(latest_text)
+            continuation_cues = ("?", "？", "但是", "不过", "为什么", "你呢", "怎么看", "反对", "不对")
+            if not mentioned and not any(cue in latest_text for cue in continuation_cues):
+                return DialogueDecision(action="wait", wait_for_player=True, stop_reason="no_natural_follow_up")
+
+        context = {
+            "player_message": str(latest.get("content") or trigger_text),
+            "last_speaker_id": latest.get("character_id") or self.last_speaker_id,
+            "character_relationships": self._load_all_relationships(),
+            "previous_responses": previous_responses,
+        }
+        speaker_id = initial_speaker_id if initial_speaker_id in self.character_ids else None
+        if not speaker_id:
+            speaker_id = self.speaking_strategy.select_speaker(
+                self.participants,
+                self.character_cards,
+                context,
+            )
+        target_id = latest.get("message_id") or trigger_message_id
+        return DialogueDecision(
+            action="speak",
+            speaker_id=speaker_id,
+            reply_to_message_id=target_id,
+            reply_to_character_id=latest.get("character_id"),
+            intent="answer" if latest.get("role") == "user" else "agree",
+            topic=str(latest.get("topic") or trigger_text or "")[:120] or None,
+        )
+
+
+    def _build_pulse_state(
+        self,
+        decisions: list[DialogueDecision],
+        responses: list[dict],
+        trigger_source: str,
+    ) -> dict:
+        spoken = [decision for decision in decisions if decision.action == "speak"]
+        final = decisions[-1] if decisions else DialogueDecision(action="wait", wait_for_player=True)
+        hooks = []
+        for decision, response in zip(spoken, responses):
+            if decision.follow_up_expected:
+                hooks.append({
+                    "message_id": response.get("message_id"),
+                    "character_id": decision.speaker_id,
+                    "preferred_next_character_id": decision.preferred_next_character_id,
+                    "topic": decision.topic,
+                })
+        last = spoken[-1] if spoken else None
+        return {
+            "current_topic": last.topic if last else None,
+            "topic_source": trigger_source,
+            "last_reply_to_message_id": last.reply_to_message_id if last else None,
+            "last_reply_to_character_id": last.reply_to_character_id if last else None,
+            "last_speaker_id": last.speaker_id if last else None,
+            "waiting_for_player": bool(final.wait_for_player or final.action == "wait"),
+            "unresolved_hooks": hooks,
+        }
     
     
     def trigger_character_interaction(self, trigger_character_id: str = None, prompt: str = None) -> dict:
@@ -405,16 +726,23 @@ class MultiCharacterOrchestrator:
         """
         if trigger_character_id is None:
             trigger_character_id = self._select_character_for_interaction()
-        
-        # 生成角色间互动对话
-        clock_snapshot = world_clock.get_clock_snapshot(self.player_id)
-        result = self._generate_character_interaction(
-            trigger_character_id,
-            prompt=prompt,
-            clock_snapshot=clock_snapshot,
+
+        responses = self.run_dialogue_pulse(
+            trigger_source="goal",
+            trigger_text=prompt or "主动延续当前剧情或未解决的话题",
+            initial_speaker_id=trigger_character_id,
+            max_messages=1,
+            clock_snapshot=world_clock.get_clock_snapshot(self.player_id),
+            extract_memory=True,
         )
-        
-        return result
+        if not responses:
+            return {
+                "character_id": trigger_character_id,
+                "character_name": self.character_cards[trigger_character_id].meta.display_name,
+                "dialogue": "",
+                "action": "wait",
+            }
+        return responses[0]
     
     
     def _decide_next_speaker(self, player_message: str) -> str:
@@ -674,7 +1002,7 @@ class MultiCharacterOrchestrator:
         
         # 记录消息
         character_name = card.meta.display_name or card.meta.name
-        repository.append_multi_character_message(
+        message_id = repository.append_multi_character_message(
             self.session_id,
             role="assistant",
             content=dialogue,
@@ -684,12 +1012,14 @@ class MultiCharacterOrchestrator:
         )
         
         return {
+            "message_id": message_id,
             "character_id": character_id,
             "character_name": character_name,
             "dialogue": dialogue,
             "action": action,
             "current_affinity": runtime_state.get("affection_level", 0),
-            "current_mood": runtime_state.get("current_mood", "neutral")
+            "current_mood": runtime_state.get("current_mood", "neutral"),
+            "world_created_at": clock_snapshot.world_now.isoformat(),
         }
     
     
@@ -698,6 +1028,9 @@ class MultiCharacterOrchestrator:
         character_id: str,
         player_message: str,
         *,
+        decision: DialogueDecision | None = None,
+        trigger_source: str = "player",
+        target_message: dict | None = None,
         clock_snapshot=None,
     ) -> dict:
         """
@@ -744,6 +1077,14 @@ class MultiCharacterOrchestrator:
             current_message=player_message,
             recent_history=history,
         )
+        decision = decision or DialogueDecision(
+            action="speak",
+            speaker_id=character_id,
+            reply_to_message_id=(target_message or {}).get("message_id"),
+            reply_to_character_id=(target_message or {}).get("character_id"),
+            intent="answer",
+            topic=player_message[:120] or None,
+        )
         
         # 准备其他角色信息
         other_characters = []
@@ -771,6 +1112,16 @@ class MultiCharacterOrchestrator:
             ),
             time_context=time_context,
             knowledge_context=knowledge.prompt_section,
+            dialogue_target={
+                "reply_to_message_id": decision.reply_to_message_id,
+                "reply_to_character_id": decision.reply_to_character_id,
+                "reply_to_name": (target_message or {}).get("character_name") or self.player_name,
+                "message": str((target_message or {}).get("content") or player_message),
+                "intent": decision.intent,
+                "topic": decision.topic,
+                "preferred_next_character_id": decision.preferred_next_character_id,
+                "follow_up_expected": decision.follow_up_expected,
+            },
         )
         
         # 转换为 LLM 格式
@@ -779,7 +1130,16 @@ class MultiCharacterOrchestrator:
             character_id,
             character_relationships=character_relationships
         )
-        messages.append({"role": "user", "content": player_message})
+        messages.append({
+            "role": "user",
+            "content": (
+                "[对话动作指令] "
+                f"请以 {decision.intent or 'answer'} 意图回复消息 "
+                f"#{decision.reply_to_message_id or 'latest'}，"
+                f"目标身份为 {decision.reply_to_character_id or 'player'}，"
+                f"当前话题为 {decision.topic or '延续当前话题'}。"
+            ),
+        })
         
         # 调用 LLM
         result = llm_client.call_role_turn(
@@ -818,7 +1178,7 @@ class MultiCharacterOrchestrator:
         
         # 记录消息
         character_name = card.meta.display_name or card.meta.name
-        repository.append_multi_character_message(
+        message_id = repository.append_multi_character_message(
             self.session_id,
             role="assistant",
             content=dialogue,
@@ -826,18 +1186,15 @@ class MultiCharacterOrchestrator:
             character_name=character_name,
             world_created_at=clock_snapshot.world_now.isoformat(),
             knowledge_sources=knowledge.sources,
+            reply_to_message_id=decision.reply_to_message_id,
+            reply_to_character_id=decision.reply_to_character_id,
+            intent=decision.intent,
+            topic=decision.topic,
+            trigger_source=trigger_source,
         )
-        
-        if not getattr(self, "_checkpoint_memory_ready", False):
-            self._prepare_checkpoint_memory()
-        if getattr(self, "_checkpoint_memory_fact", None):
-            repository.save_long_term_fact(
-                character_id,
-                self.player_id,
-                self._checkpoint_memory_fact,
-            )
-        
+
         return {
+            "message_id": message_id,
             "character_id": character_id,
             "character_name": character_name,
             "dialogue": dialogue,
@@ -848,6 +1205,12 @@ class MultiCharacterOrchestrator:
             "current_trust": new_trust,
             "current_mood": mood_after,
             "knowledge_sources": knowledge.sources,
+            "reply_to_message_id": decision.reply_to_message_id,
+            "reply_to_character_id": decision.reply_to_character_id,
+            "intent": decision.intent,
+            "topic": decision.topic,
+            "trigger_source": trigger_source,
+            "world_created_at": clock_snapshot.world_now.isoformat(),
         }
     
     
@@ -1127,21 +1490,26 @@ class MultiCharacterOrchestrator:
             char_name = msg.get("character_name")
             
             if role == "user":
-                # 玩家消息
-                formatted_content = f"[{self.player_name}]: {content}"
+                formatted_content = (
+                    f"[消息 #{msg.get('message_id') or '?'} | 玩家 {self.player_name}]: {content}"
+                )
                 messages.append({"role": "user", "content": formatted_content})
             
             elif role == "assistant":
-                # 角色消息
+                source_name = char_name or char_id or "未知角色"
+                target = msg.get("reply_to_character_id") or "玩家/群体"
+                metadata = (
+                    f"消息 #{msg.get('message_id') or '?'}，发言者 {source_name}({char_id or '?'})，"
+                    f"回复消息 #{msg.get('reply_to_message_id') or '?'}，目标 {target}，"
+                    f"意图 {msg.get('intent') or '未标注'}，话题 {msg.get('topic') or '未标注'}"
+                )
                 if char_id == current_character_id:
-                    # 自己的历史消息
-                    messages.append({"role": "assistant", "content": content})
+                    messages.append({
+                        "role": "assistant",
+                        "content": f"[{metadata}] {content}",
+                    })
                 else:
-                    # 其他角色的消息（作为用户消息呈现）
-                    if char_name:
-                        formatted_content = f"[{char_name}]: {content}"
-                    else:
-                        formatted_content = f"[其他角色]: {content}"
+                    formatted_content = f"[{metadata}] {content}"
                     messages.append({"role": "user", "content": formatted_content})
         
         return messages

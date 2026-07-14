@@ -543,7 +543,7 @@ class TestMultiSession:
         assert [m["content"] for m in older] == ["旧消息-0", "旧消息-1", "旧消息-2", "新消息-0"]
         assert older_has_more is False
 
-    def test_multi_character_thread_history_merges_same_name_sessions(self):
+    def test_multi_character_thread_history_keeps_same_name_threads_isolated(self):
         first_sid = str(uuid.uuid4())
         second_sid = str(uuid.uuid4())
         other_player_sid = str(uuid.uuid4())
@@ -579,10 +579,148 @@ class TestMultiSession:
         repository.append_multi_character_message(other_player_sid, "user", "其他玩家消息")
 
         sessions = repository.get_multi_character_thread_sessions(first_sid)
-        assert [s["session_id"] for s in sessions] == [first_sid, second_sid]
+        assert [s["session_id"] for s in sessions] == [first_sid]
 
         history = repository.get_multi_character_thread_history(first_sid, limit_messages=None)
-        assert [m["content"] for m in history] == ["同名第一段", "同名第二段"]
+        assert [m["content"] for m in history] == ["同名第一段"]
+
+    def test_multi_character_thread_incremental_history_is_stable_across_sessions(self):
+        thread_id = str(uuid.uuid4())
+        first_sid = str(uuid.uuid4())
+        second_sid = str(uuid.uuid4())
+        player_id = f"gti_{uuid.uuid4().hex[:8]}"
+
+        for session_id in (first_sid, second_sid):
+            assert repository.create_multi_character_session(
+                session_id,
+                player_id,
+                "Player",
+                ["gc1", "gc2"],
+                group_name="增量群聊",
+                group_thread_id=thread_id,
+            )
+
+        first_id = repository.append_multi_character_message(
+            first_sid,
+            "user",
+            "第一条",
+            world_created_at="2026-01-01T08:00:00+00:00",
+            trigger_source="player",
+        )
+        second_id = repository.append_multi_character_message(
+            first_sid,
+            "assistant",
+            "第二条",
+            "gc1",
+            "角色一",
+            reply_to_message_id=first_id,
+            intent="answer",
+            topic="计划",
+            trigger_source="player",
+            world_created_at="2026-01-01T08:01:00+00:00",
+        )
+        third_id = repository.append_multi_character_message(
+            second_sid,
+            "assistant",
+            "第三条",
+            "gc2",
+            "角色二",
+            reply_to_message_id=second_id,
+            reply_to_character_id="gc1",
+            intent="challenge",
+            topic="计划",
+            trigger_source="npc_follow_up",
+            world_created_at="2026-01-01T08:02:00+00:00",
+        )
+
+        first_page, has_more, latest_id = repository.get_multi_character_thread_history_after(
+            first_sid,
+            after_message_id=0,
+            limit=2,
+        )
+        second_page, second_has_more, second_latest_id = repository.get_multi_character_thread_history_after(
+            first_sid,
+            after_message_id=second_id,
+            limit=2,
+        )
+        repeated, repeated_has_more, repeated_latest_id = repository.get_multi_character_thread_history_after(
+            first_sid,
+            after_message_id=second_id,
+            limit=2,
+        )
+        empty, empty_has_more, empty_latest_id = repository.get_multi_character_thread_history_after(
+            first_sid,
+            after_message_id=third_id,
+            limit=2,
+        )
+
+        assert [message["message_id"] for message in first_page] == [first_id, second_id]
+        assert has_more is True
+        assert latest_id == third_id
+        assert second_page == repeated
+        assert second_has_more is repeated_has_more is False
+        assert second_latest_id == repeated_latest_id == third_id
+        assert second_page[0] == {
+            **second_page[0],
+            "message_id": third_id,
+            "session_id": second_sid,
+            "reply_to_message_id": second_id,
+            "reply_to_character_id": "gc1",
+            "intent": "challenge",
+            "topic": "计划",
+            "trigger_source": "npc_follow_up",
+            "world_created_at": "2026-01-01T08:02:00+00:00",
+        }
+        assert empty == []
+        assert empty_has_more is False
+        assert empty_latest_id == third_id
+
+    def test_group_message_notifications_aggregate_and_mark_only_owned_thread(self):
+        player_id = f"gun_{uuid.uuid4().hex[:8]}"
+        other_player_id = f"gun_other_{uuid.uuid4().hex[:8]}"
+        thread_id = str(uuid.uuid4())
+        other_thread_id = str(uuid.uuid4())
+        session_id = str(uuid.uuid4())
+
+        repository.upsert_group_message_notification(
+            player_id,
+            thread_id,
+            session_id,
+            2,
+            group_name="行动组",
+        )
+        repository.upsert_group_message_notification(
+            player_id,
+            thread_id,
+            session_id,
+            3,
+            group_name="行动组",
+        )
+        repository.upsert_group_message_notification(
+            player_id,
+            other_thread_id,
+            session_id,
+            4,
+        )
+        repository.upsert_group_message_notification(
+            other_player_id,
+            thread_id,
+            session_id,
+            6,
+        )
+
+        player_unread = repository.list_player_event_inbox(player_id)
+        thread_notification = next(
+            row for row in player_unread if row["group_thread_id"] == thread_id
+        )
+        assert thread_notification["unread_count"] == 5
+        assert thread_notification["content"] == "群聊中有 5 条新消息"
+
+        assert repository.mark_group_thread_notifications_read(player_id, thread_id) == 1
+        remaining = repository.list_player_event_inbox(player_id)
+        assert [row["group_thread_id"] for row in remaining] == [other_thread_id]
+        other_player_unread = repository.list_player_event_inbox(other_player_id)
+        assert other_player_unread[0]["unread_count"] == 6
 
     def test_multi_character_thread_history_filters_created_after(self):
         sid = str(uuid.uuid4())
@@ -825,6 +963,54 @@ class TestSessionListFields:
         assert empty_session["last_message"] == "旧会话最后一句"
         assert empty_session["last_message_at"] is not None
         assert empty_session["message_count"] == 2
+
+    def test_group_session_list_aggregates_logical_thread_and_unread_count(self):
+        player_id = f"slg_{uuid.uuid4().hex[:8]}"
+        thread_id = str(uuid.uuid4())
+        first_sid = str(uuid.uuid4())
+        second_sid = str(uuid.uuid4())
+
+        for session_id in (first_sid, second_sid):
+            assert repository.create_multi_character_session(
+                session_id,
+                player_id,
+                "Tester",
+                ["slg-c1", "slg-c2"],
+                group_name="逻辑线程",
+                group_thread_id=thread_id,
+            )
+        repository.end_session(first_sid)
+        first_message_id = repository.append_multi_character_message(
+            first_sid,
+            "user",
+            "线程旧消息",
+        )
+        latest_message_id = repository.append_multi_character_message(
+            second_sid,
+            "assistant",
+            "线程最新消息",
+            "slg-c1",
+            "角色一",
+        )
+        repository.upsert_group_message_notification(
+            player_id,
+            thread_id,
+            second_sid,
+            3,
+            group_name="逻辑线程",
+        )
+
+        sessions = repository.get_all_player_sessions(player_id)
+        groups = [session for session in sessions if session["is_multi_character"]]
+
+        assert len(groups) == 1
+        assert groups[0]["session_id"] == second_sid
+        assert groups[0]["group_thread_id"] == thread_id
+        assert groups[0]["latest_message_id"] == latest_message_id
+        assert groups[0]["latest_message_id"] > first_message_id
+        assert groups[0]["last_message"] == "线程最新消息"
+        assert groups[0]["message_count"] == 2
+        assert groups[0]["unread_count"] == 3
 
     def test_paginated_messages_include_message_id(self):
         sid = str(uuid.uuid4())
