@@ -12,6 +12,85 @@ from memoria.db import repository
 
 
 class TestMigrations:
+    def test_init_db_migrates_directional_character_impressions(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        database_path = tmp_path / "legacy_shared_memory.db"
+        with sqlite3.connect(database_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE shared_memory (
+                    id TEXT PRIMARY KEY,
+                    owner_user_id TEXT NOT NULL,
+                    character_a_id TEXT NOT NULL,
+                    character_b_id TEXT NOT NULL,
+                    memory_text TEXT NOT NULL,
+                    context TEXT,
+                    importance REAL DEFAULT 0.5,
+                    created_at TEXT,
+                    last_referenced TEXT,
+                    reference_count INTEGER DEFAULT 0
+                )
+                """
+            )
+            conn.executemany(
+                """
+                INSERT INTO shared_memory
+                (id, owner_user_id, character_a_id, character_b_id,
+                 memory_text, context)
+                VALUES (?, 'user-1', 'npc_a', 'npc_b', ?, ?)
+                """,
+                [
+                    (
+                        "pulse-fact",
+                        "众人决定夜间出发",
+                        "session:s1:dialogue_pulse",
+                    ),
+                    (
+                        "directed-impression",
+                        "对 npc_b 的印象：认为他在压力下很可靠",
+                        "session:s1",
+                    ),
+                    (
+                        "ambiguous",
+                        "一起完成了训练",
+                        "session:s1",
+                    ),
+                ],
+            )
+
+        monkeypatch.setattr(configs, "database_url", "")
+        monkeypatch.setattr(configs, "database_path", str(database_path))
+
+        repository.init_db()
+
+        with sqlite3.connect(database_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = {
+                row["id"]: dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT id, observer_character_id, target_character_id,
+                           memory_kind, memory_text
+                    FROM shared_memory
+                    """
+                ).fetchall()
+            }
+
+        assert "pulse-fact" not in rows
+        assert rows["directed-impression"] == {
+            "id": "directed-impression",
+            "observer_character_id": "npc_a",
+            "target_character_id": "npc_b",
+            "memory_kind": "character_impression",
+            "memory_text": "认为他在压力下很可靠",
+        }
+        assert rows["ambiguous"]["memory_kind"] == "legacy_archived"
+        assert rows["ambiguous"]["observer_character_id"] is None
+        assert rows["ambiguous"]["target_character_id"] is None
+
     def test_init_db_adds_scheduler_lease_columns_before_index(
         self,
         tmp_path,
@@ -1257,6 +1336,77 @@ class TestGroupDialoguePulseCommit:
         inbox = repository.list_player_event_inbox(player_id)
         assert len(inbox) == 1
         assert inbox[0]["unread_count"] == 2
+
+    def test_commit_suppresses_duplicate_responses(self):
+        suffix = uuid.uuid4().hex[:8]
+        session_id = f"dedup-group-session-{suffix}"
+        thread_id = f"dedup-group-thread-{suffix}"
+        player_id = f"dedup-group-player-{suffix}"
+        assert repository.create_multi_character_session(
+            session_id,
+            player_id,
+            "Player",
+            ["c1", "c2"],
+            group_thread_id=thread_id,
+        )
+        repository.save_group_dialogue_state(thread_id, player_id)
+        assert repository.claim_group_dialogue_state(
+            thread_id,
+            lease_owner="worker-dedup",
+            lease_expires_at="2026-01-02T12:10:00+00:00",
+            real_now_iso="2026-01-02T12:00:00+00:00",
+        )
+
+        committed = repository.commit_group_dialogue_pulse(
+            thread_id,
+            session_id,
+            player_id,
+            [
+                {
+                    "message_id": -1,
+                    "character_id": "c1",
+                    "character_name": "甲",
+                    "dialogue": "我们先去北门侦查。",
+                },
+                {
+                    "message_id": -2,
+                    "character_id": "c1",
+                    "character_name": "甲",
+                    "dialogue": "我们先去北门侦查！",
+                    "reply_to_message_id": -1,
+                },
+            ],
+            lease_owner="worker-dedup",
+            real_now_iso="2026-01-02T12:00:00+00:00",
+            world_now_iso="2026-01-02T20:00:00+00:00",
+            autonomous_message_count=2,
+            daily_message_date="2026-01-02",
+            current_topic="侦查",
+            topic_source="goal",
+            last_reply_to_message_id=-2,
+            last_reply_to_character_id="c1",
+            last_speaker_id="c1",
+            waiting_for_player=False,
+            unresolved_hooks=[],
+        )
+
+        history = repository.get_multi_character_history(
+            session_id,
+            limit_messages=None,
+        )
+        state = repository.get_group_dialogue_state(thread_id)
+        participants = repository.get_session_participants(
+            session_id,
+            only_active=False,
+        )
+        inbox = repository.list_player_event_inbox(player_id)
+
+        assert len(committed) == 1
+        assert [message["content"] for message in history] == ["我们先去北门侦查。"]
+        assert state["daily_message_count"] == 1
+        assert state["waiting_for_player"] is True
+        assert sum(row["message_count"] for row in participants) == 1
+        assert inbox[0]["unread_count"] == 1
 
     def test_notification_failure_rolls_back_entire_pulse(self, monkeypatch):
         suffix = uuid.uuid4().hex[:8]

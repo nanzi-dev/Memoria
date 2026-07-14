@@ -122,7 +122,17 @@ def _build_multi_character_system_prompt(*, locale: Locale, **kwargs) -> str:
     except TypeError as exc:
         if "unexpected keyword argument" not in str(exc):
             raise
-        return prompt_builder.build_multi_character_system_prompt(**kwargs)
+        legacy_kwargs = dict(kwargs)
+        legacy_kwargs.pop("player_character", None)
+        try:
+            return prompt_builder.build_multi_character_system_prompt(
+                locale=locale,
+                **legacy_kwargs,
+            )
+        except TypeError as legacy_exc:
+            if "unexpected keyword argument" not in str(legacy_exc):
+                raise
+            return prompt_builder.build_multi_character_system_prompt(**legacy_kwargs)
 
 
 # =========================
@@ -160,6 +170,8 @@ class MultiCharacterOrchestrator:
         
         self.player_id = self.session["player_id"]
         self.player_name = self.session["player_name"]
+        self.player_character = {}
+        self._refresh_player_character()
         self.locale = self.session.get("locale") or DEFAULT_LOCALE
         
         # 加载参与者
@@ -184,6 +196,21 @@ class MultiCharacterOrchestrator:
         self._checkpoint_memory_ready = False
         
         logger.info(f"多角色编排器已初始化: session={session_id}, 参与角色={self.character_ids}")
+
+
+    def _refresh_player_character(self) -> dict:
+        fallback_name = getattr(self, "player_name", None) or "玩家"
+        try:
+            card = repository.get_or_create_user_character_card(self.player_id)
+        except Exception as exc:
+            logger.warning("加载玩家角色卡失败，继续使用会话名称: %s", exc)
+            card = None
+        player_character = dict(card or getattr(self, "player_character", {}) or {})
+        player_character.setdefault("display_name", fallback_name)
+        player_character.setdefault("node_id", repository.player_node_id(self.player_id))
+        self.player_character = player_character
+        self.player_name = player_character["display_name"]
+        return player_character
 
 
     def _ensure_has_active_participants(self) -> None:
@@ -731,6 +758,24 @@ class MultiCharacterOrchestrator:
                 persist=False,
                 history_override=history,
             )
+            if self._is_redundant_dialogue_response(
+                result,
+                history=history,
+                accepted_responses=responses,
+            ):
+                logger.warning(
+                    "抑制重复群聊回复: session=%s, character=%s, reply_to=%s",
+                    self.session_id,
+                    result.get("character_id"),
+                    result.get("reply_to_message_id"),
+                )
+                decisions.pop()
+                decisions.append(DialogueDecision(
+                    action="wait",
+                    wait_for_player=True,
+                    stop_reason="duplicate_response",
+                ))
+                break
             if persist_messages:
                 if all(
                     key in result
@@ -804,6 +849,45 @@ class MultiCharacterOrchestrator:
         return responses
 
 
+    @staticmethod
+    def _is_redundant_dialogue_response(
+        result: dict,
+        *,
+        history: list[dict],
+        accepted_responses: list[dict],
+    ) -> bool:
+        dialogue = str(result.get("dialogue") or "").strip()
+        speaker_id = result.get("character_id")
+        if not dialogue or not speaker_id:
+            return True
+
+        candidates = [
+            str(response.get("dialogue") or "")
+            for response in accepted_responses
+            if response.get("character_id") == speaker_id
+        ]
+        reply_to_message_id = result.get("reply_to_message_id")
+        recent_message_ids = {
+            message.get("message_id")
+            for message in history[-4:]
+        }
+        candidates.extend(
+            str(message.get("content") or "")
+            for message in history
+            if message.get("role") == "assistant"
+            and message.get("character_id") == speaker_id
+            and (
+                message.get("message_id") in recent_message_ids
+                or message.get("message_id") == reply_to_message_id
+                or message.get("reply_to_message_id") == reply_to_message_id
+            )
+        )
+        return any(
+            repository.dialogue_texts_redundant(dialogue, candidate)
+            for candidate in candidates
+        )
+
+
     def _decide_dialogue_action(
         self,
         *,
@@ -847,6 +931,7 @@ class MultiCharacterOrchestrator:
         trigger_text: str,
         initial_speaker_id: str | None,
     ) -> str:
+        self._refresh_player_character()
         participants = []
         for participant in self.participants:
             character_id = participant["character_id"]
@@ -912,10 +997,12 @@ class MultiCharacterOrchestrator:
             "话题优先级：明确事件/未解决钩子 > 目标、秘密、关系冲突 > 最新问题或点名 > 情绪关系延伸 > 喜爱话题。",
             "普通闲聊不能连续开启无剧情价值的新话题。连续发言和发言次数只降低优先级，不得硬性排除角色。",
             "若最新发言明确等待某角色、追问、反驳或点名，允许同一角色再次发言。没有自然后续时 action=wait。",
+            "后续发言必须承接最近一条有效消息推进内容；如果只能重复已有表达，必须选择 action=wait。",
             "回复必须指向历史中真实 message_id；面向玩家时 reply_to_character_id=null，面向 NPC 时填其 character_id。",
             f"触发来源: {trigger_source}",
             f"触发文本: {trigger_text[:800]}",
             f"首步指定发言者: {initial_speaker_id or '无'}",
+            f"玩家角色卡: {json.dumps(self.player_character, ensure_ascii=False)}",
             f"线程状态: {json.dumps(thread_state, ensure_ascii=False)}",
             f"参与角色: {json.dumps(participants, ensure_ascii=False)}",
             f"最近历史: {json.dumps(recent_history, ensure_ascii=False)}",
@@ -1131,6 +1218,12 @@ class MultiCharacterOrchestrator:
                 rel = self._get_character_relationship(char_a, char_b)
                 if rel:
                     relationships[f"{char_a}_{char_b}"] = rel
+
+        player_node_id = repository.player_node_id(self.player_id)
+        for character_id in self.character_ids:
+            rel = self._get_character_relationship(player_node_id, character_id)
+            if rel:
+                relationships[f"{player_node_id}_{character_id}"] = rel
         
         return relationships
 
@@ -1289,6 +1382,7 @@ class MultiCharacterOrchestrator:
         Returns:
             dict: 开场白结果
         """
+        self._refresh_player_character()
         card = self.character_cards[character_id]
         character_relationships = self._load_all_relationships()
         relationship_history_cutoff = multi_character_memory.get_relationship_history_cutoff(
@@ -1333,6 +1427,7 @@ class MultiCharacterOrchestrator:
             card=card,
             runtime_state=runtime_state,
             player_name=self.player_name,
+            player_character=self.player_character,
             other_characters=other_characters,
             character_relationships=character_relationships,
             is_opening=True,
@@ -1393,6 +1488,7 @@ class MultiCharacterOrchestrator:
         Returns:
             dict: 角色回应结果
         """
+        self._refresh_player_character()
         if character_id not in self.character_cards:
             raise ValueError(f"角色不可回复: {character_id}")
         card = self.character_cards[character_id]
@@ -1462,6 +1558,7 @@ class MultiCharacterOrchestrator:
             card=card,
             runtime_state=runtime_state,
             player_name=self.player_name,
+            player_character=self.player_character,
             other_characters=other_characters,
             character_relationships=character_relationships,
             past_summaries=self._load_memory_context(
@@ -1577,6 +1674,7 @@ class MultiCharacterOrchestrator:
         Returns:
             dict: 角色互动结果
         """
+        self._refresh_player_character()
         if trigger_character_id not in self.character_cards:
             raise ValueError(f"角色不可回复: {trigger_character_id}")
         card = self.character_cards[trigger_character_id]
@@ -1637,6 +1735,7 @@ class MultiCharacterOrchestrator:
             card=card,
             runtime_state=runtime_state,
             player_name=self.player_name,
+            player_character=self.player_character,
             other_characters=other_characters,
             character_relationships=character_relationships,
             past_summaries=self._load_memory_context(
@@ -1921,6 +2020,12 @@ def start_multi_character_session(
     Returns:
         dict: 包含 session_id 和开场白的结果
     """
+    try:
+        player_character = repository.get_or_create_user_character_card(player_id)
+    except Exception as exc:
+        logger.warning("加载玩家角色卡失败，继续使用请求名称: %s", exc)
+        player_character = None
+    player_name = (player_character or {}).get("display_name") or player_name
     session_id = str(uuid.uuid4())
     
     # 创建会话

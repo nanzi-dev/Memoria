@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import * as d3 from 'd3';
-import { characterAdmin, relationshipAdmin } from '../api/memoria';
+import { relationshipAdmin } from '../api/memoria';
 import { useDialog } from '../context/DialogContext';
 import { useUser } from '../context/UserContext';
 import SideRays from '../components/SideRays';
@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 
 const CYBER_GREEN = '#A7EF9E';
+const PLAYER_CYAN = '#67E8F9';
 const CYBER_BG = '#0b0b0c';
 const CYBER_SURFACE = '#120F17';
 const CYBER_DARK = '#0a0a0e';
@@ -198,6 +199,9 @@ function AddRelationModal({ characters, relationTypes, usedTypeValues, onAddType
   const [type, setType] = useState(relationTypes[0]?.value || '');
   const [affinity, setAffinity] = useState(50);
   const [desc, setDesc] = useState('');
+  const isPlayerRelation = [charA, charB].some(
+    characterId => characters.find(character => character.character_id === characterId)?.node_type === 'player'
+  );
 
   useEffect(() => {
     if (!type && relationTypes[0]?.value) setType(relationTypes[0].value);
@@ -210,7 +214,9 @@ function AddRelationModal({ characters, relationTypes, usedTypeValues, onAddType
   };
 
   const opts = characters.map(c => (
-    <option key={c.character_id} value={c.character_id}>{c.display_name || c.name}</option>
+    <option key={c.character_id} value={c.character_id}>
+      {c.node_type === 'player' ? '[玩家] ' : ''}{c.display_name || c.name}
+    </option>
   ));
 
   return createPortal(
@@ -270,7 +276,7 @@ function AddRelationModal({ characters, relationTypes, usedTypeValues, onAddType
           </div>
           <div>
             <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">
-              亲密度: {affinity}
+              {isPlayerRelation ? '好感度' : '亲密度'}: {affinity}
             </label>
             <input type="range" min="-100" max="100" value={affinity}
               onChange={e => setAffinity(Number(e.target.value))}
@@ -302,6 +308,7 @@ function EditRelationModal({ edge, relationTypes, usedTypeValues, onAddType, onR
 
   const sourceName = edge.source?.display_name || edge.source?.name || edge.source;
   const targetName = edge.target?.display_name || edge.target?.name || edge.target;
+  const isPlayerRelation = edge.source?.node_type === 'player' || edge.target?.node_type === 'player';
 
   return createPortal(
     <div className="fixed inset-0 z-[1000] flex min-h-screen items-center justify-center overflow-y-auto p-4 font-mono" onClick={onClose}>
@@ -345,7 +352,7 @@ function EditRelationModal({ edge, relationTypes, usedTypeValues, onAddType, onR
           </div>
           <div>
             <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">
-              亲密度: {affinity}
+              {isPlayerRelation ? '好感度' : '亲密度'}: {affinity}
             </label>
             <input type="range" min="-100" max="100" value={affinity}
               onChange={e => setAffinity(Number(e.target.value))}
@@ -389,6 +396,7 @@ export default function RelationshipGraph() {
   const [error, setError] = useState(null);
   const [network, setNetwork] = useState({ nodes: [], edges: [] });
   const [characters, setCharacters] = useState([]);
+  const [graphSize, setGraphSize] = useState({ width: 0, height: 0 });
   const [relationTypes, setRelationTypes] = useState(loadRelationTypes);
 
   const [showAddModal, setShowAddModal] = useState(false);
@@ -417,29 +425,18 @@ export default function RelationshipGraph() {
 
     try {
       setLoading(true); setError(null);
-      const [charList, netData] = await Promise.all([
-        characterAdmin.list(false),
-        relationshipAdmin.network(),
-      ]);
+      const netData = await relationshipAdmin.network();
       if (loadRequestRef.current !== requestId) return;
-      const map = {};
-      for (const c of charList) {
-        map[c.character_id] = {
-          character_id: c.character_id, avatar_url: c.avatar_url || null,
-          name: c.name || c.display_name || c.character_id,
-          display_name: c.name || c.display_name || c.character_id,
-          is_active: !!c.is_active,
-        };
-      }
-      const enrichedNodes = netData.nodes.map(n => ({
-        ...n,
-        name: map[n.character_id]?.name || n.name || n.character_id,
-        display_name: map[n.character_id]?.name || map[n.character_id]?.display_name || n.name || n.character_id,
-        avatar_url: map[n.character_id]?.avatar_url || null,
-        is_active: map[n.character_id]?.is_active ?? true,
+      const nodes = (netData.nodes || []).map(node => ({
+        character_id: node.character_id,
+        node_type: node.node_type || 'character',
+        name: node.name || node.character_id,
+        display_name: node.name || node.character_id,
+        avatar_url: node.avatar_url || null,
+        is_active: node.is_active ?? true,
       }));
-      setCharacters(Object.values(map));
-      setNetwork({ nodes: enrichedNodes, edges: netData.edges });
+      setCharacters(nodes);
+      setNetwork({ nodes, edges: netData.edges || [] });
       setRelationTypes(prev => mergeRelationTypes(prev, netData.edges));
     } catch (e) {
       if (loadRequestRef.current !== requestId) return;
@@ -454,13 +451,34 @@ export default function RelationshipGraph() {
     return () => { loadRequestRef.current += 1; };
   }, [loadData]);
 
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+    const updateSize = () => {
+      const rect = container.getBoundingClientRect();
+      const width = Math.round(rect.width);
+      const height = Math.round(rect.height);
+      if (!width || !height) return;
+      setGraphSize(current => (
+        current.width === width && current.height === height
+          ? current
+          : { width, height }
+      ));
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
   // ── D3 渲染 ──
   useEffect(() => {
     if (!svgRef.current || !containerRef.current) return;
     const svg = d3.select(svgRef.current);
     const container = containerRef.current;
-    const W = container.clientWidth;
-    const H = container.clientHeight;
+    const W = graphSize.width || container.clientWidth;
+    const H = graphSize.height || container.clientHeight;
+    if (!W || !H) return;
 
     if (simulationRef.current) {
       simulationRef.current.stop();
@@ -603,13 +621,13 @@ export default function RelationshipGraph() {
         .on('end', (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }))
       .on('dblclick', (event, d) => {
         event.stopPropagation();
-        navigate(`/editor/${d.character_id}`);
+        navigate(d.node_type === 'player' ? '/persona' : `/editor/${d.character_id}`);
       });
 
     node.transition().delay((d, i) => Math.min(i, 16) * 45).duration(360).ease(d3.easeCubicOut).attr('opacity', 1);
 
     // 光晕
-    node.append('circle').attr('r', NODE_R + 10).attr('fill', CYBER_GREEN)
+    node.append('circle').attr('r', NODE_R + 10).attr('fill', d => d.node_type === 'player' ? PLAYER_CYAN : CYBER_GREEN)
       .attr('opacity', 0).attr('class', 'node-halo').attr('filter', 'url(#glow)');
 
     // 头像裁剪定义（在 defs 中定义，避免重复id冲突）
@@ -639,7 +657,7 @@ export default function RelationshipGraph() {
         g.append('text')
           .text((d.name || d.display_name || d.character_id).charAt(0))
           .attr('text-anchor', 'middle').attr('dy', '0.35em')
-          .attr('fill', CYBER_GREEN).attr('font-family', 'Noto Sans SC, Microsoft YaHei, PingFang SC, system-ui, sans-serif')
+          .attr('fill', d.node_type === 'player' ? PLAYER_CYAN : CYBER_GREEN).attr('font-family', 'Noto Sans SC, Microsoft YaHei, PingFang SC, system-ui, sans-serif')
           .attr('font-size', '18px').attr('font-weight', 'bold')
           .attr('pointer-events', 'none');
       }
@@ -648,20 +666,32 @@ export default function RelationshipGraph() {
     // 主体圆（描边）
     node.append('circle').attr('r', NODE_R)
       .attr('fill', 'none')
-      .attr('stroke', d => d.is_active ? CYBER_GREEN : '#EF4444')
+      .attr('stroke', d => d.node_type === 'player' ? PLAYER_CYAN : (d.is_active ? CYBER_GREEN : '#EF4444'))
       .attr('stroke-width', d => d.is_active ? 2.4 : 2.8)
       .attr('stroke-opacity', 0.9);
 
     // 装饰虚线环
     node.append('circle').attr('r', NODE_R - 4).attr('fill', 'none')
-      .attr('stroke', CYBER_GREEN).attr('stroke-opacity', 0.26).attr('stroke-width', 1)
+      .attr('stroke', d => d.node_type === 'player' ? PLAYER_CYAN : CYBER_GREEN).attr('stroke-opacity', 0.26).attr('stroke-width', 1)
       .attr('stroke-dasharray', '3 6');
+
+    const playerBadge = node.filter(d => d.node_type === 'player');
+    playerBadge.append('rect')
+      .attr('x', -19).attr('y', -NODE_R - 19)
+      .attr('width', 38).attr('height', 16).attr('rx', 4)
+      .attr('fill', '#071417').attr('stroke', PLAYER_CYAN).attr('stroke-opacity', 0.55);
+    playerBadge.append('text')
+      .text('玩家')
+      .attr('text-anchor', 'middle').attr('dy', -NODE_R - 8)
+      .attr('fill', PLAYER_CYAN).attr('font-size', '9px').attr('font-weight', '700')
+      .attr('font-family', 'Noto Sans SC, Microsoft YaHei, PingFang SC, system-ui, sans-serif')
+      .attr('pointer-events', 'none');
 
     // 名称
     node.append('text')
       .text(d => d.name || d.display_name || d.character_id)
       .attr('text-anchor', 'middle').attr('dy', NODE_R + 18)
-      .attr('fill', CYBER_GREEN).attr('font-family', 'Noto Sans SC, Microsoft YaHei, PingFang SC, system-ui, sans-serif')
+      .attr('fill', d => d.node_type === 'player' ? PLAYER_CYAN : CYBER_GREEN).attr('font-family', 'Noto Sans SC, Microsoft YaHei, PingFang SC, system-ui, sans-serif')
       .attr('font-size', '14px').attr('font-weight', '500')
       .attr('opacity', 0.92).attr('pointer-events', 'none');
 
@@ -712,7 +742,7 @@ export default function RelationshipGraph() {
       setActiveRelationType(null);
       simulation.stop();
     };
-  }, [network, navigate, relationTypes]);
+  }, [graphSize.height, graphSize.width, network, navigate, relationTypes]);
 
   // ── 操作 ──
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
@@ -742,9 +772,12 @@ export default function RelationshipGraph() {
   const handleDelete = async (edge) => {
     const sn = edge.source?.display_name || edge.source?.name;
     const tn = edge.target?.display_name || edge.target?.name;
+    const isPlayerRelation = edge.source?.node_type === 'player' || edge.target?.node_type === 'player';
     const ok = await dialog.confirm({
       title: '删除关系',
-      message: `确定删除「${sn}」与「${tn}」之间的关系吗？`,
+      message: isPlayerRelation
+        ? `确定删除「${sn}」与「${tn}」之间的关系吗？运行时好感度将重置为 0，信任与心情状态保留。`
+        : `确定删除「${sn}」与「${tn}」之间的关系吗？`,
       variant: 'danger',
       confirmText: '删除',
     });
@@ -836,26 +869,28 @@ export default function RelationshipGraph() {
 
       {/* Header */}
       <div className="sticky top-0 z-20 memoria-glass border-x-0 border-t-0">
-        <div className="flex items-center justify-between px-5 py-3">
+        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2.5 sm:px-5 sm:py-3">
           <button onClick={() => navigate('/')}
-            className="flex items-center gap-1.5 text-cyber-green/50 hover:text-cyber-green hover:bg-cyber-green/5 rounded-lg px-2 py-2 transition-all font-mono text-sm">
-            <ArrowLeft size={16} /> Back
+            className="flex h-11 w-11 items-center justify-center gap-1.5 rounded-lg text-cyber-green/50 transition-all hover:bg-cyber-green/5 hover:text-cyber-green sm:w-auto sm:px-2 sm:font-mono sm:text-sm">
+            <ArrowLeft size={16} /> <span className="hidden sm:inline">Back</span>
           </button>
-          <h1 className="font-display text-base text-cyber-green tracking-[0.2em] flex items-center gap-2">
-            <Users size={18} /> RELATIONSHIP GRAPH
+          <h1 className="flex min-w-0 items-center justify-center gap-1.5 whitespace-nowrap font-display text-[11px] tracking-[0.08em] text-cyber-green sm:gap-2 sm:text-base sm:tracking-[0.2em]">
+            <Users size={18} className="hidden shrink-0 sm:block" /> RELATIONSHIP GRAPH
           </h1>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <span className="text-[10px] font-mono text-cyber-green/30 hidden sm:inline">
               {characters.length} 角色 · {network.edges.length} 边
             </span>
             <button onClick={() => setShowAddModal(true)}
               disabled={!user || loading}
-              className="flex items-center gap-1 px-3 py-1.5 bg-cyber-green/10 border border-cyber-green/25 text-cyber-green font-mono text-xs rounded-lg hover:bg-cyber-green/20 hover:shadow-[0_0_22px_rgba(167,239,158,0.12)] active:scale-95 transition-all disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-cyber-green/10 disabled:hover:shadow-none disabled:active:scale-100">
-              <Plus size={13} /> 添加关系
+              className="flex h-11 w-11 items-center justify-center gap-1 rounded-lg border border-cyber-green/25 bg-cyber-green/10 font-mono text-xs text-cyber-green transition-all hover:bg-cyber-green/20 hover:shadow-[0_0_22px_rgba(167,239,158,0.12)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-cyber-green/10 disabled:hover:shadow-none disabled:active:scale-100 sm:w-auto sm:px-3">
+              <Plus size={14} /> <span className="hidden sm:inline">添加关系</span>
             </button>
             <button onClick={loadData} disabled={loading}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-mono text-cyber-green/40 hover:text-cyber-green hover:bg-cyber-green/5 border border-cyber-green/15 rounded-lg transition-all disabled:opacity-30">
-              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+              className="flex h-11 w-11 items-center justify-center rounded-lg border border-cyber-green/15 font-mono text-xs text-cyber-green/40 transition-all hover:bg-cyber-green/5 hover:text-cyber-green disabled:opacity-30"
+              aria-label="刷新关系图"
+              title="刷新关系图">
+              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             </button>
           </div>
         </div>
@@ -905,18 +940,18 @@ export default function RelationshipGraph() {
         {/* 浮动控件 */}
         {!loading && network.nodes.length > 0 && (
           <>
-            <div className="absolute bottom-6 right-6 flex flex-col gap-1.5 z-10 animate-fade-up">
-              <button onClick={zoomIn} className="memoria-glass p-2.5 rounded-lg text-cyber-green/50 hover:text-cyber-green hover:border-cyber-green/30 active:scale-95 transition-all" title="放大">
+            <div className="absolute bottom-24 right-3 flex flex-col gap-1.5 z-10 animate-fade-up sm:bottom-6 sm:right-6">
+              <button onClick={zoomIn} className="memoria-glass flex h-11 w-11 items-center justify-center rounded-lg text-cyber-green/50 hover:text-cyber-green hover:border-cyber-green/30 active:scale-95 transition-all" title="放大" aria-label="放大关系图">
                 <ZoomIn size={16} />
               </button>
-              <button onClick={zoomOut} className="memoria-glass p-2.5 rounded-lg text-cyber-green/50 hover:text-cyber-green hover:border-cyber-green/30 active:scale-95 transition-all" title="缩小">
+              <button onClick={zoomOut} className="memoria-glass flex h-11 w-11 items-center justify-center rounded-lg text-cyber-green/50 hover:text-cyber-green hover:border-cyber-green/30 active:scale-95 transition-all" title="缩小" aria-label="缩小关系图">
                 <ZoomOut size={16} />
               </button>
-              <button onClick={zoomReset} className="memoria-glass p-2.5 rounded-lg text-cyber-green/50 hover:text-cyber-green hover:border-cyber-green/30 active:scale-95 transition-all" title="重置">
+              <button onClick={zoomReset} className="memoria-glass flex h-11 w-11 items-center justify-center rounded-lg text-cyber-green/50 hover:text-cyber-green hover:border-cyber-green/30 active:scale-95 transition-all" title="重置" aria-label="重置关系图缩放">
                 <Maximize2 size={16} />
               </button>
             </div>
-            <div className="absolute bottom-6 left-6 z-10 animate-fade-up">
+            <div className="absolute bottom-4 left-3 right-3 z-10 animate-fade-up sm:bottom-6 sm:left-6 sm:right-auto">
               <div className="memoria-glass rounded-lg px-3 py-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px]">
                 {relationTypes.map(rt => {
                   const active = activeRelationType === rt.value;
@@ -950,7 +985,7 @@ export default function RelationshipGraph() {
       {!loading && network.nodes.length > 0 && (
         <div className="text-center py-2 border-t border-cyber-green/5 bg-[#0d0d14]/40 backdrop-blur-sm">
           <span className="text-[10px] font-mono text-cyber-green/15">
-            拖拽节点 · 滚轮缩放 · 悬停高亮 · 点击边编辑 · 双击编辑角色
+            拖拽节点 · 滚轮缩放 · 悬停高亮 · 点击边编辑 · 双击编辑节点
           </span>
         </div>
       )}

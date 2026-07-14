@@ -7,6 +7,7 @@ const ChatRoom = lazy(() => import('./pages/ChatRoom'));
 const EventList = lazy(() => import('./pages/EventList'));
 const EventEditor = lazy(() => import('./pages/EventEditor'));
 const CharacterEditor = lazy(() => import('./pages/CharacterEditor'));
+const PersonaEditor = lazy(() => import('./pages/PersonaEditor'));
 const RelationshipGraph = lazy(() => import('./pages/RelationshipGraph'));
 const KnowledgeManager = lazy(() => import('./pages/KnowledgeManager'));
 
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/editor" element={<CharacterEditor />} />
         <Route path="/editor/:characterId" element={<CharacterEditor />} />
+        <Route path="/persona" element={<PersonaEditor />} />
         <Route path="/events" element={<EventList />} />
         <Route path="/graph" element={<RelationshipGraph />} />
         <Route path="/knowledge" element={<KnowledgeManager />} />

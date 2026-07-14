@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useUser } from '../context/UserContext';
 import { userApi } from '../api/memoria';
 import {
@@ -6,8 +7,8 @@ import {
   CalendarClock,
   Check,
   ClockArrowUp,
+  Contact,
   Edit3,
-  Globe2,
   Link,
   Loader2,
   LogOut,
@@ -38,23 +39,9 @@ function validateUsername(name) {
 
 const GENDER_LABEL = { male: '男', female: '女', unknown: '保密' };
 
-function browserTimezone() {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-}
-
-function isValidTimezone(value) {
-  try {
-    new Intl.DateTimeFormat('zh-CN', { timeZone: value }).format();
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function worldDateTimeInput(date, timezone) {
-  if (!date || !timezone) return '';
+function worldDateTimeInput(date) {
+  if (!date) return '';
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -65,12 +52,11 @@ function worldDateTimeInput(date, timezone) {
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 
-function formatClockDate(value, timezone) {
+function formatClockDate(value) {
   if (!value) return '暂无';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '暂无';
   return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: timezone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -102,21 +88,15 @@ function syncPreview(seconds) {
     : `世界时间将前进 ${formatOffset(value).slice(1)}`;
 }
 
-function nextMorningLocal(date, timezone) {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date).filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
-  let target = new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day)));
-  if (Number(parts.hour) >= 6) target = new Date(target.getTime() + 86400000);
-  return `${target.getUTCFullYear()}-${String(target.getUTCMonth() + 1).padStart(2, '0')}-${String(target.getUTCDate()).padStart(2, '0')}T06:00`;
+function nextMorningLocal(date) {
+  const target = new Date(date);
+  if (target.getHours() >= 6) target.setDate(target.getDate() + 1);
+  target.setHours(6, 0, 0, 0);
+  return worldDateTimeInput(target);
 }
 
 export default function UserSettingsModal({ onClose }) {
+  const navigate = useNavigate();
   const {
     user,
     worldClock,
@@ -137,12 +117,9 @@ export default function UserSettingsModal({ onClose }) {
   const [success, setSuccess] = useState(null);
   const [submitted, setSubmitted] = useState(false);
   const [clockLoading, setClockLoading] = useState(false);
-  const [timezoneMode, setTimezoneMode] = useState(worldClock?.timezone_mode || 'fixed');
-  const [timezone, setTimezone] = useState(worldClock?.timezone || browserTimezone());
   const [worldDateTime, setWorldDateTime] = useState(() => (
-    worldDateTimeInput(getWorldNow?.() || new Date(worldClock?.world_now || Date.now()), worldClock?.timezone || 'UTC')
+    worldDateTimeInput(getWorldNow?.() || new Date(worldClock?.world_now || Date.now()))
   ));
-  const [timezoneError, setTimezoneError] = useState('');
   const [syncConfirming, setSyncConfirming] = useState(false);
   const [speechLoading, setSpeechLoading] = useState(false);
   const [ttsAutoPlay, setTtsAutoPlay] = useState(Boolean(user?.tts_auto_play));
@@ -162,9 +139,7 @@ export default function UserSettingsModal({ onClose }) {
 
   useEffect(() => {
     if (!worldClock) return;
-    setTimezoneMode(worldClock.timezone_mode || 'fixed');
-    setTimezone(worldClock.timezone || browserTimezone());
-    setWorldDateTime(worldDateTimeInput(getWorldNow() || new Date(worldClock.world_now), worldClock.timezone));
+    setWorldDateTime(worldDateTimeInput(getWorldNow() || new Date(worldClock.world_now)));
   }, [worldClock?.clock_revision, getWorldNow]);
 
   useEffect(() => {
@@ -241,6 +216,11 @@ export default function UserSettingsModal({ onClose }) {
     onClose();
   };
 
+  const handleOpenPersona = () => {
+    onClose();
+    navigate('/persona');
+  };
+
   const handleScaleChange = async (timeScale) => {
     setApiError(null);
     setClockLoading(true);
@@ -268,34 +248,20 @@ export default function UserSettingsModal({ onClose }) {
     }
   };
 
-  const handleTimezoneSave = async () => {
-    const nextTimezone = timezoneMode === 'device' ? browserTimezone() : timezone.trim();
-    if (!isValidTimezone(nextTimezone)) {
-      setTimezoneError('请输入有效的 IANA 时区，例如 Asia/Shanghai');
-      return;
-    }
-    setTimezoneError('');
-    setApiError(null);
-    setClockLoading(true);
-    try {
-      await updateWorldClock({ timezone: nextTimezone, timezoneMode });
-      setSuccess(timezoneMode === 'device' ? `世界时区将跟随设备（${nextTimezone}）` : `世界时区已固定为 ${nextTimezone}`);
-    } catch (err) {
-      setApiError(err.clockRecovered ? '时区设置发生冲突，已加载最新配置，请重试' : err.message);
-    } finally {
-      setClockLoading(false);
-    }
-  };
-
   const handleSetWorldTime = async (value = worldDateTime) => {
     if (!value) {
       setApiError('请选择世界日期和时间');
       return;
     }
+    const localDate = new Date(value);
+    if (Number.isNaN(localDate.getTime())) {
+      setApiError('请选择有效的世界日期和时间');
+      return;
+    }
     setApiError(null);
     setClockLoading(true);
     try {
-      await setWorldClock(`${value}:00`);
+      await setWorldClock(localDate.toISOString());
       setSuccess('世界日期和时间已更新');
     } catch (err) {
       setApiError(err.clockRecovered ? '时间设置发生冲突，已加载最新时间，请重试' : err.message);
@@ -319,8 +285,8 @@ export default function UserSettingsModal({ onClose }) {
 
   const handleNextMorning = async () => {
     const current = getWorldNow();
-    if (!current || !worldClock?.timezone) return;
-    const target = nextMorningLocal(current, worldClock.timezone);
+    if (!current) return;
+    const target = nextMorningLocal(current);
     setWorldDateTime(target);
     await handleSetWorldTime(target);
   };
@@ -377,9 +343,43 @@ export default function UserSettingsModal({ onClose }) {
             </div>
           )}
 
+          <section className="rounded-lg border border-cyan-300/15 bg-cyan-300/[0.035] px-4 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-cyan-300/30 bg-[#0b0b0c]">
+                  {user?.role_summary?.avatar_url ? (
+                    <img
+                      src={user.role_summary.avatar_url}
+                      alt={`${user.role_summary.display_name}的扮演头像`}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <Contact size={21} className="text-cyan-200/35" />
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[9px] uppercase tracking-wider text-cyan-200/45">扮演身份</div>
+                  <div className="mt-1 truncate text-sm text-zinc-200">
+                    {user?.role_summary?.display_name || user?.username || '未设置'}
+                  </div>
+                  <div className="mt-0.5 truncate text-[9px] text-zinc-600">
+                    {user?.role_summary?.node_id || '-'}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleOpenPersona}
+                className="flex min-h-[44px] shrink-0 items-center gap-2 rounded-lg border border-cyan-300/20 px-3 text-xs text-cyan-100/80 transition-colors hover:bg-cyan-300/10"
+              >
+                <Edit3 size={14} /> 编辑
+              </button>
+            </div>
+          </section>
+
           {/* ── Avatar Section ── */}
           <fieldset className="border border-cyber-green/10 rounded-lg px-4 py-4">
-            <legend className="text-[10px] text-cyber-green/50 uppercase tracking-wider px-1.5">头像</legend>
+            <legend className="text-[10px] text-cyber-green/50 uppercase tracking-wider px-1.5">账户头像</legend>
             <div className="flex flex-col items-center gap-3">
               <div className="w-[72px] h-[72px] rounded-full overflow-hidden border-2 border-cyber-green/25 bg-[#0b0b0c] relative group">
                 {user?.avatar_url ? (
@@ -509,69 +509,6 @@ export default function UserSettingsModal({ onClose }) {
 
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-[11px] text-zinc-300">
-                <Globe2 size={13} className="text-cyan-200/60" />
-                世界时区
-              </div>
-              <div className="grid grid-cols-2 overflow-hidden rounded-md border border-white/10 bg-black/20">
-                {[
-                  { value: 'fixed', label: '固定世界时区' },
-                  { value: 'device', label: '跟随当前设备' },
-                ].map(option => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => {
-                      setTimezoneMode(option.value);
-                      setTimezoneError('');
-                      if (option.value === 'device') setTimezone(browserTimezone());
-                    }}
-                    className={`min-h-[44px] border-r border-white/10 px-2 text-[10px] last:border-r-0 ${
-                      timezoneMode === option.value
-                        ? 'bg-cyan-300/12 text-cyan-100'
-                        : 'text-zinc-500 hover:bg-white/[0.03] hover:text-zinc-300'
-                    }`}
-                    aria-pressed={timezoneMode === option.value}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <div className="min-w-0 flex-1">
-                  <label htmlFor="settings-world-timezone" className="sr-only">IANA 世界时区</label>
-                  <input
-                    id="settings-world-timezone"
-                    type="text"
-                    list="world-timezone-suggestions"
-                    value={timezoneMode === 'device' ? browserTimezone() : timezone}
-                    onChange={event => { setTimezone(event.target.value); setTimezoneError(''); }}
-                    disabled={timezoneMode === 'device' || clockLoading}
-                    placeholder="Asia/Shanghai"
-                    className={`min-h-[44px] w-full rounded-md border bg-[#0b0b0c] px-3 text-xs text-zinc-300 outline-none focus:ring-2 focus:ring-cyan-300/10 disabled:text-zinc-600 ${timezoneError ? 'border-red-400/35' : 'border-cyan-300/15 focus:border-cyan-300/40'}`}
-                    aria-invalid={!!timezoneError}
-                  />
-                  <datalist id="world-timezone-suggestions">
-                    <option value="Asia/Shanghai" />
-                    <option value="Asia/Tokyo" />
-                    <option value="Europe/London" />
-                    <option value="America/New_York" />
-                    <option value="UTC" />
-                  </datalist>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleTimezoneSave}
-                  disabled={clockLoading}
-                  className="min-h-[44px] shrink-0 rounded-md border border-cyan-300/20 px-3 text-[11px] text-cyan-100/80 hover:bg-cyan-300/8 disabled:opacity-30"
-                >
-                  应用
-                </button>
-              </div>
-              {timezoneError && <p className="text-[10px] text-red-300/80" role="alert">{timezoneError}</p>}
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-[11px] text-zinc-300">
                 <ClockArrowUp size={13} className="text-cyan-200/60" />
                 时间流速
               </div>
@@ -657,8 +594,8 @@ export default function UserSettingsModal({ onClose }) {
               {worldClock?.next_event ? (
                 <div className="mt-1.5 space-y-1 text-[10px] leading-4 text-zinc-400">
                   <div className="truncate text-zinc-300">{worldClock.next_event.event_name || worldClock.next_event.event_id}</div>
-                  <div>世界：{formatClockDate(worldClock.next_event.next_run_at, worldClock.timezone)}</div>
-                  <div>现实：{worldClock.next_event.next_due_real_at ? formatClockDate(worldClock.next_event.next_due_real_at, browserTimezone()) : '世界时间已暂停'}</div>
+                  <div>世界：{formatClockDate(worldClock.next_event.next_run_at)}</div>
+                  <div>现实：{worldClock.next_event.next_due_real_at ? formatClockDate(worldClock.next_event.next_due_real_at) : '世界时间已暂停'}</div>
                   {worldClock.next_event.missed_count > 0 && <div className="text-amber-300/75">待补偿 {worldClock.next_event.missed_count} 次</div>}
                 </div>
               ) : (

@@ -30,12 +30,17 @@ def _relationship_updated_at_for_pair(
         character_id_a,
         character_id_b
     )
-    updated_at = relationship.get("updated_at") if relationship else None
     revision_updated_at = repository.get_character_relationship_updated_at(
         player_id,
         character_id_a,
         character_id_b
     )
+    if (
+        repository.is_player_node_id(character_id_a)
+        or repository.is_player_node_id(character_id_b)
+    ):
+        return revision_updated_at
+    updated_at = relationship.get("updated_at") if relationship else None
     return relationship_context.latest_timestamp(updated_at, revision_updated_at)
 
 
@@ -359,16 +364,6 @@ def process_dialogue_pulse_memories(
             context="dialogue_pulse",
             importance=0.7,
         )
-        for index, character_id_a in enumerate(present_ids):
-            for character_id_b in present_ids[index + 1:]:
-                repository.save_shared_memory(
-                    owner_user_id=player_id,
-                    character_a_id=character_id_a,
-                    character_b_id=character_id_b,
-                    memory_text=fact,
-                    context=f"session:{session_id}:dialogue_pulse",
-                    importance=0.7,
-                )
 
     for row in extracted["secret_facts"]:
         for character_id in row["allowed_character_ids"]:
@@ -401,7 +396,7 @@ def extract_character_impressions(
         return []
 
     prompt = f"""
-分析以下多角色群聊，只提取角色之间值得长期记住的印象、冲突、合作、承诺或共同经历。
+分析以下多角色群聊，只提取一个角色对另一个角色形成或改变的主观印象。
 
 参与角色ID：
 {json.dumps(clean_character_ids, ensure_ascii=False)}
@@ -410,7 +405,9 @@ def extract_character_impressions(
 {dialogue_text}
 
 要求：
-- 只记录角色对其他角色的印象或角色之间的共同经历
+- impression 必须表达观察者对目标角色的性格判断、信任、态度、期待、警惕或观点变化
+- 不得把共同经历、事件经过、决定、承诺或客观事实本身作为 impression
+- 可以依据事件形成印象，但输出必须是主观判断，例如“认为目标在压力下很可靠”
 - 不要记录玩家个人信息，玩家相关记忆不属于本任务
 - 忽略寒暄、告别、无意义闲聊
 - observer_id 和 target_id 必须来自参与角色ID，且不能相同
@@ -444,6 +441,8 @@ JSON 格式：
             continue
         if observer_id == target_id or observer_id not in allowed or target_id not in allowed:
             continue
+        if not _looks_like_character_impression(impression):
+            continue
         try:
             importance = float(row.get("importance", 0.6))
         except (TypeError, ValueError):
@@ -457,6 +456,18 @@ JSON 格式：
         })
 
     return impressions
+
+
+def _looks_like_character_impression(text: str) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    subjective_markers = (
+        "认为", "觉得", "印象", "信任", "不信任", "可靠", "谨慎", "冲动",
+        "友善", "危险", "可疑", "值得", "态度", "期待", "担心", "欣赏",
+        "警惕", "尊重", "依赖", "厌恶", "怀疑", "认可", "佩服", "戒备",
+    )
+    return any(marker in normalized for marker in subjective_markers)
 
 
 # =========================
@@ -487,13 +498,11 @@ def save_character_impression(
     """
     if not player_id:
         raise ValueError("player_id is required for character impression isolation")
-    memory_text = f"对 {target_id} 的印象：{impression}"
-    
-    memory_id = repository.save_shared_memory(
+    memory_id = repository.save_character_impression(
         owner_user_id=player_id,
-        character_a_id=observer_id,
-        character_b_id=target_id,
-        memory_text=memory_text,
+        observer_character_id=observer_id,
+        target_character_id=target_id,
+        impression_text=impression,
         context=f"session:{session_id}",
         importance=importance
     )
@@ -522,10 +531,10 @@ def get_character_impressions(
     """
     if not player_id:
         raise ValueError("player_id is required for character impression isolation")
-    return repository.get_shared_memories(
+    return repository.get_character_impressions(
         owner_user_id=player_id,
-        character_id_a=observer_id,
-        character_id_b=target_id,
+        observer_character_id=observer_id,
+        target_character_id=target_id,
         limit=limit
     )
 
@@ -813,10 +822,10 @@ def integrate_multi_character_context(
                 character_id,
                 other_id
             )
-            impressions = repository.get_shared_memories(
+            impressions = repository.get_character_impressions(
                 owner_user_id=player_id,
-                character_id_a=character_id,
-                character_id_b=other_id,
+                observer_character_id=character_id,
+                target_character_id=other_id,
                 limit=10,
             )
             relationship = relationship_context.relationship_between(
@@ -960,13 +969,13 @@ def query_multi_character_memories(
     
     # 查询对其他角色的印象
     if include_impressions:
-        shared = repository.get_character_shared_memories(
+        shared = repository.get_observer_character_impressions(
             owner_user_id=player_id,
-            character_id=character_id,
+            observer_character_id=character_id,
             limit=10
         )
         results["character_impressions"] = [
-            {"with": s["character_b_id"] if s["character_a_id"] == character_id else s["character_a_id"],
+            {"with": s["target_character_id"],
              "memory": s["memory_text"]}
             for s in shared
         ]

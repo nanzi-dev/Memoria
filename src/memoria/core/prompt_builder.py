@@ -24,6 +24,8 @@ SYSTEM_PROMPT_TEMPLATE = """你现在要完全代入并扮演游戏中的角色"
 
 {knowledge_context}
 
+{player_character_section}
+
 【角色身份】
 {core_identity_summary}
 年龄：{age}　性别：{gender}　身份：{occupation}
@@ -50,7 +52,7 @@ SYSTEM_PROMPT_TEMPLATE = """你现在要完全代入并扮演游戏中的角色"
 好感度：{affinity}/100
 信任度：{trust}/100
 当前情绪：{current_mood}
-已知玩家信息：{known_player_facts}
+已知玩家信息（仅作补充，不得覆盖玩家角色卡）：{known_player_facts}
 已解锁内容：{unlocked_content}
 
 【历史互动记录】
@@ -127,10 +129,47 @@ def _safe_get_runtime(runtime_state: dict, key: str, default):
     return default if value is None else value
 
 
+def _player_character_value(player_character: dict | None, key: str, default: str = "未设定") -> str:
+    value = (player_character or {}).get(key)
+    if value is None or value == "":
+        return default
+    return str(value)
+
+
+def _effective_player_name(player_name: str, player_character: dict | None) -> str:
+    return _player_character_value(player_character, "display_name", player_name or "玩家")
+
+
+def _format_player_character_section(
+    player_name: str,
+    player_character: dict | None,
+    heading: str = "【玩家角色卡（当前权威身份）】",
+) -> str:
+    effective_name = _effective_player_name(player_name, player_character)
+    return "\n".join([
+        heading,
+        "以下内容是玩家在当前世界观中的现行身份设定，优先级高于长期记忆、历史摘要、已知玩家信息和旧对话。",
+        "如其他上下文与本角色卡冲突，必须把冲突内容视为过期信息，不得覆盖、质疑或擅自修改玩家当前身份。",
+        f"姓名：{effective_name}",
+        f"性别：{_player_character_value(player_character, 'gender')}",
+        f"代词：{_player_character_value(player_character, 'pronouns')}",
+        f"年龄：{_player_character_value(player_character, 'age')}",
+        f"种族：{_player_character_value(player_character, 'species')}",
+        f"职业：{_player_character_value(player_character, 'occupation')}",
+        f"外貌：{_player_character_value(player_character, 'appearance')}",
+        f"性格：{_player_character_value(player_character, 'personality')}",
+        f"背景：{_player_character_value(player_character, 'background')}",
+        f"目标：{_player_character_value(player_character, 'goals')}",
+        "自然地依据这些信息与玩家互动，不要机械复述整张角色卡。",
+    ])
+
+
 def _build_relationship_graph_lines(
     card: CharacterCard,
     other_characters: list[dict],
-    character_relationships: dict
+    character_relationships: dict,
+    player_name: str,
+    player_character: dict | None,
 ) -> list[str]:
     participants = [
         (
@@ -144,6 +183,13 @@ def _build_relationship_graph_lines(
             continue
         other_name = other.get("display_name") or other.get("name") or other_id
         participants.append((other_id, other_name))
+
+    player_node_id = (player_character or {}).get("node_id")
+    if player_node_id and all(participant[0] != player_node_id for participant in participants):
+        participants.append((
+            player_node_id,
+            _effective_player_name(player_name, player_character),
+        ))
 
     return relationship_context.build_relationship_graph_lines(
         participants,
@@ -179,6 +225,7 @@ def build_system_prompt(
     time_context: dict | None = None,
     knowledge_context: str = "",
     locale: Locale = DEFAULT_LOCALE,
+    player_character: dict | None = None,
 ):
     """
     构建 system prompt（核心函数）
@@ -190,6 +237,7 @@ def build_system_prompt(
     - past_summaries: 历史会话摘要列表（可选）
     """
     
+    player_name = _effective_player_name(player_name, player_character)
     identity = card.identity    # 角色身份
     personality = card.personality # 角色性格
     speech_style = card.speech_style # 角色语言风格
@@ -237,6 +285,10 @@ def build_system_prompt(
         relationship_graph_context=relationship_graph_context,
         time_context_section=_format_time_context(time_context),
         knowledge_context=knowledge_context,
+        player_character_section=_format_player_character_section(
+            player_name,
+            player_character,
+        ),
         
         # identity
         core_identity_summary = identity.core_identity_summary,
@@ -292,8 +344,10 @@ def build_opening_line_prompt(
     runtime_state: dict,
     player_name: str,
     locale: Locale = DEFAULT_LOCALE,
+    player_character: dict | None = None,
 ) -> str:
     """会话开场白用的简短追加指令，拼在 system prompt 后面一起发送。"""
+    player_name = _effective_player_name(player_name, player_character)
     return (
         f"\n【特别说明】这是与玩家'{player_name}'的新一轮见面对话，"
         f"请你作为{card.meta.name}，根据当前好感度（{runtime_state.get('affinity', 0)}）和心情，"
@@ -318,6 +372,7 @@ def build_multi_character_system_prompt(
     knowledge_context: str = "",
     dialogue_target: dict | None = None,
     locale: Locale = DEFAULT_LOCALE,
+    player_character: dict | None = None,
 ) -> str:
     """
     构建多角色场景的系统提示
@@ -336,6 +391,7 @@ def build_multi_character_system_prompt(
     Returns:
         str: 多角色场景的系统提示
     """
+    player_name = _effective_player_name(player_name, player_character)
     identity = card.identity
     personality = card.personality
     speech_style = card.speech_style
@@ -380,6 +436,8 @@ def build_multi_character_system_prompt(
         card,
         other_characters,
         character_relationships,
+        player_name,
+        player_character,
     )
     
     for other in other_characters:
@@ -414,6 +472,12 @@ def build_multi_character_system_prompt(
         f"# 角色设定",
         f"你正在扮演：{card.meta.display_name or card.meta.name}",
         f"",
+        _format_player_character_section(
+            player_name,
+            player_character,
+            heading="# 玩家角色卡（当前权威身份）",
+        ),
+        "",
     ]
 
     if relationship_graph_lines:
@@ -524,6 +588,7 @@ def build_multi_character_system_prompt(
             f"- 倾向下一角色：{dialogue_target.get('preferred_next_character_id') or '无'}",
             f"- 是否期待后续接话：{'是' if dialogue_target.get('follow_up_expected') else '否'}",
             "必须直接响应这个目标，不要把其他 NPC 的发言误当成玩家发言。",
+            "必须基于最新对话推进信息、行动或关系变化，不得复述自己或其他角色已经说过的句子。",
             "",
         ])
 

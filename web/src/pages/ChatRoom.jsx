@@ -264,24 +264,22 @@ function formatChatTime(value) {
   return date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-function worldDateKey(value, timezone) {
+function worldDateKey(value) {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone || 'UTC',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   }).format(date);
 }
 
-function formatWorldDate(value, timezone) {
+function formatWorldDate(value) {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
   return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: timezone || 'UTC',
     year: 'numeric',
     month: 'long',
     day: 'numeric',
@@ -289,20 +287,19 @@ function formatWorldDate(value, timezone) {
   }).format(date);
 }
 
-function formatWorldTime(value, timezone) {
+function formatWorldTime(value) {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
   return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: timezone || 'UTC',
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
   }).format(date);
 }
 
-function WorldDateSeparator({ value, timezone }) {
-  const label = formatWorldDate(value, timezone);
+function WorldDateSeparator({ value }) {
+  const label = formatWorldDate(value);
   if (!label) return null;
   return (
     <div className="flex items-center gap-3 py-1" role="separator" aria-label={`世界日期 ${label}`}>
@@ -313,14 +310,13 @@ function WorldDateSeparator({ value, timezone }) {
   );
 }
 
-function MessageWorldTime({ value, timezone, align = 'left' }) {
-  const label = formatWorldTime(value, timezone);
+function MessageWorldTime({ value, align = 'left' }) {
+  const label = formatWorldTime(value);
   if (!label) return null;
   return (
     <div className={`mt-1 flex items-center gap-1 px-1 text-[10px] text-zinc-600 ${align === 'right' ? 'justify-end' : 'justify-start'}`}>
       <span className="h-1 w-1 rounded-full bg-amber-300/45" />
       <time dateTime={value}>{label}</time>
-      <span className="max-w-[110px] truncate">{timezone}</span>
     </div>
   );
 }
@@ -2417,15 +2413,15 @@ export default function ChatRoom() {
             const isUser = msg.role === 'user';
             const charInfo = msg.charId ? getCharById(msg.charId) : null;
             const replyBubbles = isUser ? [msg.content] : splitAssistantReply(msg.content);
-            const currentWorldDate = worldDateKey(msg.world_created_at, worldClock?.timezone);
-            const previousWorldDate = worldDateKey(messages[i - 1]?.world_created_at, worldClock?.timezone);
+            const currentWorldDate = worldDateKey(msg.world_created_at);
+            const previousWorldDate = worldDateKey(messages[i - 1]?.world_created_at);
             const showWorldDate = !!currentWorldDate && currentWorldDate !== previousWorldDate;
             return replyBubbles.map((bubble, bubbleIndex) => {
               const isLastBubble = bubbleIndex === replyBubbles.length - 1;
               return (
               <Fragment key={`${msg.message_id ?? msg.client_id ?? i}-${bubbleIndex}`}>
               {bubbleIndex === 0 && showWorldDate && (
-                <WorldDateSeparator value={msg.world_created_at} timezone={worldClock?.timezone} />
+                <WorldDateSeparator value={msg.world_created_at} />
               )}
               <div className={`animate-fade-up flex gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
                 {/* 头像 */}
@@ -2470,7 +2466,6 @@ export default function ChatRoom() {
                   {isLastBubble && (
                     <MessageWorldTime
                       value={msg.world_created_at}
-                      timezone={worldClock?.timezone}
                       align={isUser ? 'right' : 'left'}
                     />
                   )}
@@ -2764,9 +2759,9 @@ export default function ChatRoom() {
 
             const replyBubbles = isUser ? [msg.content] : splitAssistantReply(msg.content);
 
-            const currentWorldDate = worldDateKey(msg.world_created_at, worldClock?.timezone);
+            const currentWorldDate = worldDateKey(msg.world_created_at);
 
-            const previousWorldDate = worldDateKey(messages[i - 1]?.world_created_at, worldClock?.timezone);
+            const previousWorldDate = worldDateKey(messages[i - 1]?.world_created_at);
 
             const showWorldDate = !!currentWorldDate && currentWorldDate !== previousWorldDate;
 
@@ -2780,7 +2775,7 @@ export default function ChatRoom() {
 
               {bubbleIndex === 0 && showWorldDate && (
 
-                <WorldDateSeparator value={msg.world_created_at} timezone={worldClock?.timezone} />
+                <WorldDateSeparator value={msg.world_created_at} />
 
               )}
 
@@ -2859,8 +2854,6 @@ export default function ChatRoom() {
                     <MessageWorldTime
 
                       value={msg.world_created_at}
-
-                      timezone={worldClock?.timezone}
 
                       align={isUser ? 'right' : 'left'}
 

@@ -164,11 +164,13 @@ export function UserProvider({ children }) {
     applyClock(baseUser, timing);
 
     const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const reportKey = `${baseUser.user_id}:${browserTimezone}`;
+    const reportKey = `${baseUser.user_id}:${browserTimezone}:device`;
     if (
-      baseUser.timezone_mode === 'device'
-      && browserTimezone
-      && browserTimezone !== baseUser.timezone
+      browserTimezone
+      && (
+        baseUser.timezone_mode !== 'device'
+        || browserTimezone !== baseUser.timezone
+      )
       && timezoneReportedForRef.current !== reportKey
     ) {
       timezoneReportedForRef.current = reportKey;

@@ -7,6 +7,8 @@
 3. 支持关系可视化
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -50,7 +52,10 @@ class RelationshipInfo(BaseModel):
 class RelationshipNetworkNode(BaseModel):
     """关系网络节点"""
     character_id: str
-    name: str | None = None
+    node_type: Literal["player", "character"]
+    name: str
+    avatar_url: str | None = None
+    is_active: bool = True
 
 
 class RelationshipNetworkEdge(BaseModel):
@@ -79,11 +84,16 @@ def _require_relationship_characters(
     character_id_a: str,
     character_id_b: str,
 ) -> None:
-    """Require two distinct character cards owned by the current user."""
+    """Require distinct nodes owned by the current user."""
     if character_id_a == character_id_b:
         raise HTTPException(status_code=400, detail="不能创建角色与自身的关系")
 
+    current_player_node = repository.player_node_id(current_user_id)
     for character_id in (character_id_a, character_id_b):
+        if repository.is_player_node_id(character_id):
+            if character_id != current_player_node:
+                raise HTTPException(status_code=403, detail="不能访问其他用户的玩家角色")
+            continue
         character = repository.get_character_card_from_db(
             current_user_id,
             character_id,
@@ -325,25 +335,52 @@ def get_relationship_network(
             all_relationships = repository.list_all_character_relationships(current_user_id)
         
         # 构建节点和边
-        nodes_dict = {}
+        player_card = repository.get_or_create_user_character_card(current_user_id)
+        if not player_card:
+            raise HTTPException(status_code=404, detail="用户角色卡不存在")
+        player_id = repository.player_node_id(current_user_id)
+        character_cards = {
+            card["character_id"]: card
+            for card in repository.list_character_cards_from_db(
+                current_user_id,
+                only_active=False,
+            )
+        }
+        nodes_dict = {
+            player_id: RelationshipNetworkNode(
+                character_id=player_id,
+                node_type="player",
+                name=player_card["display_name"],
+                avatar_url=player_card.get("avatar_url"),
+                is_active=True,
+            )
+        }
         edges = []
+
+        def add_character_node(character_id: str) -> None:
+            if character_id in nodes_dict:
+                return
+            card = character_cards.get(character_id)
+            nodes_dict[character_id] = RelationshipNetworkNode(
+                character_id=character_id,
+                node_type="character",
+                name=(
+                    (card or {}).get("display_name")
+                    or (card or {}).get("name")
+                    or character_id
+                ),
+                avatar_url=(card or {}).get("avatar_url"),
+                is_active=bool((card or {}).get("is_active", True)),
+            )
         
         for rel in all_relationships:
             char_a = rel["character_id_a"]
             char_b = rel["character_id_b"]
             
-            # 添加节点
-            if char_a not in nodes_dict:
-                nodes_dict[char_a] = RelationshipNetworkNode(
-                    character_id=char_a,
-                    name=char_a  # 后续可从角色卡获取名称
-                )
-            
-            if char_b not in nodes_dict:
-                nodes_dict[char_b] = RelationshipNetworkNode(
-                    character_id=char_b,
-                    name=char_b
-                )
+            if char_a != player_id:
+                add_character_node(char_a)
+            if char_b != player_id:
+                add_character_node(char_b)
             
             # 添加边
             edges.append(RelationshipNetworkEdge(
@@ -359,6 +396,8 @@ def get_relationship_network(
             edges=edges
         )
     
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取关系网络失败: {str(e)}")
 

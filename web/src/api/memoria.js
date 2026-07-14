@@ -114,6 +114,29 @@ export const userApi = {
       body: JSON.stringify({ url }),
     });
   },
+  getCharacterCard() {
+    return request('/user/character-card');
+  },
+  updateCharacterCard(data) {
+    return request('/user/character-card', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+  async uploadCharacterCardAvatar(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    return request('/user/character-card/avatar/upload', {
+      method: 'POST',
+      body: formData,
+    });
+  },
+  setCharacterCardAvatarUrl(url) {
+    return request('/user/character-card/avatar/url', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    });
+  },
   getWorldClock() {
     return request('/user/world-clock');
   },

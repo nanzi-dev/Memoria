@@ -191,6 +191,24 @@ def _text_similarity(a: str, b: str) -> float:
         return 1.0
     return SequenceMatcher(None, na, nb).ratio()
 
+
+def _normalize_dialogue_text(text: str | None) -> str:
+    return re.sub(r"[\W_]+", "", str(text or "").casefold())
+
+
+def dialogue_texts_redundant(a: str | None, b: str | None) -> bool:
+    """判断两段对白是否属于同一表达；短文本只做精确归一化匹配。"""
+    normalized_a = _normalize_dialogue_text(a)
+    normalized_b = _normalize_dialogue_text(b)
+    if not normalized_a or not normalized_b:
+        return False
+    if normalized_a == normalized_b:
+        return True
+    if min(len(normalized_a), len(normalized_b)) < 16:
+        return False
+    return SequenceMatcher(None, normalized_a, normalized_b).ratio() >= 0.95
+
+
 def _dedup_check(conn, table, text_col, text, where_clause, params, threshold=0.75):
     """检查是否存在相似记录，返回匹配的行或None"""
     norm = _normalize(text)
@@ -263,6 +281,24 @@ CREATE TABLE IF NOT EXISTS users (
     stt_auto_send   INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT,
     updated_at      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS user_character_card (
+    user_id         TEXT PRIMARY KEY,
+    display_name    TEXT NOT NULL,
+    avatar_url      TEXT,
+    gender          TEXT DEFAULT 'unknown',
+    pronouns        TEXT DEFAULT '',
+    age             INTEGER,
+    species         TEXT DEFAULT '',
+    occupation      TEXT DEFAULT '',
+    appearance      TEXT DEFAULT '',
+    personality     TEXT DEFAULT '',
+    background      TEXT DEFAULT '',
+    goals           TEXT DEFAULT '',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(user_id)
 );
 
 CREATE TABLE IF NOT EXISTS auth_token (
@@ -879,6 +915,9 @@ CREATE TABLE IF NOT EXISTS shared_memory (
     owner_user_id   TEXT NOT NULL,
     character_a_id  TEXT NOT NULL,
     character_b_id  TEXT NOT NULL,
+    observer_character_id TEXT,
+    target_character_id TEXT,
+    memory_kind     TEXT NOT NULL DEFAULT 'legacy_archived',
     memory_text     TEXT NOT NULL,
     context         TEXT,
     importance      REAL DEFAULT 0.5,
@@ -912,9 +951,74 @@ CREATE INDEX IF NOT EXISTS idx_relationship_revision_lookup
 ON character_relationship_revision(owner_user_id, character_id_a, character_id_b);
 """
 
+
+def _migrate_shared_memory_directionality(conn) -> None:
+    """将可识别的旧角色印象转为定向记录，并移除 pulse 事实副本。"""
+    conn.execute(
+        """
+        DELETE FROM shared_memory
+        WHERE context = 'dialogue_pulse'
+           OR context LIKE '%:dialogue_pulse'
+        """
+    )
+    rows = conn.execute(
+        """
+        SELECT id, character_a_id, character_b_id, memory_text
+        FROM shared_memory
+        WHERE observer_character_id IS NULL
+           OR target_character_id IS NULL
+        """
+    ).fetchall()
+    impression_pattern = re.compile(r"^对\s+(.+?)\s+的印象[：:]\s*(.*)$")
+    for row in rows:
+        record = dict(row)
+        match = impression_pattern.match(str(record.get("memory_text") or "").strip())
+        if not match:
+            continue
+        target_id = match.group(1).strip()
+        character_a_id = record.get("character_a_id")
+        character_b_id = record.get("character_b_id")
+        if target_id == character_a_id and target_id != character_b_id:
+            observer_id = character_b_id
+        elif target_id == character_b_id and target_id != character_a_id:
+            observer_id = character_a_id
+        else:
+            continue
+        impression = match.group(2).strip()
+        conn.execute(
+            """
+            UPDATE shared_memory
+            SET observer_character_id = ?,
+                target_character_id = ?,
+                memory_kind = 'character_impression',
+                memory_text = ?
+            WHERE id = ?
+            """,
+            (observer_id, target_id, impression or record["memory_text"], record["id"]),
+        )
+
+
 def _migrate(conn):
     """数据库迁移：为已有数据库添加新列"""
     migration_schema = """
+        CREATE TABLE IF NOT EXISTS user_character_card (
+            user_id         TEXT PRIMARY KEY,
+            display_name    TEXT NOT NULL,
+            avatar_url      TEXT,
+            gender          TEXT DEFAULT 'unknown',
+            pronouns        TEXT DEFAULT '',
+            age             INTEGER,
+            species         TEXT DEFAULT '',
+            occupation      TEXT DEFAULT '',
+            appearance      TEXT DEFAULT '',
+            personality     TEXT DEFAULT '',
+            background      TEXT DEFAULT '',
+            goals           TEXT DEFAULT '',
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        );
+
         CREATE TABLE IF NOT EXISTS event_context_state (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             event_id        TEXT NOT NULL,
@@ -1263,6 +1367,21 @@ def _migrate(conn):
     add_column("player_event_inbox", "group_thread_id TEXT")
     add_column("player_event_inbox", "unread_count INTEGER NOT NULL DEFAULT 0")
     add_column("shared_memory", "owner_user_id TEXT")
+    add_column("shared_memory", "observer_character_id TEXT")
+    add_column("shared_memory", "target_character_id TEXT")
+    add_column("shared_memory", "memory_kind TEXT NOT NULL DEFAULT 'legacy_archived'")
+    _migrate_shared_memory_directionality(conn)
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_shared_memory_directional
+        ON shared_memory(
+            owner_user_id,
+            observer_character_id,
+            target_character_id,
+            importance DESC
+        )
+        """
+    )
     conn.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_event_schedule_due_real
@@ -1315,6 +1434,18 @@ def _migrate(conn):
             SELECT 1 FROM users WHERE is_admin = 1
         )
         """
+    )
+    now = _now()
+    conn.execute(
+        """
+        INSERT INTO user_character_card
+        (user_id, display_name, gender, created_at, updated_at)
+        SELECT user_id, username, COALESCE(gender, 'unknown'), ?, ?
+        FROM users
+        WHERE 1 = 1
+        ON CONFLICT(user_id) DO NOTHING
+        """,
+        (now, now),
     )
 
 
@@ -1571,20 +1702,16 @@ def get_runtime_state(
 
 def save_runtime_state(character_id: str, player_id: str, affection_level: float, trust_level: float, current_mood: str):
     """更新角色状态"""
+    now = _now()
     with get_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO relationship_state
-            (character_id, player_id, affection_level, trust_level, current_mood, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(character_id, player_id)
-            DO UPDATE SET
-                affection_level=excluded.affection_level,
-                trust_level=excluded.trust_level,
-                current_mood=excluded.current_mood,
-                updated_at=excluded.updated_at
-            """,
-            (character_id, player_id, affection_level, trust_level, current_mood, _now()),
+        _save_runtime_state_in_transaction(
+            conn,
+            character_id=character_id,
+            player_id=player_id,
+            affection_level=affection_level,
+            trust_level=trust_level,
+            current_mood=current_mood,
+            now=now,
         )
         
 
@@ -2552,28 +2679,42 @@ def get_recent_summaries(
 
 
 # =========================
-# 角色间共享记忆（shared_memory）
+# 定向角色印象（shared_memory）
 # =========================
-def save_shared_memory(
+def save_character_impression(
     owner_user_id: str,
-    character_a_id: str,
-    character_b_id: str,
-    memory_text: str,
+    observer_character_id: str,
+    target_character_id: str,
+    impression_text: str,
     context: str = None,
     importance: float = 0.5
 ) -> str:
-    """保存同一用户下两个角色之间的共享记忆。含去重检查。"""
-    import uuid
+    """保存观察者对目标角色的定向印象。"""
     if not owner_user_id:
         raise ValueError("owner_user_id is required for shared_memory isolation")
+    if not observer_character_id or not target_character_id:
+        raise ValueError("observer_character_id and target_character_id are required")
+    if observer_character_id == target_character_id:
+        raise ValueError("observer_character_id and target_character_id must differ")
+    impression_text = str(impression_text or "").strip()
+    if not impression_text:
+        raise ValueError("impression_text is required")
     memory_id = str(uuid.uuid4())
-    a, b = sorted([character_a_id, character_b_id])
 
     with get_conn() as conn:
         existing = _dedup_check(
-            conn, "shared_memory", "memory_text", memory_text,
-            "owner_user_id = ? AND character_a_id = ? AND character_b_id = ?",
-            (owner_user_id, a, b), threshold=0.75
+            conn,
+            "shared_memory",
+            "memory_text",
+            impression_text,
+            """
+            owner_user_id = ?
+            AND observer_character_id = ?
+            AND target_character_id = ?
+            AND memory_kind = 'character_impression'
+            """,
+            (owner_user_id, observer_character_id, target_character_id),
+            threshold=0.92,
         )
         if existing:
             new_imp = max(existing.get("importance", 0), importance)
@@ -2582,10 +2723,110 @@ def save_shared_memory(
             return existing["id"]
 
         conn.execute(
-            "INSERT INTO shared_memory (id, owner_user_id, character_a_id, character_b_id, memory_text, context, importance, created_at, last_referenced, reference_count) VALUES (?,?,?,?,?,?,?,?,?,0)",
-            (memory_id, owner_user_id, a, b, memory_text, context, importance, _now(), _now()))
+            """
+            INSERT INTO shared_memory
+            (id, owner_user_id, character_a_id, character_b_id,
+             observer_character_id, target_character_id, memory_kind,
+             memory_text, context, importance, created_at, last_referenced,
+             reference_count)
+            VALUES (?, ?, ?, ?, ?, ?, 'character_impression', ?, ?, ?, ?, ?, 0)
+            """,
+            (
+                memory_id,
+                owner_user_id,
+                observer_character_id,
+                target_character_id,
+                observer_character_id,
+                target_character_id,
+                impression_text,
+                context,
+                importance,
+                _now(),
+                _now(),
+            ),
+        )
 
     return memory_id
+
+
+def get_character_impressions(
+    owner_user_id: str,
+    observer_character_id: str,
+    target_character_id: str,
+    limit: int = 10,
+    created_after: str | None = None
+) -> list[dict]:
+    """获取观察者对目标角色的定向印象。"""
+    if not owner_user_id:
+        raise ValueError("owner_user_id is required for shared_memory isolation")
+    where_clause = """
+        owner_user_id = ?
+        AND observer_character_id = ?
+        AND target_character_id = ?
+        AND memory_kind = 'character_impression'
+    """
+    params = [owner_user_id, observer_character_id, target_character_id]
+    if created_after:
+        where_clause += " AND created_at >= ?"
+        params.append(created_after)
+    params.append(limit)
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT id, observer_character_id, target_character_id,
+                   memory_text, context, importance, created_at
+            FROM shared_memory
+            WHERE {where_clause}
+            ORDER BY importance DESC, last_referenced DESC
+            LIMIT ?
+            """,
+            tuple(params)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_observer_character_impressions(
+    owner_user_id: str,
+    observer_character_id: str,
+    limit: int = 20,
+) -> list[dict]:
+    """获取一个角色对其他角色形成的全部定向印象。"""
+    if not owner_user_id:
+        raise ValueError("owner_user_id is required for shared_memory isolation")
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, owner_user_id, observer_character_id,
+                   target_character_id, memory_text, context, importance,
+                   created_at
+            FROM shared_memory
+            WHERE owner_user_id = ?
+              AND observer_character_id = ?
+              AND memory_kind = 'character_impression'
+            ORDER BY importance DESC, last_referenced DESC
+            LIMIT ?
+            """,
+            (owner_user_id, observer_character_id, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def save_shared_memory(
+    owner_user_id: str,
+    character_a_id: str,
+    character_b_id: str,
+    memory_text: str,
+    context: str = None,
+    importance: float = 0.5,
+) -> str:
+    """兼容旧调用；按 A 观察 B 的定向角色印象保存。"""
+    return save_character_impression(
+        owner_user_id=owner_user_id,
+        observer_character_id=character_a_id,
+        target_character_id=character_b_id,
+        impression_text=memory_text,
+        context=context,
+        importance=importance,
+    )
 
 
 def get_shared_memories(
@@ -2593,34 +2834,29 @@ def get_shared_memories(
     character_id_a: str,
     character_id_b: str,
     limit: int = 10,
-    created_after: str | None = None
+    created_after: str | None = None,
 ) -> list[dict]:
-    """获取同一用户下两个角色之间的共享记忆"""
-    if not owner_user_id:
-        raise ValueError("owner_user_id is required for shared_memory isolation")
-    a, b = sorted([character_id_a, character_id_b])
-    where_clause = "owner_user_id=? AND character_a_id=? AND character_b_id=?"
-    params = [owner_user_id, a, b]
-    if created_after:
-        where_clause += " AND created_at >= ?"
-        params.append(created_after)
-    params.append(limit)
-    with get_conn() as conn:
-        rows = conn.execute(
-            f"SELECT id, memory_text, context, importance, created_at FROM shared_memory WHERE {where_clause} ORDER BY importance DESC, last_referenced DESC LIMIT ?",
-            tuple(params)).fetchall()
-    return [dict(r) for r in rows]
+    """兼容旧调用；只返回 A 对 B 的定向角色印象。"""
+    return get_character_impressions(
+        owner_user_id=owner_user_id,
+        observer_character_id=character_id_a,
+        target_character_id=character_id_b,
+        limit=limit,
+        created_after=created_after,
+    )
 
 
-def get_character_shared_memories(owner_user_id: str, character_id: str, limit: int = 20) -> list[dict]:
-    """获取同一用户下某个角色与其他所有角色的共享记忆"""
-    if not owner_user_id:
-        raise ValueError("owner_user_id is required for shared_memory isolation")
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT id, owner_user_id, character_a_id, character_b_id, memory_text, context, importance, created_at FROM shared_memory WHERE owner_user_id=? AND (character_a_id=? OR character_b_id=?) ORDER BY importance DESC, last_referenced DESC LIMIT ?",
-            (owner_user_id, character_id, character_id, limit)).fetchall()
-    return [dict(r) for r in rows]
+def get_character_shared_memories(
+    owner_user_id: str,
+    character_id: str,
+    limit: int = 20,
+) -> list[dict]:
+    """兼容旧调用；只返回该角色作为观察者形成的印象。"""
+    return get_observer_character_impressions(
+        owner_user_id=owner_user_id,
+        observer_character_id=character_id,
+        limit=limit,
+    )
 
 
 # =========================
@@ -3677,28 +3913,73 @@ def _save_runtime_states_in_transaction(
     now: str,
 ) -> None:
     for state in runtime_states or []:
-        conn.execute(
-            """
-            INSERT INTO relationship_state
-            (character_id, player_id, affection_level, trust_level,
-             current_mood, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(character_id, player_id)
-            DO UPDATE SET
-                affection_level=excluded.affection_level,
-                trust_level=excluded.trust_level,
-                current_mood=excluded.current_mood,
-                updated_at=excluded.updated_at
-            """,
-            (
-                state["character_id"],
-                player_id,
-                state["affection_level"],
-                state["trust_level"],
-                state["current_mood"],
-                now,
-            ),
+        _save_runtime_state_in_transaction(
+            conn,
+            character_id=state["character_id"],
+            player_id=player_id,
+            affection_level=state["affection_level"],
+            trust_level=state["trust_level"],
+            current_mood=state["current_mood"],
+            now=now,
         )
+
+
+def _save_runtime_state_in_transaction(
+    conn,
+    *,
+    character_id: str,
+    player_id: str,
+    affection_level: float,
+    trust_level: float,
+    current_mood: str,
+    now: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO relationship_state
+        (character_id, player_id, affection_level, trust_level,
+         current_mood, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(character_id, player_id)
+        DO UPDATE SET
+            affection_level=excluded.affection_level,
+            trust_level=excluded.trust_level,
+            current_mood=excluded.current_mood,
+            updated_at=excluded.updated_at
+        """,
+        (
+            character_id,
+            player_id,
+            affection_level,
+            trust_level,
+            current_mood,
+            now,
+        ),
+    )
+    player_id_node, character_id_node = _normalize_relationship_pair(
+        player_node_id(player_id),
+        character_id,
+    )
+    conn.execute(
+        """
+        INSERT INTO character_relationship
+        (owner_user_id, character_id_a, character_id_b, relationship_type,
+         affinity, description, created_at, updated_at)
+        VALUES (?, ?, ?, '相识', ?, NULL, ?, ?)
+        ON CONFLICT(owner_user_id, character_id_a, character_id_b)
+        DO UPDATE SET
+            affinity=excluded.affinity,
+            updated_at=excluded.updated_at
+        """,
+        (
+            player_id,
+            player_id_node,
+            character_id_node,
+            affection_level,
+            now,
+            now,
+        ),
+    )
 
 
 def _commit_dialogue_turn_in_transaction(
@@ -5203,6 +5484,50 @@ def _touch_character_relationship_revision(
     )
 
 
+def _player_edge_character_id(
+    owner_user_id: str,
+    character_id_a: str,
+    character_id_b: str,
+) -> str | None:
+    player_id = player_node_id(owner_user_id)
+    if character_id_a == player_id and not is_player_node_id(character_id_b):
+        return character_id_b
+    if character_id_b == player_id and not is_player_node_id(character_id_a):
+        return character_id_a
+    return None
+
+
+def _sync_runtime_affection_from_player_edge(
+    conn,
+    *,
+    owner_user_id: str,
+    character_id_a: str,
+    character_id_b: str,
+    affinity: float,
+    now: str,
+) -> None:
+    character_id = _player_edge_character_id(
+        owner_user_id,
+        character_id_a,
+        character_id_b,
+    )
+    if not character_id:
+        return
+    conn.execute(
+        """
+        INSERT INTO relationship_state
+        (character_id, player_id, affection_level, trust_level,
+         current_mood, updated_at)
+        VALUES (?, ?, ?, 0, 'neutral', ?)
+        ON CONFLICT(character_id, player_id)
+        DO UPDATE SET
+            affection_level=excluded.affection_level,
+            updated_at=excluded.updated_at
+        """,
+        (character_id, owner_user_id, affinity, now),
+    )
+
+
 def save_character_relationship(
     owner_user_id: str,
     character_id_a: str,
@@ -5233,6 +5558,14 @@ def save_character_relationship(
                 """,
                 (owner_user_id, character_id_a, character_id_b, relationship_type, affinity,
                  description, now, now),
+            )
+            _sync_runtime_affection_from_player_edge(
+                conn,
+                owner_user_id=owner_user_id,
+                character_id_a=character_id_a,
+                character_id_b=character_id_b,
+                affinity=affinity,
+                now=now,
             )
             _touch_character_relationship_revision(conn, owner_user_id, character_id_a, character_id_b, now)
         return True
@@ -5272,6 +5605,9 @@ def get_character_relationship_updated_at(owner_user_id: str, character_id_a: st
         ).fetchone()
         if row:
             return row["updated_at"]
+
+        if is_player_node_id(character_id_a) or is_player_node_id(character_id_b):
+            return None
 
         row = conn.execute(
             """
@@ -5326,6 +5662,14 @@ def delete_character_relationship(owner_user_id: str, character_id_a: str, chara
                 WHERE owner_user_id = ? AND character_id_a = ? AND character_id_b = ?
                 """,
                 (owner_user_id, character_id_a, character_id_b),
+            )
+            _sync_runtime_affection_from_player_edge(
+                conn,
+                owner_user_id=owner_user_id,
+                character_id_a=character_id_a,
+                character_id_b=character_id_b,
+                affinity=0,
+                now=now,
             )
             _touch_character_relationship_revision(conn, owner_user_id, character_id_a, character_id_b, now)
         return True
@@ -5383,6 +5727,22 @@ def update_relationship_affinity(
             (affinity_delta, now, owner_user_id, character_id_a, character_id_b),
         )
         if cursor.rowcount > 0:
+            relationship = conn.execute(
+                """
+                SELECT affinity
+                FROM character_relationship
+                WHERE owner_user_id = ? AND character_id_a = ? AND character_id_b = ?
+                """,
+                (owner_user_id, character_id_a, character_id_b),
+            ).fetchone()
+            _sync_runtime_affection_from_player_edge(
+                conn,
+                owner_user_id=owner_user_id,
+                character_id_a=character_id_a,
+                character_id_b=character_id_b,
+                affinity=relationship["affinity"],
+                now=now,
+            )
             _touch_character_relationship_revision(conn, owner_user_id, character_id_a, character_id_b, now)
 
 
@@ -6134,8 +6494,10 @@ def commit_group_dialogue_pulse(
     group_name: str | None = None,
 ) -> list[dict]:
     """原子提交自主群聊消息、角色状态、线程状态和玩家通知。"""
-    committed_responses = [dict(response) for response in responses]
+    candidate_responses = [dict(response) for response in responses]
+    committed_responses: list[dict] = []
     message_id_map: dict[int, int] = {}
+    duplicate_suppressed = False
 
     def resolved_message_id(value):
         if not isinstance(value, int) or value >= 0:
@@ -6145,11 +6507,47 @@ def commit_group_dialogue_pulse(
         return message_id_map[value]
 
     with get_conn() as conn:
-        for response in committed_responses:
+        for response in candidate_responses:
             temporary_message_id = response.get("message_id")
             reply_to_message_id = resolved_message_id(
                 response.get("reply_to_message_id")
             )
+            recent_rows = conn.execute(
+                """
+                SELECT id, content, reply_to_message_id
+                FROM short_term_message
+                WHERE session_id = ?
+                  AND role = 'assistant'
+                  AND character_id = ?
+                ORDER BY id DESC
+                LIMIT 20
+                """,
+                (session_id, response.get("character_id")),
+            ).fetchall()
+            duplicate_message_id = next(
+                (
+                    int(row["id"])
+                    for index, row in enumerate(recent_rows)
+                    if (
+                        index < 4
+                        or row["id"] == reply_to_message_id
+                        or row["reply_to_message_id"] == reply_to_message_id
+                    )
+                    and dialogue_texts_redundant(
+                        response.get("dialogue"),
+                        row["content"],
+                    )
+                ),
+                None,
+            )
+            if duplicate_message_id is not None:
+                duplicate_suppressed = True
+                if isinstance(temporary_message_id, int) and temporary_message_id < 0:
+                    message_id_map[temporary_message_id] = duplicate_message_id
+                response["message_id"] = duplicate_message_id
+                response["reply_to_message_id"] = reply_to_message_id
+                continue
+
             insert_sql = """
                 INSERT INTO short_term_message
                 (session_id, role, content, character_id, character_name, created_at,
@@ -6183,6 +6581,7 @@ def commit_group_dialogue_pulse(
                 message_id_map[temporary_message_id] = message_id
             response["message_id"] = message_id
             response["reply_to_message_id"] = reply_to_message_id
+            committed_responses.append(response)
 
         latest_relationships: dict[str, dict] = {}
         participant_counts: dict[str, int] = {}
@@ -6246,14 +6645,17 @@ def commit_group_dialogue_pulse(
             lease_owner=lease_owner,
             real_now_iso=real_now_iso,
             world_now_iso=world_now_iso,
-            autonomous_message_count=autonomous_message_count,
+            autonomous_message_count=min(
+                max(0, autonomous_message_count),
+                len(committed_responses),
+            ),
             daily_message_date=daily_message_date,
             current_topic=current_topic,
             topic_source=topic_source,
             last_reply_to_message_id=resolved_message_id(last_reply_to_message_id),
             last_reply_to_character_id=last_reply_to_character_id,
             last_speaker_id=last_speaker_id,
-            waiting_for_player=waiting_for_player,
+            waiting_for_player=waiting_for_player or duplicate_suppressed,
             unresolved_hooks=resolved_hooks,
         )
         if not completed:
@@ -7226,8 +7628,36 @@ def has_authorized_knowledge_bases(
 # =========================
 # 用户管理
 # =========================
+def player_node_id(user_id: str) -> str:
+    return f"player:{user_id}"
+
+
+def is_player_node_id(node_id: str) -> bool:
+    return isinstance(node_id, str) and node_id.startswith("player:")
+
+
+def _insert_default_user_character_card(
+    conn,
+    *,
+    user_id: str,
+    display_name: str,
+    gender: str,
+    now: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO user_character_card
+        (user_id, display_name, gender, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(user_id) DO NOTHING
+        """,
+        (user_id, display_name, gender or "unknown", now, now),
+    )
+
+
 def create_user(user_id: str, username: str, password_hash: str, gender: str = "unknown"):
     """创建新用户"""
+    now = _now()
     with get_conn() as conn:
         conn.execute(
             """
@@ -7238,8 +7668,100 @@ def create_user(user_id: str, username: str, password_hash: str, gender: str = "
                         THEN 0 ELSE 1 END,
                    ?, ?, ?
             """,
-            (user_id, username, password_hash, gender, _now(), _now()),
+            (user_id, username, password_hash, gender, now, now),
         )
+        _insert_default_user_character_card(
+            conn,
+            user_id=user_id,
+            display_name=username,
+            gender=gender,
+            now=now,
+        )
+
+
+def get_user_character_card(user_id: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM user_character_card WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        return _row_to_dict(row)
+
+
+def get_or_create_user_character_card(user_id: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM user_character_card WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if row:
+            return _row_to_dict(row)
+        user = conn.execute(
+            "SELECT username, gender FROM users WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if not user:
+            return None
+        now = _now()
+        _insert_default_user_character_card(
+            conn,
+            user_id=user_id,
+            display_name=user["username"],
+            gender=user["gender"] or "unknown",
+            now=now,
+        )
+        row = conn.execute(
+            "SELECT * FROM user_character_card WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        return _row_to_dict(row)
+
+
+def update_user_character_card(user_id: str, fields: dict) -> dict | None:
+    allowed = {
+        "display_name",
+        "avatar_url",
+        "gender",
+        "pronouns",
+        "age",
+        "species",
+        "occupation",
+        "appearance",
+        "personality",
+        "background",
+        "goals",
+    }
+    updates = {key: value for key, value in fields.items() if key in allowed}
+    with get_conn() as conn:
+        user = conn.execute(
+            "SELECT username, gender FROM users WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if not user:
+            return None
+        now = _now()
+        _insert_default_user_character_card(
+            conn,
+            user_id=user_id,
+            display_name=user["username"],
+            gender=user["gender"] or "unknown",
+            now=now,
+        )
+        if updates:
+            assignments = ", ".join(f"{key} = ?" for key in updates)
+            conn.execute(
+                f"""
+                UPDATE user_character_card
+                SET {assignments}, updated_at = ?
+                WHERE user_id = ?
+                """,
+                (*updates.values(), now, user_id),
+            )
+        card = conn.execute(
+            "SELECT * FROM user_character_card WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        return _row_to_dict(card)
 
 
 def get_user_by_username(username: str) -> dict | None:

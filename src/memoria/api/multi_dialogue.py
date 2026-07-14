@@ -420,10 +420,21 @@ async def start_multi_session(
         if clean_group_name and repository.player_group_name_exists(request.player_id, clean_group_name):
             raise HTTPException(status_code=400, detail="群聊名称已存在，请换一个名称")
         
+        try:
+            player_character = repository.get_or_create_user_character_card(
+                request.player_id
+            )
+        except Exception:
+            player_character = None
+        player_name = (
+            (player_character or {}).get("display_name")
+            or request.player_name
+        )
+
         # 创建会话
         result = start_multi_character_session(
             player_id=request.player_id,
-            player_name=request.player_name,
+            player_name=player_name,
             character_ids=request.character_ids,
             group_name=clean_group_name or request.group_name,
             locale=request.locale,
@@ -602,7 +613,13 @@ async def get_multi_session_info(
         return MultiSessionInfo(
             session_id=session["session_id"],
             player_id=session["player_id"],
-            player_name=session["player_name"],
+            player_name=(
+                (
+                    repository.get_or_create_user_character_card(session["player_id"])
+                    or {}
+                ).get("display_name")
+                or session["player_name"]
+            ),
             group_name=session.get("group_name"),
             group_thread_id=session.get("group_thread_id") or session["session_id"],
             created_at=session["created_at"],
@@ -650,10 +667,20 @@ async def continue_multi_session(
 
         new_session_id = str(uuid.uuid4())
         group_thread_id = source_session.get("group_thread_id") or source_session["session_id"]
+        try:
+            player_character = repository.get_or_create_user_character_card(
+                source_session["player_id"]
+            )
+        except Exception:
+            player_character = None
+        player_name = (
+            (player_character or {}).get("display_name")
+            or source_session["player_name"]
+        )
         ok = repository.create_multi_character_session(
             session_id=new_session_id,
             player_id=source_session["player_id"],
-            player_name=source_session["player_name"],
+            player_name=player_name,
             character_ids=character_ids,
             group_name=source_session.get("group_name"),
             group_thread_id=group_thread_id,

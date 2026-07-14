@@ -107,6 +107,7 @@ def _build_system_prompt(
     runtime_state: dict,
     player_name: str,
     *,
+    player_character: dict | None,
     past_summaries: list[str],
     relationship_graph_lines: list[str],
     time_context: dict,
@@ -124,6 +125,7 @@ def _build_system_prompt(
             time_context=time_context,
             knowledge_context=knowledge_context,
             locale=locale,
+            player_character=player_character,
         )
     except TypeError as exc:
         if "unexpected keyword argument" not in str(exc):
@@ -136,17 +138,31 @@ def _build_system_prompt(
                 past_summaries=past_summaries,
                 relationship_graph_lines=relationship_graph_lines,
                 time_context=time_context,
+                knowledge_context=knowledge_context,
+                locale=locale,
             )
-        except TypeError as legacy_exc:
-            if "unexpected keyword argument" not in str(legacy_exc):
+        except TypeError as compatibility_exc:
+            if "unexpected keyword argument" not in str(compatibility_exc):
                 raise
-            return prompt_builder.build_system_prompt(
-                card,
-                runtime_state,
-                player_name,
-                past_summaries=past_summaries,
-                relationship_graph_lines=relationship_graph_lines,
-            )
+            try:
+                return prompt_builder.build_system_prompt(
+                    card,
+                    runtime_state,
+                    player_name,
+                    past_summaries=past_summaries,
+                    relationship_graph_lines=relationship_graph_lines,
+                    time_context=time_context,
+                )
+            except TypeError as legacy_exc:
+                if "unexpected keyword argument" not in str(legacy_exc):
+                    raise
+                return prompt_builder.build_system_prompt(
+                    card,
+                    runtime_state,
+                    player_name,
+                    past_summaries=past_summaries,
+                    relationship_graph_lines=relationship_graph_lines,
+                )
 
 
 def _load_character_card(character_id: str, player_id: str, locale: Locale):
@@ -164,6 +180,7 @@ def _build_opening_line_prompt(
     runtime_state: dict,
     player_name: str,
     locale: Locale,
+    player_character: dict | None,
 ) -> str:
     """Build a locale-aware opening instruction for legacy test doubles."""
     try:
@@ -172,11 +189,35 @@ def _build_opening_line_prompt(
             runtime_state,
             player_name,
             locale=locale,
+            player_character=player_character,
         )
     except TypeError as exc:
         if "unexpected keyword argument" not in str(exc):
             raise
-        return prompt_builder.build_opening_line_prompt(card, runtime_state, player_name)
+        try:
+            return prompt_builder.build_opening_line_prompt(
+                card,
+                runtime_state,
+                player_name,
+                locale=locale,
+            )
+        except TypeError as legacy_exc:
+            if "unexpected keyword argument" not in str(legacy_exc):
+                raise
+            return prompt_builder.build_opening_line_prompt(card, runtime_state, player_name)
+
+
+def _load_player_character(player_id: str, fallback_name: str) -> dict:
+    """Load the latest persona without allowing missing legacy rows to block chat."""
+    try:
+        card = repository.get_or_create_user_character_card(player_id)
+    except Exception as exc:
+        logger.warning("加载玩家角色卡失败，继续使用会话名称: %s", exc)
+        card = None
+    player_character = dict(card or {})
+    player_character.setdefault("display_name", fallback_name or "玩家")
+    player_character.setdefault("node_id", repository.player_node_id(player_id))
+    return player_character
     
 
 def _aliases_for_card(character_id: str, card) -> list[str]:
@@ -192,6 +233,15 @@ def _aliases_for_card(character_id: str, card) -> list[str]:
 
 
 def _character_name_and_aliases(player_id: str, character_id: str) -> tuple[str, list[str]]:
+    if repository.is_player_node_id(character_id):
+        player_character = _load_player_character(player_id, "玩家")
+        name = player_character.get("display_name") or "玩家"
+        return name, relationship_context.normalize_aliases([
+            character_id,
+            name,
+            "玩家",
+        ])
+
     aliases = [character_id]
     name = character_id
     row = None
@@ -256,12 +306,17 @@ def _relationship_updated_at_for_pair(
         character_id_a,
         character_id_b,
     )
-    updated_at = relationship.get("updated_at") if relationship else None
     revision_updated_at = repository.get_character_relationship_updated_at(
         player_id,
         character_id_a,
         character_id_b,
     )
+    if (
+        repository.is_player_node_id(character_id_a)
+        or repository.is_player_node_id(character_id_b)
+    ):
+        return revision_updated_at
+    updated_at = relationship.get("updated_at") if relationship else None
     return relationship_context.latest_timestamp(updated_at, revision_updated_at)
 
 
@@ -431,6 +486,7 @@ def _load_single_character_prompt_context(
     card,
     query_context: str | None = None,
     fallback_known_player_facts=None,
+    player_character: dict | None = None,
 ) -> dict:
     relationship_records = repository.list_character_relationships(player_id, character_id)
     character_relationships = relationship_context.relationship_map_from_records(
@@ -469,13 +525,25 @@ def _load_single_character_prompt_context(
         for participant_id in _parse_group_memory_participants(memory.get("participants")):
             add_related(participant_id)
 
+    player_node_id = repository.player_node_id(player_id)
+    add_related(player_node_id)
+
     current_name = getattr(getattr(card, "meta", None), "display_name", None)
     current_name = current_name or getattr(getattr(card, "meta", None), "name", None) or character_id
     character_names = {character_id: current_name}
     aliases_by_character = {character_id: _aliases_for_card(character_id, card)}
 
     for other_id in related_character_ids:
-        name, aliases = _character_name_and_aliases(player_id, other_id)
+        if other_id == player_node_id:
+            current_player = player_character or _load_player_character(player_id, "玩家")
+            name = current_player.get("display_name") or "玩家"
+            aliases = relationship_context.normalize_aliases([
+                player_node_id,
+                name,
+                "玩家",
+            ])
+        else:
+            name, aliases = _character_name_and_aliases(player_id, other_id)
         character_names[other_id] = name
         aliases_by_character[other_id] = aliases
 
@@ -581,6 +649,8 @@ def start_session(
 ) -> dict:
     """对应 /dialogue/session/start"""
     
+    player_character = _load_player_character(player_id, player_name)
+    player_name = player_character["display_name"]
     card = _load_character_card(character_id, player_id, locale)
     runtime_state = repository.get_runtime_state(character_id, player_id, card)
     clock_snapshot = world_clock.get_clock_snapshot(player_id)
@@ -600,6 +670,7 @@ def start_session(
         player_id,
         card,
         fallback_known_player_facts=runtime_state.get("known_player_facts"),
+        player_character=player_character,
     )
     runtime_state["known_player_facts"] = prompt_context["known_player_facts"]
     past_summaries.extend(prompt_context["cross_mode_memories"])
@@ -608,13 +679,14 @@ def start_session(
         card,
         runtime_state,
         player_name,
+        player_character=player_character,
         past_summaries=past_summaries,
         relationship_graph_lines=prompt_context["relationship_graph_lines"],
         time_context=time_context,
         locale=locale,
     )
     opening_instruction = _build_opening_line_prompt(
-        card, runtime_state, player_name, locale
+        card, runtime_state, player_name, locale, player_character
     )
     
     result = llm_client.call_role_turn(
@@ -709,22 +781,26 @@ def run_dialogue_turn(
         past_summaries_raw = repository.get_recent_summaries(
             character_id, player_id, limit=3
         )
-        past_summaries = [
-            summary["summary_text"] for summary in past_summaries_raw or []
-        ]
+        player_character = _load_player_character(player_id, player_name)
+        player_name = player_character["display_name"]
         prompt_context = _load_single_character_prompt_context(
             character_id,
             player_id,
             card,
             query_context=player_message,
             fallback_known_player_facts=runtime_state.get("known_player_facts"),
+            player_character=player_character,
         )
         runtime_state["known_player_facts"] = prompt_context["known_player_facts"]
+        past_summaries = [
+            summary["summary_text"] for summary in past_summaries_raw or []
+        ]
         past_summaries.extend(prompt_context["cross_mode_memories"])
         system_prompt = _build_system_prompt(
             card,
             runtime_state,
             player_name,
+            player_character=player_character,
             past_summaries=past_summaries,
             relationship_graph_lines=prompt_context["relationship_graph_lines"],
             time_context=time_context,

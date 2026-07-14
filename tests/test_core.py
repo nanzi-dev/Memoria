@@ -852,18 +852,23 @@ class TestMultiCharacterMemory:
         assert len(results) >= 1
         assert any("训练" in r["memory_text"] for r in results)
 
-    def test_shared_memory_bidirectional(self):
-        """测试共享记忆双向查询"""
+    def test_shared_memory_is_directional(self):
+        """测试角色印象只按观察者到目标的方向查询"""
         from memoria.db import repository
 
-        repository.save_shared_memory("user_shared_b", "char_p", "char_q", "共同击败了敌人", importance=0.9)
+        repository.save_shared_memory(
+            "user_shared_b",
+            "char_p",
+            "char_q",
+            "认为对方在压力下很可靠",
+            importance=0.9,
+        )
         
         forward = repository.get_shared_memories("user_shared_b", "char_p", "char_q", 5)
         backward = repository.get_shared_memories("user_shared_b", "char_q", "char_p", 5)
         
-        assert len(forward) == len(backward)
-        if forward:
-            assert forward[0]["memory_text"] == backward[0]["memory_text"]
+        assert len(forward) == 1
+        assert backward == []
 
     def test_shared_memory_isolated_by_user(self):
         """测试相同角色 ID 在不同用户下共享记忆隔离"""
@@ -1166,6 +1171,34 @@ class TestMultiCharacterMemory:
         memories = repository.get_shared_memories("user_shared_invalid", "npc_a", "npc_b", limit=5)
         assert count == 0
         assert memories == []
+
+    def test_extract_character_impressions_rejects_plain_event_fact(self, monkeypatch):
+        """测试共同经历的事实复述不会被当成角色印象"""
+        from memoria.core import multi_character_memory
+
+        monkeypatch.setattr(
+            multi_character_memory.llm_client,
+            "call_light_task",
+            lambda *args, **kwargs: (
+                '[{"observer_id":"npc_a","target_id":"npc_b",'
+                '"impression":"npc_a和npc_b共同击败了敌人","importance":0.8}]'
+            ),
+        )
+
+        impressions = multi_character_memory.extract_character_impressions(
+            session_id="fact-not-impression",
+            recent_messages=[
+                {
+                    "role": "assistant",
+                    "character_id": "npc_a",
+                    "character_name": "A",
+                    "content": "敌人已经被击退。",
+                }
+            ],
+            character_ids=["npc_a", "npc_b"],
+        )
+
+        assert impressions == []
 
     def test_auto_process_multi_character_memories_saves_impressions(self, monkeypatch):
         """测试自动多角色记忆处理会写入角色间印象"""

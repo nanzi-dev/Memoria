@@ -16,6 +16,42 @@ class TestPromptBuilder:
         assert '"trust_delta"' in prompt
         assert "测试者" in prompt
 
+    def test_player_character_card_is_authoritative_in_single_prompt(self):
+        from memoria.core import prompt_builder, character_loader
+
+        card = character_loader.load_character_card("npc_luo_xiaohei")
+        prompt = prompt_builder.build_system_prompt(
+            card,
+            {
+                "affection_level": 30,
+                "trust_level": 50,
+                "current_mood": "开心",
+                "known_player_facts": ["旧记忆称玩家为旅行者，并说玩家是人类。"],
+            },
+            "旧会话名称",
+            player_character={
+                "node_id": "player:usr_role",
+                "display_name": "星野",
+                "gender": "女性",
+                "pronouns": "她/她",
+                "age": 27,
+                "species": "月裔",
+                "occupation": "档案修复师",
+                "appearance": "银灰短发，左眼有浅色伤痕。",
+                "personality": "谨慎敏锐，对弱者温和。",
+                "background": "来自旧城区档案馆。",
+                "goals": "找回失落的家族记录。",
+            },
+        )
+
+        assert "玩家角色卡（当前权威身份）" in prompt
+        assert "姓名：星野" in prompt
+        assert "种族：月裔" in prompt
+        assert "职业：档案修复师" in prompt
+        assert "不得覆盖、质疑或擅自修改玩家当前身份" in prompt
+        assert "玩家：星野" in prompt
+        assert "玩家：旧会话名称" not in prompt
+
     def test_build_multi_character_prompt(self):
         from memoria.core import prompt_builder, character_loader
         c1 = character_loader.load_character_card("npc_luo_xiaohei")
@@ -28,6 +64,43 @@ class TestPromptBuilder:
         )
         assert "小黑" in prompt or "罗小黑" in prompt
         assert "无限" in prompt or "巫仙" in prompt
+
+    def test_multi_character_prompt_includes_player_node_relationship(self):
+        from memoria.core import prompt_builder, character_loader
+
+        card = character_loader.load_character_card("npc_luo_xiaohei")
+        player_node_id = "player:usr_role"
+        prompt = prompt_builder.build_multi_character_system_prompt(
+            card,
+            {
+                "affection_level": 42,
+                "trust_level": 50,
+                "current_mood": "开心",
+                "known_player_facts": [],
+            },
+            "旧会话名称",
+            other_characters=[],
+            player_character={
+                "node_id": player_node_id,
+                "display_name": "星野",
+                "gender": "女性",
+                "pronouns": "她/她",
+                "species": "月裔",
+            },
+            character_relationships={
+                f"{player_node_id}_{card.character_id}": {
+                    "relationship_type": "盟友",
+                    "affinity": 42,
+                    "description": "共同追查旧城档案",
+                }
+            },
+        )
+
+        assert "姓名：星野" in prompt
+        assert "星野（玩家）" in prompt
+        assert "星野 与" in prompt or "与 星野" in prompt
+        assert "当前关系类型 = 盟友" in prompt
+        assert "共同追查旧城档案" in prompt
 
     def test_multi_character_prompt_marks_relationship_graph_authoritative(self):
         from memoria.core import prompt_builder, character_loader

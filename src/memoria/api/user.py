@@ -196,6 +196,46 @@ class UpdateSpeechSettingsRequest(BaseModel):
 class SetAvatarUrlRequest(BaseModel):
     url: str
 
+
+class UserCharacterCardUpdate(BaseModel):
+    display_name: str | None = Field(default=None, max_length=50)
+    avatar_url: str | None = Field(default=None, max_length=4_000_000)
+    gender: str | None = Field(default=None, max_length=30)
+    pronouns: str | None = Field(default=None, max_length=50)
+    age: int | None = Field(default=None, ge=0, le=10_000)
+    species: str | None = Field(default=None, max_length=80)
+    occupation: str | None = Field(default=None, max_length=120)
+    appearance: str | None = Field(default=None, max_length=4_000)
+    personality: str | None = Field(default=None, max_length=4_000)
+    background: str | None = Field(default=None, max_length=8_000)
+    goals: str | None = Field(default=None, max_length=4_000)
+
+
+class UserCharacterCardResponse(BaseModel):
+    user_id: str
+    node_id: str
+    display_name: str
+    avatar_url: str | None = None
+    gender: str
+    pronouns: str
+    age: int | None = None
+    species: str
+    occupation: str
+    appearance: str
+    personality: str
+    background: str
+    goals: str
+    created_at: str
+    updated_at: str
+
+
+class UserRoleSummary(BaseModel):
+    node_id: str
+    display_name: str
+    avatar_url: str | None = None
+    updated_at: str | None = None
+
+
 class NextScheduledEventResponse(BaseModel):
     event_id: str
     event_name: str | None = None
@@ -252,6 +292,7 @@ class UserResponse(BaseModel):
     next_event: NextScheduledEventResponse | None = None
     tts_auto_play: bool = False
     stt_auto_send: bool = False
+    role_summary: UserRoleSummary
 
 class EventInboxItem(BaseModel):
     id: int
@@ -278,6 +319,13 @@ def _build_user_response(user: dict) -> UserResponse:
     clock = _build_world_clock_response(
         world_clock.get_clock_snapshot(user["user_id"])
     )
+    card = repository.get_user_character_card(user["user_id"])
+    role_summary = UserRoleSummary(
+        node_id=repository.player_node_id(user["user_id"]),
+        display_name=(card or {}).get("display_name") or user["username"],
+        avatar_url=(card or {}).get("avatar_url"),
+        updated_at=(card or {}).get("updated_at"),
+    )
     return UserResponse(
         user_id=user["user_id"],
         username=user["username"],
@@ -286,8 +334,28 @@ def _build_user_response(user: dict) -> UserResponse:
         avatar_url=user.get("avatar_url"),
         tts_auto_play=bool(user.get("tts_auto_play", False)),
         stt_auto_send=bool(user.get("stt_auto_send", False)),
+        role_summary=role_summary,
         **clock.model_dump(),
     )
+
+
+def _build_character_card_response(card: dict) -> UserCharacterCardResponse:
+    return UserCharacterCardResponse(
+        **card,
+        node_id=repository.player_node_id(card["user_id"]),
+    )
+
+
+def _avatar_data_url(data: bytes, mime_type: str | None) -> str:
+    if mime_type not in ALLOWED_MIME_TYPES:
+        raise HTTPException(400, f"不支持的图片格式: {mime_type}")
+    if len(data) > MAX_AVATAR_SIZE:
+        data = _resize_image(data)
+        if data is None:
+            raise HTTPException(400, "图片过大且压缩失败")
+        mime_type = "image/jpeg"
+    b64 = base64.b64encode(data).decode("ascii")
+    return f"data:{mime_type};base64,{b64}"
 
 
 def _build_world_clock_response(
@@ -424,6 +492,88 @@ def update_speech_settings(
 
 
 # =========================
+# 用户角色卡
+# =========================
+@router.get("/user/character-card", response_model=UserCharacterCardResponse)
+def get_character_card(
+    user_id: str = Depends(require_current_user_id),
+):
+    card = repository.get_or_create_user_character_card(user_id)
+    if not card:
+        raise HTTPException(404, "用户不存在")
+    return _build_character_card_response(card)
+
+
+@router.put("/user/character-card", response_model=UserCharacterCardResponse)
+def put_character_card(
+    req: UserCharacterCardUpdate,
+    user_id: str = Depends(require_current_user_id),
+):
+    fields = req.model_dump(exclude_unset=True)
+    for key, value in list(fields.items()):
+        if isinstance(value, str):
+            fields[key] = value.strip()
+    if "display_name" in fields and not fields["display_name"]:
+        raise HTTPException(400, "角色名称不能为空")
+    avatar_url = fields.get("avatar_url")
+    if avatar_url and not avatar_url.startswith("data:image/"):
+        raise HTTPException(400, "角色头像请通过头像上传或网络图片接口设置")
+    card = repository.update_user_character_card(user_id, fields)
+    if not card:
+        raise HTTPException(404, "用户不存在")
+    return _build_character_card_response(card)
+
+
+@router.post(
+    "/user/character-card/avatar/upload",
+    response_model=UserCharacterCardResponse,
+)
+async def upload_character_card_avatar(
+    file: UploadFile = File(...),
+    user_id: str = Depends(require_current_user_id),
+):
+    contents = await read_upload_limited(
+        file,
+        MAX_AVATAR_UPLOAD_SIZE,
+        detail="头像文件超过 8 MB 上传限制",
+    )
+    mime_type = file.content_type or mimetypes.guess_type(file.filename)[0]
+    avatar_url = _avatar_data_url(contents, mime_type)
+    card = repository.update_user_character_card(
+        user_id,
+        {"avatar_url": avatar_url},
+    )
+    if not card:
+        raise HTTPException(404, "用户不存在")
+    return _build_character_card_response(card)
+
+
+@router.post(
+    "/user/character-card/avatar/url",
+    response_model=UserCharacterCardResponse,
+)
+def set_character_card_avatar_url(
+    req: SetAvatarUrlRequest,
+    user_id: str = Depends(require_current_user_id),
+):
+    url = req.url.strip()
+    if not url:
+        card = repository.update_user_character_card(
+            user_id,
+            {"avatar_url": None},
+        )
+    else:
+        image = download_remote_image(url, timeout=10)
+        card = repository.update_user_character_card(
+            user_id,
+            {"avatar_url": _avatar_data_url(image.data, image.content_type)},
+        )
+    if not card:
+        raise HTTPException(404, "用户不存在")
+    return _build_character_card_response(card)
+
+
+# =========================
 # 世界时钟与事件收件箱
 # =========================
 @router.get("/user/world-clock", response_model=WorldClockResponse)
@@ -533,18 +683,7 @@ async def upload_avatar(
         detail="头像文件超过 8 MB 上传限制",
     )
     mime_type = file.content_type or mimetypes.guess_type(file.filename)[0]
-    if mime_type not in ALLOWED_MIME_TYPES:
-        raise HTTPException(400, f"不支持的图片格式: {mime_type}")
-
-    data = contents
-    if len(data) > MAX_AVATAR_SIZE:
-        data = _resize_image(data)
-        if data is None:
-            raise HTTPException(400, "图片过大且压缩失败")
-        mime_type = "image/jpeg"
-
-    b64 = base64.b64encode(data).decode("ascii")
-    data_url = f"data:{mime_type};base64,{b64}"
+    data_url = _avatar_data_url(contents, mime_type)
     repository.update_user_profile(uid, avatar_url=data_url)
     return OperationResponse(success=True, message="头像上传成功")
 
@@ -560,16 +699,8 @@ def set_avatar_url(
         return OperationResponse(success=True, message="头像已清除")
 
     image = download_remote_image(url, timeout=10)
-    data = image.data
-    ct = image.content_type
-    if len(data) > MAX_AVATAR_SIZE:
-        data = _resize_image(data)
-        if data is None:
-            raise HTTPException(400, "图片过大且压缩失败")
-        ct = "image/jpeg"
-
-    b64 = base64.b64encode(data).decode("ascii")
-    avatar_url = f"data:{ct};base64,{b64}"
-
-    repository.update_user_profile(uid, avatar_url=avatar_url)
+    repository.update_user_profile(
+        uid,
+        avatar_url=_avatar_data_url(image.data, image.content_type),
+    )
     return OperationResponse(success=True, message="头像设置成功")

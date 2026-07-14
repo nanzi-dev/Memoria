@@ -404,6 +404,96 @@ def test_pulse_stops_on_wait_or_wait_for_player(
     assert orchestrator.last_pulse_state["waiting_for_player"] is waiting_for_player
 
 
+def test_pulse_suppresses_repeated_generated_dialogue(monkeypatch):
+    from memoria.core import multi_character_orchestrator
+
+    orchestrator = _orchestrator()
+    decisions = iter([
+        _decision(speaker_id="c1", reply_to_message_id=1),
+        _decision(speaker_id="c1", reply_to_message_id=1),
+    ])
+    monkeypatch.setattr(
+        multi_character_orchestrator.repository,
+        "get_multi_character_thread_history",
+        lambda *args, **kwargs: [
+            {"message_id": 1, "role": "user", "content": "继续"}
+        ],
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_decide_dialogue_action",
+        lambda **kwargs: next(decisions),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_generate_character_response",
+        lambda *args, **kwargs: {
+            "character_id": "c1",
+            "character_name": "甲",
+            "dialogue": "我们先去北门侦查。",
+            "reply_to_message_id": 1,
+        },
+    )
+
+    responses = orchestrator.run_dialogue_pulse(
+        trigger_source="event",
+        trigger_text="继续",
+        max_messages=2,
+        persist_state=False,
+        persist_messages=False,
+        clock_snapshot=SimpleNamespace(world_now=SimpleNamespace(isoformat=lambda: "now")),
+    )
+
+    assert [response["dialogue"] for response in responses] == ["我们先去北门侦查。"]
+    assert orchestrator.last_pulse_state["waiting_for_player"] is True
+
+
+def test_pulse_suppresses_duplicate_from_recent_history(monkeypatch):
+    from memoria.core import multi_character_orchestrator
+
+    orchestrator = _orchestrator()
+    monkeypatch.setattr(
+        multi_character_orchestrator.repository,
+        "get_multi_character_thread_history",
+        lambda *args, **kwargs: [
+            {"message_id": 1, "role": "user", "content": "继续"},
+            {
+                "message_id": 2,
+                "role": "assistant",
+                "character_id": "c1",
+                "content": "我们先去北门侦查。",
+            },
+        ],
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_decide_dialogue_action",
+        lambda **kwargs: _decision(speaker_id="c1", reply_to_message_id=1),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_generate_character_response",
+        lambda *args, **kwargs: {
+            "character_id": "c1",
+            "character_name": "甲",
+            "dialogue": "我们先去北门侦查！",
+            "reply_to_message_id": 1,
+        },
+    )
+
+    responses = orchestrator.run_dialogue_pulse(
+        trigger_source="player",
+        trigger_text="继续",
+        max_messages=1,
+        persist_state=False,
+        persist_messages=False,
+        clock_snapshot=SimpleNamespace(world_now=SimpleNamespace(isoformat=lambda: "now")),
+    )
+
+    assert responses == []
+    assert orchestrator.last_pulse_state["waiting_for_player"] is True
+
+
 def test_dialogue_pulse_memory_secret_is_not_broadcast(monkeypatch):
     from memoria.core import multi_character_memory
 
@@ -459,4 +549,4 @@ def test_dialogue_pulse_memory_secret_is_not_broadcast(monkeypatch):
     assert secret_recipients == {"c1", "c2"}
     assert player_fact_recipients == {"c1", "c2", "c3"}
     assert group_memories[0]["participants"] == ["c1", "c2", "c3"]
-    assert len(shared_memories) == 3
+    assert shared_memories == []

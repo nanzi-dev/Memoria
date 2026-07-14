@@ -217,6 +217,12 @@ def _start_empty_session(
     locale: Locale,
 ) -> SessionStartResponse:
     """创建会话但不阻塞等待开场白生成。"""
+    try:
+        player_character = repository.get_or_create_user_character_card(player_id)
+    except Exception:
+        player_character = None
+    if player_character:
+        player_name = player_character.get("display_name") or player_name
     _ensure_character_can_chat(character_id, player_id)
     card = _load_character_card(character_id, player_id, locale)
     runtime_state = repository.get_runtime_state(character_id, player_id, card)

@@ -87,12 +87,11 @@ function sortEvents(list, sort) {
   return sorted;
 }
 
-function formatScheduleTime(value, timezone) {
+function formatScheduleTime(value) {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
   return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: timezone,
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -469,12 +468,12 @@ export default function EventList() {
                         <div className="mt-2 grid gap-x-4 gap-y-1 text-[10px] font-mono leading-4 text-zinc-500 sm:grid-cols-2">
                           <span className="truncate" title={evt.next_run_at || ''}>
                             世界触发：{evt.next_run_at
-                              ? formatScheduleTime(evt.next_run_at, worldClock?.timezone || 'UTC')
+                              ? formatScheduleTime(evt.next_run_at)
                               : '尚未排期'}
                           </span>
                           <span className="truncate" title={evt.next_due_real_at || ''}>
                             现实预计：{evt.next_due_real_at
-                              ? formatScheduleTime(evt.next_due_real_at, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
+                              ? formatScheduleTime(evt.next_due_real_at)
                               : Number(worldClock?.time_scale) === 0 ? '世界时间已暂停' : '尚未计算'}
                           </span>
                           {Number(evt.missed_count) > 0 && (

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { dialogue, multiDialogue } from '../src/api/memoria.js';
+import { dialogue, multiDialogue, userApi } from '../src/api/memoria.js';
 
 test('dialogue APIs include caller request IDs for idempotent retries', async () => {
   const calls = [];
@@ -43,5 +43,45 @@ test('dialogue APIs include caller request IDs for idempotent retries', async ()
     discussion_mode: true,
     request_id: 'req-group',
     max_responses: 2,
+  });
+});
+
+test('user character-card APIs use the authenticated persona endpoints', async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return {
+      ok: true,
+      json: async () => ({ display_name: '旅人' }),
+    };
+  };
+
+  try {
+    await userApi.getCharacterCard();
+    await userApi.updateCharacterCard({ display_name: '旅人', age: 24 });
+    await userApi.uploadCharacterCardAvatar(new Blob(['avatar'], { type: 'image/png' }));
+    await userApi.setCharacterCardAvatarUrl('https://example.test/avatar.png');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(calls.map(call => call.url), [
+    '/api/v1/user/character-card',
+    '/api/v1/user/character-card',
+    '/api/v1/user/character-card/avatar/upload',
+    '/api/v1/user/character-card/avatar/url',
+  ]);
+  assert.equal(calls[0].options.credentials, 'include');
+  assert.equal(calls[1].options.method, 'PUT');
+  assert.deepEqual(JSON.parse(calls[1].options.body), {
+    display_name: '旅人',
+    age: 24,
+  });
+  assert.equal(calls[2].options.method, 'POST');
+  assert.ok(calls[2].options.body instanceof FormData);
+  assert.equal(calls[3].options.method, 'POST');
+  assert.deepEqual(JSON.parse(calls[3].options.body), {
+    url: 'https://example.test/avatar.png',
   });
 });

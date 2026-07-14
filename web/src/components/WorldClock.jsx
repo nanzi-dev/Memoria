@@ -10,9 +10,8 @@ import {
 } from 'lucide-react';
 import { useUser } from '../context/UserContext';
 
-function narrativePeriod(date, timezone) {
+function narrativePeriod(date) {
   const hour = Number(new Intl.DateTimeFormat('zh-CN', {
-    timeZone: timezone,
     hour: 'numeric',
     hourCycle: 'h23',
   }).format(date));
@@ -50,19 +49,17 @@ export function WorldClockDisplay({ className = '', onClick }) {
   const formatted = useMemo(() => {
     if (!clock || !worldNow) return null;
     const date = new Intl.DateTimeFormat('zh-CN', {
-      timeZone: clock.timezone,
       month: 'numeric',
       day: 'numeric',
       weekday: 'short',
     }).format(worldNow);
     const time = new Intl.DateTimeFormat('zh-CN', {
-      timeZone: clock.timezone,
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',
       hour12: false,
     }).format(worldNow);
-    return { date, time, period: narrativePeriod(worldNow, clock.timezone) };
+    return { date, time, period: narrativePeriod(worldNow) };
   }, [clock, worldNow]);
 
   if (!formatted) return null;
@@ -88,7 +85,6 @@ export function WorldClockDisplay({ className = '', onClick }) {
           <span className="tabular-nums text-xs font-semibold text-zinc-100">{formatted.time}</span>
         </span>
         <span className="mt-0.5 flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[10px]">
-          <span className="max-w-[92px] truncate text-zinc-500">{clock.timezone}</span>
           <span className="text-amber-200/75">{formatted.period}</span>
           <span className={paused ? 'text-amber-300' : 'text-cyan-200/75'}>
             {paused ? '暂停' : `${clock.time_scale}x`}
@@ -103,7 +99,7 @@ export function WorldClockDisplay({ className = '', onClick }) {
       </span>
     </>
   );
-  const label = `${formatted.date} ${formatted.time}，${clock.timezone}，${formatted.period}，${paused ? '已暂停' : `${clock.time_scale}倍速`}${statusLabel ? `，${statusLabel}` : ''}`;
+  const label = `${formatted.date} ${formatted.time}，${formatted.period}，${paused ? '已暂停' : `${clock.time_scale}倍速`}${statusLabel ? `，${statusLabel}` : ''}`;
   const classes = `flex min-h-[44px] min-w-0 shrink-0 items-center gap-2 rounded-md px-1.5 text-zinc-400 ${className}`;
 
   if (!onClick) {

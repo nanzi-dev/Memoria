@@ -109,10 +109,22 @@ def _ensure_carrier_session(
         return latest_session
 
     session_id = str(uuid.uuid4())
+    try:
+        player_character = repository.get_or_create_user_character_card(
+            state["player_id"]
+        )
+    except Exception as exc:
+        logger.warning("自主群聊加载玩家角色卡失败: %s", exc)
+        player_character = None
+    player_name = (
+        (player_character or {}).get("display_name")
+        or latest_session.get("player_name")
+        or "玩家"
+    )
     created = repository.create_multi_character_session(
         session_id=session_id,
         player_id=state["player_id"],
-        player_name=latest_session.get("player_name") or "玩家",
+        player_name=player_name,
         character_ids=character_ids,
         group_name=latest_session.get("group_name"),
         group_thread_id=state["group_thread_id"],
