@@ -62,6 +62,7 @@ class MultiDialogueTurnRequest(BaseModel):
         le=5,
         description="群聊接话人数上限；不传时按语境动态决定"
     )
+    request_id: Optional[str] = Field(None, description="客户端生成的事件执行幂等 ID")
 
 
 class MultiDialogueTurnResponse(BaseModel):
@@ -75,6 +76,10 @@ class MultiDialogueTurnResponse(BaseModel):
     current_affinity: Optional[float] = None
     current_trust: Optional[float] = None
     current_mood: Optional[str] = None
+    triggered_events: list[dict] = Field(default_factory=list)
+    event_executions: list[dict] = Field(default_factory=list)
+    event_notifications: list[dict] = Field(default_factory=list)
+    event_notification: Optional[str] = None
     knowledge_sources: list[KnowledgeSource] = Field(default_factory=list)
 
 
@@ -83,6 +88,8 @@ class MultiDialogueGroupResponse(BaseModel):
     responses: list[MultiDialogueTurnResponse] = Field(..., description="所有角色的回应列表")
     total_speakers: int = Field(..., description="发言角色数量")
     discussion_mode: bool = Field(True, description="群聊接话标识")
+    event_executions: list[dict] = Field(default_factory=list)
+    event_notifications: list[dict] = Field(default_factory=list)
 
 
 class TriggerInteractionRequest(BaseModel):
@@ -454,7 +461,8 @@ async def multi_dialogue_turn(
             session_id=request.session_id,
             player_message=request.player_message,
             discussion_mode=request.discussion_mode,
-            max_responses=request.max_responses
+            max_responses=request.max_responses,
+            request_id=request.request_id,
         )
         
         # 根据是否为讨论模式返回不同格式
@@ -464,14 +472,26 @@ async def multi_dialogue_turn(
                 return MultiDialogueGroupResponse(
                     responses=[MultiDialogueTurnResponse(**r) for r in result],
                     total_speakers=len(result),
-                    discussion_mode=True
+                    discussion_mode=True,
+                    event_executions=[
+                        execution
+                        for response in result
+                        for execution in response.get("event_executions", [])
+                    ],
+                    event_notifications=[
+                        notification
+                        for response in result
+                        for notification in response.get("event_notifications", [])
+                    ],
                 )
             else:
                 # 如果只有一个回应，也包装成列表
                 return MultiDialogueGroupResponse(
                     responses=[MultiDialogueTurnResponse(**result)],
                     total_speakers=1,
-                    discussion_mode=True
+                    discussion_mode=True,
+                    event_executions=result.get("event_executions", []),
+                    event_notifications=result.get("event_notifications", []),
                 )
         else:
             # 单角色模式：返回单个回应

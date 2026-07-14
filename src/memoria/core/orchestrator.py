@@ -24,7 +24,6 @@ from memoria.core import (
     world_clock,
 )
 from memoria.core.config import configs
-from memoria.core.event_schema import EventContext
 from memoria.core import event_runtime, relationship_context
 from memoria.core.knowledge_retriever import retrieve_knowledge
 from memoria.core.memory_extractor import extract_player_memory
@@ -618,6 +617,7 @@ def start_session(
 def run_dialogue_turn(
     session_id: str,
     player_message: str,
+    request_id: str | None = None,
     debug: bool = False,
     debug_sink: DebugSink | None = None,
 ) -> dict:
@@ -765,28 +765,33 @@ def run_dialogue_turn(
     # =========================
     triggered_events_info = []
     event_notification = None
+    event_notifications = []
+    event_results = []
     user_msg_id = None
     assistant_msg_id = None
     
     try:
-        # 构建事件上下文
-        session_created = datetime.fromisoformat(session["created_at"]) if session.get("created_at") else datetime.now(timezone.utc)
-        session_duration = (datetime.now(timezone.utc) - session_created).total_seconds() / 60.0
-        
-        event_context = EventContext(
+        event_context = event_runtime.build_event_context(
             character_id=character_id,
             player_id=player_id,
             session_id=session_id,
-           current_affinity=new_affinity,
+            current_affinity=new_affinity,
             current_trust=new_trust,
-           current_mood=mood_after,
+            current_mood=mood_after,
+            previous_affinity=previous_affinity,
+            previous_trust=previous_trust,
+            affinity_delta=affinity_delta,
+            trust_delta=trust_delta,
             player_message=player_message,
             npc_response=dialogue,
-            dialogue_count=len(history) // 2 + 1,
-            total_dialogue_count=len(history) // 2 + 1,  # 简化实现，后续可扩展
-            session_duration_minutes=session_duration,
-            unlocked_content=[],
-            character_relationships=prompt_context.get("character_relationships", {})
+            character_relationships=prompt_context.get("character_relationships", {}),
+            world_time=clock_snapshot.world_now.isoformat(),
+            execution_key=(
+                f"dialogue:{session_id}:{request_id}"
+                if request_id
+                else None
+            ),
+            trigger_source="dialogue",
         )
         
         event_results = event_runtime.detect_and_execute_events(event_context)
@@ -799,6 +804,7 @@ def run_dialogue_turn(
                 mood_after,
             )
         )
+        event_notifications = event_runtime.collect_event_notifications(event_results)
         
     except Exception as e:
         logger.error(f"事件系统处理失败: {e}", exc_info=True)
@@ -865,6 +871,12 @@ def run_dialogue_turn(
         "current_trust": new_trust,
         "current_mood": mood_after,
         "triggered_events": triggered_events_info,
+        "event_executions": [
+            result.model_dump(mode="json")
+            for result in event_results
+            if hasattr(result, "model_dump")
+        ],
+        "event_notifications": event_notifications,
         "event_notification": event_notification,
         "user_message_id": user_msg_id,
         "assistant_message_id": assistant_msg_id,

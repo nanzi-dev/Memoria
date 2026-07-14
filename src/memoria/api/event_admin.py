@@ -9,6 +9,8 @@
 
 import json
 import logging
+import re
+from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -40,10 +42,18 @@ class TriggerConditionDTO(BaseModel):
     comparison: Optional[str] = "gte"
     keywords: Optional[list[str]] = None
     match_mode: Optional[str] = "any"
+    crossing: bool = False
     count: Optional[int] = None
     duration_minutes: Optional[int] = None
     schedule: Optional[str] = None
     mood: Optional[str] = None
+    state_field: Optional[str] = None
+    event_id: Optional[str] = None
+    event_status: Optional[str] = "succeeded"
+    min_occurrences: Optional[int] = 1
+    time_window_start: Optional[str] = None
+    time_window_end: Optional[str] = None
+    weekdays: Optional[list[int]] = None
     sub_conditions: Optional[list["TriggerConditionDTO"]] = None
     logic_operator: Optional[str] = "and"
     cooldown_hours: Optional[int] = 0
@@ -73,6 +83,9 @@ class EventEffectDTO(BaseModel):
     target_session_id: Optional[str] = None
     proactive_character_id: Optional[str] = None
     proactive_prompt: Optional[str] = None
+    progress: Optional[float] = None
+    progress_delta: Optional[float] = None
+    event_status: Optional[str] = None
 
 
 class EventCreateRequest(BaseModel):
@@ -83,6 +96,9 @@ class EventCreateRequest(BaseModel):
     trigger_condition: TriggerConditionDTO
     effects: list[EventEffectDTO] = Field(default_factory=list)
     priority: int = 0
+    exclusive_group: Optional[str] = None
+    max_triggers_per_turn: int = Field(3, ge=1, le=20)
+    stop_processing: bool = False
     is_active: bool = True
     schedule: Optional[str] = None
     template_id: Optional[str] = None
@@ -95,6 +111,9 @@ class EventUpdateRequest(BaseModel):
     trigger_condition: Optional[TriggerConditionDTO] = None
     effects: Optional[list[EventEffectDTO]] = None
     priority: Optional[int] = None
+    exclusive_group: Optional[str] = None
+    max_triggers_per_turn: Optional[int] = Field(None, ge=1, le=20)
+    stop_processing: Optional[bool] = None
     is_active: Optional[bool] = None
     schedule: Optional[str] = None
     template_id: Optional[str] = None
@@ -106,6 +125,9 @@ class EventListItem(BaseModel):
     description: Optional[str] = None
     character_id: Optional[str] = None
     priority: int
+    exclusive_group: Optional[str] = None
+    max_triggers_per_turn: int = 3
+    stop_processing: bool = False
     is_active: bool
     trigger_count: int
     last_triggered_at: Optional[str] = None
@@ -130,6 +152,8 @@ class TriggerLogItem(BaseModel):
     session_id: str
     triggered_at: Optional[str] = None
     effects_applied: Optional[str] = None
+    execution_id: Optional[str] = None
+    status: Optional[str] = None
 
 
 class OperationResponse(BaseModel):
@@ -172,6 +196,64 @@ class ScheduleRunResponse(BaseModel):
     triggered_events: list[dict]
 
 
+class EventSimulationRequest(BaseModel):
+    character_id: Optional[str] = None
+    session_id: Optional[str] = None
+    player_message: str = ""
+    npc_response: Optional[str] = None
+    current_affinity: Optional[float] = None
+    current_trust: Optional[float] = None
+    current_mood: Optional[str] = None
+    previous_affinity: Optional[float] = None
+    previous_trust: Optional[float] = None
+    affinity_delta: Optional[float] = None
+    trust_delta: Optional[float] = None
+    dialogue_count: Optional[int] = None
+    total_dialogue_count: Optional[int] = None
+    session_duration_minutes: Optional[float] = None
+    unlocked_content: Optional[list[str]] = None
+    character_relationships: Optional[dict[str, dict]] = None
+    event_history: Optional[list[dict]] = None
+    world_time: Optional[str] = None
+    event_data: dict = Field(default_factory=dict)
+
+
+class EventSimulationResponse(BaseModel):
+    matched: bool
+    evaluation: dict
+    context: dict
+    planned_result: Optional[dict] = None
+
+
+class EventScheduleItem(BaseModel):
+    event_id: str
+    character_id: str
+    player_id: str
+    schedule: str
+    last_checked_at: Optional[str] = None
+    last_run_at: Optional[str] = None
+    next_run_at: Optional[str] = None
+    status: str
+    lease_owner: Optional[str] = None
+    lease_expires_at: Optional[str] = None
+    last_error: Optional[str] = None
+    last_failed_at: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class EventMetricsResponse(BaseModel):
+    matched_count: int
+    succeeded_count: int
+    failed_count: int
+    partial_count: int
+    skipped_count: int
+    deduplicated_count: int
+    average_duration_ms: float
+    last_execution_at: Optional[str] = None
+    last_error: Optional[str] = None
+
+
 class EventContextStateItem(BaseModel):
     event_id: str
     character_id: str
@@ -199,6 +281,199 @@ def _require_owned_character(
     if not character:
         raise HTTPException(status_code=404, detail=f"角色 '{normalized_id}' 不存在")
     return normalized_id
+
+
+UNIMPLEMENTED_EFFECTS = {
+    EffectType.GRANT_ITEM,
+    EffectType.START_QUEST,
+    EffectType.MODIFY_RELATIONSHIP,
+}
+UNIMPLEMENTED_TRIGGERS = {
+    TriggerType.ITEM_ACQUIRED,
+    TriggerType.QUEST_COMPLETED,
+    TriggerType.RELATIONSHIP_CHANGE,
+}
+
+
+def sanitize_schedule(value: str | None) -> str | None:
+    normalized = str(value or "").strip()
+    return normalized or None
+
+
+def _validate_cron(schedule: str) -> None:
+    try:
+        event_runtime.validate_cron_schedule(schedule)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"cron 表达式无效: {exc}") from exc
+
+
+def _validate_condition_semantics(
+    condition: TriggerCondition,
+    current_user_id: str,
+) -> None:
+    if condition.trigger_type in UNIMPLEMENTED_TRIGGERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"触发类型 {condition.trigger_type.value} 尚未实现，不能保存",
+        )
+    if condition.comparison not in {"gte", ">=", "lte", "<=", "eq", "==", "gt", ">", "lt", "<"}:
+        raise HTTPException(status_code=400, detail="比较运算符无效")
+    if condition.trigger_type in {TriggerType.KEYWORD_MATCH, TriggerType.NPC_KEYWORD_MATCH}:
+        if not any(str(keyword or "").strip() for keyword in condition.keywords or []):
+            raise HTTPException(status_code=400, detail="关键词触发条件至少需要一个非空关键词")
+        if condition.match_mode not in {"any", "all", "exact", "whole_word", "regex"}:
+            raise HTTPException(status_code=400, detail="关键词匹配模式无效")
+        if condition.match_mode == "regex":
+            try:
+                for pattern in condition.keywords or []:
+                    re.compile(pattern)
+            except re.error as exc:
+                raise HTTPException(status_code=400, detail=f"关键词正则表达式无效: {exc}") from exc
+    if condition.trigger_type in {TriggerType.AFFINITY_THRESHOLD, TriggerType.TRUST_THRESHOLD, TriggerType.STATE_DELTA}:
+        if condition.threshold is None:
+            raise HTTPException(status_code=400, detail="阈值触发条件必须提供 threshold")
+    if condition.trigger_type == TriggerType.DIALOGUE_COUNT:
+        if condition.count is None or condition.count < 0:
+            raise HTTPException(status_code=400, detail="对话次数条件必须提供非负 count")
+    if condition.trigger_type == TriggerType.TIME_BASED:
+        if condition.duration_minutes is None and not condition.schedule:
+            raise HTTPException(status_code=400, detail="时间条件必须提供 duration_minutes 或 schedule")
+        if condition.duration_minutes is not None and condition.duration_minutes < 0:
+            raise HTTPException(status_code=400, detail="duration_minutes 不能为负数")
+    if condition.trigger_type == TriggerType.MOOD_MATCH and not str(condition.mood or "").strip():
+        raise HTTPException(status_code=400, detail="情绪条件必须提供 mood")
+    if condition.trigger_type == TriggerType.STATE_DELTA and condition.state_field not in {"affinity", "trust"}:
+        raise HTTPException(status_code=400, detail="状态变化条件的 state_field 必须为 affinity 或 trust")
+    if condition.trigger_type == TriggerType.EVENT_HISTORY:
+        if not condition.event_id or not repository.get_event_definition(current_user_id, condition.event_id):
+            raise HTTPException(status_code=400, detail="事件历史条件引用了不存在的当前用户事件")
+        if condition.event_status not in {"succeeded", "failed", "partial", "skipped"}:
+            raise HTTPException(status_code=400, detail="事件历史状态无效")
+    if condition.trigger_type == TriggerType.WORLD_TIME_WINDOW:
+        if not condition.time_window_start or not condition.time_window_end:
+            raise HTTPException(status_code=400, detail="世界时间窗口需要开始和结束时间")
+        try:
+            datetime.strptime(condition.time_window_start, "%H:%M")
+            datetime.strptime(condition.time_window_end, "%H:%M")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="世界时间窗口必须使用 HH:MM") from exc
+        if any(day < 0 or day > 6 for day in condition.weekdays or []):
+            raise HTTPException(status_code=400, detail="weekdays 必须位于 0 到 6")
+    if condition.trigger_type == TriggerType.COMPOSITE:
+        if not condition.sub_conditions:
+            raise HTTPException(status_code=400, detail="复合条件至少需要一个子条件")
+        if condition.logic_operator not in {"and", "or"}:
+            raise HTTPException(status_code=400, detail="复合条件逻辑运算符必须为 and 或 or")
+    if condition.schedule:
+        _validate_cron(condition.schedule)
+    for child in condition.sub_conditions or []:
+        _validate_condition_semantics(child, current_user_id)
+
+
+def _validate_effect_semantics(
+    effect: EventEffect,
+    current_user_id: str,
+) -> None:
+    if effect.effect_type in UNIMPLEMENTED_EFFECTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"效果 {effect.effect_type.value} 尚未实现，不能保存",
+        )
+    if effect.effect_type == EffectType.MODIFY_STATE:
+        if not effect.state_changes:
+            raise HTTPException(status_code=400, detail="修改状态效果必须提供 state_changes")
+        unknown = set(effect.state_changes) - {"affection_level", "trust_level", "current_mood"}
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"不支持的状态字段: {', '.join(sorted(unknown))}")
+    if effect.effect_type == EffectType.UNLOCK_CONTENT and not any(
+        str(key or "").strip() for key in effect.unlock_keys or []
+    ):
+        raise HTTPException(status_code=400, detail="解锁内容效果至少需要一个 unlock_key")
+    if effect.effect_type == EffectType.TRIGGER_DIALOGUE and not str(effect.dialogue_text or "").strip():
+        raise HTTPException(status_code=400, detail="触发对话效果必须提供 dialogue_text")
+    if effect.effect_type == EffectType.ADD_MEMORY and not str(effect.memory_text or "").strip():
+        raise HTTPException(status_code=400, detail="添加记忆效果必须提供 memory_text")
+    if effect.effect_type == EffectType.CHANGE_MOOD and not str(effect.target_mood or "").strip():
+        raise HTTPException(status_code=400, detail="改变情绪效果必须提供 target_mood")
+    if effect.effect_type == EffectType.NOTIFY_PLAYER and not str(effect.notification_message or "").strip():
+        raise HTTPException(status_code=400, detail="通知效果必须提供 notification_message")
+    referenced_events: list[str] = []
+    if effect.effect_type == EffectType.TRIGGER_EVENT and effect.next_event_id:
+        referenced_events.append(effect.next_event_id)
+    if effect.effect_type == EffectType.BRANCH_EVENT:
+        if effect.next_event_id:
+            referenced_events.append(effect.next_event_id)
+        referenced_events.extend(
+            str(branch.get("event_id") or "") for branch in effect.branch_conditions or []
+        )
+    for event_id in referenced_events:
+        if not event_id or not repository.get_event_definition(current_user_id, event_id):
+            raise HTTPException(status_code=400, detail=f"引用事件 '{event_id}' 不存在或不属于当前用户")
+    if effect.effect_type == EffectType.BRANCH_EVENT and not effect.branch_conditions:
+        raise HTTPException(status_code=400, detail="分支事件效果必须提供 branch_conditions")
+    if effect.effect_type == EffectType.BRANCH_EVENT:
+        for branch in effect.branch_conditions or []:
+            condition_data = branch.get("condition")
+            if not condition_data:
+                raise HTTPException(status_code=400, detail="分支事件缺少 condition")
+            try:
+                branch_condition = TriggerCondition.model_validate(condition_data)
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"分支条件无效: {exc}") from exc
+            _validate_condition_semantics(branch_condition, current_user_id)
+    for character_id in (effect.target_character_id, effect.proactive_character_id):
+        if character_id:
+            _require_owned_character(current_user_id, character_id)
+    if effect.effect_type == EffectType.UPDATE_EVENT_PROGRESS:
+        if effect.event_status and effect.event_status not in {"pending", "active", "completed", "failed"}:
+            raise HTTPException(status_code=400, detail="事件进度状态无效")
+        if effect.progress is not None and not 0 <= effect.progress <= 1:
+            raise HTTPException(status_code=400, detail="事件进度必须位于 0 到 1")
+
+
+def _validate_event_configuration(
+    trigger_condition: TriggerConditionDTO,
+    effects: list[EventEffectDTO],
+    current_user_id: str,
+) -> tuple[TriggerCondition, list[EventEffect]]:
+    try:
+        condition = TriggerCondition.model_validate(trigger_condition.model_dump())
+        parsed_effects = [EventEffect.model_validate(effect.model_dump()) for effect in effects]
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"配置校验失败: {exc}") from exc
+    _validate_condition_semantics(condition, current_user_id)
+    for effect in parsed_effects:
+        _validate_effect_semantics(effect, current_user_id)
+    return condition, parsed_effects
+
+
+def _register_definition_schedule(
+    *,
+    event_id: str,
+    character_id: str | None,
+    player_id: str,
+    schedule: str | None,
+    is_active: bool = True,
+) -> None:
+    if not schedule:
+        return
+    if not character_id:
+        raise HTTPException(status_code=400, detail="定时事件必须绑定角色")
+    _validate_cron(schedule)
+    if not event_runtime.register_time_event_schedule(
+        event_id=event_id,
+        character_id=character_id,
+        player_id=player_id,
+        schedule=schedule,
+    ):
+        raise HTTPException(status_code=500, detail="事件已保存，但调度注册失败")
+    if not is_active:
+        repository.set_event_schedule_status(
+            event_id,
+            character_id,
+            player_id,
+            "paused",
+        )
 
 
 # =========================
@@ -237,6 +512,9 @@ def list_events(
                 description=r.get("description"),
                 character_id=r.get("character_id"),
                 priority=r.get("priority", 0),
+                exclusive_group=r.get("exclusive_group"),
+                max_triggers_per_turn=r.get("max_triggers_per_turn") or 3,
+                stop_processing=bool(r.get("stop_processing", 0)),
                 is_active=bool(r.get("is_active", 1)),
                 trigger_count=r.get("trigger_count", 0),
                 last_triggered_at=r.get("last_triggered_at"),
@@ -279,6 +557,9 @@ def get_event(
         description=row.get("description"),
         character_id=row.get("character_id"),
         priority=row.get("priority", 0),
+        exclusive_group=row.get("exclusive_group"),
+        max_triggers_per_turn=row.get("max_triggers_per_turn") or 3,
+        stop_processing=bool(row.get("stop_processing", 0)),
         is_active=bool(row.get("is_active", 1)),
         trigger_count=row.get("trigger_count", 0),
         last_triggered_at=row.get("last_triggered_at"),
@@ -317,13 +598,18 @@ def create_event(
 
     character_id = _require_owned_character(current_user_id, req.character_id)
 
-    # 将 DTO 转为 event_schema 对象进行深度校验
-    try:
-        TriggerCondition.model_validate(req.trigger_condition.model_dump())
-        for eff in req.effects:
-            EventEffect.model_validate(eff.model_dump())
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"配置校验失败: {e}")
+    _validate_event_configuration(
+        req.trigger_condition,
+        req.effects,
+        current_user_id,
+    )
+    schedule = sanitize_schedule(req.schedule) or sanitize_schedule(
+        req.trigger_condition.schedule
+    )
+    if schedule:
+        _validate_cron(schedule)
+        if not character_id:
+            raise HTTPException(status_code=400, detail="定时事件必须绑定角色")
 
     trigger_json = req.trigger_condition.model_dump_json()
     effects_json = json.dumps(
@@ -339,13 +625,23 @@ def create_event(
         character_id=character_id,
         description=req.description,
         priority=req.priority,
+        exclusive_group=req.exclusive_group,
+        max_triggers_per_turn=req.max_triggers_per_turn,
+        stop_processing=req.stop_processing,
         is_active=req.is_active,
-        schedule=req.schedule,
+        schedule=schedule,
         template_id=req.template_id,
     )
 
     if not success:
         raise HTTPException(status_code=500, detail="保存事件到数据库失败")
+    _register_definition_schedule(
+        event_id=req.event_id,
+        character_id=character_id,
+        player_id=current_user_id,
+        schedule=schedule,
+        is_active=req.is_active,
+    )
 
     return OperationResponse(
         success=True,
@@ -375,33 +671,58 @@ def update_event(
     event_name = req.event_name or existing["event_name"]
     description = req.description if req.description is not None else existing.get("description")
     priority = req.priority if req.priority is not None else existing.get("priority", 0)
+    exclusive_group = (
+        req.exclusive_group
+        if "exclusive_group" in req.model_fields_set
+        else existing.get("exclusive_group")
+    )
+    max_triggers_per_turn = (
+        req.max_triggers_per_turn
+        if req.max_triggers_per_turn is not None
+        else existing.get("max_triggers_per_turn") or 3
+    )
+    stop_processing = (
+        req.stop_processing
+        if req.stop_processing is not None
+        else bool(existing.get("stop_processing", 0))
+    )
     is_active = req.is_active if req.is_active is not None else bool(existing.get("is_active", 1))
-    schedule = req.schedule if req.schedule is not None else existing.get("schedule")
-    template_id = req.template_id if req.template_id is not None else existing.get("template_id")
+    schedule = (
+        sanitize_schedule(req.schedule)
+        or sanitize_schedule(
+            req.trigger_condition.schedule if req.trigger_condition else None
+        )
+        if "schedule" in req.model_fields_set
+        else existing.get("schedule")
+    )
+    template_id = (
+        req.template_id
+        if "template_id" in req.model_fields_set
+        else existing.get("template_id")
+    )
     character_id = existing.get("character_id")
     if "character_id" in req.model_fields_set:
         character_id = _require_owned_character(current_user_id, req.character_id)
 
-    if req.trigger_condition is not None:
-        try:
-            TriggerCondition.model_validate(req.trigger_condition.model_dump())
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"触发条件校验失败: {e}")
-        trigger_json = req.trigger_condition.model_dump_json()
-    else:
-        trigger_json = existing["trigger_config"]
-
-    if req.effects is not None:
-        try:
-            for eff in req.effects:
-                EventEffect.model_validate(eff.model_dump())
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"效果配置校验失败: {e}")
-        effects_json = json.dumps(
-            [e.model_dump() for e in req.effects], ensure_ascii=False
-        )
-    else:
-        effects_json = existing["effects_config"]
+    condition_dto = req.trigger_condition or TriggerConditionDTO.model_validate_json(
+        existing["trigger_config"]
+    )
+    effects_dto = req.effects
+    if effects_dto is None:
+        effects_dto = [
+            EventEffectDTO.model_validate(item)
+            for item in json.loads(existing["effects_config"])
+        ]
+    _validate_event_configuration(condition_dto, effects_dto, current_user_id)
+    trigger_json = condition_dto.model_dump_json()
+    effects_json = json.dumps(
+        [effect.model_dump() for effect in effects_dto],
+        ensure_ascii=False,
+    )
+    if schedule:
+        _validate_cron(schedule)
+        if not character_id:
+            raise HTTPException(status_code=400, detail="定时事件必须绑定角色")
 
     success = repository.save_event_definition(
         owner_user_id=current_user_id,
@@ -412,6 +733,9 @@ def update_event(
         character_id=character_id,
         description=description,
         priority=priority,
+        exclusive_group=exclusive_group,
+        max_triggers_per_turn=max_triggers_per_turn,
+        stop_processing=stop_processing,
         is_active=is_active,
         schedule=schedule,
         template_id=template_id,
@@ -419,6 +743,23 @@ def update_event(
 
     if not success:
         raise HTTPException(status_code=500, detail="更新事件失败")
+    previous_character_id = existing.get("character_id")
+    if not schedule or not character_id:
+        repository.delete_event_schedules(event_id, current_user_id)
+    else:
+        if previous_character_id and previous_character_id != character_id:
+            repository.delete_event_schedules(
+                event_id,
+                current_user_id,
+                previous_character_id,
+            )
+        _register_definition_schedule(
+            event_id=event_id,
+            character_id=character_id,
+            player_id=current_user_id,
+            schedule=schedule,
+            is_active=is_active,
+        )
 
     return OperationResponse(
         success=True,
@@ -481,6 +822,9 @@ def toggle_event(
         character_id=existing.get("character_id"),
         description=existing.get("description"),
         priority=existing.get("priority", 0),
+        exclusive_group=existing.get("exclusive_group"),
+        max_triggers_per_turn=existing.get("max_triggers_per_turn") or 3,
+        stop_processing=bool(existing.get("stop_processing", 0)),
         is_active=active,
         schedule=existing.get("schedule"),
         template_id=existing.get("template_id"),
@@ -488,6 +832,25 @@ def toggle_event(
 
     if not success:
         raise HTTPException(status_code=500, detail="切换事件状态失败")
+
+    character_id = existing.get("character_id")
+    schedule = existing.get("schedule")
+    if character_id and schedule:
+        if active:
+            _register_definition_schedule(
+                event_id=event_id,
+                character_id=character_id,
+                player_id=current_user_id,
+                schedule=schedule,
+                is_active=True,
+            )
+        else:
+            repository.set_event_schedule_status(
+                event_id,
+                character_id,
+                current_user_id,
+                "paused",
+            )
 
     status_text = "已启用" if active else "已禁用"
     return OperationResponse(
@@ -604,12 +967,11 @@ def create_event_template(
     current_user_id: str = Depends(require_current_user_id),
 ):
     """创建或更新系统事件模板。仅作为开发维护 API 使用。"""
-    try:
-        TriggerCondition.model_validate(req.trigger_config.model_dump())
-        for eff in req.effects_config:
-            EventEffect.model_validate(eff.model_dump())
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"模板配置校验失败: {e}")
+    _validate_event_configuration(
+        req.trigger_config,
+        req.effects_config,
+        current_user_id,
+    )
 
     success = repository.save_event_template(
         template_id=req.template_id,
@@ -663,21 +1025,222 @@ def register_event_schedule(
     if not existing:
         raise HTTPException(status_code=404, detail=f"事件 '{req.event_id}' 不存在")
     character_id = _require_owned_character(current_user_id, req.character_id)
+    if not character_id:
+        raise HTTPException(status_code=400, detail="定时事件必须绑定角色")
+    event_character_id = existing.get("character_id")
+    if event_character_id and event_character_id != character_id:
+        raise HTTPException(
+            status_code=400,
+            detail="角色专属事件只能注册到事件定义绑定的角色",
+        )
+    _validate_cron(req.schedule)
 
     try:
-        event_runtime.register_time_event_schedule(
+        success = event_runtime.register_time_event_schedule(
             event_id=req.event_id,
             character_id=character_id,
             player_id=req.player_id,
             schedule=req.schedule,
         )
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"注册调度失败: {e}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"注册调度失败: {exc}") from exc
+    except Exception as exc:
+        logger.exception("注册事件调度失败", extra={"event_id": req.event_id})
+        raise HTTPException(status_code=500, detail="注册事件调度失败") from exc
+    if not success:
+        raise HTTPException(status_code=500, detail="注册事件调度失败")
 
     return OperationResponse(
         success=True,
         message="事件调度已注册",
         event_id=req.event_id,
+    )
+
+
+@router.get("/admin/event-schedules", response_model=list[EventScheduleItem])
+def list_event_schedules(
+    event_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 200,
+    current_user_id: str = Depends(require_current_user_id),
+):
+    if status and status not in {"active", "paused"}:
+        raise HTTPException(status_code=400, detail="调度状态必须为 active 或 paused")
+    return [
+        EventScheduleItem(**row)
+        for row in repository.list_event_schedules(
+            current_user_id,
+            event_id=event_id,
+            status=status,
+            limit=limit,
+        )
+    ]
+
+
+@router.post(
+    "/admin/event-schedules/{event_id}/{character_id}/pause",
+    response_model=OperationResponse,
+)
+def pause_event_schedule(
+    event_id: str,
+    character_id: str,
+    current_user_id: str = Depends(require_current_user_id),
+):
+    if not repository.get_event_definition(current_user_id, event_id):
+        raise HTTPException(status_code=404, detail=f"事件 '{event_id}' 不存在")
+    if not repository.set_event_schedule_status(
+        event_id,
+        character_id,
+        current_user_id,
+        "paused",
+    ):
+        raise HTTPException(status_code=404, detail="事件调度不存在")
+    return OperationResponse(success=True, message="事件调度已暂停", event_id=event_id)
+
+
+@router.post(
+    "/admin/event-schedules/{event_id}/{character_id}/resume",
+    response_model=OperationResponse,
+)
+def resume_event_schedule(
+    event_id: str,
+    character_id: str,
+    current_user_id: str = Depends(require_current_user_id),
+):
+    schedule_state = repository.get_event_schedule(
+        event_id,
+        character_id,
+        current_user_id,
+    )
+    if not schedule_state:
+        raise HTTPException(status_code=404, detail="事件调度不存在")
+    snapshot = event_runtime.world_clock.get_clock_snapshot(current_user_id)
+    try:
+        next_run_at = event_runtime.next_cron_run(
+            schedule_state["schedule"],
+            snapshot.world_now,
+            timezone_name=snapshot.timezone,
+        ).isoformat()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"无法恢复调度: {exc}") from exc
+    if not repository.set_event_schedule_status(
+        event_id,
+        character_id,
+        current_user_id,
+        "active",
+        next_run_at=next_run_at,
+    ):
+        raise HTTPException(status_code=404, detail="事件调度不存在")
+    return OperationResponse(success=True, message="事件调度已恢复", event_id=event_id)
+
+
+@router.get("/admin/event-metrics", response_model=EventMetricsResponse)
+def get_event_metrics(
+    event_id: Optional[str] = None,
+    current_user_id: str = Depends(require_current_user_id),
+):
+    if event_id and not repository.get_event_definition(current_user_id, event_id):
+        raise HTTPException(status_code=404, detail=f"事件 '{event_id}' 不存在")
+    return EventMetricsResponse(
+        **repository.get_event_execution_metrics(current_user_id, event_id)
+    )
+
+
+@router.get("/admin/events/{event_id}/executions")
+def list_event_executions(
+    event_id: str,
+    limit: int = 100,
+    current_user_id: str = Depends(require_current_user_id),
+):
+    if not repository.get_event_definition(current_user_id, event_id):
+        raise HTTPException(status_code=404, detail=f"事件 '{event_id}' 不存在")
+    return repository.list_event_execution_history(
+        current_user_id,
+        event_id=event_id,
+        limit=limit,
+    )
+
+
+@router.post(
+    "/admin/events/{event_id}/simulate",
+    response_model=EventSimulationResponse,
+)
+def simulate_event(
+    event_id: str,
+    req: EventSimulationRequest,
+    current_user_id: str = Depends(require_current_user_id),
+):
+    row = repository.get_event_definition(current_user_id, event_id)
+    if not row:
+        raise HTTPException(status_code=404, detail=f"事件 '{event_id}' 不存在")
+    event = event_runtime._event_definition_from_row(row)
+    character_id = _require_owned_character(
+        current_user_id,
+        req.character_id or event.character_id,
+    )
+    if not character_id:
+        raise HTTPException(status_code=400, detail="模拟全局事件时必须提供 character_id")
+
+    session_id = req.session_id or f"simulate:{event_id}"
+    state = repository.get_event_context_state(
+        event_id,
+        character_id,
+        current_user_id,
+    )
+    context = event_runtime.build_event_context(
+        character_id=character_id,
+        player_id=current_user_id,
+        session_id=session_id,
+        current_affinity=(
+            req.current_affinity if req.current_affinity is not None else 0.0
+        ),
+        current_trust=(
+            req.current_trust if req.current_trust is not None else 0.0
+        ),
+        current_mood=req.current_mood or "neutral",
+        previous_affinity=req.previous_affinity,
+        previous_trust=req.previous_trust,
+        affinity_delta=req.affinity_delta,
+        trust_delta=req.trust_delta,
+        player_message=req.player_message,
+        npc_response=req.npc_response,
+        character_relationships=req.character_relationships,
+        event_data={
+            **(json.loads(state["context_data"]) if state and state.get("context_data") else {}),
+            **req.event_data,
+        },
+        world_time=req.world_time,
+        trigger_source="simulation",
+        current_user_turn_persisted=True,
+    )
+    updates = {}
+    for key in (
+        "dialogue_count",
+        "total_dialogue_count",
+        "session_duration_minutes",
+        "unlocked_content",
+        "event_history",
+    ):
+        value = getattr(req, key)
+        if value is not None:
+            updates[key] = value
+    if updates:
+        context = context.model_copy(update=updates)
+
+    evaluation = event_runtime.get_event_detector().evaluate_event(event, context)
+    planned_result = None
+    if evaluation["matched"]:
+        result, _ = event_runtime.get_event_executor().plan_event(
+            event,
+            context,
+            execution_key=f"simulation:{event_id}",
+        )
+        planned_result = result.model_dump(mode="json")
+    return EventSimulationResponse(
+        matched=evaluation["matched"],
+        evaluation=evaluation,
+        context=context.model_dump(mode="json"),
+        planned_result=planned_result,
     )
 
 

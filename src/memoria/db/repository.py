@@ -324,6 +324,9 @@ CREATE TABLE IF NOT EXISTS event_definition (
     effects_config  TEXT NOT NULL,      -- EventEffect[] JSON
     
     priority        INTEGER DEFAULT 0,
+    exclusive_group TEXT,
+    max_triggers_per_turn INTEGER DEFAULT 3,
+    stop_processing INTEGER DEFAULT 0,
     is_active       INTEGER DEFAULT 1,
     
     created_at      TEXT,
@@ -354,8 +357,56 @@ CREATE TABLE IF NOT EXISTS event_trigger_log (
     
     -- 应用的效果
     effects_applied  TEXT,              -- 效果列表 JSON
+
+    execution_id    TEXT,
+    status          TEXT DEFAULT 'succeeded',
     
     FOREIGN KEY (player_id, event_id) REFERENCES event_definition(owner_user_id, event_id)
+);
+
+-- =========================
+-- 事件执行批次与逐事件结果
+-- =========================
+CREATE TABLE IF NOT EXISTS event_execution_batch (
+    player_id       TEXT NOT NULL,
+    execution_key   TEXT NOT NULL,
+    trigger_source  TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    results_data    TEXT NOT NULL,
+    deduplicated_count INTEGER DEFAULT 0,
+    created_at      TEXT NOT NULL,
+    completed_at    TEXT,
+
+    PRIMARY KEY (player_id, execution_key)
+);
+
+CREATE TABLE IF NOT EXISTS event_execution (
+    execution_id    TEXT PRIMARY KEY,
+    execution_key   TEXT NOT NULL,
+    owner_user_id   TEXT NOT NULL,
+    event_id        TEXT NOT NULL,
+    character_id    TEXT NOT NULL,
+    session_id      TEXT NOT NULL,
+    trigger_source  TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    effects_data    TEXT NOT NULL,
+    result_data     TEXT NOT NULL,
+    error           TEXT,
+    duration_ms     REAL DEFAULT 0.0,
+    created_at      TEXT NOT NULL,
+    completed_at    TEXT,
+
+    UNIQUE(owner_user_id, event_id, execution_key)
+);
+
+CREATE TABLE IF NOT EXISTS event_unlock (
+    player_id       TEXT NOT NULL,
+    character_id    TEXT NOT NULL,
+    unlock_key      TEXT NOT NULL,
+    event_id        TEXT NOT NULL,
+    unlocked_at     TEXT NOT NULL,
+
+    PRIMARY KEY (player_id, character_id, unlock_key)
 );
 
 -- =========================
@@ -394,6 +445,8 @@ CREATE TABLE IF NOT EXISTS event_schedule_state (
     status          TEXT DEFAULT 'active',
     lease_owner     TEXT,
     lease_expires_at TEXT,
+    last_error      TEXT,
+    last_failed_at  TEXT,
 
     created_at      TEXT,
     updated_at      TEXT,
@@ -709,6 +762,12 @@ ON event_definition(owner_user_id, character_id, is_active);
 CREATE INDEX IF NOT EXISTS idx_event_trigger_log
 ON event_trigger_log(event_id, character_id, player_id, triggered_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_event_execution_metrics
+ON event_execution(owner_user_id, event_id, status, completed_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_event_unlock_lookup
+ON event_unlock(player_id, character_id, unlocked_at DESC);
+
 CREATE INDEX IF NOT EXISTS idx_event_context_lookup
 ON event_context_state(character_id, player_id, status, updated_at DESC);
 
@@ -819,6 +878,45 @@ def _migrate(conn):
             metadata        TEXT,
             created_at      TEXT,
             updated_at      TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS event_execution_batch (
+            player_id       TEXT NOT NULL,
+            execution_key   TEXT NOT NULL,
+            trigger_source  TEXT NOT NULL,
+            status          TEXT NOT NULL,
+            results_data    TEXT NOT NULL,
+            deduplicated_count INTEGER DEFAULT 0,
+            created_at      TEXT NOT NULL,
+            completed_at    TEXT,
+            PRIMARY KEY (player_id, execution_key)
+        );
+
+        CREATE TABLE IF NOT EXISTS event_execution (
+            execution_id    TEXT PRIMARY KEY,
+            execution_key   TEXT NOT NULL,
+            owner_user_id   TEXT NOT NULL,
+            event_id        TEXT NOT NULL,
+            character_id    TEXT NOT NULL,
+            session_id      TEXT NOT NULL,
+            trigger_source  TEXT NOT NULL,
+            status          TEXT NOT NULL,
+            effects_data    TEXT NOT NULL,
+            result_data     TEXT NOT NULL,
+            error           TEXT,
+            duration_ms     REAL DEFAULT 0.0,
+            created_at      TEXT NOT NULL,
+            completed_at    TEXT,
+            UNIQUE(owner_user_id, event_id, execution_key)
+        );
+
+        CREATE TABLE IF NOT EXISTS event_unlock (
+            player_id       TEXT NOT NULL,
+            character_id    TEXT NOT NULL,
+            unlock_key      TEXT NOT NULL,
+            event_id        TEXT NOT NULL,
+            unlocked_at     TEXT NOT NULL,
+            PRIMARY KEY (player_id, character_id, unlock_key)
         );
 
         CREATE TABLE IF NOT EXISTS auth_token (
@@ -944,6 +1042,12 @@ def _migrate(conn):
         CREATE INDEX IF NOT EXISTS idx_player_event_inbox_unread
         ON player_event_inbox(player_id, read_at, id DESC);
 
+        CREATE INDEX IF NOT EXISTS idx_event_execution_metrics
+        ON event_execution(owner_user_id, event_id, status, completed_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_event_unlock_lookup
+        ON event_unlock(player_id, character_id, unlocked_at DESC);
+
         CREATE INDEX IF NOT EXISTS idx_knowledge_base_owner
         ON knowledge_base(owner_user_id, is_enabled, updated_at DESC);
 
@@ -975,6 +1079,11 @@ def _migrate(conn):
     add_column("session", "group_thread_id TEXT")
     add_column("event_definition", "schedule TEXT")
     add_column("event_definition", "template_id TEXT")
+    add_column("event_definition", "exclusive_group TEXT")
+    add_column("event_definition", "max_triggers_per_turn INTEGER DEFAULT 3")
+    add_column("event_definition", "stop_processing INTEGER DEFAULT 0")
+    add_column("event_trigger_log", "execution_id TEXT")
+    add_column("event_trigger_log", "status TEXT DEFAULT 'succeeded'")
     add_column("event_context_state", "context_data TEXT NOT NULL DEFAULT '{}'")
     add_column("event_context_state", "status TEXT DEFAULT 'active'")
     add_column("event_context_state", "progress REAL DEFAULT 0.0")
@@ -988,8 +1097,11 @@ def _migrate(conn):
     add_column("event_schedule_state", "status TEXT DEFAULT 'active'")
     add_column("event_schedule_state", "lease_owner TEXT")
     add_column("event_schedule_state", "lease_expires_at TEXT")
+    add_column("event_schedule_state", "last_error TEXT")
+    add_column("event_schedule_state", "last_failed_at TEXT")
     add_column("event_schedule_state", "created_at TEXT")
     add_column("event_schedule_state", "updated_at TEXT")
+    add_column("event_execution_batch", "deduplicated_count INTEGER DEFAULT 0")
     add_column("short_term_message", "action TEXT")
     add_column("short_term_message", "affinity_delta REAL")
     add_column("short_term_message", "trust_delta REAL")
@@ -1191,6 +1303,15 @@ def get_runtime_state(
              query_context=query_context,
              created_after=memory_created_after
          )
+         unlock_rows = conn.execute(
+             """
+             SELECT unlock_key FROM event_unlock
+             WHERE player_id = ? AND character_id = ?
+             ORDER BY unlocked_at ASC, unlock_key ASC
+             """,
+             (player_id, character_id),
+         ).fetchall()
+         state["unlocked_content"] = [row["unlock_key"] for row in unlock_rows]
          return state
      
 
@@ -1612,6 +1733,35 @@ def get_session_user_turn_count(session_id: str) -> int:
             WHERE session_id = ? AND role = 'user'
             """,
             (session_id,),
+        ).fetchone()
+    return int(row["turn_count"]) if row else 0
+
+
+def count_character_user_turns(player_id: str, character_id: str) -> int:
+    """Count player turns across every single and group chat involving a character."""
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS turn_count
+            FROM short_term_message m
+            INNER JOIN session s ON s.session_id = m.session_id
+            WHERE s.player_id = ?
+              AND m.role = 'user'
+              AND (
+                  (COALESCE(s.is_multi_character, 0) = 0 AND s.character_id = ?)
+                  OR
+                  (
+                      COALESCE(s.is_multi_character, 0) = 1
+                      AND EXISTS (
+                          SELECT 1
+                          FROM multi_session_participant p
+                          WHERE p.session_id = s.session_id
+                            AND p.character_id = ?
+                      )
+                  )
+              )
+            """,
+            (player_id, character_id, character_id),
         ).fetchone()
     return int(row["turn_count"]) if row else 0
 
@@ -2412,6 +2562,9 @@ def save_event_definition(
     character_id: str = None,
     description: str = None,
     priority: int = 0,
+    exclusive_group: str = None,
+    max_triggers_per_turn: int = 3,
+    stop_processing: bool = False,
     is_active: bool = True,
     schedule: str = None,
     template_id: str = None,
@@ -2423,8 +2576,9 @@ def save_event_definition(
                 """
                 INSERT INTO event_definition
                 (owner_user_id, event_id, event_name, description, character_id, trigger_config,
-                 effects_config, priority, is_active, created_at, updated_at, schedule, template_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 effects_config, priority, exclusive_group, max_triggers_per_turn,
+                 stop_processing, is_active, created_at, updated_at, schedule, template_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(owner_user_id, event_id)
                 DO UPDATE SET
                     event_name=excluded.event_name,
@@ -2433,13 +2587,17 @@ def save_event_definition(
                     trigger_config=excluded.trigger_config,
                     effects_config=excluded.effects_config,
                     priority=excluded.priority,
+                    exclusive_group=excluded.exclusive_group,
+                    max_triggers_per_turn=excluded.max_triggers_per_turn,
+                    stop_processing=excluded.stop_processing,
                     is_active=excluded.is_active,
                     updated_at=excluded.updated_at,
                     schedule=excluded.schedule,
                     template_id=excluded.template_id
                 """,
                 (owner_user_id, event_id, event_name, description, character_id, trigger_config,
-                 effects_config, priority, 1 if is_active else 0, _now(), _now(), schedule, template_id),
+                 effects_config, priority, exclusive_group, max_triggers_per_turn,
+                 1 if stop_processing else 0, 1 if is_active else 0, _now(), _now(), schedule, template_id),
             )
         return True
     except Exception as e:
@@ -2464,29 +2622,41 @@ def list_event_definitions(
     with get_conn() as conn:
         query = "SELECT * FROM event_definition WHERE owner_user_id = ?"
         params = [owner_user_id]
-        
+
         if character_id is not None:
             query += " AND (character_id = ? OR character_id IS NULL)"
             params.append(character_id)
-        
+
         if only_active:
             query += " AND is_active = 1"
-        
+
         query += " ORDER BY priority DESC, created_at DESC"
-        
+
         rows = conn.execute(query, params).fetchall()
-    
+
     return [dict(r) for r in rows]
 
 def delete_event_definition(owner_user_id: str, event_id: str) -> bool:
-    """删除事件定义"""
+    """Delete an event definition and its operational trigger state."""
     try:
         with get_conn() as conn:
             conn.execute(
+                "DELETE FROM event_schedule_state WHERE player_id = ? AND event_id = ?",
+                (owner_user_id, event_id),
+            )
+            conn.execute(
+                "DELETE FROM event_context_state WHERE player_id = ? AND event_id = ?",
+                (owner_user_id, event_id),
+            )
+            conn.execute(
+                "DELETE FROM event_trigger_log WHERE player_id = ? AND event_id = ?",
+                (owner_user_id, event_id),
+            )
+            deleted = conn.execute(
                 "DELETE FROM event_definition WHERE owner_user_id = ? AND event_id = ?",
                 (owner_user_id, event_id),
             )
-        return True
+        return deleted.rowcount == 1
     except Exception as e:
         logger.error(f"删除事件定义失败: {e}")
         return False
@@ -2559,20 +2729,499 @@ def get_event_trigger_history(
     
     return [dict(r) for r in rows]
 
-def get_last_trigger_time(event_id: str, character_id: str, player_id: str) -> str | None:
+def get_last_trigger_time(event_id: str, character_id: str | None, player_id: str) -> str | None:
     """获取事件最后触发时间（用于冷却时间判断）"""
+    with get_conn() as conn:
+        if character_id is None:
+            row = conn.execute(
+                """
+                SELECT triggered_at FROM event_trigger_log
+                WHERE event_id = ? AND player_id = ? AND status = 'succeeded'
+                ORDER BY triggered_at DESC
+                LIMIT 1
+                """,
+                (event_id, player_id),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """
+                SELECT triggered_at FROM event_trigger_log
+                WHERE event_id = ? AND character_id = ? AND player_id = ?
+                  AND status = 'succeeded'
+                ORDER BY triggered_at DESC
+                LIMIT 1
+                """,
+                (event_id, character_id, player_id),
+            ).fetchone()
+
+    return row["triggered_at"] if row else None
+
+
+def get_event_execution_batch(player_id: str, execution_key: str) -> dict | None:
+    """读取已完成的事件批次，用于请求重放。"""
     with get_conn() as conn:
         row = conn.execute(
             """
-            SELECT triggered_at FROM event_trigger_log
-            WHERE event_id = ? AND character_id = ? AND player_id = ?
-            ORDER BY triggered_at DESC
-            LIMIT 1
+            SELECT * FROM event_execution_batch
+            WHERE player_id = ? AND execution_key = ?
             """,
-            (event_id, character_id, player_id),
+            (player_id, execution_key),
         ).fetchone()
-    
-    return row["triggered_at"] if row else None
+    return _row_to_dict(row)
+
+
+def increment_event_execution_batch_deduplicated(
+    player_id: str,
+    execution_key: str,
+) -> bool:
+    """记录一次命中已完成批次的幂等重放。"""
+    with get_conn() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE event_execution_batch
+            SET deduplicated_count = COALESCE(deduplicated_count, 0) + 1
+            WHERE player_id = ? AND execution_key = ?
+            """,
+            (player_id, execution_key),
+        )
+    return cursor.rowcount == 1
+
+
+def get_event_execution(
+    owner_user_id: str,
+    event_id: str,
+    execution_key: str,
+) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM event_execution
+            WHERE owner_user_id = ? AND event_id = ? AND execution_key = ?
+            """,
+            (owner_user_id, event_id, execution_key),
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def list_event_execution_history(
+    owner_user_id: str,
+    character_id: str | None = None,
+    event_id: str | None = None,
+    limit: int = 100,
+) -> list[dict]:
+    """Return recent auditable event outcomes for condition evaluation."""
+    with get_conn() as conn:
+        query = """
+            SELECT execution_id, execution_key, event_id, character_id,
+                   session_id, trigger_source, status, error, duration_ms,
+                   created_at, completed_at
+            FROM event_execution
+            WHERE owner_user_id = ?
+        """
+        params: list[Any] = [owner_user_id]
+        if character_id:
+            query += " AND character_id = ?"
+            params.append(character_id)
+        if event_id:
+            query += " AND event_id = ?"
+            params.append(event_id)
+        query += " ORDER BY completed_at DESC LIMIT ?"
+        params.append(max(1, min(limit, 1000)))
+        rows = conn.execute(query, params).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _insert_long_term_fact_in_transaction(conn, memory: dict) -> dict | None:
+    fact_text = normalize_long_term_fact_text(memory.get("fact_text"))
+    if not fact_text:
+        return None
+    character_id = memory["character_id"]
+    player_id = memory["player_id"]
+    importance = int(memory.get("importance") or 5)
+    existing = _dedup_check(
+        conn,
+        "long_term_fact",
+        "fact_text",
+        fact_text,
+        "character_id = ? AND player_id = ?",
+        (character_id, player_id),
+        threshold=0.75,
+    )
+    now = _now()
+    if existing:
+        conn.execute(
+            "UPDATE long_term_fact SET importance = ?, last_referenced = ? WHERE id = ?",
+            (max(existing.get("importance", 0), importance), now, existing["id"]),
+        )
+        return None
+
+    insert_sql = """
+        INSERT INTO long_term_fact
+        (character_id, player_id, fact_text, importance, created_at, last_referenced)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """
+    if _is_postgres_enabled():
+        insert_sql += " RETURNING id"
+    cursor = conn.execute(
+        insert_sql,
+        (character_id, player_id, fact_text, importance, now, now),
+    )
+    fact_id = cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
+    return {
+        "fact_id": fact_id,
+        "character_id": character_id,
+        "player_id": player_id,
+        "fact_text": fact_text,
+        "importance": importance,
+    }
+
+
+def commit_event_execution_batch(
+    *,
+    player_id: str,
+    execution_key: str,
+    trigger_source: str,
+    results_data: str,
+    executions: list[dict],
+    runtime_states: list[dict] | None = None,
+    schedule_completion: dict | None = None,
+) -> dict:
+    """在一个数据库事务中提交整轮事件执行及全部数据库副作用。"""
+    inserted_memories: list[dict] = []
+    now = _now()
+    statuses = {execution["status"] for execution in executions}
+    if not executions or statuses <= {"succeeded", "skipped"}:
+        batch_status = "succeeded"
+    elif statuses == {"failed"}:
+        batch_status = "failed"
+    else:
+        batch_status = "partial"
+    with get_conn() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO event_execution_batch
+            (player_id, execution_key, trigger_source, status, results_data,
+             deduplicated_count, created_at, completed_at)
+            VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+            ON CONFLICT(player_id, execution_key) DO NOTHING
+            """,
+            (player_id, execution_key, trigger_source, batch_status, results_data, now, now),
+        )
+        if cursor.rowcount == 0:
+            conn.execute(
+                """
+                UPDATE event_execution_batch
+                SET deduplicated_count = COALESCE(deduplicated_count, 0) + 1
+                WHERE player_id = ? AND execution_key = ?
+                """,
+                (player_id, execution_key),
+            )
+            row = conn.execute(
+                """
+                SELECT * FROM event_execution_batch
+                WHERE player_id = ? AND execution_key = ?
+                """,
+                (player_id, execution_key),
+            ).fetchone()
+            return {"deduplicated": True, "batch": dict(row), "inserted_memories": []}
+
+        for execution in executions:
+            conn.execute(
+                """
+                INSERT INTO event_execution
+                (execution_id, execution_key, owner_user_id, event_id, character_id,
+                 session_id, trigger_source, status, effects_data, result_data,
+                 error, duration_ms, created_at, completed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    execution["execution_id"],
+                    execution_key,
+                    player_id,
+                    execution["event_id"],
+                    execution["character_id"],
+                    execution["session_id"],
+                    trigger_source,
+                    execution["status"],
+                    execution["effects_data"],
+                    execution["result_data"],
+                    execution.get("error"),
+                    float(execution.get("duration_ms") or 0.0),
+                    now,
+                    now,
+                ),
+            )
+
+            if execution["status"] != "succeeded":
+                continue
+
+            conn.execute(
+                """
+                INSERT INTO event_trigger_log
+                (event_id, character_id, player_id, session_id, triggered_at,
+                 context_snapshot, effects_applied, execution_id, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'succeeded')
+                """,
+                (
+                    execution["event_id"],
+                    execution["character_id"],
+                    player_id,
+                    execution["session_id"],
+                    now,
+                    execution["context_snapshot"],
+                    execution["effects_applied"],
+                    execution["execution_id"],
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE event_definition
+                SET trigger_count = trigger_count + 1, last_triggered_at = ?
+                WHERE owner_user_id = ? AND event_id = ?
+                """,
+                (now, player_id, execution["event_id"]),
+            )
+
+            context_state = execution.get("context_state")
+            if context_state:
+                conn.execute(
+                    """
+                    INSERT INTO event_context_state
+                    (event_id, character_id, player_id, context_data, status,
+                     progress, last_session_id, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(event_id, character_id, player_id)
+                    DO UPDATE SET
+                        context_data=excluded.context_data,
+                        status=excluded.status,
+                        progress=excluded.progress,
+                        last_session_id=excluded.last_session_id,
+                        updated_at=excluded.updated_at
+                    """,
+                    (
+                        execution["event_id"],
+                        execution["character_id"],
+                        player_id,
+                        context_state["context_data"],
+                        context_state["status"],
+                        context_state["progress"],
+                        execution["session_id"],
+                        now,
+                        now,
+                    ),
+                )
+
+            for unlock_key in execution.get("unlock_keys") or []:
+                conn.execute(
+                    """
+                    INSERT INTO event_unlock
+                    (player_id, character_id, unlock_key, event_id, unlocked_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(player_id, character_id, unlock_key) DO NOTHING
+                    """,
+                    (
+                        player_id,
+                        execution["character_id"],
+                        unlock_key,
+                        execution["event_id"],
+                        now,
+                    ),
+                )
+
+            for memory in execution.get("memories") or []:
+                inserted = _insert_long_term_fact_in_transaction(conn, memory)
+                if inserted:
+                    inserted_memories.append(inserted)
+
+            for inbox_item in execution.get("inbox_items") or []:
+                conn.execute(
+                    """
+                    INSERT INTO player_event_inbox
+                    (player_id, event_id, character_id, session_id, event_type,
+                     title, content, payload, world_created_at, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        player_id,
+                        execution["event_id"],
+                        execution["character_id"],
+                        inbox_item.get("session_id"),
+                        inbox_item.get("event_type", "event"),
+                        inbox_item.get("title"),
+                        inbox_item["content"],
+                        inbox_item.get("payload"),
+                        inbox_item.get("world_created_at"),
+                        now,
+                    ),
+                )
+
+            for message in execution.get("proactive_messages") or []:
+                conn.execute(
+                    """
+                    INSERT INTO short_term_message
+                    (session_id, role, content, character_id, character_name,
+                     created_at, knowledge_sources, world_created_at)
+                    VALUES (?, 'assistant', ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        message["session_id"],
+                        message["content"],
+                        message["character_id"],
+                        message.get("character_name"),
+                        now,
+                        _encode_knowledge_sources(message.get("knowledge_sources")),
+                        message.get("world_created_at"),
+                    ),
+                )
+                conn.execute(
+                    """
+                    UPDATE multi_session_participant
+                    SET last_spoke_at = ?, message_count = message_count + 1
+                    WHERE session_id = ? AND character_id = ?
+                    """,
+                    (now, message["session_id"], message["character_id"]),
+                )
+
+        for state in runtime_states or []:
+            conn.execute(
+                """
+                INSERT INTO relationship_state
+                (character_id, player_id, affection_level, trust_level,
+                 current_mood, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(character_id, player_id)
+                DO UPDATE SET
+                    affection_level=excluded.affection_level,
+                    trust_level=excluded.trust_level,
+                    current_mood=excluded.current_mood,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    state["character_id"],
+                    player_id,
+                    state["affection_level"],
+                    state["trust_level"],
+                    state["current_mood"],
+                    now,
+                ),
+            )
+
+        if schedule_completion:
+            completed = conn.execute(
+                """
+                UPDATE event_schedule_state
+                SET last_checked_at = ?, last_run_at = ?, next_run_at = ?,
+                    lease_owner = NULL, lease_expires_at = NULL,
+                    last_error = NULL, last_failed_at = NULL, updated_at = ?
+                WHERE event_id = ? AND character_id = ? AND player_id = ?
+                  AND lease_owner = ?
+                """,
+                (
+                    schedule_completion["last_checked_at"],
+                    schedule_completion["last_run_at"],
+                    schedule_completion["next_run_at"],
+                    now,
+                    schedule_completion["event_id"],
+                    schedule_completion["character_id"],
+                    player_id,
+                    schedule_completion["lease_owner"],
+                ),
+            )
+            if completed.rowcount != 1:
+                raise RuntimeError("schedule lease was lost before atomic completion")
+
+    return {
+        "deduplicated": False,
+        "batch": {
+            "player_id": player_id,
+            "execution_key": execution_key,
+            "results_data": results_data,
+            "status": batch_status,
+        },
+        "inserted_memories": inserted_memories,
+    }
+
+
+def list_event_unlocks(player_id: str, character_id: str) -> list[str]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT unlock_key FROM event_unlock
+            WHERE player_id = ? AND character_id = ?
+            ORDER BY unlocked_at ASC, unlock_key ASC
+            """,
+            (player_id, character_id),
+        ).fetchall()
+    return [row["unlock_key"] for row in rows]
+
+
+def get_event_execution_metrics(
+    owner_user_id: str,
+    event_id: str | None = None,
+) -> dict:
+    with get_conn() as conn:
+        where = "owner_user_id = ?"
+        params: list = [owner_user_id]
+        if event_id:
+            where += " AND event_id = ?"
+            params.append(event_id)
+        aggregate = conn.execute(
+            f"""
+            SELECT
+                COUNT(*) AS matched_count,
+                SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded_count,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
+                SUM(CASE WHEN status = 'partial' THEN 1 ELSE 0 END) AS partial_count,
+                SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) AS skipped_count,
+                AVG(duration_ms) AS average_duration_ms,
+                MAX(completed_at) AS last_execution_at
+            FROM event_execution
+            WHERE {where}
+            """,
+            tuple(params),
+        ).fetchone()
+        last_error = conn.execute(
+            f"""
+            SELECT error FROM event_execution
+            WHERE {where} AND error IS NOT NULL
+            ORDER BY completed_at DESC LIMIT 1
+            """,
+            tuple(params),
+        ).fetchone()
+        if event_id:
+            deduplicated = conn.execute(
+                """
+                SELECT COALESCE(SUM(batch.deduplicated_count), 0) AS count
+                FROM event_execution_batch AS batch
+                WHERE batch.player_id = ?
+                  AND EXISTS (
+                      SELECT 1 FROM event_execution AS execution
+                      WHERE execution.owner_user_id = batch.player_id
+                        AND execution.execution_key = batch.execution_key
+                        AND execution.event_id = ?
+                  )
+                """,
+                (owner_user_id, event_id),
+            ).fetchone()
+        else:
+            deduplicated = conn.execute(
+                """
+                SELECT COALESCE(SUM(deduplicated_count), 0) AS count
+                FROM event_execution_batch WHERE player_id = ?
+                """,
+                (owner_user_id,),
+            ).fetchone()
+    return {
+        "matched_count": int(aggregate["matched_count"] or 0),
+        "succeeded_count": int(aggregate["succeeded_count"] or 0),
+        "failed_count": int(aggregate["failed_count"] or 0),
+        "partial_count": int(aggregate["partial_count"] or 0),
+        "skipped_count": int(aggregate["skipped_count"] or 0),
+        "deduplicated_count": int(deduplicated["count"] or 0),
+        "average_duration_ms": float(aggregate["average_duration_ms"] or 0.0),
+        "last_execution_at": aggregate["last_execution_at"],
+        "last_error": last_error["error"] if last_error else None,
+    }
 
 def delete_trigger_history(
     event_id: str,
@@ -2746,6 +3395,107 @@ def list_active_event_schedules(
     return [dict(row) for row in rows]
 
 
+def list_event_schedules(
+    player_id: str,
+    event_id: str | None = None,
+    status: str | None = None,
+    limit: int = 200,
+) -> list[dict]:
+    with get_conn() as conn:
+        query = "SELECT * FROM event_schedule_state WHERE player_id = ?"
+        params: list[Any] = [player_id]
+        if event_id:
+            query += " AND event_id = ?"
+            params.append(event_id)
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY next_run_at ASC, updated_at DESC LIMIT ?"
+        params.append(max(1, min(limit, 1000)))
+        rows = conn.execute(query, params).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_event_schedule(
+    event_id: str,
+    character_id: str,
+    player_id: str,
+) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM event_schedule_state
+            WHERE event_id = ? AND character_id = ? AND player_id = ?
+            """,
+            (event_id, character_id, player_id),
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def set_event_schedule_status(
+    event_id: str,
+    character_id: str,
+    player_id: str,
+    status: str,
+    *,
+    next_run_at: str | None = None,
+) -> bool:
+    if status not in {"active", "paused"}:
+        raise ValueError("schedule status must be active or paused")
+    with get_conn() as conn:
+        if next_run_at is None:
+            cursor = conn.execute(
+                """
+                UPDATE event_schedule_state
+                SET status = ?, lease_owner = NULL, lease_expires_at = NULL,
+                    updated_at = ?
+                WHERE event_id = ? AND character_id = ? AND player_id = ?
+                """,
+                (status, _now(), event_id, character_id, player_id),
+            )
+        else:
+            cursor = conn.execute(
+                """
+                UPDATE event_schedule_state
+                SET status = ?, next_run_at = ?, lease_owner = NULL,
+                    lease_expires_at = NULL, updated_at = ?
+                WHERE event_id = ? AND character_id = ? AND player_id = ?
+                """,
+                (
+                    status,
+                    next_run_at,
+                    _now(),
+                    event_id,
+                    character_id,
+                    player_id,
+                ),
+            )
+    return cursor.rowcount == 1
+
+
+def delete_event_schedules(
+    event_id: str,
+    player_id: str,
+    character_id: str | None = None,
+) -> int:
+    """Delete schedules owned by a player, optionally for one character."""
+    with get_conn() as conn:
+        if character_id is None:
+            cursor = conn.execute(
+                "DELETE FROM event_schedule_state WHERE event_id = ? AND player_id = ?",
+                (event_id, player_id),
+            )
+        else:
+            cursor = conn.execute(
+                """
+                DELETE FROM event_schedule_state
+                WHERE event_id = ? AND character_id = ? AND player_id = ?
+                """,
+                (event_id, character_id, player_id),
+            )
+    return cursor.rowcount
+
+
 def claim_event_schedule(
     event_id: str,
     character_id: str,
@@ -2796,7 +3546,8 @@ def complete_event_schedule(
             """
             UPDATE event_schedule_state
             SET last_checked_at = ?, last_run_at = ?, next_run_at = ?,
-                lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+                lease_owner = NULL, lease_expires_at = NULL,
+                last_error = NULL, last_failed_at = NULL, updated_at = ?
             WHERE event_id = ? AND character_id = ? AND player_id = ?
               AND lease_owner = ?
             """,
@@ -2804,6 +3555,38 @@ def complete_event_schedule(
                 last_checked_at,
                 last_run_at,
                 next_run_at,
+                _now(),
+                event_id,
+                character_id,
+                player_id,
+                lease_owner,
+            ),
+        )
+    return cursor.rowcount == 1
+
+
+def fail_event_schedule(
+    event_id: str,
+    character_id: str,
+    player_id: str,
+    *,
+    lease_owner: str,
+    error: str,
+    failed_at: str,
+) -> bool:
+    """Record a scheduler failure and release only the current worker's lease."""
+    with get_conn() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE event_schedule_state
+            SET last_error = ?, last_failed_at = ?, lease_owner = NULL,
+                lease_expires_at = NULL, updated_at = ?
+            WHERE event_id = ? AND character_id = ? AND player_id = ?
+              AND lease_owner = ?
+            """,
+            (
+                error[:2000],
+                failed_at,
                 _now(),
                 event_id,
                 character_id,

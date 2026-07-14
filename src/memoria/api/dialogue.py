@@ -34,6 +34,7 @@ class SessionStartRequest(BaseModel):
 class DialogueTurnRequest(BaseModel):
     session_id: str
     player_message: str
+    request_id: str | None = None
     
 
 # =========================
@@ -74,6 +75,8 @@ class DialogueTurnResponse(BaseModel):
     current_trust: float
     current_mood: str
     triggered_events: list[dict] = []
+    event_executions: list[dict] = []
+    event_notifications: list[dict] = []
     event_notification: str | None = None
     user_message_id: int | None = None
     assistant_message_id: int | None = None
@@ -369,7 +372,8 @@ def dialogue_turn(
         _ensure_character_can_chat(session["character_id"], session["player_id"])
         result = orchestrator.run_dialogue_turn(
             req.session_id,
-            req.player_message
+            req.player_message,
+            request_id=req.request_id,
         )
         return DialogueTurnResponse(**result)
 

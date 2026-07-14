@@ -50,6 +50,7 @@ SYSTEM_PROMPT_TEMPLATE = """你现在要完全代入并扮演游戏中的角色"
 信任度：{trust}/100
 当前情绪：{current_mood}
 已知玩家信息：{known_player_facts}
+已解锁内容：{unlocked_content}
 
 【历史互动记录】
 {past_summaries}
@@ -202,6 +203,7 @@ def build_system_prompt(
     affinity = _safe_get_runtime(runtime_state, "affection_level", 0) # 好感度
     trust = _safe_get_runtime(runtime_state, "trust_level", 0) # 信任度
     current_mood = _safe_get_runtime(runtime_state, "current_mood", card.runtime_state_schema.current_mood.default_mood) # 当前情绪
+    unlocked_content = _safe_get_runtime(runtime_state, "unlocked_content", [])
     
     # -------------------------
     # known facts 兼容处理
@@ -263,6 +265,7 @@ def build_system_prompt(
         trust=trust,
         current_mood=current_mood,
         known_player_facts=known_facts_str,
+        unlocked_content=_join(unlocked_content),
         past_summaries=past_summaries_str,
 
         # rules
@@ -333,6 +336,7 @@ def build_multi_character_system_prompt(
     affinity = _safe_get_runtime(runtime_state, "affection_level", 0)
     trust = _safe_get_runtime(runtime_state, "trust_level", 0)
     current_mood = _safe_get_runtime(runtime_state, "current_mood", card.runtime_state_schema.current_mood.default_mood)
+    unlocked_content = _safe_get_runtime(runtime_state, "unlocked_content", [])
     
     # 处理known facts
     if isinstance(known_facts, dict):
@@ -447,6 +451,7 @@ def build_multi_character_system_prompt(
         f"- 当前情绪：{current_mood}",
         f"- 对玩家的好感度：{affinity}/100",
         f"- 信任度：{trust}/100",
+        f"- 已解锁内容：{_join(unlocked_content)}",
         f"",
     ])
 
