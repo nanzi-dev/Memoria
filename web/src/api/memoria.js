@@ -15,7 +15,10 @@ async function request(url, options = {}) {
   const resp = await fetch(`${API_BASE}${url}`, { ...options, credentials: 'include', headers });
   if (!resp.ok) {
     const errBody = await resp.json().catch(() => ({}));
-    throw new Error(errBody.detail || `HTTP ${resp.status}`);
+    const error = new Error(errBody.detail || `HTTP ${resp.status}`);
+    error.status = resp.status;
+    error.body = errBody;
+    throw error;
   }
   return resp.json();
 }
@@ -62,7 +65,10 @@ export const userApi = {
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${resp.status}`);
+      const error = new Error(err.detail || `HTTP ${resp.status}`);
+      error.status = resp.status;
+      error.body = err;
+      throw error;
     }
     return resp.json();
   },
@@ -75,17 +81,34 @@ export const userApi = {
   getWorldClock() {
     return request('/user/world-clock');
   },
-  updateWorldClock({ timezone, timeScale } = {}) {
+  updateWorldClock({ expectedRevision, timezone, timezoneMode, timeScale } = {}) {
     return request('/user/world-clock', {
       method: 'PUT',
       body: JSON.stringify({
+        expected_revision: expectedRevision,
         ...(timezone != null ? { timezone } : {}),
+        ...(timezoneMode != null ? { timezone_mode: timezoneMode } : {}),
         ...(timeScale != null ? { time_scale: timeScale } : {}),
       }),
     });
   },
-  syncWorldClock() {
-    return request('/user/world-clock/sync', { method: 'POST' });
+  syncWorldClock(expectedRevision) {
+    return request('/user/world-clock/sync', {
+      method: 'POST',
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    });
+  },
+  setWorldClock(worldNow, expectedRevision) {
+    return request('/user/world-clock/set', {
+      method: 'POST',
+      body: JSON.stringify({ world_now: worldNow, expected_revision: expectedRevision }),
+    });
+  },
+  advanceWorldClock(seconds, expectedRevision) {
+    return request('/user/world-clock/advance', {
+      method: 'POST',
+      body: JSON.stringify({ seconds, expected_revision: expectedRevision }),
+    });
   },
   getEventInbox(unreadOnly = true, limit = 50) {
     return request(`/user/event-inbox?unread_only=${unreadOnly}&limit=${limit}`);

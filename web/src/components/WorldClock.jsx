@@ -1,32 +1,51 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Bell, Clock3, Pause, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  Bell,
+  Clock3,
+  Pause,
+  RefreshCw,
+  WifiOff,
+  X,
+} from 'lucide-react';
 import { useUser } from '../context/UserContext';
 
-function deriveWorldNow(clock, realMilliseconds) {
-  if (!clock?.world_now || !clock?.real_now) return null;
-  const worldAnchor = Date.parse(clock.world_now);
-  const realAnchor = Date.parse(clock.real_now);
-  if (!Number.isFinite(worldAnchor) || !Number.isFinite(realAnchor)) return null;
-  return new Date(worldAnchor + (realMilliseconds - realAnchor) * Number(clock.time_scale || 0));
+function narrativePeriod(date, timezone) {
+  const hour = Number(new Intl.DateTimeFormat('zh-CN', {
+    timeZone: timezone,
+    hour: 'numeric',
+    hourCycle: 'h23',
+  }).format(date));
+  if (hour >= 5 && hour < 8) return '清晨';
+  if (hour >= 8 && hour < 12) return '上午';
+  if (hour >= 12 && hour < 14) return '中午';
+  if (hour >= 14 && hour < 18) return '下午';
+  if (hour >= 18 && hour < 22) return '傍晚';
+  return '深夜';
 }
 
 export function useWorldNow() {
-  const { worldClock } = useUser();
-  const [realMilliseconds, setRealMilliseconds] = useState(Date.now());
+  const { worldClock, getWorldNow } = useUser();
+  const [worldNow, setWorldNow] = useState(() => getWorldNow());
 
   useEffect(() => {
-    setRealMilliseconds(Date.now());
-    const timer = setInterval(() => setRealMilliseconds(Date.now()), 1000);
+    setWorldNow(getWorldNow());
+    const timer = setInterval(() => setWorldNow(getWorldNow()), 1000);
     return () => clearInterval(timer);
-  }, [worldClock?.real_now, worldClock?.world_now, worldClock?.time_scale]);
+  }, [getWorldNow, worldClock?.clock_revision]);
 
-  return {
-    clock: worldClock,
-    worldNow: deriveWorldNow(worldClock, realMilliseconds),
-  };
+  return { clock: worldClock, worldNow };
 }
 
-export function WorldClockDisplay({ className = '' }) {
+function ClockStatusIcon({ state }) {
+  if (state === 'offline') return <WifiOff size={12} />;
+  if (state === 'refreshing') return <RefreshCw size={12} className="animate-spin" />;
+  if (['error', 'stale', 'conflict'].includes(state)) return <AlertTriangle size={12} />;
+  return null;
+}
+
+export function WorldClockDisplay({ className = '', onClick }) {
+  const { clockStatus } = useUser();
   const { clock, worldNow } = useWorldNow();
   const formatted = useMemo(() => {
     if (!clock || !worldNow) return null;
@@ -43,24 +62,63 @@ export function WorldClockDisplay({ className = '' }) {
       second: '2-digit',
       hour12: false,
     }).format(worldNow);
-    return { date, time };
+    return { date, time, period: narrativePeriod(worldNow, clock.timezone) };
   }, [clock, worldNow]);
 
   if (!formatted) return null;
-  const paused = clock.time_scale === 0;
-  return (
-    <div
-      className={`flex min-w-0 shrink-0 items-center gap-1.5 text-[10px] text-zinc-400 ${className}`}
-      title={`${clock.timezone} 世界时间`}
-      aria-label={`${formatted.date} ${formatted.time}，${paused ? '已暂停' : `${clock.time_scale}倍速`}`}
-    >
-      {paused ? <Pause size={12} className="text-amber-400/80" /> : <Clock3 size={12} className="text-cyan-300/70" />}
-      <span className="hidden md:inline whitespace-nowrap">{formatted.date}</span>
-      <span className="tabular-nums whitespace-nowrap text-zinc-300">{formatted.time}</span>
-      <span className={`whitespace-nowrap ${paused ? 'text-amber-400/80' : 'text-cyan-300/60'}`}>
-        {paused ? '暂停' : `${clock.time_scale}x`}
+  const paused = Number(clock.time_scale) === 0;
+  const hasWarning = !['idle', 'synced'].includes(clockStatus.state);
+  const statusLabel = clockStatus.state === 'offline'
+    ? '离线'
+    : clockStatus.state === 'refreshing'
+      ? '校准中'
+      : hasWarning
+        ? '待校准'
+        : '';
+  const content = (
+    <>
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-white/8 bg-black/20">
+        {paused
+          ? <Pause size={14} className="text-amber-300" />
+          : <Clock3 size={14} className="text-cyan-200" />}
       </span>
-    </div>
+      <span className="min-w-0 flex-1 text-left leading-tight">
+        <span className="flex items-center gap-1.5 whitespace-nowrap text-[11px] text-zinc-300">
+          <span>{formatted.date}</span>
+          <span className="tabular-nums text-xs font-semibold text-zinc-100">{formatted.time}</span>
+        </span>
+        <span className="mt-0.5 flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[10px]">
+          <span className="max-w-[92px] truncate text-zinc-500">{clock.timezone}</span>
+          <span className="text-amber-200/75">{formatted.period}</span>
+          <span className={paused ? 'text-amber-300' : 'text-cyan-200/75'}>
+            {paused ? '暂停' : `${clock.time_scale}x`}
+          </span>
+          {statusLabel && (
+            <span className="inline-flex items-center gap-1 text-amber-300" title={clockStatus.message}>
+              <ClockStatusIcon state={clockStatus.state} />
+              {statusLabel}
+            </span>
+          )}
+        </span>
+      </span>
+    </>
+  );
+  const label = `${formatted.date} ${formatted.time}，${clock.timezone}，${formatted.period}，${paused ? '已暂停' : `${clock.time_scale}倍速`}${statusLabel ? `，${statusLabel}` : ''}`;
+  const classes = `flex min-h-[44px] min-w-0 shrink-0 items-center gap-2 rounded-md px-1.5 text-zinc-400 ${className}`;
+
+  if (!onClick) {
+    return <div className={classes} aria-label={label}>{content}</div>;
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`${classes} transition-colors hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/35`}
+      aria-label={`${label}，打开世界时间设置`}
+      title="打开世界时间设置"
+    >
+      {content}
+    </button>
   );
 }
 
@@ -76,7 +134,7 @@ export function EventInboxBanner({ characterId = null, sessionId = null }) {
 
   if (!visibleItems.length) return null;
   return (
-    <div className="shrink-0 border-b border-amber-300/10 bg-amber-300/[0.035] px-3 py-2 space-y-1.5">
+    <div className="shrink-0 space-y-1.5 border-b border-amber-300/10 bg-amber-300/[0.035] px-3 py-2">
       {visibleItems.map(item => (
         <div key={item.id} className="flex min-w-0 items-start gap-2 text-[11px] leading-4 text-zinc-300">
           <Bell size={13} className="mt-0.5 shrink-0 text-amber-300/70" />

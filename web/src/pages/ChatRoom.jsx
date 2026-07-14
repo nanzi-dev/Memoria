@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
@@ -8,6 +8,7 @@ import { dialogue, multiDialogue, characterAdmin } from '../api/memoria';
 
 import SideRays from '../components/SideRays';
 import { EventInboxBanner, WorldClockDisplay } from '../components/WorldClock';
+import UserSettingsModal from '../components/UserSettingsModal';
 
 import { splitAssistantReply } from '../utils/chatMessages';
 
@@ -119,6 +120,7 @@ function normalizeDialogueMessage(message, options = {}) {
     trust_delta: toDelta(message.trust_delta),
     showRelationshipDelta: options.showRelationshipDelta === true,
     created_at: message.created_at,
+    world_created_at: message.world_created_at,
     message_id: message.message_id || message.id,
   };
 }
@@ -141,6 +143,7 @@ function normalizeGroupMessage(message, knownParticipants = [], options = {}) {
     trust_delta: toDelta(message.trust_delta),
     showRelationshipDelta: options.showRelationshipDelta === true,
     created_at: message.created_at,
+    world_created_at: message.world_created_at,
     message_id: message.message_id || message.id,
   };
 }
@@ -154,6 +157,67 @@ function formatChatTime(value) {
     return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
   }
   return date.toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function worldDateKey(value, timezone) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone || 'UTC',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
+function formatWorldDate(value, timezone) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: timezone || 'UTC',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    weekday: 'short',
+  }).format(date);
+}
+
+function formatWorldTime(value, timezone) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: timezone || 'UTC',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date);
+}
+
+function WorldDateSeparator({ value, timezone }) {
+  const label = formatWorldDate(value, timezone);
+  if (!label) return null;
+  return (
+    <div className="flex items-center gap-3 py-1" role="separator" aria-label={`世界日期 ${label}`}>
+      <span className="h-px flex-1 bg-amber-200/10" />
+      <span className="shrink-0 text-[10px] text-amber-100/55">{label} · 世界时间</span>
+      <span className="h-px flex-1 bg-amber-200/10" />
+    </div>
+  );
+}
+
+function MessageWorldTime({ value, timezone, align = 'left' }) {
+  const label = formatWorldTime(value, timezone);
+  if (!label) return null;
+  return (
+    <div className={`mt-1 flex items-center gap-1 px-1 text-[10px] text-zinc-600 ${align === 'right' ? 'justify-end' : 'justify-start'}`}>
+      <span className="h-1 w-1 rounded-full bg-amber-300/45" />
+      <time dateTime={value}>{label}</time>
+      <span className="max-w-[110px] truncate">{timezone}</span>
+    </div>
+  );
 }
 
 function sortMessagesChronologically(messages) {
@@ -260,7 +324,7 @@ export default function ChatRoom() {
 
   const navigate = useNavigate();
 
-  const { user, loading: userLoading } = useUser();
+  const { user, loading: userLoading, worldClock, getWorldNow } = useUser();
 
 
 
@@ -303,6 +367,7 @@ export default function ChatRoom() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [isRecovered, setIsRecovered] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
+  const [showClockSettings, setShowClockSettings] = useState(false);
 
 
 
@@ -813,7 +878,12 @@ export default function ChatRoom() {
         setIsRecovered(true);
         nextHistoryOffset = session.messages.length;
       } else if (session.opening_line) {
-        setMessages([{ role: 'assistant', content: session.opening_line, action: session.action || '' }]);
+        setMessages([{
+          role: 'assistant',
+          content: session.opening_line,
+          action: session.action || '',
+          world_created_at: session.world_created_at,
+        }]);
       }
 
       setAffinity(session.current_affinity || 0);
@@ -998,7 +1068,12 @@ export default function ChatRoom() {
 
     setInput(''); setSending(true); setSendingMulti(true);
 
-    setMessages(prev => [...prev, { role: 'user', content: text }]);
+    const optimisticWorldCreatedAt = getWorldNow()?.toISOString();
+    setMessages(prev => [...prev, {
+      role: 'user',
+      content: text,
+      world_created_at: optimisticWorldCreatedAt,
+    }]);
 
     try {
 
@@ -1015,6 +1090,7 @@ export default function ChatRoom() {
           affinity_delta: affinityDelta,
           trust_delta: trustDelta,
           showRelationshipDelta: true,
+          world_created_at: res.world_created_at,
         }]);
 
         setHistoryOffset(prev => prev + 2);
@@ -1084,7 +1160,7 @@ export default function ChatRoom() {
 
     finally { setSending(false); setSendingMulti(false); }
 
-  }, [input, sending, sendingMulti, view, singleSessionId, multiSessionId, multiSessionStatus, groupName, affinity, trust, character, participants, allChars, PLAYER_ID, PLAYER_NAME]);
+  }, [input, sending, sendingMulti, view, singleSessionId, multiSessionId, multiSessionStatus, groupName, affinity, trust, character, participants, allChars, PLAYER_ID, PLAYER_NAME, getWorldNow]);
 
 
 
@@ -1584,7 +1660,10 @@ export default function ChatRoom() {
             </div>
           </div>
 
-          <WorldClockDisplay className="max-w-[150px]" />
+          <WorldClockDisplay
+            className="max-w-[178px] sm:max-w-[260px]"
+            onClick={() => setShowClockSettings(true)}
+          />
 
           {/* 事件通知 */}
           {events.length > 0 && (
@@ -1666,10 +1745,17 @@ export default function ChatRoom() {
             const isUser = msg.role === 'user';
             const charInfo = msg.charId ? getCharById(msg.charId) : null;
             const replyBubbles = isUser ? [msg.content] : splitAssistantReply(msg.content);
+            const currentWorldDate = worldDateKey(msg.world_created_at, worldClock?.timezone);
+            const previousWorldDate = worldDateKey(messages[i - 1]?.world_created_at, worldClock?.timezone);
+            const showWorldDate = !!currentWorldDate && currentWorldDate !== previousWorldDate;
             return replyBubbles.map((bubble, bubbleIndex) => {
               const isLastBubble = bubbleIndex === replyBubbles.length - 1;
               return (
-              <div key={`${msg.message_id || i}-${bubbleIndex}`} className={`animate-fade-up flex gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
+              <Fragment key={`${msg.message_id || i}-${bubbleIndex}`}>
+              {bubbleIndex === 0 && showWorldDate && (
+                <WorldDateSeparator value={msg.world_created_at} timezone={worldClock?.timezone} />
+              )}
+              <div className={`animate-fade-up flex gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
                 {/* 头像 */}
                 <div className={`w-8 h-8 rounded-full overflow-hidden border-2 shrink-0 mt-0.5 ${
                   isUser ? 'border-cyber-green/10 bg-cyber-green/[0.03]' : moodBorder
@@ -1709,8 +1795,16 @@ export default function ChatRoom() {
                   {msg.showRelationshipDelta && isLastBubble && (
                     <RelationshipDeltaLine affinityDelta={msg.affinity_delta} trustDelta={msg.trust_delta} />
                   )}
+                  {isLastBubble && (
+                    <MessageWorldTime
+                      value={msg.world_created_at}
+                      timezone={worldClock?.timezone}
+                      align={isUser ? 'right' : 'left'}
+                    />
+                  )}
                 </div>
               </div>
+              </Fragment>
               );
             });
           })}
@@ -1771,6 +1865,7 @@ export default function ChatRoom() {
             </button>
           </div>
         </div>
+        {showClockSettings && <UserSettingsModal onClose={() => setShowClockSettings(false)} />}
       </div>
     );
 
@@ -1791,7 +1886,7 @@ export default function ChatRoom() {
 
           <button onClick={goToList} className="text-cyber-green/30 hover:text-cyber-green/50 p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg"><ArrowLeft size={18} /></button>
 
-          <div className="flex -space-x-2">
+          <div className="hidden -space-x-2 sm:flex">
 
             {resolvedParticipants.slice(0,3).map(p => (
 
@@ -1819,7 +1914,10 @@ export default function ChatRoom() {
 
           </div>
 
-          <WorldClockDisplay className="max-w-[150px]" />
+          <WorldClockDisplay
+            className="max-w-[178px] sm:max-w-[260px]"
+            onClick={() => setShowClockSettings(true)}
+          />
 
         </header>
 
@@ -1876,6 +1974,8 @@ export default function ChatRoom() {
           {renderChatArea('group')}
 
         </div>
+
+        {showClockSettings && <UserSettingsModal onClose={() => setShowClockSettings(false)} />}
 
       </div>
 
@@ -1970,13 +2070,27 @@ export default function ChatRoom() {
 
             const replyBubbles = isUser ? [msg.content] : splitAssistantReply(msg.content);
 
+            const currentWorldDate = worldDateKey(msg.world_created_at, worldClock?.timezone);
+
+            const previousWorldDate = worldDateKey(messages[i - 1]?.world_created_at, worldClock?.timezone);
+
+            const showWorldDate = !!currentWorldDate && currentWorldDate !== previousWorldDate;
+
             return replyBubbles.map((bubble, bubbleIndex) => {
 
               const isLastBubble = bubbleIndex === replyBubbles.length - 1;
 
               return (
 
-              <div key={`${msg.message_id || i}-${bubbleIndex}`} className={`animate-fade-up flex gap-2.5 ${isUser ? 'flex-row-reverse' : ''}`}>
+              <Fragment key={`${msg.message_id || i}-${bubbleIndex}`}>
+
+              {bubbleIndex === 0 && showWorldDate && (
+
+                <WorldDateSeparator value={msg.world_created_at} timezone={worldClock?.timezone} />
+
+              )}
+
+              <div className={`animate-fade-up flex gap-2.5 ${isUser ? 'flex-row-reverse' : ''}`}>
 
                 <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full overflow-hidden border-2 shrink-0 mt-0.5 ${isUser ? 'border-cyber-green/10 bg-cyber-green/[0.03] flex items-center justify-center' : 'border-purple-500/15'}`}>
 
@@ -2046,9 +2160,25 @@ export default function ChatRoom() {
                     <RelationshipDeltaLine affinityDelta={msg.affinity_delta} trustDelta={msg.trust_delta} />
                   )}
 
+                  {isLastBubble && (
+
+                    <MessageWorldTime
+
+                      value={msg.world_created_at}
+
+                      timezone={worldClock?.timezone}
+
+                      align={isUser ? 'right' : 'left'}
+
+                    />
+
+                  )}
+
                 </div>
 
               </div>
+
+              </Fragment>
 
               );
 

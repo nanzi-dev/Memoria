@@ -36,6 +36,18 @@ class TestMigrations:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE player_world_clock (
+                    player_id TEXT PRIMARY KEY,
+                    timezone TEXT NOT NULL DEFAULT 'UTC',
+                    anchor_real_utc TEXT NOT NULL,
+                    anchor_world_utc TEXT NOT NULL,
+                    time_scale REAL NOT NULL DEFAULT 1,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
 
         monkeypatch.setattr(configs, "database_url", "")
         monkeypatch.setattr(configs, "database_path", str(database_path))
@@ -55,9 +67,22 @@ class TestMigrations:
                     "PRAGMA index_list(event_schedule_state)"
                 ).fetchall()
             }
+            clock_columns = {
+                row[1]
+                for row in conn.execute(
+                    "PRAGMA table_info(player_world_clock)"
+                ).fetchall()
+            }
 
-        assert {"lease_owner", "lease_expires_at"} <= columns
+        assert {
+            "lease_owner",
+            "lease_expires_at",
+            "next_due_real_at",
+            "missed_count",
+        } <= columns
+        assert {"timezone_mode", "clock_revision"} <= clock_columns
         assert "idx_event_schedule_lease" in indexes
+        assert "idx_event_schedule_due_real" in indexes
 
 
 class TestRuntimeState:
@@ -302,6 +327,7 @@ class TestEventDeepIntegrationRepository:
             player_id=pid,
             schedule="*/5 * * * *",
             next_run_at="2026-07-10T14:30:00+00:00",
+            next_due_real_at="2026-07-10T14:30:00+00:00",
         )
         due = repository.list_due_event_schedules("2026-07-10T14:31:00+00:00")
         assert any(row["event_id"] == eid for row in due)

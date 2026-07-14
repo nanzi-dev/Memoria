@@ -12,10 +12,15 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from memoria.core import character_loader, world_clock
 from memoria.core.config import configs
+from memoria.core.cron_schedule import (
+    collect_due_cron_runs,
+    cron_matches,
+    next_cron_run,
+    validate_cron_schedule,
+)
 from memoria.core.event_detector import get_event_detector
 from memoria.core.event_executor import get_event_executor
 from memoria.core.event_schema import (
@@ -658,119 +663,6 @@ def _parse_iso(value: str | None) -> datetime | None:
         return None
 
 
-def _parse_cron_number(value: str, field_name: str) -> int:
-    if not value or not value.isdigit():
-        raise ValueError(f"cron {field_name} 字段包含非法值: {value!r}")
-    return int(value)
-
-
-def _parse_cron_field(
-    field: str,
-    min_value: int,
-    max_value: int,
-    field_name: str,
-    *,
-    normalize_sunday: bool = False,
-) -> set[int]:
-    if not field:
-        raise ValueError(f"cron {field_name} 字段不能为空")
-
-    allowed: set[int] = set()
-    for part in field.split(","):
-        if not part:
-            raise ValueError(f"cron {field_name} 字段包含空列表项")
-        if part == "*":
-            values = range(min_value, max_value + 1)
-        elif part.startswith("*/"):
-            step = _parse_cron_number(part[2:], field_name)
-            if step <= 0:
-                raise ValueError(f"cron {field_name} 字段的步长必须大于 0")
-            values = range(min_value, max_value + 1, step)
-        elif "-" in part:
-            bounds = part.split("-")
-            if len(bounds) != 2:
-                raise ValueError(f"cron {field_name} 字段范围无效: {part!r}")
-            start = _parse_cron_number(bounds[0], field_name)
-            end = _parse_cron_number(bounds[1], field_name)
-            if start > end:
-                raise ValueError(f"cron {field_name} 字段范围不能反向: {part!r}")
-            values = range(start, end + 1)
-        else:
-            values = [_parse_cron_number(part, field_name)]
-
-        for raw_value in values:
-            if raw_value < min_value or raw_value > max_value:
-                raise ValueError(
-                    f"cron {field_name} 字段值 {raw_value} 超出范围 "
-                    f"{min_value}..{max_value}"
-                )
-            allowed.add(0 if normalize_sunday and raw_value == 7 else raw_value)
-    return allowed
-
-
-def _parse_cron_schedule(schedule: str) -> tuple[set[int], ...]:
-    parts = str(schedule or "").split()
-    if len(parts) != 5:
-        raise ValueError("cron 表达式必须是 5 字段: minute hour day month weekday")
-    return (
-        _parse_cron_field(parts[0], 0, 59, "minute"),
-        _parse_cron_field(parts[1], 0, 23, "hour"),
-        _parse_cron_field(parts[2], 1, 31, "day"),
-        _parse_cron_field(parts[3], 1, 12, "month"),
-        _parse_cron_field(
-            parts[4],
-            0,
-            7,
-            "weekday",
-            normalize_sunday=True,
-        ),
-    )
-
-
-def validate_cron_schedule(schedule: str) -> None:
-    """Validate the supported five-field cron grammar and numeric bounds."""
-    _parse_cron_schedule(schedule)
-
-
-def _cron_weekday(when: datetime) -> int:
-    """Return cron weekday where Sunday is 0, Monday is 1, ... Saturday is 6."""
-    return (when.weekday() + 1) % 7
-
-
-def _cron_fields_match(fields: tuple[set[int], ...], when: datetime) -> bool:
-    minute, hour, day, month, weekday = fields
-    return (
-        when.minute in minute
-        and when.hour in hour
-        and when.day in day
-        and when.month in month
-        and _cron_weekday(when) in weekday
-    )
-
-
-def cron_matches(schedule: str, when: datetime) -> bool:
-    """检查 5 字段 cron 是否匹配当前分钟。"""
-    return _cron_fields_match(_parse_cron_schedule(schedule), when)
-
-
-def next_cron_run(
-    schedule: str,
-    after: datetime | None = None,
-    max_minutes: int = 366 * 24 * 60,
-    timezone_name: str = "UTC",
-) -> datetime:
-    """Return the next world-UTC instant matching a player's local cron."""
-    fields = _parse_cron_schedule(schedule)
-    cursor = after or datetime.now(timezone.utc)
-    cursor = cursor.astimezone(timezone.utc).replace(second=0, microsecond=0) + timedelta(minutes=1)
-    local_timezone = ZoneInfo(timezone_name)
-    for _ in range(max_minutes):
-        if _cron_fields_match(fields, cursor.astimezone(local_timezone)):
-            return cursor
-        cursor += timedelta(minutes=1)
-    raise ValueError(f"无法在搜索窗口内计算下一次 cron: {schedule}")
-
-
 def register_time_event_schedule(
     event_id: str,
     character_id: str,
@@ -786,12 +678,21 @@ def register_time_event_schedule(
         world_base,
         timezone_name=snapshot.timezone,
     )
+    next_due_real = world_clock.world_due_to_real(
+        next_run,
+        snapshot.world_now,
+        snapshot.real_now,
+        snapshot.time_scale,
+    )
     return repository.save_event_schedule_state(
         event_id=event_id,
         character_id=character_id,
         player_id=player_id,
         schedule=schedule,
         next_run_at=next_run.isoformat(),
+        next_due_real_at=(
+            next_due_real.isoformat() if next_due_real is not None else None
+        ),
         last_checked_at=world_base.isoformat(),
         status="active",
     )
@@ -916,16 +817,32 @@ def run_due_time_events(
     player_id: str | None = None,
     lease_owner: str | None = None,
 ) -> list[EventTriggerResult]:
-    """Execute each due player schedule once against that player's world clock."""
+    """Execute schedules selected by their indexed real-UTC due instant."""
     real_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    reconcile_event_schedule_due_times(now=real_now, player_id=player_id)
     owner = lease_owner or f"scheduler:{uuid.uuid4().hex}"
     lease_expires_at = real_now + timedelta(
         seconds=configs.world_clock_scheduler_lease_seconds
     )
-    rows = repository.list_active_event_schedules(
-        limit=limit,
-        player_id=player_id,
-    )
+    rows: list[dict[str, Any]] = []
+    after = None
+    while True:
+        page = repository.list_due_event_schedules(
+            real_now.isoformat(),
+            limit=limit,
+            player_id=player_id,
+            after=after,
+        )
+        rows.extend(page)
+        if len(page) < limit:
+            break
+        last = page[-1]
+        after = (
+            last["next_due_real_at"],
+            last["event_id"],
+            last["character_id"],
+            last["player_id"],
+        )
     results: list[EventTriggerResult] = []
 
     for schedule_state in rows:
@@ -933,10 +850,8 @@ def run_due_time_events(
             schedule_state["player_id"],
             real_now=real_now,
         )
-        if snapshot.paused:
-            continue
         next_run_at = _parse_iso(schedule_state.get("next_run_at"))
-        if not next_run_at or next_run_at > snapshot.world_now:
+        if snapshot.paused or not next_run_at or next_run_at > snapshot.world_now:
             continue
         if not repository.claim_event_schedule(
             schedule_state["event_id"],
@@ -946,6 +861,7 @@ def run_due_time_events(
             lease_expires_at=lease_expires_at.isoformat(),
             real_now_iso=real_now.isoformat(),
             expected_next_run_at=schedule_state["next_run_at"],
+            expected_next_due_real_at=schedule_state.get("next_due_real_at"),
         ):
             continue
 
@@ -959,52 +875,94 @@ def run_due_time_events(
             event = _event_definition_from_row(event_row)
             if not event.is_active:
                 raise ValueError("event definition is inactive")
-            context = _load_scheduled_event_context(
-                event,
-                schedule_state,
-                snapshot.world_now,
-            )
-            next_run = next_cron_run(
+            replay_runs, due_count, next_run = collect_due_cron_runs(
                 schedule_state["schedule"],
+                next_run_at,
                 snapshot.world_now,
                 timezone_name=snapshot.timezone,
+                replay_limit=event.trigger_condition.catch_up_replay_limit,
             )
-            execution_key = (
-                f"schedule:{schedule_state['event_id']}:"
-                f"{schedule_state['character_id']}:{schedule_state['player_id']}:"
-                f"{schedule_state['next_run_at']}"
+            last_run_at = replay_runs[-1]
+            next_due_real = world_clock.world_due_to_real(
+                next_run,
+                snapshot.world_now,
+                real_now,
+                snapshot.time_scale,
             )
-            context = context.model_copy(update={"execution_key": execution_key})
-            existing = repository.get_event_execution_batch(
-                context.player_id,
-                execution_key,
+            missed_count = (
+                int(schedule_state.get("missed_count") or 0)
+                + due_count
+                - len(replay_runs)
             )
-            if existing:
-                event_results = _replay_batch_results(
+            definitions_by_id = {
+                definition.event_id: definition
+                for definition in load_event_definitions(
+                    schedule_state["player_id"],
+                    schedule_state["character_id"],
+                    only_active=True,
+                )
+            }
+            definitions_by_id[event.event_id] = event
+
+            for index, scheduled_for in enumerate(replay_runs):
+                replay_state = {
+                    **schedule_state,
+                    "next_run_at": scheduled_for.isoformat(),
+                }
+                context = _load_scheduled_event_context(
+                    event,
+                    replay_state,
+                    scheduled_for,
+                )
+                execution_key = (
+                    f"schedule:{schedule_state['event_id']}:"
+                    f"{schedule_state['character_id']}:"
+                    f"{schedule_state['player_id']}:"
+                    f"{scheduled_for.isoformat()}"
+                )
+                context = context.model_copy(update={"execution_key": execution_key})
+                is_final_replay = index == len(replay_runs) - 1
+                schedule_completion = None
+                if is_final_replay:
+                    schedule_completion = {
+                        "event_id": schedule_state["event_id"],
+                        "character_id": schedule_state["character_id"],
+                        "lease_owner": owner,
+                        "last_checked_at": snapshot.world_now.isoformat(),
+                        "last_run_at": last_run_at.isoformat(),
+                        "next_run_at": next_run.isoformat(),
+                        "next_due_real_at": (
+                            next_due_real.isoformat()
+                            if next_due_real is not None
+                            else None
+                        ),
+                        "missed_count": missed_count,
+                    }
+
+                existing = repository.get_event_execution_batch(
                     context.player_id,
                     execution_key,
-                    existing,
                 )
-                if not repository.complete_event_schedule(
-                    schedule_state["event_id"],
-                    schedule_state["character_id"],
-                    schedule_state["player_id"],
-                    lease_owner=owner,
-                    last_checked_at=snapshot.world_now.isoformat(),
-                    last_run_at=snapshot.world_now.isoformat(),
-                    next_run_at=next_run.isoformat(),
-                ):
-                    raise RuntimeError("schedule lease was lost before replay completion")
-            else:
-                definitions_by_id = {
-                    definition.event_id: definition
-                    for definition in load_event_definitions(
-                        context.player_id,
-                        context.character_id,
-                        only_active=True,
-                    )
-                }
-                definitions_by_id[event.event_id] = event
+                if existing:
+                    if schedule_completion:
+                        commit = repository.commit_event_execution_batch(
+                            player_id=context.player_id,
+                            execution_key=execution_key,
+                            trigger_source=context.trigger_source,
+                            results_data=existing.get("results_data") or "[]",
+                            executions=[],
+                            schedule_completion=schedule_completion,
+                        )
+                        event_results = _restore_batch_results(commit["batch"])
+                    else:
+                        event_results = _replay_batch_results(
+                            context.player_id,
+                            execution_key,
+                            existing,
+                        )
+                    results.extend(event_results)
+                    continue
+
                 event_results, executions = _plan_event_chain(
                     [event],
                     context,
@@ -1036,7 +994,7 @@ def run_due_time_events(
                                 else context.session_id
                             ),
                             "payload": matching.model_dump_json(),
-                            "world_created_at": snapshot.world_now.isoformat(),
+                            "world_created_at": scheduled_for.isoformat(),
                         })
                 runtime_state = _runtime_state_after_results(context, event_results)
                 event_results = _commit_planned_batch(
@@ -1044,16 +1002,9 @@ def run_due_time_events(
                     event_results,
                     executions,
                     runtime_states=[runtime_state] if runtime_state else [],
-                    schedule_completion={
-                        "event_id": schedule_state["event_id"],
-                        "character_id": schedule_state["character_id"],
-                        "lease_owner": owner,
-                        "last_checked_at": snapshot.world_now.isoformat(),
-                        "last_run_at": snapshot.world_now.isoformat(),
-                        "next_run_at": next_run.isoformat(),
-                    },
+                    schedule_completion=schedule_completion,
                 )
-            results.extend(event_results)
+                results.extend(event_results)
         except Exception as exc:
             repository.fail_event_schedule(
                 schedule_state["event_id"],
@@ -1075,6 +1026,47 @@ def run_due_time_events(
             )
 
     return results
+
+
+def reconcile_event_schedule_due_times(
+    now: datetime | None = None,
+    player_id: str | None = None,
+) -> int:
+    """Backfill indexed real due times for schedules created by older schemas."""
+    real_now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    rows = repository.list_event_schedules_missing_due_projection(
+        player_id=player_id,
+    )
+    snapshots: dict[str, world_clock.WorldClockSnapshot] = {}
+    updated = 0
+    for schedule_state in rows:
+        player_id = schedule_state["player_id"]
+        snapshot = snapshots.get(player_id)
+        if snapshot is None:
+            snapshot = world_clock.get_clock_snapshot(player_id, real_now=real_now)
+            snapshots[player_id] = snapshot
+        if snapshot.paused:
+            continue
+        next_run_at = _parse_iso(schedule_state.get("next_run_at"))
+        if next_run_at is None:
+            continue
+        next_due_real_at = world_clock.world_due_to_real(
+            next_run_at,
+            snapshot.world_now,
+            real_now,
+            snapshot.time_scale,
+        )
+        if next_due_real_at is None:
+            continue
+        if repository.set_event_schedule_due_projection(
+            schedule_state["event_id"],
+            schedule_state["character_id"],
+            player_id,
+            expected_next_run_at=schedule_state["next_run_at"],
+            next_due_real_at=next_due_real_at.isoformat(),
+        ):
+            updated += 1
+    return updated
 
 
 async def run_world_clock_scheduler() -> None:

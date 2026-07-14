@@ -80,6 +80,7 @@ class MultiDialogueTurnResponse(BaseModel):
     event_executions: list[dict] = Field(default_factory=list)
     event_notifications: list[dict] = Field(default_factory=list)
     event_notification: Optional[str] = None
+    world_created_at: Optional[str] = None
     knowledge_sources: list[KnowledgeSource] = Field(default_factory=list)
 
 

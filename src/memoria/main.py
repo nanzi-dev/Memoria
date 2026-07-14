@@ -32,6 +32,7 @@ from memoria.api.user import (
 from memoria.core.config import configs
 from memoria.core.event_runtime import (
     ensure_default_event_templates,
+    reconcile_event_schedule_due_times,
     run_world_clock_scheduler,
 )
 from memoria.core.knowledge_service import (
@@ -152,6 +153,9 @@ async def lifespan(app: FastAPI):
     try:
         repository.init_db()
         ensure_default_event_templates()
+        reconciled_schedules = reconcile_event_schedule_due_times()
+        if reconciled_schedules:
+            logger.info("已补全 %s 条事件调度的现实到期时间", reconciled_schedules)
         logger.info("数据库初始化成功")
     except Exception as e:
         logger.error("数据库初始化失败: %s", e, exc_info=True)

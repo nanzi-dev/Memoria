@@ -13,7 +13,7 @@ import uuid
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
-from memoria.core import character_loader, orchestrator
+from memoria.core import character_loader, orchestrator, world_clock
 from memoria.core.memory_extractor import summarize_session
 from memoria.api.user import require_current_user_id
 from memoria.api.knowledge_models import KnowledgeSource
@@ -51,6 +51,7 @@ class HistoryMessage(BaseModel):
     current_mood: str | None = None
     event_notification: str | None = None
     created_at: str | None = None
+    world_created_at: str | None = None
     message_id: int | None = None
     knowledge_sources: list[KnowledgeSource] = Field(default_factory=list)
 
@@ -61,6 +62,7 @@ class SessionStartResponse(BaseModel):
     action: str
     current_affinity: float
     current_trust: float
+    world_created_at: str | None = None
     assistant_message_id: int | None = None
     recovered: bool = False
     messages: list[HistoryMessage] = []
@@ -80,6 +82,7 @@ class DialogueTurnResponse(BaseModel):
     event_notification: str | None = None
     user_message_id: int | None = None
     assistant_message_id: int | None = None
+    world_created_at: str | None = None
     knowledge_sources: list[KnowledgeSource] = Field(default_factory=list)
 
 class SessionEndRequest(BaseModel):
@@ -190,6 +193,7 @@ def _start_empty_session(character_id: str, player_id: str, player_name: str) ->
     _ensure_character_can_chat(character_id, player_id)
     card = character_loader.load_character_card(character_id, player_id)
     runtime_state = repository.get_runtime_state(character_id, player_id, card)
+    world_created_at = world_clock.get_clock_snapshot(player_id).world_now.isoformat()
     session_id = str(uuid.uuid4())
     repository.create_session(session_id, character_id, player_id, player_name)
     return SessionStartResponse(
@@ -198,6 +202,7 @@ def _start_empty_session(character_id: str, player_id: str, player_name: str) ->
         action="",
         current_affinity=runtime_state.get("affection_level", 0),
         current_trust=runtime_state.get("trust_level", 0),
+        world_created_at=world_created_at,
         assistant_message_id=None,
         recovered=False,
         messages=[],
@@ -344,15 +349,27 @@ def session_start(
         active_session = repository.get_latest_active_session(req.player_id, req.character_id)
         if active_session:
             current_affinity, current_trust, _ = _current_character_state(req.character_id, req.player_id)
+            messages = _messages_for_session(active_session["session_id"])
+            world_created_at = next(
+                (
+                    message.world_created_at
+                    for message in reversed(messages)
+                    if message.world_created_at
+                ),
+                None,
+            )
+            if world_created_at is None:
+                world_created_at = world_clock.get_clock_snapshot(req.player_id).world_now.isoformat()
             return SessionStartResponse(
                 session_id=active_session["session_id"],
                 opening_line="",
                 action="",
                 current_affinity=current_affinity,
                 current_trust=current_trust,
+                world_created_at=world_created_at,
                 assistant_message_id=None,
                 recovered=True,
-                messages=_messages_for_session(active_session["session_id"]),
+                messages=messages,
             )
 
         return _start_empty_session(req.character_id, req.player_id, req.player_name)

@@ -74,6 +74,35 @@ class TestEventAdminAPI:
         condition = TriggerConditionDTO(trigger_type="time_based", schedule="0 9 * * 0")
         assert condition.schedule == "0 9 * * 0"
 
+    def test_time_event_catch_up_replay_limit_defaults_and_bounds(self):
+        from memoria.api.event_admin import TriggerConditionDTO
+
+        default_condition = TriggerConditionDTO(trigger_type="time_based", schedule="0 * * * *")
+        assert default_condition.catch_up_replay_limit == 1
+        assert TriggerConditionDTO(
+            trigger_type="time_based",
+            schedule="0 * * * *",
+            catch_up_replay_limit=1,
+        ).catch_up_replay_limit == 1
+        assert TriggerConditionDTO(
+            trigger_type="time_based",
+            schedule="0 * * * *",
+            catch_up_replay_limit=100,
+        ).catch_up_replay_limit == 100
+
+        with pytest.raises(ValidationError):
+            TriggerConditionDTO(
+                trigger_type="time_based",
+                schedule="0 * * * *",
+                catch_up_replay_limit=0,
+            )
+        with pytest.raises(ValidationError):
+            TriggerConditionDTO(
+                trigger_type="time_based",
+                schedule="0 * * * *",
+                catch_up_replay_limit=101,
+            )
+
 class TestRelationshipAPI:
     def test_create_relationship(self):
         from memoria.api.relationship import RelationshipCreateRequest as CreateRelationshipRequest
@@ -138,9 +167,11 @@ class TestCodeReviewFixesAPI:
             action="wave",
             current_affinity=20,
             current_trust=15,
+            world_created_at="2026-07-14T08:30:00+00:00",
             assistant_message_id=99
         )
         assert r.current_trust == 15
+        assert r.world_created_at == "2026-07-14T08:30:00+00:00"
         assert r.assistant_message_id == 99
 
     def test_history_message_with_message_id(self):

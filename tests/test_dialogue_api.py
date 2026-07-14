@@ -2,6 +2,7 @@
 Dialogue API behavior tests.
 """
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -22,6 +23,12 @@ def test_session_start_creates_session_without_llm_opening(monkeypatch):
     monkeypatch.setattr(dialogue.repository, "is_character_card_active", lambda owner_user_id, character_id: True)
     monkeypatch.setattr(dialogue.character_loader, "load_character_card", lambda character_id, owner_user_id=None: SimpleNamespace())
     monkeypatch.setattr(dialogue.repository, "get_runtime_state", lambda *args, **kwargs: {"affection_level": 12})
+    world_now = datetime(2026, 7, 14, 8, 30, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        dialogue.world_clock,
+        "get_clock_snapshot",
+        lambda player_id: SimpleNamespace(world_now=world_now),
+    )
     monkeypatch.setattr(
         dialogue.repository,
         "create_session",
@@ -47,6 +54,7 @@ def test_session_start_creates_session_without_llm_opening(monkeypatch):
     assert res.session_id == created["session_id"]
     assert created["character_id"] == "char-1"
     assert res.opening_line == ""
+    assert res.world_created_at == world_now.isoformat()
     assert res.recovered is False
     assert res.messages == []
 
@@ -67,6 +75,53 @@ def test_session_start_rejects_disabled_character_without_existing_session(monke
 
     assert exc_info.value.status_code == 400
     assert "角色卡已禁用" in exc_info.value.detail
+
+
+def test_session_start_recovers_latest_message_world_timestamp(monkeypatch):
+    from memoria.api import dialogue
+
+    world_created_at = "2026-07-13T21:15:00+00:00"
+    monkeypatch.setattr(dialogue.repository, "get_all_player_sessions", lambda player_id: [])
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_latest_active_session",
+        lambda player_id, character_id=None: {"session_id": "session-1"},
+    )
+    monkeypatch.setattr(
+        dialogue,
+        "_current_character_state",
+        lambda character_id, player_id: (12, 8, "neutral"),
+    )
+    monkeypatch.setattr(
+        dialogue,
+        "_messages_for_session",
+        lambda session_id: [
+            dialogue.HistoryMessage(
+                role="assistant",
+                content="晚上好。",
+                world_created_at=world_created_at,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        dialogue.world_clock,
+        "get_clock_snapshot",
+        lambda player_id: pytest.fail("stored message timestamp should avoid a clock fallback"),
+    )
+
+    res = dialogue.session_start(
+        dialogue.SessionStartRequest(
+            character_id="char-1",
+            player_id="player-1",
+            player_name="Tester",
+        ),
+        BackgroundTasks(),
+        current_user_id="player-1",
+    )
+
+    assert res.recovered is True
+    assert res.world_created_at == world_created_at
+    assert res.messages[0].world_created_at == world_created_at
 
 
 def test_dialogue_turn_rejects_disabled_character(monkeypatch):

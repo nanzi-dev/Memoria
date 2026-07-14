@@ -87,6 +87,20 @@ function sortEvents(list, sort) {
   return sorted;
 }
 
+function formatScheduleTime(value, timezone) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: timezone,
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date);
+}
+
 function EventStat({ label, value, tone = 'default' }) {
   const toneClass = tone === 'warning'
     ? 'border-amber-400/15 bg-amber-400/[0.04] text-amber-200/80'
@@ -105,7 +119,7 @@ function EventStat({ label, value, tone = 'default' }) {
 export default function EventList() {
   const navigate = useNavigate();
   const dialog = useDialog();
-  const { user, loading: userLoading } = useUser();
+  const { user, loading: userLoading, worldClock } = useUser();
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -450,6 +464,23 @@ export default function EventList() {
                       </div>
                       {evt.description && (
                         <p className="mt-2 line-clamp-2 text-xs leading-5 text-zinc-400/70">{evt.description}</p>
+                      )}
+                      {evt.trigger_type === 'time_based' && (
+                        <div className="mt-2 grid gap-x-4 gap-y-1 text-[10px] font-mono leading-4 text-zinc-500 sm:grid-cols-2">
+                          <span className="truncate" title={evt.next_run_at || ''}>
+                            世界触发：{evt.next_run_at
+                              ? formatScheduleTime(evt.next_run_at, worldClock?.timezone || 'UTC')
+                              : '尚未排期'}
+                          </span>
+                          <span className="truncate" title={evt.next_due_real_at || ''}>
+                            现实预计：{evt.next_due_real_at
+                              ? formatScheduleTime(evt.next_due_real_at, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
+                              : Number(worldClock?.time_scale) === 0 ? '世界时间已暂停' : '尚未计算'}
+                          </span>
+                          {Number(evt.missed_count) > 0 && (
+                            <span className="text-amber-300/75">已合并漏触发 {evt.missed_count} 次</span>
+                          )}
+                        </div>
                       )}
                     </div>
 

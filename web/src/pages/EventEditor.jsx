@@ -575,25 +575,38 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
       )}
 
       {t === 'time_based' && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <label className="text-[10px] font-mono text-cyber-green/40">
-            <span className="mb-1 block">会话时长（分钟）</span>
+        <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-[10px] font-mono text-cyber-green/40">
+              <span className="mb-1 block">会话时长（分钟）</span>
+              <input
+                type="number"
+                min="0"
+                value={condition.duration_minutes ?? ''}
+                onChange={e => update('duration_minutes', e.target.value === '' ? null : Number(e.target.value))}
+                className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+              />
+            </label>
+            <label className="text-[10px] font-mono text-cyber-green/40">
+              <span className="mb-1 block">Cron（5 字段，可替代时长）</span>
+              <input
+                type="text"
+                value={condition.schedule || ''}
+                onChange={e => update('schedule', e.target.value)}
+                placeholder="0 9 * * *"
+                className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+              />
+            </label>
+          </div>
+          <label className="block text-[10px] font-mono text-cyber-green/40">
+            <span className="mb-1 block">补偿重放上限</span>
             <input
               type="number"
-              min="0"
-              value={condition.duration_minutes ?? ''}
-              onChange={e => update('duration_minutes', e.target.value === '' ? null : Number(e.target.value))}
-              className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
-            />
-          </label>
-          <label className="text-[10px] font-mono text-cyber-green/40">
-            <span className="mb-1 block">Cron（5 字段，可替代时长）</span>
-            <input
-              type="text"
-              value={condition.schedule || ''}
-              onChange={e => update('schedule', e.target.value)}
-              placeholder="0 9 * * *"
-              className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+              min="1"
+              max="100"
+              value={condition.catch_up_replay_limit ?? 1}
+              onChange={event => update('catch_up_replay_limit', Math.min(100, Math.max(1, Number(event.target.value) || 1)))}
+              className="min-h-[42px] w-28 rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
             />
           </label>
         </div>

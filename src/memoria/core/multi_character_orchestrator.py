@@ -769,7 +769,12 @@ class MultiCharacterOrchestrator:
             repository.get_last_character_interaction_world_at(
                 self.player_id,
                 character_id,
-            )
+            ),
+            locale=getattr(
+                getattr(card, "speech_style", None),
+                "language",
+                "zh-CN",
+            ),
         )
         # 准备其他角色信息
         other_characters = []
@@ -821,7 +826,8 @@ class MultiCharacterOrchestrator:
             "dialogue": dialogue,
             "action": action,
             "current_affinity": runtime_state.get("affection_level", 0),
-            "current_mood": runtime_state.get("current_mood", "neutral")
+            "current_mood": runtime_state.get("current_mood", "neutral"),
+            "world_created_at": clock_snapshot.world_now.isoformat(),
         }
     
     
@@ -863,7 +869,12 @@ class MultiCharacterOrchestrator:
             repository.get_last_character_interaction_world_at(
                 self.player_id,
                 character_id,
-            )
+            ),
+            locale=getattr(
+                getattr(card, "speech_style", None),
+                "language",
+                "zh-CN",
+            ),
         )
         history = repository.get_multi_character_thread_history(
             self.session_id,
@@ -951,6 +962,7 @@ class MultiCharacterOrchestrator:
             "current_affinity": new_affinity,
             "current_trust": new_trust,
             "current_mood": mood_after,
+            "world_created_at": clock_snapshot.world_now.isoformat(),
             "knowledge_sources": knowledge.sources,
             "_previous_affinity": runtime_state.get("affection_level", 0),
             "_previous_trust": runtime_state.get("trust_level", 0),
@@ -1006,7 +1018,12 @@ class MultiCharacterOrchestrator:
             repository.get_last_character_interaction_world_at(
                 self.player_id,
                 trigger_character_id,
-            )
+            ),
+            locale=getattr(
+                getattr(card, "speech_style", None),
+                "language",
+                "zh-CN",
+            ),
         )
         history = repository.get_multi_character_thread_history(
             self.session_id,
@@ -1087,6 +1104,7 @@ class MultiCharacterOrchestrator:
             "character_name": character_name,
             "dialogue": dialogue,
             "action": action,
+            "world_created_at": clock_snapshot.world_now.isoformat(),
             "knowledge_sources": knowledge.sources,
         }
     

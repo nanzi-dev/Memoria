@@ -55,6 +55,7 @@ class TriggerCondition(BaseModel):
     # 时间条件
     duration_minutes: Optional[int] = None         # 会话时长（分钟）
     schedule: Optional[str] = None                 # cron 式调度表达式（简化为 5 字段 cron）
+    catch_up_replay_limit: int = Field(default=1, ge=1, le=100)
     
     # 情绪条件
     mood: Optional[str] = None                     # 目标情绪

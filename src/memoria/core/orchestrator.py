@@ -551,7 +551,8 @@ def start_session(
     runtime_state = repository.get_runtime_state(character_id, player_id, card)
     clock_snapshot = world_clock.get_clock_snapshot(player_id)
     time_context = clock_snapshot.prompt_context(
-        repository.get_last_character_interaction_world_at(player_id, character_id)
+        repository.get_last_character_interaction_world_at(player_id, character_id),
+        locale=getattr(getattr(card, "speech_style", None), "language", "zh-CN"),
     )
     
     session_id = str(uuid.uuid4())
@@ -607,6 +608,7 @@ def start_session(
         "action": result.get("action", card.action_vocabulary.default_action),
         "current_affinity": runtime_state.get("affection_level", 0),
         "current_trust": runtime_state.get("trust_level", 0),
+        "world_created_at": clock_snapshot.world_now.isoformat(),
         "assistant_message_id": assistant_msg_id,
     }
     
@@ -632,12 +634,12 @@ def run_dialogue_turn(
     character_id = session["character_id"]
     player_id = session["player_id"]
     player_name = session["player_name"]
+    card = character_loader.load_character_card(character_id, player_id)
     clock_snapshot = world_clock.get_clock_snapshot(player_id)
     time_context = clock_snapshot.prompt_context(
-        repository.get_last_character_interaction_world_at(player_id, character_id)
+        repository.get_last_character_interaction_world_at(player_id, character_id),
+        locale=getattr(getattr(card, "speech_style", None), "language", "zh-CN"),
     )
-    
-    card = character_loader.load_character_card(character_id, player_id)
     
     # 使用玩家消息作为查询上下文，进行向量检索
     runtime_state = repository.get_runtime_state(
@@ -880,5 +882,6 @@ def run_dialogue_turn(
         "event_notification": event_notification,
         "user_message_id": user_msg_id,
         "assistant_message_id": assistant_msg_id,
+        "world_created_at": clock_snapshot.world_now.isoformat(),
         "knowledge_sources": knowledge.sources,
     }

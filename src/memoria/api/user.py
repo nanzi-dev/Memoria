@@ -11,7 +11,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Header, Response, Cookie, Depends, Query
-from pydantic import BaseModel, StrictInt
+from pydantic import BaseModel, Field, StrictInt
 
 from memoria.api.avatar_fetcher import download_remote_image
 from memoria.core.config import configs
@@ -180,16 +180,44 @@ class UpdateProfileRequest(BaseModel):
 class SetAvatarUrlRequest(BaseModel):
     url: str
 
+class NextScheduledEventResponse(BaseModel):
+    event_id: str
+    event_name: str | None = None
+    character_id: str
+    next_run_at: str
+    next_due_real_at: str | None = None
+    missed_count: int = 0
+
+
 class WorldClockResponse(BaseModel):
     world_now: str
     real_now: str
     timezone: str
+    timezone_mode: str
     time_scale: int
     paused: bool
+    clock_revision: int
+    real_offset_seconds: int
+    next_event: NextScheduledEventResponse | None = None
+
 
 class UpdateWorldClockRequest(BaseModel):
+    expected_revision: StrictInt
     timezone: str | None = None
+    timezone_mode: str | None = None
     time_scale: StrictInt | None = None
+
+
+class ClockRevisionRequest(BaseModel):
+    expected_revision: StrictInt
+
+
+class SetWorldClockRequest(ClockRevisionRequest):
+    world_now: str
+
+
+class AdvanceWorldClockRequest(ClockRevisionRequest):
+    seconds: StrictInt = Field(gt=0, le=366 * 24 * 60 * 60)
 
 class UserResponse(BaseModel):
     user_id: str
@@ -197,10 +225,14 @@ class UserResponse(BaseModel):
     gender: str
     avatar_url: str | None = None
     timezone: str
+    timezone_mode: str
     time_scale: int
     paused: bool
     world_now: str
     real_now: str
+    clock_revision: int
+    real_offset_seconds: int
+    next_event: NextScheduledEventResponse | None = None
 
 class EventInboxItem(BaseModel):
     id: int
@@ -225,14 +257,42 @@ class OperationResponse(BaseModel):
 
 
 def _build_user_response(user: dict) -> UserResponse:
-    clock = world_clock.get_clock_snapshot(user["user_id"]).to_api_dict()
+    clock = _build_world_clock_response(
+        world_clock.get_clock_snapshot(user["user_id"])
+    )
     return UserResponse(
         user_id=user["user_id"],
         username=user["username"],
         gender=user["gender"],
         avatar_url=user.get("avatar_url"),
-        **clock,
+        **clock.model_dump(),
     )
+
+
+def _build_world_clock_response(
+    snapshot: world_clock.WorldClockSnapshot,
+) -> WorldClockResponse:
+    next_schedule = repository.get_next_event_schedule(snapshot.player_id)
+    next_event = None
+    if next_schedule:
+        next_event = NextScheduledEventResponse(
+            event_id=next_schedule["event_id"],
+            event_name=next_schedule.get("event_name"),
+            character_id=next_schedule["character_id"],
+            next_run_at=next_schedule["next_run_at"],
+            next_due_real_at=next_schedule.get("next_due_real_at"),
+            missed_count=int(next_schedule.get("missed_count") or 0),
+        )
+    return WorldClockResponse(**snapshot.to_api_dict(), next_event=next_event)
+
+
+def _raise_clock_http_error(exc: ValueError) -> None:
+    if isinstance(
+        exc,
+        (world_clock.ClockRevisionConflict, world_clock.ClockScheduleBusy),
+    ):
+        raise HTTPException(409, str(exc)) from exc
+    raise HTTPException(400, str(exc)) from exc
 
 
 # =========================
@@ -346,7 +406,7 @@ def update_profile(
 # =========================
 @router.get("/user/world-clock", response_model=WorldClockResponse)
 def get_world_clock(user_id: str = Depends(require_current_user_id)):
-    return WorldClockResponse(**world_clock.get_clock_snapshot(user_id).to_api_dict())
+    return _build_world_clock_response(world_clock.get_clock_snapshot(user_id))
 
 
 @router.put("/user/world-clock", response_model=WorldClockResponse)
@@ -358,16 +418,60 @@ def put_world_clock(
         snapshot = world_clock.update_clock(
             user_id,
             timezone_name=req.timezone,
+            timezone_mode=req.timezone_mode,
             time_scale=req.time_scale,
+            expected_revision=req.expected_revision,
         )
     except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    return WorldClockResponse(**snapshot.to_api_dict())
+        _raise_clock_http_error(exc)
+    return _build_world_clock_response(snapshot)
 
 
 @router.post("/user/world-clock/sync", response_model=WorldClockResponse)
-def sync_world_clock(user_id: str = Depends(require_current_user_id)):
-    return WorldClockResponse(**world_clock.sync_clock(user_id).to_api_dict())
+def sync_world_clock(
+    req: ClockRevisionRequest,
+    user_id: str = Depends(require_current_user_id),
+):
+    try:
+        snapshot = world_clock.sync_clock(
+            user_id,
+            expected_revision=req.expected_revision,
+        )
+    except ValueError as exc:
+        _raise_clock_http_error(exc)
+    return _build_world_clock_response(snapshot)
+
+
+@router.post("/user/world-clock/set", response_model=WorldClockResponse)
+def set_world_clock(
+    req: SetWorldClockRequest,
+    user_id: str = Depends(require_current_user_id),
+):
+    try:
+        snapshot = world_clock.set_clock(
+            user_id,
+            req.world_now,
+            expected_revision=req.expected_revision,
+        )
+    except ValueError as exc:
+        _raise_clock_http_error(exc)
+    return _build_world_clock_response(snapshot)
+
+
+@router.post("/user/world-clock/advance", response_model=WorldClockResponse)
+def advance_world_clock(
+    req: AdvanceWorldClockRequest,
+    user_id: str = Depends(require_current_user_id),
+):
+    try:
+        snapshot = world_clock.advance_clock(
+            user_id,
+            timedelta(seconds=req.seconds),
+            expected_revision=req.expected_revision,
+        )
+    except ValueError as exc:
+        _raise_clock_http_error(exc)
+    return _build_world_clock_response(snapshot)
 
 
 @router.get("/user/event-inbox", response_model=list[EventInboxItem])
