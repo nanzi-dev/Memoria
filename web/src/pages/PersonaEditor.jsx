@@ -99,8 +99,8 @@ function Field({ id, label, error, limit, value, children }) {
 
 function SectionTitle({ icon: Icon, title }) {
   return (
-    <div className="flex items-center gap-2 border-b border-white/[0.06] pb-3">
-      <Icon size={15} className="text-cyan-200/70" />
+    <div className="memoria-section-heading">
+      <Icon size={15} />
       <h2 className="text-xs font-bold tracking-wider text-zinc-200">{title}</h2>
     </div>
   );
@@ -235,7 +235,7 @@ export default function PersonaEditor() {
 
   if (userLoading || loading) {
     return (
-      <div className="min-h-dvh character-editor-page flex items-center justify-center" role="status">
+      <div className="min-h-dvh character-editor-page memoria-app-page flex items-center justify-center" role="status">
         <Loader2 className="animate-spin text-cyber-green" size={32} />
         <span className="sr-only">正在加载角色卡</span>
       </div>
@@ -244,8 +244,8 @@ export default function PersonaEditor() {
 
   if (error && !card.display_name) {
     return (
-      <div className="min-h-dvh character-editor-page flex items-center justify-center px-4">
-        <div className="w-full max-w-md rounded-lg border border-red-400/25 bg-[#120f17] p-6 text-center">
+      <div className="min-h-dvh character-editor-page memoria-app-page flex items-center justify-center px-4">
+        <div className="memoria-panel w-full max-w-md p-6 text-center">
           <AlertCircle className="mx-auto text-red-300/70" size={28} />
           <p className="mt-3 break-words text-sm text-red-200/80">{error}</p>
           <div className="mt-5 flex justify-center gap-2">
@@ -262,8 +262,8 @@ export default function PersonaEditor() {
   }
 
   return (
-    <div className="min-h-dvh character-editor-page font-mono">
-      <header className="sticky top-0 z-20 border-b border-cyber-green/18 bg-[#100d14]/92 backdrop-blur-xl">
+    <div className="min-h-dvh character-editor-page memoria-app-page font-mono">
+      <header className="memoria-app-header sticky top-0 z-20 border-b">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-3 py-3 sm:px-5">
           <button
             type="button"
@@ -274,7 +274,7 @@ export default function PersonaEditor() {
           </button>
           <div className="order-first basis-full text-center sm:order-none sm:basis-auto sm:text-left">
             <h1 className="font-display text-base tracking-widest text-cyber-green">PLAYER PERSONA</h1>
-            <p className="mt-1 text-[10px] text-cyan-200/40">{card.node_id || user?.role_summary?.node_id}</p>
+            <p className="mt-1 text-[10px] text-cyber-green/35">{card.node_id || user?.role_summary?.node_id}</p>
           </div>
           <button
             type="submit"
@@ -290,20 +290,20 @@ export default function PersonaEditor() {
 
       <main className="relative z-[1] mx-auto grid max-w-6xl gap-5 px-3 py-5 sm:px-5 lg:grid-cols-[280px_minmax(0,1fr)] lg:items-start">
         <aside className="space-y-4 lg:sticky lg:top-[86px]">
-          <section className="memoria-glass rounded-lg p-4">
+          <section className="memoria-panel p-4">
             <SectionTitle icon={ImagePlus} title="扮演头像" />
             <div className="mt-5 flex flex-col items-center">
-              <div className="relative h-32 w-32 overflow-hidden rounded-full border-2 border-cyan-300/45 bg-[#08090b] shadow-[0_0_28px_rgba(103,232,249,0.1)]">
+              <div className="memoria-avatar-ring relative h-32 w-32 overflow-hidden rounded-full border-2 border-cyber-green/35 bg-[#08090b]">
                 {card.avatar_url ? (
                   <img src={card.avatar_url} alt={`${card.display_name || '角色'}的扮演头像`} className="h-full w-full object-cover" />
                 ) : (
-                  <div className="flex h-full w-full items-center justify-center text-cyan-200/25">
+                  <div className="flex h-full w-full items-center justify-center text-cyber-green/25">
                     <Contact size={52} />
                   </div>
                 )}
                 {avatarSaving && (
                   <div className="absolute inset-0 flex items-center justify-center bg-black/70">
-                    <Loader2 size={24} className="animate-spin text-cyan-200" />
+                    <Loader2 size={24} className="animate-spin text-cyber-green" />
                   </div>
                 )}
               </div>
@@ -318,7 +318,7 @@ export default function PersonaEditor() {
                 type="button"
                 onClick={() => fileRef.current?.click()}
                 disabled={avatarSaving}
-                className="mt-4 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] text-xs text-cyan-100/80 transition-colors hover:bg-cyan-300/10 disabled:opacity-40"
+                className="memoria-button memoria-button-primary mt-4 w-full disabled:opacity-40"
               >
                 <Upload size={15} /> 上传扮演头像
               </button>
@@ -342,7 +342,7 @@ export default function PersonaEditor() {
                   type="button"
                   onClick={handleAvatarUrl}
                   disabled={avatarSaving || (!avatarUrl.trim() && !card.avatar_url)}
-                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-cyan-300/20 text-cyan-100/70 hover:bg-cyan-300/10 disabled:opacity-30"
+                  className="memoria-icon-button shrink-0 border border-cyber-green/20 text-cyber-green/70 hover:bg-cyber-green/[0.08] disabled:opacity-30"
                   aria-label={avatarUrl.trim() ? '从链接设置扮演头像' : '清除扮演头像'}
                   title={avatarUrl.trim() ? '设置头像链接' : '清除头像'}
                 >
@@ -352,7 +352,7 @@ export default function PersonaEditor() {
             </div>
           </section>
 
-          <section className="rounded-lg border border-white/[0.07] bg-black/15 p-4">
+          <section className="memoria-panel-muted p-4">
             <div className="flex items-center justify-between gap-3">
               <span className="text-[10px] tracking-wider text-zinc-600">账户身份</span>
               <BadgeCheck size={14} className="text-cyber-green/45" />

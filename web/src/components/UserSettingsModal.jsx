@@ -37,8 +37,6 @@ function validateUsername(name) {
   return null;
 }
 
-const GENDER_LABEL = { male: '男', female: '女', unknown: '保密' };
-
 function worldDateTimeInput(date) {
   if (!date) return '';
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {

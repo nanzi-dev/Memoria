@@ -17,8 +17,8 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException
 
 from memoria.api.user import require_admin_user_id, require_current_user_id
+from memoria.core.cron_schedule import next_cron_run, validate_cron_schedule
 from memoria.core.event_schema import (
-    EventDefinition,
     TriggerCondition,
     EventEffect,
     TriggerType,
@@ -306,7 +306,7 @@ def sanitize_schedule(value: str | None) -> str | None:
 
 def _validate_cron(schedule: str) -> None:
     try:
-        event_runtime.validate_cron_schedule(schedule)
+        validate_cron_schedule(schedule)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=f"cron 表达式无效: {exc}") from exc
 
@@ -1118,7 +1118,7 @@ def resume_event_schedule(
         raise HTTPException(status_code=404, detail="事件调度不存在")
     snapshot = event_runtime.world_clock.get_clock_snapshot(current_user_id)
     try:
-        next_run_at = event_runtime.next_cron_run(
+        next_run_at = next_cron_run(
             schedule_state["schedule"],
             snapshot.world_now,
             timezone_name=snapshot.timezone,

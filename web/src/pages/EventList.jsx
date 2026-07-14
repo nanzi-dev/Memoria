@@ -235,14 +235,14 @@ export default function EventList() {
   const isAuthBlocked = !user || isAuthError;
 
   return (
-    <div className="relative min-h-screen overflow-x-hidden memoria-page">
+    <div className="relative min-h-dvh overflow-x-hidden memoria-page memoria-app-page">
       <SideRays {...EVENT_RAYS_PROPS} className="side-rays-event" />
 
-      <div className="sticky top-0 z-20 border-b border-cyber-green/10 bg-[#0b0b0c]/88 backdrop-blur-xl">
+      <div className="memoria-app-header sticky top-0 z-20 border-b">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <button
             onClick={() => navigate('/')}
-            className="flex min-h-[40px] items-center gap-2 rounded-lg px-2.5 text-sm font-mono text-cyber-green/55 transition-all hover:bg-cyber-green/5 hover:text-cyber-green"
+            className="flex min-h-[44px] items-center gap-2 rounded-lg px-2.5 text-sm font-mono text-cyber-green/55 transition-all hover:bg-cyber-green/5 hover:text-cyber-green"
           >
             <ArrowLeft size={16} />
             Home
@@ -259,7 +259,9 @@ export default function EventList() {
             <button
               onClick={() => loadEvents({ soft: true })}
               disabled={isAuthBlocked || loading || refreshing}
-              className="flex min-h-[40px] items-center gap-2 rounded-lg border border-cyber-green/15 px-3 text-xs font-mono text-cyber-green/60 transition-all hover:border-cyber-green/30 hover:bg-cyber-green/5 hover:text-cyber-green disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label="刷新事件列表"
+              title="刷新"
+              className="flex min-h-[44px] min-w-[44px] items-center justify-center gap-2 rounded-lg border border-cyber-green/15 px-3 text-xs font-mono text-cyber-green/60 transition-all hover:border-cyber-green/30 hover:bg-cyber-green/5 hover:text-cyber-green disabled:cursor-not-allowed disabled:opacity-40"
             >
               <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
               <span className="hidden sm:inline">刷新</span>
@@ -267,7 +269,7 @@ export default function EventList() {
             <button
               onClick={() => navigate('/events/new')}
               disabled={isAuthBlocked || loading}
-              className="flex min-h-[40px] items-center gap-2 rounded-lg border border-cyber-green/30 bg-cyber-green/12 px-4 text-xs font-bold text-cyber-green transition-all hover:bg-cyber-green/20 hover:shadow-[0_0_24px_rgba(167,239,158,0.12)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-cyber-green/12 disabled:hover:shadow-none disabled:active:scale-100"
+              className="flex min-h-[44px] items-center gap-2 rounded-lg border border-cyber-green/30 bg-cyber-green/12 px-4 text-xs font-bold text-cyber-green transition-all hover:bg-cyber-green/20 hover:shadow-[0_0_24px_rgba(167,239,158,0.12)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-cyber-green/12 disabled:hover:shadow-none disabled:active:scale-100"
             >
               <Plus size={14} />
               New
@@ -285,7 +287,7 @@ export default function EventList() {
               <button
                 key={opt.value}
                 onClick={() => setFilter(opt.value)}
-                className={`min-h-[34px] rounded-lg border px-3 text-[11px] font-mono transition-all ${
+                className={`min-h-[44px] rounded-lg border px-3 text-[11px] font-mono transition-all ${
                   filter === opt.value
                     ? 'border-cyber-green/35 bg-cyber-green/12 text-cyber-green'
                     : 'border-cyber-green/10 bg-cyber-surface/45 text-cyber-green/45 hover:border-cyber-green/25 hover:text-cyber-green/75'
@@ -304,13 +306,14 @@ export default function EventList() {
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="搜索名称、ID、角色、描述..."
-                className="min-h-[38px] w-full rounded-lg border border-cyber-green/12 bg-cyber-surface/70 pl-9 pr-9 text-xs font-mono text-cyber-green/85 outline-none transition-all placeholder:text-cyber-green/22 focus:border-cyber-green/42 focus:ring-2 focus:ring-cyber-green/10"
+                className="min-h-[44px] w-full rounded-lg border border-cyber-green/12 bg-cyber-surface/70 pl-9 pr-9 text-xs font-mono text-cyber-green/85 outline-none transition-all placeholder:text-cyber-green/22 focus:border-cyber-green/42 focus:ring-2 focus:ring-cyber-green/10"
               />
               {search && (
                 <button
                   onClick={() => setSearch('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-cyber-green/35 transition-colors hover:bg-cyber-green/8 hover:text-cyber-green"
+                  className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-md text-cyber-green/35 transition-colors hover:bg-cyber-green/8 hover:text-cyber-green"
                   aria-label="清空搜索"
+                  title="清空搜索"
                 >
                   <X size={14} />
                 </button>
@@ -320,7 +323,7 @@ export default function EventList() {
             <select
               value={triggerFilter}
               onChange={e => setTriggerFilter(e.target.value)}
-              className="min-h-[38px] rounded-lg border border-cyber-green/12 bg-cyber-surface/70 px-3 text-xs font-mono text-cyber-green/70 outline-none transition-all focus:border-cyber-green/42 focus:ring-2 focus:ring-cyber-green/10"
+              className="min-h-[44px] rounded-lg border border-cyber-green/12 bg-cyber-surface/70 px-3 text-xs font-mono text-cyber-green/70 outline-none transition-all focus:border-cyber-green/42 focus:ring-2 focus:ring-cyber-green/10"
             >
               <option value="all">全部触发类型</option>
               {TRIGGER_TYPES.map(type => (
@@ -331,7 +334,7 @@ export default function EventList() {
             <select
               value={sort}
               onChange={e => setSort(e.target.value)}
-              className="min-h-[38px] rounded-lg border border-cyber-green/12 bg-cyber-surface/70 px-3 text-xs font-mono text-cyber-green/70 outline-none transition-all focus:border-cyber-green/42 focus:ring-2 focus:ring-cyber-green/10"
+              className="min-h-[44px] rounded-lg border border-cyber-green/12 bg-cyber-surface/70 px-3 text-xs font-mono text-cyber-green/70 outline-none transition-all focus:border-cyber-green/42 focus:ring-2 focus:ring-cyber-green/10"
             >
               {SORT_OPTIONS.map(opt => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -363,7 +366,7 @@ export default function EventList() {
             <p className="text-sm font-mono text-red-200/80">{error}</p>
             <button
               onClick={isAuthError ? () => navigate('/') : () => loadEvents()}
-              className="inline-flex min-h-[38px] items-center justify-center gap-2 rounded-lg border border-red-300/20 px-3 text-xs font-mono text-red-200/80 transition-all hover:bg-red-400/10"
+              className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-red-300/20 px-3 text-xs font-mono text-red-200/80 transition-all hover:bg-red-400/10"
             >
               {!isAuthError && <RefreshCw size={14} />}
               {isAuthError ? '返回首页登录' : '重试'}
@@ -390,14 +393,14 @@ export default function EventList() {
               {events.length === 0 ? (
                 <button
                   onClick={() => navigate('/events/new')}
-                  className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-cyber-green/25 bg-cyber-green/10 px-4 text-xs font-bold text-cyber-green transition-colors hover:bg-cyber-green/20"
+                  className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-cyber-green/25 bg-cyber-green/10 px-4 text-xs font-bold text-cyber-green transition-colors hover:bg-cyber-green/20"
                 >
                   <Plus size={14} /> 创建第一个事件
                 </button>
               ) : (
                 <button
                   onClick={() => { setSearch(''); setFilter('all'); setTriggerFilter('all'); }}
-                  className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-cyber-green/18 px-4 text-xs font-mono text-cyber-green/65 transition-colors hover:bg-cyber-green/8 hover:text-cyber-green"
+                  className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-cyber-green/18 px-4 text-xs font-mono text-cyber-green/65 transition-colors hover:bg-cyber-green/8 hover:text-cyber-green"
                 >
                   <X size={14} /> 清空筛选
                 </button>
@@ -416,7 +419,7 @@ export default function EventList() {
                 </div>
                 <button
                   onClick={() => { setSearch(''); setFilter('all'); setTriggerFilter('all'); }}
-                  className="text-[11px] font-mono text-cyber-green/45 transition-colors hover:text-cyber-green"
+                  className="min-h-11 rounded-lg px-2 text-[11px] font-mono text-cyber-green/45 transition-colors hover:bg-cyber-green/[0.05] hover:text-cyber-green"
                 >
                   清空筛选
                 </button>
@@ -498,7 +501,8 @@ export default function EventList() {
                         onClick={e => { e.stopPropagation(); handleToggle(evt); }}
                         disabled={busy}
                         title={evt.is_active ? '禁用' : '启用'}
-                        className={`flex h-9 w-9 items-center justify-center rounded-lg transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-45 ${
+                        aria-label={evt.is_active ? `禁用事件 ${evt.event_name || evt.event_id}` : `启用事件 ${evt.event_name || evt.event_id}`}
+                        className={`flex h-11 w-11 items-center justify-center rounded-lg transition-all active:scale-95 disabled:cursor-not-allowed disabled:opacity-45 ${
                           evt.is_active
                             ? 'text-cyber-green/55 hover:bg-cyber-green/10 hover:text-cyber-green'
                             : 'text-zinc-500 hover:bg-cyber-green/8 hover:text-cyber-green/70'
@@ -510,7 +514,8 @@ export default function EventList() {
                         onClick={e => { e.stopPropagation(); handleDelete(evt); }}
                         disabled={busy}
                         title="删除"
-                        className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 transition-all hover:bg-red-400/8 hover:text-red-300 active:scale-95 disabled:cursor-not-allowed disabled:opacity-45"
+                        aria-label={`删除事件 ${evt.event_name || evt.event_id}`}
+                        className="flex h-11 w-11 items-center justify-center rounded-lg text-zinc-500 transition-all hover:bg-red-400/8 hover:text-red-300 active:scale-95 disabled:cursor-not-allowed disabled:opacity-45"
                       >
                         <Trash2 size={15} />
                       </button>

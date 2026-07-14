@@ -96,14 +96,14 @@ const STATUS_FILTERS = [
   { id: 'disabled', label: '已停用' },
 ];
 
-function SummaryMetric({ icon: Icon, label, value, tone = 'cyan' }) {
+function SummaryMetric({ icon: Icon, label, value, tone = 'green' }) {
   const toneClass = tone === 'green'
     ? 'bg-cyber-green/10 text-cyber-green'
     : tone === 'amber'
     ? 'bg-amber-300/10 text-amber-200'
     : tone === 'muted'
     ? 'bg-white/[0.05] text-zinc-400'
-    : 'bg-cyan-300/10 text-cyan-200';
+    : 'bg-cyber-green/10 text-cyber-green';
 
   return (
     <div className="flex min-w-0 items-center gap-3">
@@ -339,29 +339,15 @@ export default function KnowledgeManager() {
   }
 
   return (
-    <div className="relative min-h-dvh overflow-x-hidden bg-[#090d11] font-character text-zinc-100">
-      <div
-        className="pointer-events-none fixed inset-0 opacity-70"
-        aria-hidden="true"
-        style={{
-          backgroundImage: [
-            'linear-gradient(rgba(154, 215, 255, 0.025) 1px, transparent 1px)',
-            'linear-gradient(90deg, rgba(154, 215, 255, 0.02) 1px, transparent 1px)',
-            'radial-gradient(circle at 12% 8%, rgba(167, 239, 158, 0.08), transparent 26rem)',
-            'radial-gradient(circle at 88% 0%, rgba(154, 215, 255, 0.07), transparent 28rem)',
-          ].join(','),
-          backgroundSize: '40px 40px, 40px 40px, auto, auto',
-        }}
-      />
-
+    <div className="memoria-page memoria-app-page relative min-h-dvh overflow-x-hidden font-character text-zinc-100">
       <a
         href="#knowledge-workspace"
-        className="fixed left-4 top-3 z-50 -translate-y-20 rounded-lg bg-cyber-green px-3 py-2 text-sm font-semibold text-[#09100b] transition-transform focus:translate-y-0"
+        className="memoria-skip-link"
       >
         跳到知识库工作区
       </a>
 
-      <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-[#090d11]/92 backdrop-blur-xl">
+      <header className="memoria-app-header sticky top-0 z-30 border-b">
         <div className="mx-auto flex max-w-[1480px] items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <button
@@ -388,7 +374,7 @@ export default function KnowledgeManager() {
               disabled={isAuthBlocked || loading || refreshing}
               aria-label="刷新知识库"
               title="刷新"
-              className="flex h-11 w-11 items-center justify-center rounded-lg border border-white/[0.08] text-zinc-400 transition-colors hover:border-cyan-300/25 hover:bg-cyan-300/[0.06] hover:text-cyan-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/35 disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex h-11 w-11 items-center justify-center rounded-lg border border-white/[0.08] text-zinc-400 transition-colors hover:border-cyber-green/25 hover:bg-cyber-green/[0.06] hover:text-cyber-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
             </button>
@@ -424,14 +410,14 @@ export default function KnowledgeManager() {
         </FadeContent>
 
         <div className="grid items-start gap-4 lg:grid-cols-[minmax(290px,360px)_minmax(0,1fr)] lg:gap-5">
-          <aside className="overflow-hidden rounded-lg border border-white/[0.08] bg-[#0d1217]/92 shadow-[0_18px_60px_rgba(0,0,0,0.22)]">
+          <aside className="memoria-panel overflow-hidden">
             <div className="border-b border-white/[0.07] p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-semibold text-zinc-100">资料库</h2>
                   <p className="mt-1 text-xs text-zinc-500">{filtered.length} 个结果</p>
                 </div>
-                <Database size={18} className="text-cyan-200/65" />
+                <Database size={18} className="text-cyber-green/65" />
               </div>
 
               <label htmlFor="knowledge-search" className="mt-4 block text-xs font-medium text-zinc-400">
@@ -445,7 +431,7 @@ export default function KnowledgeManager() {
                   value={search}
                   onChange={event => setSearch(event.target.value)}
                   placeholder="名称、描述或 ID"
-                  className="min-h-11 w-full rounded-lg border border-white/[0.08] bg-[#090d11] pl-9 pr-10 text-sm text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-cyan-300/35 focus:ring-2 focus:ring-cyan-300/10"
+                  className="min-h-11 w-full rounded-lg border border-cyber-green/12 bg-black/25 pl-9 pr-10 text-sm text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-cyber-green/40 focus:ring-2 focus:ring-cyber-green/10"
                 />
                 {search && (
                   <button
@@ -453,7 +439,7 @@ export default function KnowledgeManager() {
                     onClick={() => setSearch('')}
                     aria-label="清空搜索"
                     title="清空搜索"
-                    className="absolute right-1 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.05] hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/35"
+                    className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.05] hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35"
                   >
                     <X size={15} />
                   </button>
@@ -467,9 +453,9 @@ export default function KnowledgeManager() {
                     type="button"
                     onClick={() => setStatusFilter(option.id)}
                     aria-pressed={statusFilter === option.id}
-                    className={`min-h-11 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/35 ${
+                    className={`min-h-11 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35 ${
                       statusFilter === option.id
-                        ? 'bg-white/[0.09] text-zinc-100 shadow-sm'
+                        ? 'bg-cyber-green/[0.09] text-cyber-green shadow-sm'
                         : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
                     }`}
                   >
@@ -488,7 +474,7 @@ export default function KnowledgeManager() {
                 <button
                   type="button"
                   onClick={isAuthError ? () => navigate('/') : () => loadBases()}
-                  className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-lg border border-red-300/20 px-3 text-xs font-medium text-red-100/80 transition-colors hover:bg-red-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/35"
+                  className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg border border-red-300/20 px-3 text-xs font-medium text-red-100/80 transition-colors hover:bg-red-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/35"
                 >
                   {!isAuthError && <RefreshCw size={14} />}
                   {isAuthError ? '返回首页登录' : '重新加载'}
@@ -518,7 +504,7 @@ export default function KnowledgeManager() {
                   onClick={bases.length === 0
                     ? () => setShowCreateModal(true)
                     : () => { setSearch(''); setStatusFilter('all'); }}
-                  className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-lg border border-white/[0.09] px-3 text-xs font-medium text-zinc-300 transition-colors hover:bg-white/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/35"
+                  className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-lg border border-white/[0.09] px-3 text-xs font-medium text-zinc-300 transition-colors hover:bg-white/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35"
                 >
                   {bases.length === 0 ? <Plus size={14} /> : <X size={14} />}
                   {bases.length === 0 ? '创建知识库' : '清除筛选'}
@@ -539,16 +525,16 @@ export default function KnowledgeManager() {
                         type="button"
                         onClick={() => handleSelectBase(base)}
                         aria-current={isSelected ? 'true' : undefined}
-                        className={`group relative w-full rounded-lg border px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/35 ${
+                        className={`group relative w-full rounded-lg border px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35 ${
                           isSelected
-                            ? 'border-cyan-300/25 bg-cyan-300/[0.075]'
+                            ? 'border-cyber-green/25 bg-cyber-green/[0.07]'
                             : 'border-transparent hover:border-white/[0.07] hover:bg-white/[0.035]'
                         } ${base.is_enabled ? '' : 'opacity-65 hover:opacity-90'}`}
                       >
                         <span className={`absolute inset-y-3 left-0 w-0.5 rounded-r-full ${base.is_enabled ? 'bg-cyber-green' : 'bg-zinc-600'}`} />
                         <span className="flex items-start gap-3">
                           <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-                            isSelected ? 'bg-cyan-300/10 text-cyan-200' : 'bg-white/[0.045] text-zinc-500'
+                            isSelected ? 'bg-cyber-green/10 text-cyber-green' : 'bg-white/[0.045] text-zinc-500'
                           }`}>
                             <Database size={16} />
                           </span>
@@ -595,7 +581,7 @@ export default function KnowledgeManager() {
                 />
               </FadeContent>
             ) : (
-              <div className="flex min-h-[560px] flex-col items-center justify-center rounded-lg border border-dashed border-white/[0.09] bg-[#0d1217]/55 px-6 text-center">
+              <div className="memoria-panel-muted flex min-h-[560px] flex-col items-center justify-center border-dashed px-6 text-center">
                 <BookOpen size={36} className="text-zinc-700" />
                 <h2 className="mt-4 text-base font-semibold text-zinc-300">选择一个知识库</h2>
                 <p className="mt-2 max-w-sm text-sm leading-6 text-zinc-600">选中左侧知识库后，可在这里管理文档、绑定范围和启用状态。</p>
@@ -721,7 +707,7 @@ function CreateBaseModal({ show, onClose, onSuccess }) {
   return (
     <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4 font-mono">
       <div className="absolute inset-0 bg-black/78 backdrop-blur-md" onClick={onClose} />
-      <div role="dialog" aria-modal="true" aria-labelledby="create-base-title" className="relative w-full max-w-md overflow-hidden rounded-lg border border-cyan-400/20 bg-[#0d0d14]/95 shadow-[0_0_70px_rgba(154,215,255,0.08)] animate-fade-up">
+      <div role="dialog" aria-modal="true" aria-labelledby="create-base-title" className="relative w-full max-w-md overflow-hidden rounded-lg border border-cyber-green/20 bg-[#0d0d14]/95 shadow-[0_0_70px_rgba(167,239,158,0.08)] animate-fade-up">
         <div className="absolute inset-0 pointer-events-none opacity-[0.04]" style={{
           backgroundImage: 'linear-gradient(#9AD7FF 1px, transparent 1px), linear-gradient(90deg, #9AD7FF 1px, transparent 1px)',
           backgroundSize: '20px 20px',
@@ -733,7 +719,7 @@ function CreateBaseModal({ show, onClose, onSuccess }) {
               <h2 id="create-base-title" className="text-sm font-bold tracking-wider text-zinc-100">创建知识库</h2>
               <p className="mt-1 text-[11px] text-zinc-400/70">新建一个独立的知识库</p>
             </div>
-            <button type="button" onClick={onClose} aria-label="关闭创建知识库窗口" className="flex h-10 w-10 items-center justify-center rounded-lg text-cyber-green/40 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40">
+            <button type="button" onClick={onClose} aria-label="关闭创建知识库窗口" className="flex h-11 w-11 items-center justify-center rounded-lg text-cyber-green/40 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40">
               <X size={16} />
             </button>
           </div>
@@ -842,11 +828,11 @@ function EditBaseModal({ show, base, onClose, onSuccess }) {
   return (
     <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4 font-mono">
       <div className="absolute inset-0 bg-black/78 backdrop-blur-md" onClick={onClose} />
-      <div role="dialog" aria-modal="true" aria-labelledby="edit-base-title" className="relative w-full max-w-md overflow-hidden rounded-lg border border-cyan-400/20 bg-[#0d0d14]/95 shadow-[0_0_70px_rgba(154,215,255,0.08)] animate-fade-up">
+      <div role="dialog" aria-modal="true" aria-labelledby="edit-base-title" className="relative w-full max-w-md overflow-hidden rounded-lg border border-cyber-green/20 bg-[#0d0d14]/95 shadow-[0_0_70px_rgba(167,239,158,0.08)] animate-fade-up">
         <form onSubmit={handleSubmit} className="relative p-5">
           <div className="flex items-start justify-between mb-4">
             <h2 id="edit-base-title" className="text-sm font-bold tracking-wider text-zinc-100">编辑知识库</h2>
-            <button type="button" onClick={onClose} aria-label="关闭编辑知识库窗口" className="flex h-10 w-10 items-center justify-center rounded-lg text-cyber-green/40 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40">
+            <button type="button" onClick={onClose} aria-label="关闭编辑知识库窗口" className="flex h-11 w-11 items-center justify-center rounded-lg text-cyber-green/40 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40">
               <X size={16} />
             </button>
           </div>
@@ -959,7 +945,7 @@ function BaseDetailPanel({
   );
 
   return (
-    <section aria-labelledby="base-detail-title" className="overflow-hidden rounded-lg border border-white/[0.08] bg-[#0d1217]/92 shadow-[0_18px_60px_rgba(0,0,0,0.22)]">
+    <section aria-labelledby="base-detail-title" className="memoria-panel overflow-hidden">
       <div className="border-b border-white/[0.07] px-4 py-4 sm:px-5">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="flex min-w-0 items-start gap-3">
@@ -989,7 +975,7 @@ function BaseDetailPanel({
           </div>
 
           <div className="flex shrink-0 items-center gap-1 self-end xl:self-auto">
-            <button type="button" onClick={onEdit} disabled={!base || busy} aria-label="编辑知识库" title="编辑" className="flex h-11 w-11 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-white/[0.05] hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/35 disabled:cursor-not-allowed disabled:opacity-40">
+            <button type="button" onClick={onEdit} disabled={!base || busy} aria-label="编辑知识库" title="编辑" className="flex h-11 w-11 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-white/[0.05] hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35 disabled:cursor-not-allowed disabled:opacity-40">
               <Edit2 size={16} />
             </button>
             <button type="button" onClick={onToggle} disabled={!base || busy} aria-label={base?.is_enabled ? '停用知识库' : '启用知识库'} title={base?.is_enabled ? '停用' : '启用'} className="flex h-11 w-11 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-cyber-green/[0.07] hover:text-cyber-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35 disabled:cursor-not-allowed disabled:opacity-40">
@@ -1013,7 +999,7 @@ function BaseDetailPanel({
       {!loading && error && (
         <div role="alert" className="m-5 rounded-lg border border-red-400/20 bg-red-400/[0.06] p-4">
           <p className="text-sm text-red-100/85">{error}</p>
-          <button type="button" onClick={onRefresh} className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-lg border border-red-300/20 px-3 text-xs font-medium text-red-100/80 hover:bg-red-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/40">
+          <button type="button" onClick={onRefresh} className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg border border-red-300/20 px-3 text-xs font-medium text-red-100/80 hover:bg-red-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/40">
             <RefreshCw size={13} /> 重新加载
           </button>
         </div>
@@ -1056,7 +1042,7 @@ function BaseDetailPanel({
               type="button"
               onClick={onShowPasteModal}
               disabled={busy}
-              className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-cyan-300/20 bg-cyan-300/[0.055] px-3 text-sm font-medium text-cyan-100 transition-colors hover:bg-cyan-300/[0.09] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/35 disabled:cursor-not-allowed disabled:opacity-45"
+              className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-cyber-green/20 bg-cyber-green/[0.055] px-3 text-sm font-medium text-cyber-green transition-colors hover:bg-cyber-green/[0.09] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35 disabled:cursor-not-allowed disabled:opacity-45"
             >
               <PenTool size={16} />
               粘贴文本
@@ -1074,7 +1060,7 @@ function BaseDetailPanel({
               type="button"
               onClick={onShowPreviewModal}
               disabled={busy}
-              className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-white/[0.09] px-3 text-sm font-medium text-zinc-300 transition-colors hover:bg-white/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/35 disabled:cursor-not-allowed disabled:opacity-45"
+              className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-white/[0.09] px-3 text-sm font-medium text-zinc-300 transition-colors hover:bg-white/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35 disabled:cursor-not-allowed disabled:opacity-45"
             >
               <Eye size={16} />
               检索预览
@@ -1119,7 +1105,7 @@ function BaseDetailPanel({
           <section aria-labelledby="document-list-title">
             <div className="flex items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-4 sm:px-5">
               <div className="flex min-w-0 items-center gap-2">
-                <FileText size={15} className="shrink-0 text-cyan-200/80" />
+                <FileText size={15} className="shrink-0 text-cyber-green/70" />
                 <h3 id="document-list-title" className="text-sm font-semibold text-zinc-200">文档</h3>
               </div>
               <span className="text-xs text-zinc-600">{documents.length} 项</span>
@@ -1225,7 +1211,7 @@ function ModalFrame({ show, title, description, onClose, children, maxWidth = 'm
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`relative flex max-h-[calc(100vh-1.5rem)] w-full ${maxWidth} flex-col overflow-hidden rounded-lg border border-cyan-400/20 bg-[#0d0d14]/98 shadow-[0_0_70px_rgba(154,215,255,0.08)] animate-fade-up sm:max-h-[calc(100vh-2.5rem)]`}
+        className={`relative flex max-h-[calc(100vh-1.5rem)] w-full ${maxWidth} flex-col overflow-hidden rounded-lg border border-cyber-green/20 bg-[#0d0d14]/98 shadow-[0_0_70px_rgba(167,239,158,0.08)] animate-fade-up sm:max-h-[calc(100vh-2.5rem)]`}
       >
         <div className="flex shrink-0 items-start justify-between gap-4 border-b border-white/[0.06] px-4 py-4 sm:px-5">
           <div className="min-w-0">
@@ -1236,7 +1222,7 @@ function ModalFrame({ show, title, description, onClose, children, maxWidth = 'm
             type="button"
             onClick={onClose}
             aria-label={`关闭${title}窗口`}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-cyber-green/40 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-cyber-green/40 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40"
           >
             <X size={17} />
           </button>
@@ -1378,7 +1364,7 @@ function BindingTargetList({ title, emptyText, items, idKey, selectedIds, onTogg
           {items.map(item => {
             const id = item[idKey];
             return (
-              <label key={id} className="flex min-h-[48px] cursor-pointer items-center gap-3 rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-2 hover:border-cyan-400/18 hover:bg-cyan-400/[0.035]">
+              <label key={id} className="flex min-h-[48px] cursor-pointer items-center gap-3 rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-2 hover:border-cyber-green/18 hover:bg-cyber-green/[0.035]">
                 <input type="checkbox" checked={selectedIds.includes(id)} onChange={() => onToggle(id)} className="h-4 w-4 shrink-0 accent-[#9AD7FF]" />
                 <span className="min-w-0">
                   <span className="block truncate text-sm text-zinc-200/85">{item.name || id}</span>
@@ -1444,12 +1430,12 @@ function UploadDocumentModal({ show, base, onClose, onSuccess }) {
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="flex min-h-48 w-full flex-col items-center justify-center rounded-lg border border-dashed border-cyan-400/22 bg-cyan-400/[0.025] px-5 text-center transition-colors hover:border-cyan-400/40 hover:bg-cyan-400/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40"
+          className="flex min-h-48 w-full flex-col items-center justify-center rounded-lg border border-dashed border-cyber-green/22 bg-cyber-green/[0.025] px-5 text-center transition-colors hover:border-cyber-green/40 hover:bg-cyber-green/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40"
         >
-          <FileUp size={30} className="text-cyan-300/65" />
+          <FileUp size={30} className="text-cyber-green/65" />
           <span className="mt-3 max-w-full break-all text-sm font-bold text-zinc-200/85">{file ? file.name : '选择文件'}</span>
           <span className="mt-2 text-[11px] leading-5 text-zinc-400/60">TXT、MD、PDF、DOCX，服务器默认上限 10 MB</span>
-          {file && <span className="mt-1 text-[10px] text-cyan-300/55">{(file.size / 1024 / 1024).toFixed(2)} MB</span>}
+          {file && <span className="mt-1 text-[10px] text-cyber-green/55">{(file.size / 1024 / 1024).toFixed(2)} MB</span>}
         </button>
         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button type="button" onClick={onClose} className="min-h-[44px] rounded-lg border border-white/10 px-4 text-sm text-zinc-300/70 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20">取消</button>
@@ -1510,7 +1496,7 @@ function PasteDocumentModal({ show, base, onClose, onSuccess }) {
         <div className="mt-2 text-right text-[10px] text-zinc-500">{text.length.toLocaleString()} 字符</div>
         <div className="mt-5 flex flex-col-reverse gap-2 border-t border-white/[0.06] pt-4 sm:flex-row sm:justify-end">
           <button type="button" onClick={onClose} className="min-h-[44px] rounded-lg border border-white/10 px-4 text-sm text-zinc-300/70 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20">取消</button>
-          <button type="submit" disabled={submitting} className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-cyan-400/30 bg-cyan-400/10 px-4 text-sm font-bold text-cyan-200 hover:bg-cyan-400/18 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/40 disabled:cursor-not-allowed disabled:opacity-45">
+          <button type="submit" disabled={submitting} className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-cyber-green/30 bg-cyber-green/10 px-4 text-sm font-bold text-cyber-green hover:bg-cyber-green/18 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40 disabled:cursor-not-allowed disabled:opacity-45">
             {submitting ? <Loader2 size={14} className="animate-spin" /> : <PenTool size={14} />}
             {submitting ? '提交中...' : '添加并处理'}
           </button>
@@ -1578,14 +1564,14 @@ function PreviewModal({ show, base, onClose }) {
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="text-xs font-bold text-zinc-300">
             角色上下文
-            <select value={characterId} onChange={event => setCharacterId(event.target.value)} disabled={targetsLoading} className="mt-2 min-h-[44px] w-full rounded-lg border border-white/10 bg-[#11131a] px-3 text-sm font-normal text-zinc-200 outline-none focus:border-cyan-400/35 focus:ring-2 focus:ring-cyan-400/10 disabled:opacity-50">
+            <select value={characterId} onChange={event => setCharacterId(event.target.value)} disabled={targetsLoading} className="mt-2 min-h-[44px] w-full rounded-lg border border-white/10 bg-[#11131a] px-3 text-sm font-normal text-zinc-200 outline-none focus:border-cyber-green/35 focus:ring-2 focus:ring-cyber-green/10 disabled:opacity-50">
               <option value="">不指定角色</option>
               {targets.characters.map(item => <option key={item.character_id} value={item.character_id}>{item.name}</option>)}
             </select>
           </label>
           <label className="text-xs font-bold text-zinc-300">
             群聊上下文
-            <select value={groupThreadId} onChange={event => setGroupThreadId(event.target.value)} disabled={targetsLoading} className="mt-2 min-h-[44px] w-full rounded-lg border border-white/10 bg-[#11131a] px-3 text-sm font-normal text-zinc-200 outline-none focus:border-cyan-400/35 focus:ring-2 focus:ring-cyan-400/10 disabled:opacity-50">
+            <select value={groupThreadId} onChange={event => setGroupThreadId(event.target.value)} disabled={targetsLoading} className="mt-2 min-h-[44px] w-full rounded-lg border border-white/10 bg-[#11131a] px-3 text-sm font-normal text-zinc-200 outline-none focus:border-cyber-green/35 focus:ring-2 focus:ring-cyber-green/10 disabled:opacity-50">
               <option value="">不指定群聊</option>
               {targets.group_threads.map(item => <option key={item.group_thread_id} value={item.group_thread_id}>{item.name}</option>)}
             </select>
@@ -1595,7 +1581,7 @@ function PreviewModal({ show, base, onClose }) {
           检索内容
           <div className="mt-2 flex flex-col gap-2 sm:flex-row">
             <input value={query} onChange={event => setQuery(event.target.value)} maxLength={4000} autoFocus placeholder="输入一个问题或事实关键词" className="min-h-[44px] min-w-0 flex-1 rounded-lg border border-cyber-green/12 bg-cyber-surface/70 px-3 text-sm font-normal text-cyber-green/85 outline-none placeholder:text-cyber-green/22 focus:border-cyber-green/42 focus:ring-2 focus:ring-cyber-green/10" />
-            <button type="submit" disabled={loading} className="inline-flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-lg border border-violet-400/30 bg-violet-400/10 px-5 text-sm font-bold text-violet-200 hover:bg-violet-400/18 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/40 disabled:cursor-not-allowed disabled:opacity-45">
+            <button type="submit" disabled={loading} className="inline-flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-lg border border-cyber-green/30 bg-cyber-green/10 px-5 text-sm font-bold text-cyber-green hover:bg-cyber-green/18 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40 disabled:cursor-not-allowed disabled:opacity-45">
               {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
               {loading ? '检索中...' : '检索'}
             </button>
@@ -1618,7 +1604,7 @@ function PreviewModal({ show, base, onClose }) {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="min-w-0">
                       <p className="truncate text-xs font-bold text-zinc-200/90">{source.document_name}</p>
-                      <p className="mt-0.5 truncate text-[10px] text-cyan-300/50">{source.knowledge_base_name}</p>
+                      <p className="mt-0.5 truncate text-[10px] text-cyber-green/45">{source.knowledge_base_name}</p>
                     </div>
                     <span className="rounded-md border border-cyber-green/15 bg-cyber-green/[0.05] px-2 py-1 text-[10px] font-bold text-cyber-green/70">{Math.round(Number(source.similarity || 0) * 100)}%</span>
                   </div>

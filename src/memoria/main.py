@@ -11,11 +11,9 @@ import logging
 import threading
 import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 from memoria.api.dialogue import router as dialogue_router
 from memoria.api.character_admin import router as character_admin_router
@@ -30,7 +28,6 @@ from memoria.api.user import (
     get_current_user_id,
     require_admin_user_id,
     router as user_router,
-    require_current_user_id,
 )
 from memoria.core.config import configs
 from memoria.core.event_runtime import (

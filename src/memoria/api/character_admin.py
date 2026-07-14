@@ -475,17 +475,6 @@ def _download_avatar_sync(avatar_url: str) -> str | None:
         logger.warning(f"下载头像 URL 失败，保留原始 URL: {e}")
         return None
 
-def _process_avatar_url(avatar_url: str | None) -> str | None:
-    """同步下载头像 URL（用于 GET 详情等需要实时返回的场景）"""
-    if not avatar_url or avatar_url.startswith("data:"):
-        return avatar_url
-    if avatar_url.startswith("http://") or avatar_url.startswith("https://"):
-        downloaded = _download_avatar_sync(avatar_url)
-        if downloaded is not None:
-            return downloaded
-        return avatar_url
-    return avatar_url
-
 def _process_avatar_async(owner_user_id: str, character_id: str, avatar_url: str | None):
     """后台线程下载头像并更新数据库，不阻塞当前请求"""
     if not avatar_url or avatar_url.startswith("data:"):

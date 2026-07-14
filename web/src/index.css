@@ -102,14 +102,12 @@
   background:
     linear-gradient(rgba(167, 239, 158, 0.05) 1px, transparent 1px),
     linear-gradient(90deg, rgba(167, 239, 158, 0.04) 1px, transparent 1px),
-    radial-gradient(circle at 18% 12%, rgba(167, 239, 158, 0.14), transparent 28rem),
-    radial-gradient(circle at 86% 18%, rgba(8, 145, 178, 0.13), transparent 26rem),
     #101113;
-  background-size: 32px 32px, 32px 32px, auto, auto, auto;
+  background-size: 32px 32px, 32px 32px, auto;
   background-attachment: fixed;
 }
 
-.memoria-page > :not(.side-rays-container) {
+.memoria-page > :not(.side-rays-container):not(.memoria-skip-link) {
   position: relative;
   z-index: 1;
 }
@@ -119,50 +117,16 @@
   isolation: isolate;
   overflow-x: hidden;
   background:
-    linear-gradient(rgba(167, 239, 158, 0.028) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(167, 239, 158, 0.024) 1px, transparent 1px),
-    radial-gradient(circle at 8% 24%, rgba(167, 239, 158, 0.1), transparent 20rem),
-    radial-gradient(circle at 92% 22%, rgba(8, 145, 178, 0.08), transparent 22rem),
-    linear-gradient(180deg, #120f17 0%, #0b0b0c 45%, #080809 100%);
-  background-size: 36px 36px, 36px 36px, auto, auto, auto;
+    linear-gradient(rgba(167, 239, 158, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(167, 239, 158, 0.04) 1px, transparent 1px),
+    #101113;
+  background-size: 32px 32px, 32px 32px, auto;
   background-attachment: fixed;
 }
 
 .character-editor-page::before,
 .character-editor-page::after {
-  content: "";
-  position: fixed;
-  top: 96px;
-  bottom: 0;
-  width: max(180px, calc((100vw - 980px) / 2));
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0.62;
-}
-
-.character-editor-page::before {
-  left: 0;
-  background:
-    linear-gradient(90deg, rgba(167, 239, 158, 0.08), transparent 58%),
-    repeating-linear-gradient(0deg, rgba(167, 239, 158, 0.08) 0 1px, transparent 1px 18px),
-    repeating-linear-gradient(90deg, rgba(167, 239, 158, 0.05) 0 1px, transparent 1px 26px);
-  mask-image: linear-gradient(90deg, #000 0%, rgba(0, 0, 0, 0.82) 42%, transparent 100%);
-}
-
-.character-editor-page::after {
-  right: 0;
-  background:
-    linear-gradient(270deg, rgba(167, 239, 158, 0.08), transparent 58%),
-    repeating-linear-gradient(0deg, rgba(167, 239, 158, 0.08) 0 1px, transparent 1px 18px),
-    repeating-linear-gradient(90deg, rgba(167, 239, 158, 0.05) 0 1px, transparent 1px 26px);
-  mask-image: linear-gradient(270deg, #000 0%, rgba(0, 0, 0, 0.82) 42%, transparent 100%);
-}
-
-@media (max-width: 1023px) {
-  .character-editor-page::before,
-  .character-editor-page::after {
-    display: none;
-  }
+  display: none;
 }
 
 .memoria-glass {
@@ -170,6 +134,181 @@
   border: 1px solid rgba(167, 239, 158, 0.18);
   box-shadow: 0 16px 44px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   backdrop-filter: blur(14px);
+}
+
+/* Non-home application shell. Home uses its own isolated visual system. */
+.memoria-app-page {
+  min-height: 100dvh;
+  color: #f4f4f5;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.memoria-app-header {
+  border-color: rgba(167, 239, 158, 0.16) !important;
+  background: rgba(13, 13, 20, 0.9) !important;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(16px);
+}
+
+.memoria-panel {
+  border: 1px solid rgba(167, 239, 158, 0.14);
+  border-radius: 8px;
+  background: rgba(18, 15, 23, 0.78);
+  box-shadow: 0 16px 46px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  backdrop-filter: blur(12px);
+}
+
+.memoria-panel-muted {
+  border: 1px solid rgba(167, 239, 158, 0.1);
+  border-radius: 8px;
+  background: rgba(11, 11, 12, 0.58);
+}
+
+.memoria-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(167, 239, 158, 0.1);
+  color: rgba(244, 244, 245, 0.92);
+}
+
+.memoria-section-heading > svg {
+  color: rgba(167, 239, 158, 0.72);
+}
+
+.memoria-form-label {
+  display: block;
+  margin-bottom: 0.375rem;
+  color: rgba(167, 239, 158, 0.58);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  text-transform: uppercase;
+}
+
+.memoria-form-control {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgba(167, 239, 158, 0.14);
+  border-radius: 6px;
+  background: rgba(11, 11, 12, 0.76);
+  padding: 0.625rem 0.75rem;
+  color: rgba(244, 244, 245, 0.92);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  outline: none;
+  transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.memoria-form-control::placeholder {
+  color: rgba(167, 239, 158, 0.2);
+}
+
+.memoria-form-control:hover {
+  border-color: rgba(167, 239, 158, 0.25);
+}
+
+.memoria-form-control:focus {
+  border-color: rgba(167, 239, 158, 0.52);
+  background: rgba(11, 11, 12, 0.92);
+  box-shadow: 0 0 0 3px rgba(167, 239, 158, 0.08);
+}
+
+.memoria-form-control:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+textarea.memoria-form-control {
+  min-height: 96px;
+  resize: vertical;
+}
+
+select.memoria-form-control {
+  color-scheme: dark;
+}
+
+.memoria-editor-item {
+  border: 1px solid rgba(167, 239, 158, 0.1);
+  border-radius: 6px;
+  background: rgba(167, 239, 158, 0.025);
+  padding: 0.75rem;
+}
+
+.memoria-icon-button {
+  display: inline-flex;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  transition: color 180ms ease, border-color 180ms ease, background-color 180ms ease, opacity 180ms ease;
+}
+
+.memoria-icon-button:focus-visible,
+.memoria-button:focus-visible,
+.memoria-form-control:focus-visible {
+  outline: 2px solid rgba(167, 239, 158, 0.72);
+  outline-offset: 2px;
+}
+
+.memoria-skip-link {
+  position: fixed;
+  top: 0;
+  left: 1rem;
+  z-index: 1000;
+  clip-path: inset(100%);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(calc(-100% - 1rem));
+}
+
+.memoria-skip-link:focus-visible {
+  clip-path: none;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0.75rem);
+  border-radius: 0.5rem;
+  background: #a7ef9e;
+  padding: 0.5rem 0.75rem;
+  color: #09100b;
+  font-size: 0.875rem;
+  font-weight: 600;
+  outline: 2px solid rgba(255, 255, 255, 0.7);
+  outline-offset: 2px;
+}
+
+.memoria-button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid rgba(167, 239, 158, 0.18);
+  border-radius: 8px;
+  padding: 0.5rem 0.875rem;
+  color: rgba(167, 239, 158, 0.72);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  transition: color 180ms ease, border-color 180ms ease, background-color 180ms ease, opacity 180ms ease;
+}
+
+.memoria-button:hover {
+  border-color: rgba(167, 239, 158, 0.38);
+  background: rgba(167, 239, 158, 0.07);
+  color: #a7ef9e;
+}
+
+.memoria-button-primary {
+  border-color: rgba(167, 239, 158, 0.32);
+  background: rgba(167, 239, 158, 0.11);
+  color: #a7ef9e;
+}
+
+.memoria-button-primary:hover {
+  background: rgba(167, 239, 158, 0.19);
 }
 
 .memoria-card-hover {

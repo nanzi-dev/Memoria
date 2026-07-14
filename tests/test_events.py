@@ -318,17 +318,17 @@ class TestEventDeepIntegration:
 
     def test_cron_helpers(self):
         from datetime import datetime, timezone
-        from memoria.core import event_runtime
+        from memoria.core.cron_schedule import cron_matches, next_cron_run
 
         now = datetime(2026, 7, 10, 14, 30, tzinfo=timezone.utc)
-        assert event_runtime.cron_matches("*/5 * * * *", now)
-        assert not event_runtime.cron_matches("*/7 * * * *", now)
-        assert event_runtime.next_cron_run("*/15 * * * *", now).minute == 45
+        assert cron_matches("*/5 * * * *", now)
+        assert not cron_matches("*/7 * * * *", now)
+        assert next_cron_run("*/15 * * * *", now).minute == 45
         sunday = datetime(2026, 7, 12, 9, 0, tzinfo=timezone.utc)
         monday = datetime(2026, 7, 13, 9, 0, tzinfo=timezone.utc)
-        assert event_runtime.cron_matches("0 9 * * 0", sunday)
-        assert event_runtime.cron_matches("0 9 * * 7", sunday)
-        assert not event_runtime.cron_matches("0 9 * * 0", monday)
+        assert cron_matches("0 9 * * 0", sunday)
+        assert cron_matches("0 9 * * 7", sunday)
+        assert not cron_matches("0 9 * * 0", monday)
 
     @pytest.mark.parametrize(
         "schedule",
@@ -344,10 +344,10 @@ class TestEventDeepIntegration:
         ],
     )
     def test_cron_helpers_reject_invalid_fields(self, schedule):
-        from memoria.core import event_runtime
+        from memoria.core.cron_schedule import validate_cron_schedule
 
         with pytest.raises(ValueError):
-            event_runtime.validate_cron_schedule(schedule)
+            validate_cron_schedule(schedule)
 
     def test_delete_event_definition_removes_owned_operational_state(self):
         from memoria.db import repository

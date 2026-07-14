@@ -15,10 +15,10 @@ import useBrowserSpeech from '../hooks/useBrowserSpeech';
 
 import {
 
-  Send, ArrowLeft, Heart, Zap, AlertTriangle, Loader2, User, X, Plus, Users,
+  Send, ArrowLeft, Heart, AlertTriangle, Loader2, User, X, Plus, Users,
 
-  Search, Cpu, Activity, TrendingUp, MessageSquare, Mic, Square, Volume2,
-  Pause, RotateCw, Languages
+  Search, Cpu, Activity, MessageSquare, Mic, Square, Volume2,
+  Pause, RotateCw
 
 } from 'lucide-react';
 
@@ -52,14 +52,6 @@ const MOOD_BUBBLE = { happy: 'bg-emerald-950 border-emerald-400/20 text-zinc-200
 const IDLE_SESSION_END_MS = 5 * 60 * 1000;
 const HISTORY_PAGE_SIZE = 20;
 const GROUP_POLL_INTERVAL_MS = 3 * 1000;
-const DEFAULT_BROWSER_LOCALE = typeof navigator !== 'undefined'
-  && navigator.language?.toLowerCase().startsWith('en')
-  ? 'en-US'
-  : 'zh-CN';
-const LOCALES = [
-  { value: 'zh-CN', label: '中文', shortLabel: 'ZH' },
-  { value: 'en-US', label: 'English', shortLabel: 'EN' },
-];
 
 const CHAT_RAYS_PROPS = {
   speed: 2.1,
@@ -481,34 +473,6 @@ function SpeechRecorderButton({ status, supported, disabled, onStart, onStop }) 
   );
 }
 
-function LocaleSelector({ value, onChange, label = '会话语言' }) {
-  return (
-    <div>
-      <div className="mb-2 flex items-center gap-1.5 text-[11px] uppercase tracking-wider text-cyber-green/40">
-        <Languages size={13} />
-        {label}
-      </div>
-      <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-cyber-green/15 bg-black/20">
-        {LOCALES.map(locale => (
-          <button
-            key={locale.value}
-            type="button"
-            onClick={() => onChange(locale.value)}
-            className={`min-h-[44px] border-r border-cyber-green/10 px-3 text-xs last:border-r-0 ${
-              value === locale.value
-                ? 'bg-cyber-green/12 text-cyber-green'
-                : 'text-zinc-500 hover:bg-white/[0.03] hover:text-zinc-300'
-            }`}
-            aria-pressed={value === locale.value}
-          >
-            {locale.label} <span className="text-[10px] opacity-55">{locale.value}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function SpeechErrorNotice({ error, onDismiss, onRetry }) {
   if (!error) return null;
   return (
@@ -570,16 +534,6 @@ export default function ChatRoom() {
   const [searchQuery, setSearchQuery] = useState('');
 
   const [error, setError] = useState(null);
-
-  const [groupLocale, setGroupLocale] = useState(DEFAULT_BROWSER_LOCALE);
-
-  const [newSessionLocale, setNewSessionLocale] = useState(DEFAULT_BROWSER_LOCALE);
-
-  const [sessionLocale, setSessionLocale] = useState(DEFAULT_BROWSER_LOCALE);
-
-  const [pendingSingleCharacter, setPendingSingleCharacter] = useState(null);
-
-
 
   // ── History loading ──
 
@@ -970,7 +924,6 @@ export default function ChatRoom() {
             unread_count: Number(s.unread_count || 0),
             participants: groupParticipants,
             group_name: resolvedGroupName,
-            locale: s.locale || info?.locale || DEFAULT_BROWSER_LOCALE,
           };
           items.push(groupItem);
 
@@ -1010,8 +963,6 @@ export default function ChatRoom() {
             core_identity: cached?.core_identity || '',
 
             is_active: cached?.is_active ?? 1,
-
-            locale: s.locale || DEFAULT_BROWSER_LOCALE,
 
           });
 
@@ -1087,10 +1038,6 @@ export default function ChatRoom() {
 
     setMood('neutral'); setEvents([]); setView('list'); setError(null);
 
-    setPendingSingleCharacter(null);
-
-    setSessionLocale(DEFAULT_BROWSER_LOCALE);
-
     setMultiSessionStatus('active');
 
     setHistoryOffset(0); setHasMoreHistory(true); setLoadingHistory(false);
@@ -1103,7 +1050,7 @@ export default function ChatRoom() {
 
 
 
-  const enterSingleChat = useCallback(async (char, localeOverride = null) => {
+  const enterSingleChat = useCallback(async (char) => {
 
     if (!PLAYER_ID) { setError('请先登录后使用对话功能'); return; }
 
@@ -1118,8 +1065,6 @@ export default function ChatRoom() {
     cancelRecording();
 
     stopAudio();
-
-    setPendingSingleCharacter(null);
 
     setError(null);
 
@@ -1158,7 +1103,6 @@ export default function ChatRoom() {
       if (!isCharacterActive(nextCharacter)) {
         const hist = await dialogue.getHistory(char.character_id, PLAYER_ID, 0, 20);
         if (generation !== singleRequestGenerationRef.current) return;
-        setSessionLocale(hist?.locale || char.locale || DEFAULT_BROWSER_LOCALE);
         if (hist?.messages?.length) {
           setMessages(sortMessagesChronologically(hist.messages.map(normalizeDialogueMessage)));
           setIsRecovered(true);
@@ -1182,12 +1126,10 @@ export default function ChatRoom() {
         char.character_id,
         PLAYER_ID,
         PLAYER_NAME,
-        localeOverride || char.locale || DEFAULT_BROWSER_LOCALE,
       );
       if (generation !== singleRequestGenerationRef.current) return;
 
       setSingleSessionId(session.session_id);
-      setSessionLocale(session.locale || localeOverride || char.locale || DEFAULT_BROWSER_LOCALE);
       activeSessionRef.current = session.session_id;
       sessionKindRef.current.set(session.session_id, 'single');
       clearIdleSessionEnd(session.session_id);
@@ -1197,7 +1139,6 @@ export default function ChatRoom() {
       const hist = await dialogue.getHistory(char.character_id, PLAYER_ID, 0, 20);
       if (generation !== singleRequestGenerationRef.current) return;
       if (hist?.messages?.length) {
-        setSessionLocale(hist.locale || session.locale || localeOverride || char.locale || DEFAULT_BROWSER_LOCALE);
         setMessages(sortMessagesChronologically(hist.messages.map(normalizeDialogueMessage)));
         setIsRecovered(session.recovered || hist.messages.length > 0);
         nextHistoryOffset = hist.messages.length;
@@ -1237,7 +1178,6 @@ export default function ChatRoom() {
       if (char.session_id) {
         enterSingleChat(char);
       } else {
-        setPendingSingleCharacter(null);
         setError('角色已离线，不能新建聊天');
       }
       return;
@@ -1251,9 +1191,7 @@ export default function ChatRoom() {
       enterSingleChat(activeItem);
       return;
     }
-    setPendingSingleCharacter(char);
-    setNewSessionLocale(DEFAULT_BROWSER_LOCALE);
-    setError(null);
+    enterSingleChat(char);
   }, [chatItems, enterSingleChat]);
 
   // ── Direct single chat from URL param ──
@@ -1283,8 +1221,6 @@ export default function ChatRoom() {
     resetGroupSyncState();
     cancelRecording();
     stopAudio();
-    setPendingSingleCharacter(null);
-    setGroupLocale(DEFAULT_BROWSER_LOCALE);
     setMessages([]); setParticipants([]); setGroupName(''); setView('group-setup');
   }, [PLAYER_ID, cancelRecording, stopAudio]);
 
@@ -1320,7 +1256,6 @@ export default function ChatRoom() {
     setParticipants(initialParticipants);
     setMultiSessionId(item.session_id);
     setMultiSessionStatus(item.status || 'active');
-    setSessionLocale(item.locale || DEFAULT_BROWSER_LOCALE);
     setHistoryOffset(0);
     setHasMoreHistory(true);
     activeSessionRef.current = item.session_id;
@@ -1335,7 +1270,6 @@ export default function ChatRoom() {
       activeGroupThreadIdRef.current = resolvedThreadId;
       setMultiSessionStatus(info.status || item.status || 'active');
       setGroupName(info.group_name || item.group_name || '');
-      setSessionLocale(info.locale || item.locale || DEFAULT_BROWSER_LOCALE);
       loadedParticipants = info.participants?.map(p => normalizeParticipant(p)) || loadedParticipants;
       setParticipants(loadedParticipants);
     } catch {
@@ -1350,7 +1284,6 @@ export default function ChatRoom() {
       const sessionInfo = hist?.session_info || {};
       const currentSessionId = sessionInfo.current_session_id || item.session_id;
       const groupThreadId = sessionInfo.group_thread_id || activeGroupThreadIdRef.current || initialThreadId;
-      setSessionLocale(sessionInfo.locale || item.locale || DEFAULT_BROWSER_LOCALE);
       const normalizedMessages = (hist?.messages || []).map(message => (
         normalizeGroupMessage(message, [...loadedParticipants, ...allChars])
       ));
@@ -1594,7 +1527,6 @@ export default function ChatRoom() {
         PLAYER_NAME,
         selectedParticipants.map(p => p.character_id),
         cleanGroupName,
-        groupLocale,
       );
 
       const generation = groupRequestGenerationRef.current + 1;
@@ -1607,7 +1539,6 @@ export default function ChatRoom() {
 
       setMultiSessionId(res.session_id);
       setMultiSessionStatus('active');
-      setSessionLocale(res.locale || groupLocale);
       activeSessionRef.current = res.session_id;
       sessionKindRef.current.set(res.session_id, 'group');
       clearIdleSessionEnd(res.session_id);
@@ -1735,7 +1666,6 @@ export default function ChatRoom() {
           setMultiSessionId(continued.session_id);
           setMultiSessionStatus('active');
           setGroupName(continued.group_name || groupName);
-          setSessionLocale(continued.locale || sessionLocale);
           if (continued.participants?.length) {
             setParticipants(continued.participants.map(p => normalizeParticipant(p)));
           }
@@ -1811,7 +1741,7 @@ export default function ChatRoom() {
       }
     }
 
-  }, [input, sending, sendingMulti, view, singleSessionId, multiSessionId, multiSessionStatus, groupName, affinity, trust, character, participants, allChars, PLAYER_ID, PLAYER_NAME, getWorldNow, syncGroupHistory, user?.tts_auto_play, enqueueAutoplay, sessionLocale]);
+  }, [input, sending, sendingMulti, view, singleSessionId, multiSessionId, multiSessionStatus, groupName, affinity, trust, character, participants, allChars, PLAYER_ID, PLAYER_NAME, getWorldNow, syncGroupHistory, user?.tts_auto_play, enqueueAutoplay]);
 
   sendMessageRef.current = sendMessage;
 
@@ -1952,7 +1882,14 @@ export default function ChatRoom() {
       <div className="min-h-screen memoria-page flex flex-col font-mono">
         <ChatBackdrop />
         <header className="memoria-glass flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 border-x-0 border-t-0 shrink-0">
-          <button onClick={() => navigate('/')} className="text-cyber-green/30 hover:text-cyber-green/70 hover:bg-cyber-green/5 rounded-lg p-2 min-w-[44px] min-h-[44px] flex items-center justify-center transition-all"><ArrowLeft size={18} /></button>
+          <button
+            onClick={() => navigate('/')}
+            aria-label="返回首页"
+            title="返回首页"
+            className="text-cyber-green/30 hover:text-cyber-green/70 hover:bg-cyber-green/5 rounded-lg p-2 min-w-[44px] min-h-[44px] flex items-center justify-center transition-all"
+          >
+            <ArrowLeft size={18} />
+          </button>
           <div className="flex items-center gap-2">
             <Activity size={14} className="text-cyber-green/40" />
             <span className="text-xs font-bold text-cyber-green/60 uppercase tracking-[0.15em]">Memoria</span>
@@ -1964,12 +1901,12 @@ export default function ChatRoom() {
               <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="搜索对话..." className="w-full bg-[#0b0b0c]/80 border border-cyber-green/10 rounded-full pl-9 pr-4 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/15 focus:outline-none focus:border-cyber-green/35 focus:ring-2 focus:ring-cyber-green/10 transition-all" />
             </div>
           </div>
-          <button onClick={enterGroupSetup} className="text-xs px-3 py-1.5 min-h-[40px] rounded-full border border-cyber-green/15 text-cyber-green/45 hover:text-cyber-green/80 hover:border-cyber-green/35 hover:bg-cyber-green/10 active:scale-95 transition-all flex items-center gap-1.5 shrink-0"><Plus size={14} />群聊</button>
+          <button onClick={enterGroupSetup} className="text-xs px-3 py-1.5 min-h-[44px] rounded-full border border-cyber-green/15 text-cyber-green/45 hover:text-cyber-green/80 hover:border-cyber-green/35 hover:bg-cyber-green/10 active:scale-95 transition-all flex items-center gap-1.5 shrink-0"><Plus size={14} />群聊</button>
         </header>
 
         <div className="flex items-center gap-1 px-4 py-2 border-b border-cyber-green/[0.06] bg-[#0d0d14]/50 backdrop-blur-md">
-          <button onClick={() => { setActiveTab('chat'); setSearchQuery(''); }} className={`text-xs px-4 py-1.5 min-h-[40px] rounded-full border transition-all ${activeTab === 'chat' ? 'border-cyber-green/30 bg-cyber-green/10 text-cyber-green' : 'border-transparent text-cyber-green/30 hover:text-cyber-green/50'}`}>对话</button>
-          <button onClick={() => { setActiveTab('contacts'); setSearchQuery(''); }} className={`text-xs px-4 py-1.5 min-h-[40px] rounded-full border transition-all ${activeTab === 'contacts' ? 'border-cyber-green/30 bg-cyber-green/10 text-cyber-green' : 'border-transparent text-cyber-green/30 hover:text-cyber-green/50'}`}>联系人</button>
+          <button onClick={() => { setActiveTab('chat'); setSearchQuery(''); }} className={`text-xs px-4 py-1.5 min-h-[44px] rounded-full border transition-all ${activeTab === 'chat' ? 'border-cyber-green/30 bg-cyber-green/10 text-cyber-green' : 'border-transparent text-cyber-green/30 hover:text-cyber-green/50'}`}>对话</button>
+          <button onClick={() => { setActiveTab('contacts'); setSearchQuery(''); }} className={`text-xs px-4 py-1.5 min-h-[44px] rounded-full border transition-all ${activeTab === 'contacts' ? 'border-cyber-green/30 bg-cyber-green/10 text-cyber-green' : 'border-transparent text-cyber-green/30 hover:text-cyber-green/50'}`}>联系人</button>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -2086,31 +2023,6 @@ export default function ChatRoom() {
           )}
         </div>
 
-        {pendingSingleCharacter && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={() => setPendingSingleCharacter(null)} />
-            <div role="dialog" aria-modal="true" aria-labelledby="new-session-language" className="memoria-glass relative w-full max-w-sm rounded-xl p-5 shadow-[0_24px_80px_rgba(0,0,0,0.55)]">
-              <div className="mb-5 flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <h2 id="new-session-language" className="truncate font-character text-xl text-zinc-100">{pendingSingleCharacter.name}</h2>
-                  <p className="mt-1 text-[11px] leading-5 text-cyber-green/30">选择新会话语言，创建后不可更改。</p>
-                </div>
-                <button type="button" onClick={() => setPendingSingleCharacter(null)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-cyber-green/35 hover:bg-cyber-green/5 hover:text-cyber-green" aria-label="关闭语言选择">
-                  <X size={17} />
-                </button>
-              </div>
-              <LocaleSelector value={newSessionLocale} onChange={setNewSessionLocale} />
-              <button
-                type="button"
-                onClick={() => enterSingleChat(pendingSingleCharacter, newSessionLocale)}
-                className="mt-5 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-cyber-green/25 bg-cyber-green/10 text-sm font-bold text-cyber-green transition-colors hover:bg-cyber-green/[0.18]"
-              >
-                <MessageSquare size={15} />
-                开始对话
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
@@ -2169,11 +2081,6 @@ export default function ChatRoom() {
 
           </div>
 
-          <div className="memoria-glass rounded-xl p-4">
-            <LocaleSelector value={groupLocale} onChange={setGroupLocale} />
-            <p className="mt-2 text-[11px] leading-5 text-cyber-green/20">群聊创建后会固定使用此语言。</p>
-          </div>
-
           {/* Character selection */}
 
           <div className="memoria-glass rounded-xl p-4">
@@ -2210,7 +2117,7 @@ export default function ChatRoom() {
 
           </div>
 
-          {participants.length>0 && <div className="flex flex-wrap gap-1.5">{participants.map(p=><div key={p.character_id} className="flex items-center gap-1 text-[12px] bg-cyber-green/5 border border-cyber-green/15 rounded-full px-2 py-1 text-cyber-green/50"><span className="font-character text-sm leading-none">{p.name}</span><button onClick={()=>toggleParticipant(p)} className="text-cyber-green/20 hover:text-red-400 ml-0.5 min-w-[24px] min-h-[24px] flex items-center justify-center"><X size={10}/></button></div>)}</div>}
+          {participants.length>0 && <div className="flex flex-wrap gap-1.5">{participants.map(p=><div key={p.character_id} className="flex items-center gap-1 text-[12px] bg-cyber-green/5 border border-cyber-green/15 rounded-full px-2 py-1 text-cyber-green/50"><span className="font-character text-sm leading-none">{p.name}</span><button onClick={()=>toggleParticipant(p)} aria-label={`移除 ${p.name}`} title={`移除 ${p.name}`} className="-my-2 -mr-2 ml-0.5 flex h-11 w-11 items-center justify-center text-cyber-green/20 transition-colors hover:text-red-400"><X size={10}/></button></div>)}</div>}
 
           <button onClick={startGroupChat} disabled={participants.length<2 || !groupName.trim() || groupNameExists} className="w-full min-h-[44px] py-2.5 bg-cyber-green/10 hover:bg-cyber-green/20 border border-cyber-green/20 rounded-lg text-sm font-bold text-cyber-green disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"><Users size={16} />开始群聊 ({participants.length}人)</button>
           </div>
@@ -2328,14 +2235,9 @@ export default function ChatRoom() {
             onClick={() => setShowClockSettings(true)}
           />
 
-          <span className="hidden shrink-0 items-center gap-1 rounded-md border border-cyber-green/10 bg-black/15 px-2 py-1 text-[10px] text-cyber-green/35 sm:flex" title="会话语言创建后不可更改">
-            <Languages size={11} />
-            {LOCALES.find(locale => locale.value === sessionLocale)?.shortLabel || sessionLocale}
-          </span>
-
           {/* 事件通知 */}
           {events.length > 0 && (
-            <button onClick={() => setEvents([])} className="relative shrink-0" title="事件通知">
+            <button onClick={() => setEvents([])} className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-amber-400/5" aria-label="清除事件通知" title="事件通知">
               <AlertTriangle size={14} className="text-amber-400/70" />
               <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 rounded-full text-[13px] flex items-center justify-center text-white font-bold">{events.length}</span>
             </button>
@@ -2363,7 +2265,7 @@ export default function ChatRoom() {
                   <p className="text-[12px] text-zinc-500">{character.identity.core_identity_summary}</p>
                 )}
               </div>
-              <button onClick={() => setShowDetail(false)} className="text-cyber-green/20 hover:text-cyber-green/40"><X size={16} /></button>
+              <button onClick={() => setShowDetail(false)} className="flex h-11 w-11 items-center justify-center rounded-lg text-cyber-green/20 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green/40" aria-label="关闭角色详情" title="关闭角色详情"><X size={16} /></button>
             </div>
 
             {/* 标签 */}
@@ -2602,11 +2504,6 @@ export default function ChatRoom() {
             className="max-w-[178px] sm:max-w-[260px]"
             onClick={() => setShowClockSettings(true)}
           />
-
-          <span className="hidden shrink-0 items-center gap-1 rounded-md border border-cyber-green/10 bg-black/15 px-2 py-1 text-[10px] text-cyber-green/35 sm:flex" title="会话语言创建后不可更改">
-            <Languages size={11} />
-            {LOCALES.find(locale => locale.value === sessionLocale)?.shortLabel || sessionLocale}
-          </span>
 
         </header>
 

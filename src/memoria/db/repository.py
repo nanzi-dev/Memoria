@@ -364,6 +364,8 @@ CREATE TABLE IF NOT EXISTS event_definition (
     -- 事件配置（JSON 格式）
     trigger_config  TEXT NOT NULL,      -- TriggerCondition JSON
     effects_config  TEXT NOT NULL,      -- EventEffect[] JSON
+    schedule        TEXT,
+    template_id     TEXT,
     
     priority        INTEGER DEFAULT 0,
     exclusive_group TEXT,
@@ -843,6 +845,9 @@ ON session(character_id, player_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_session_multi
 ON session(is_multi_character, player_id, created_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_session_group_thread
+ON session(group_thread_id, created_at DESC);
+
 CREATE INDEX IF NOT EXISTS idx_multi_participant
 ON multi_session_participant(session_id, is_active);
 
@@ -882,11 +887,20 @@ ON event_context_state(character_id, player_id, status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_event_schedule_due
 ON event_schedule_state(status, next_run_at);
 
+CREATE INDEX IF NOT EXISTS idx_event_schedule_due_real
+ON event_schedule_state(status, next_due_real_at);
+
+CREATE INDEX IF NOT EXISTS idx_event_schedule_lease
+ON event_schedule_state(status, lease_expires_at);
+
 CREATE INDEX IF NOT EXISTS idx_auth_token_user
 ON auth_token(user_id, expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_player_event_inbox_unread
 ON player_event_inbox(player_id, read_at, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_player_group_inbox_unread
+ON player_event_inbox(player_id, group_thread_id, read_at, id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_group_dialogue_state_scan
 ON group_dialogue_state(player_id, lease_expires_at, last_autonomous_pulse_at);
@@ -929,6 +943,14 @@ CREATE TABLE IF NOT EXISTS shared_memory (
 CREATE INDEX IF NOT EXISTS idx_shared_memory_owner_pair
 ON shared_memory(owner_user_id, character_a_id, character_b_id, importance DESC);
 
+CREATE INDEX IF NOT EXISTS idx_shared_memory_directional
+ON shared_memory(
+    owner_user_id,
+    observer_character_id,
+    target_character_id,
+    importance DESC
+);
+
 -- =========================
 -- 多角色群体记忆（会话级）
 -- =========================
@@ -952,552 +974,10 @@ ON character_relationship_revision(owner_user_id, character_id_a, character_id_b
 """
 
 
-def _migrate_shared_memory_directionality(conn) -> None:
-    """将可识别的旧角色印象转为定向记录，并移除 pulse 事实副本。"""
-    conn.execute(
-        """
-        DELETE FROM shared_memory
-        WHERE context = 'dialogue_pulse'
-           OR context LIKE '%:dialogue_pulse'
-        """
-    )
-    rows = conn.execute(
-        """
-        SELECT id, character_a_id, character_b_id, memory_text
-        FROM shared_memory
-        WHERE observer_character_id IS NULL
-           OR target_character_id IS NULL
-        """
-    ).fetchall()
-    impression_pattern = re.compile(r"^对\s+(.+?)\s+的印象[：:]\s*(.*)$")
-    for row in rows:
-        record = dict(row)
-        match = impression_pattern.match(str(record.get("memory_text") or "").strip())
-        if not match:
-            continue
-        target_id = match.group(1).strip()
-        character_a_id = record.get("character_a_id")
-        character_b_id = record.get("character_b_id")
-        if target_id == character_a_id and target_id != character_b_id:
-            observer_id = character_b_id
-        elif target_id == character_b_id and target_id != character_a_id:
-            observer_id = character_a_id
-        else:
-            continue
-        impression = match.group(2).strip()
-        conn.execute(
-            """
-            UPDATE shared_memory
-            SET observer_character_id = ?,
-                target_character_id = ?,
-                memory_kind = 'character_impression',
-                memory_text = ?
-            WHERE id = ?
-            """,
-            (observer_id, target_id, impression or record["memory_text"], record["id"]),
-        )
-
-
-def _migrate(conn):
-    """数据库迁移：为已有数据库添加新列"""
-    migration_schema = """
-        CREATE TABLE IF NOT EXISTS user_character_card (
-            user_id         TEXT PRIMARY KEY,
-            display_name    TEXT NOT NULL,
-            avatar_url      TEXT,
-            gender          TEXT DEFAULT 'unknown',
-            pronouns        TEXT DEFAULT '',
-            age             INTEGER,
-            species         TEXT DEFAULT '',
-            occupation      TEXT DEFAULT '',
-            appearance      TEXT DEFAULT '',
-            personality     TEXT DEFAULT '',
-            background      TEXT DEFAULT '',
-            goals           TEXT DEFAULT '',
-            created_at      TEXT NOT NULL,
-            updated_at      TEXT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users(user_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS event_context_state (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_id        TEXT NOT NULL,
-            character_id    TEXT NOT NULL,
-            player_id       TEXT NOT NULL,
-            context_data    TEXT NOT NULL DEFAULT '{}',
-            status          TEXT DEFAULT 'active',
-            progress        REAL DEFAULT 0.0,
-            last_session_id TEXT,
-            created_at      TEXT,
-            updated_at      TEXT,
-            UNIQUE(event_id, character_id, player_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS event_schedule_state (
-            event_id        TEXT NOT NULL,
-            character_id    TEXT NOT NULL,
-            player_id       TEXT NOT NULL,
-            schedule        TEXT NOT NULL,
-            last_checked_at TEXT,
-            last_run_at     TEXT,
-            next_run_at     TEXT,
-            next_due_real_at TEXT,
-            missed_count    INTEGER NOT NULL DEFAULT 0,
-            status          TEXT DEFAULT 'active',
-            created_at      TEXT,
-            updated_at      TEXT,
-            PRIMARY KEY (event_id, character_id, player_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS event_template (
-            template_id     TEXT PRIMARY KEY,
-            template_name   TEXT NOT NULL,
-            category        TEXT,
-            description     TEXT,
-            trigger_config  TEXT NOT NULL,
-            effects_config  TEXT NOT NULL,
-            metadata        TEXT,
-            created_at      TEXT,
-            updated_at      TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS event_execution_batch (
-            player_id       TEXT NOT NULL,
-            execution_key   TEXT NOT NULL,
-            trigger_source  TEXT NOT NULL,
-            status          TEXT NOT NULL,
-            results_data    TEXT NOT NULL,
-            deduplicated_count INTEGER DEFAULT 0,
-            created_at      TEXT NOT NULL,
-            completed_at    TEXT,
-            PRIMARY KEY (player_id, execution_key)
-        );
-
-        CREATE TABLE IF NOT EXISTS event_trigger_guard (
-            player_id       TEXT NOT NULL,
-            event_id        TEXT NOT NULL,
-            character_scope TEXT NOT NULL,
-            last_triggered_at TEXT,
-            claim_token     TEXT,
-            claim_expires_at TEXT,
-            updated_at      TEXT NOT NULL,
-            PRIMARY KEY (player_id, event_id, character_scope)
-        );
-
-        CREATE TABLE IF NOT EXISTS event_execution (
-            execution_id    TEXT PRIMARY KEY,
-            execution_key   TEXT NOT NULL,
-            owner_user_id   TEXT NOT NULL,
-            event_id        TEXT NOT NULL,
-            character_id    TEXT NOT NULL,
-            session_id      TEXT NOT NULL,
-            trigger_source  TEXT NOT NULL,
-            status          TEXT NOT NULL,
-            effects_data    TEXT NOT NULL,
-            result_data     TEXT NOT NULL,
-            error           TEXT,
-            duration_ms     REAL DEFAULT 0.0,
-            created_at      TEXT NOT NULL,
-            completed_at    TEXT,
-            UNIQUE(owner_user_id, event_id, execution_key)
-        );
-
-        CREATE TABLE IF NOT EXISTS event_unlock (
-            player_id       TEXT NOT NULL,
-            character_id    TEXT NOT NULL,
-            unlock_key      TEXT NOT NULL,
-            event_id        TEXT NOT NULL,
-            unlocked_at     TEXT NOT NULL,
-            PRIMARY KEY (player_id, character_id, unlock_key)
-        );
-
-        CREATE TABLE IF NOT EXISTS auth_token (
-            token           TEXT PRIMARY KEY,
-            user_id         TEXT NOT NULL,
-            created_at      TEXT NOT NULL,
-            expires_at      TEXT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users(user_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS dialogue_turn (
-            session_id       TEXT NOT NULL,
-            request_id       TEXT NOT NULL,
-            player_id        TEXT NOT NULL,
-            turn_kind        TEXT NOT NULL,
-            status           TEXT NOT NULL,
-            lease_owner      TEXT,
-            lease_expires_at TEXT,
-            response_data    TEXT,
-            error            TEXT,
-            created_at       TEXT NOT NULL,
-            updated_at       TEXT NOT NULL,
-            completed_at     TEXT,
-            PRIMARY KEY (session_id, request_id),
-            FOREIGN KEY (session_id) REFERENCES session(session_id),
-            FOREIGN KEY (player_id) REFERENCES users(user_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS player_world_clock (
-            player_id        TEXT PRIMARY KEY,
-            timezone         TEXT NOT NULL DEFAULT 'UTC',
-            timezone_mode    TEXT NOT NULL DEFAULT 'fixed',
-            anchor_real_utc  TEXT NOT NULL,
-            anchor_world_utc TEXT NOT NULL,
-            time_scale       REAL NOT NULL DEFAULT 1,
-            clock_revision   INTEGER NOT NULL DEFAULT 1,
-            updated_at       TEXT NOT NULL,
-            FOREIGN KEY (player_id) REFERENCES users(user_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS player_event_inbox (
-            id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            player_id        TEXT NOT NULL,
-            event_id         TEXT,
-            character_id     TEXT,
-            session_id       TEXT,
-            event_type       TEXT NOT NULL DEFAULT 'event',
-            group_thread_id  TEXT,
-            unread_count     INTEGER NOT NULL DEFAULT 0,
-            title            TEXT,
-            content          TEXT NOT NULL,
-            payload          TEXT,
-            world_created_at TEXT,
-            created_at       TEXT NOT NULL,
-            read_at          TEXT,
-            FOREIGN KEY (player_id) REFERENCES users(user_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS group_dialogue_state (
-            group_thread_id          TEXT PRIMARY KEY,
-            player_id                TEXT NOT NULL,
-            current_topic            TEXT,
-            topic_source             TEXT,
-            last_reply_to_message_id INTEGER,
-            last_reply_to_character_id TEXT,
-            last_speaker_id          TEXT,
-            waiting_for_player       INTEGER NOT NULL DEFAULT 0,
-            unresolved_hooks         TEXT NOT NULL DEFAULT '[]',
-            last_autonomous_pulse_at TEXT,
-            last_autonomous_world_at TEXT,
-            daily_message_date       TEXT,
-            daily_message_count      INTEGER NOT NULL DEFAULT 0,
-            lease_owner              TEXT,
-            lease_expires_at         TEXT,
-            created_at               TEXT NOT NULL,
-            updated_at               TEXT NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS character_relationship_revision (
-            owner_user_id   TEXT NOT NULL,
-            character_id_a  TEXT NOT NULL,
-            character_id_b  TEXT NOT NULL,
-            updated_at      TEXT NOT NULL,
-            PRIMARY KEY (owner_user_id, character_id_a, character_id_b),
-            FOREIGN KEY (owner_user_id) REFERENCES users(user_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS knowledge_base (
-            knowledge_base_id TEXT PRIMARY KEY,
-            owner_user_id     TEXT NOT NULL,
-            name              TEXT NOT NULL,
-            description       TEXT,
-            is_enabled        INTEGER NOT NULL DEFAULT 1,
-            created_at        TEXT NOT NULL,
-            updated_at        TEXT NOT NULL,
-            FOREIGN KEY (owner_user_id) REFERENCES users(user_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS knowledge_binding (
-            id                INTEGER PRIMARY KEY AUTOINCREMENT,
-            owner_user_id     TEXT NOT NULL,
-            knowledge_base_id TEXT NOT NULL,
-            target_type       TEXT NOT NULL,
-            target_id         TEXT NOT NULL DEFAULT '',
-            created_at        TEXT NOT NULL,
-            UNIQUE(owner_user_id, knowledge_base_id, target_type, target_id),
-            FOREIGN KEY (owner_user_id) REFERENCES users(user_id),
-            FOREIGN KEY (knowledge_base_id) REFERENCES knowledge_base(knowledge_base_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS knowledge_document (
-            document_id       TEXT PRIMARY KEY,
-            owner_user_id     TEXT NOT NULL,
-            knowledge_base_id TEXT NOT NULL,
-            original_name     TEXT NOT NULL,
-            media_type        TEXT NOT NULL,
-            source_type       TEXT NOT NULL,
-            storage_path      TEXT,
-            checksum          TEXT NOT NULL,
-            byte_size         INTEGER NOT NULL DEFAULT 0,
-            status            TEXT NOT NULL DEFAULT 'queued',
-            error_message     TEXT,
-            extracted_chars   INTEGER NOT NULL DEFAULT 0,
-            page_count        INTEGER,
-            created_at        TEXT NOT NULL,
-            updated_at        TEXT NOT NULL,
-            FOREIGN KEY (owner_user_id) REFERENCES users(user_id),
-            FOREIGN KEY (knowledge_base_id) REFERENCES knowledge_base(knowledge_base_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS knowledge_chunk (
-            chunk_id          TEXT PRIMARY KEY,
-            owner_user_id     TEXT NOT NULL,
-            knowledge_base_id TEXT NOT NULL,
-            document_id       TEXT NOT NULL,
-            chunk_index       INTEGER NOT NULL,
-            content           TEXT NOT NULL,
-            char_count        INTEGER NOT NULL,
-            source_metadata   TEXT,
-            created_at        TEXT NOT NULL,
-            UNIQUE(document_id, chunk_index),
-            FOREIGN KEY (owner_user_id) REFERENCES users(user_id),
-            FOREIGN KEY (knowledge_base_id) REFERENCES knowledge_base(knowledge_base_id),
-            FOREIGN KEY (document_id) REFERENCES knowledge_document(document_id)
-        );
-
-        CREATE TABLE IF NOT EXISTS knowledge_vector_cleanup (
-            cleanup_id        TEXT PRIMARY KEY,
-            owner_user_id     TEXT NOT NULL,
-            scope_type        TEXT NOT NULL,
-            scope_id          TEXT NOT NULL,
-            attempts          INTEGER NOT NULL DEFAULT 0,
-            last_error        TEXT,
-            created_at        TEXT NOT NULL,
-            updated_at        TEXT NOT NULL,
-            UNIQUE(owner_user_id, scope_type, scope_id)
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_auth_token_user
-        ON auth_token(user_id, expires_at);
-
-        CREATE INDEX IF NOT EXISTS idx_dialogue_turn_session_lease
-        ON dialogue_turn(session_id, status, lease_expires_at);
-
-        CREATE INDEX IF NOT EXISTS idx_relationship_revision_lookup
-        ON character_relationship_revision(owner_user_id, character_id_a, character_id_b);
-
-        CREATE INDEX IF NOT EXISTS idx_player_event_inbox_unread
-        ON player_event_inbox(player_id, read_at, id DESC);
-
-        CREATE INDEX IF NOT EXISTS idx_event_execution_metrics
-        ON event_execution(owner_user_id, event_id, status, completed_at DESC);
-
-        CREATE INDEX IF NOT EXISTS idx_event_unlock_lookup
-        ON event_unlock(player_id, character_id, unlocked_at DESC);
-
-        CREATE INDEX IF NOT EXISTS idx_group_dialogue_state_scan
-        ON group_dialogue_state(player_id, lease_expires_at, last_autonomous_pulse_at);
-
-        CREATE INDEX IF NOT EXISTS idx_knowledge_base_owner
-        ON knowledge_base(owner_user_id, is_enabled, updated_at DESC);
-
-        CREATE INDEX IF NOT EXISTS idx_knowledge_binding_target
-        ON knowledge_binding(owner_user_id, target_type, target_id, knowledge_base_id);
-
-        CREATE INDEX IF NOT EXISTS idx_knowledge_document_base
-        ON knowledge_document(owner_user_id, knowledge_base_id, status, created_at DESC);
-
-        CREATE INDEX IF NOT EXISTS idx_knowledge_chunk_document
-        ON knowledge_chunk(owner_user_id, document_id, chunk_index);
-
-        CREATE INDEX IF NOT EXISTS idx_knowledge_vector_cleanup_pending
-        ON knowledge_vector_cleanup(updated_at, attempts);
-        """
-    if _is_postgres_enabled():
-        migration_schema = migration_schema.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
-    conn.executescript(migration_schema)
-
-    def add_column(table: str, column_sql: str) -> None:
-        column_name = column_sql.split()[0]
-        if column_name in _table_columns(conn, table):
-            return
-        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column_sql}")
-
-    add_column("character_card", "avatar_url TEXT")
-    add_column("session_summary", "summary_status TEXT DEFAULT 'completed'")
-    add_column("session", "group_name TEXT")
-    add_column("session", "group_thread_id TEXT")
-    add_column("session", "locale TEXT NOT NULL DEFAULT 'zh-CN'")
-    add_column("users", "tts_auto_play INTEGER NOT NULL DEFAULT 0")
-    add_column("users", "stt_auto_send INTEGER NOT NULL DEFAULT 0")
-    add_column("users", "is_admin INTEGER NOT NULL DEFAULT 0")
-    add_column("event_definition", "schedule TEXT")
-    add_column("event_definition", "template_id TEXT")
-    add_column("event_definition", "exclusive_group TEXT")
-    add_column("event_definition", "max_triggers_per_turn INTEGER DEFAULT 3")
-    add_column("event_definition", "stop_processing INTEGER DEFAULT 0")
-    add_column("event_trigger_log", "execution_id TEXT")
-    add_column("event_trigger_log", "status TEXT DEFAULT 'succeeded'")
-    add_column("event_context_state", "context_data TEXT NOT NULL DEFAULT '{}'")
-    add_column("event_context_state", "status TEXT DEFAULT 'active'")
-    add_column("event_context_state", "progress REAL DEFAULT 0.0")
-    add_column("event_context_state", "last_session_id TEXT")
-    add_column("event_context_state", "created_at TEXT")
-    add_column("event_context_state", "updated_at TEXT")
-    add_column("event_schedule_state", "schedule TEXT NOT NULL DEFAULT '* * * * *'")
-    add_column("event_schedule_state", "last_checked_at TEXT")
-    add_column("event_schedule_state", "last_run_at TEXT")
-    add_column("event_schedule_state", "next_run_at TEXT")
-    add_column("event_schedule_state", "next_due_real_at TEXT")
-    add_column("event_schedule_state", "missed_count INTEGER NOT NULL DEFAULT 0")
-    add_column("event_schedule_state", "status TEXT DEFAULT 'active'")
-    add_column("event_schedule_state", "lease_owner TEXT")
-    add_column("event_schedule_state", "lease_expires_at TEXT")
-    add_column("event_schedule_state", "last_error TEXT")
-    add_column("event_schedule_state", "last_failed_at TEXT")
-    add_column("event_schedule_state", "created_at TEXT")
-    add_column("event_schedule_state", "updated_at TEXT")
-    add_column("event_execution_batch", "deduplicated_count INTEGER DEFAULT 0")
-    add_column("player_world_clock", "timezone_mode TEXT NOT NULL DEFAULT 'fixed'")
-    add_column("player_world_clock", "clock_revision INTEGER NOT NULL DEFAULT 1")
-    add_column("short_term_message", "action TEXT")
-    add_column("short_term_message", "affinity_delta REAL")
-    add_column("short_term_message", "trust_delta REAL")
-    add_column("short_term_message", "current_affinity REAL")
-    add_column("short_term_message", "current_trust REAL")
-    add_column("short_term_message", "current_mood TEXT")
-    add_column("short_term_message", "event_notification TEXT")
-    add_column("short_term_message", "knowledge_sources TEXT")
-    add_column("short_term_message", "world_created_at TEXT")
-    add_column("short_term_message", "reply_to_message_id INTEGER")
-    add_column("short_term_message", "reply_to_character_id TEXT")
-    add_column("short_term_message", "intent TEXT")
-    add_column("short_term_message", "topic TEXT")
-    add_column("short_term_message", "trigger_source TEXT")
-    add_column("player_event_inbox", "group_thread_id TEXT")
-    add_column("player_event_inbox", "unread_count INTEGER NOT NULL DEFAULT 0")
-    add_column("shared_memory", "owner_user_id TEXT")
-    add_column("shared_memory", "observer_character_id TEXT")
-    add_column("shared_memory", "target_character_id TEXT")
-    add_column("shared_memory", "memory_kind TEXT NOT NULL DEFAULT 'legacy_archived'")
-    _migrate_shared_memory_directionality(conn)
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_shared_memory_directional
-        ON shared_memory(
-            owner_user_id,
-            observer_character_id,
-            target_character_id,
-            importance DESC
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_event_schedule_due_real
-        ON event_schedule_state(status, next_due_real_at)
-        """
-    )
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_event_schedule_lease
-        ON event_schedule_state(status, lease_expires_at)
-        """
-    )
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_session_group_thread
-        ON session(group_thread_id, created_at DESC)
-        """
-    )
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_player_group_inbox_unread
-        ON player_event_inbox(player_id, group_thread_id, read_at, id DESC)
-        """
-    )
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_group_dialogue_state_scan
-        ON group_dialogue_state(player_id, lease_expires_at, last_autonomous_pulse_at)
-        """
-    )
-    conn.execute(
-        """
-        UPDATE session
-        SET group_thread_id = session_id
-        WHERE COALESCE(is_multi_character, 0) = 1
-          AND (group_thread_id IS NULL OR TRIM(group_thread_id) = '')
-        """
-    )
-    conn.execute(
-        """
-        UPDATE users
-        SET is_admin = 1
-        WHERE user_id = (
-            SELECT user_id
-            FROM users
-            ORDER BY created_at ASC, user_id ASC
-            LIMIT 1
-        )
-          AND NOT EXISTS (
-            SELECT 1 FROM users WHERE is_admin = 1
-        )
-        """
-    )
-    now = _now()
-    conn.execute(
-        """
-        INSERT INTO user_character_card
-        (user_id, display_name, gender, created_at, updated_at)
-        SELECT user_id, username, COALESCE(gender, 'unknown'), ?, ?
-        FROM users
-        WHERE 1 = 1
-        ON CONFLICT(user_id) DO NOTHING
-        """,
-        (now, now),
-    )
-
-
-_SHORT_TERM_MESSAGE_STATE_COLUMNS = (
-    ("action", "action TEXT"),
-    ("affinity_delta", "affinity_delta REAL"),
-    ("trust_delta", "trust_delta REAL"),
-    ("current_affinity", "current_affinity REAL"),
-    ("current_trust", "current_trust REAL"),
-    ("current_mood", "current_mood TEXT"),
-    ("event_notification", "event_notification TEXT"),
-    ("knowledge_sources", "knowledge_sources TEXT"),
-    ("world_created_at", "world_created_at TEXT"),
-    ("reply_to_message_id", "reply_to_message_id INTEGER"),
-    ("reply_to_character_id", "reply_to_character_id TEXT"),
-    ("intent", "intent TEXT"),
-    ("topic", "topic TEXT"),
-    ("trigger_source", "trigger_source TEXT"),
-)
-
-
-def _ensure_short_term_message_state_columns(conn) -> None:
-    """补齐旧库里的回放/调试状态列。"""
-    existing = _table_columns(conn, "short_term_message")
-    if not existing:
-        return
-
-    for column_name, column_sql in _SHORT_TERM_MESSAGE_STATE_COLUMNS:
-        if column_name not in existing:
-            conn.execute(f"ALTER TABLE short_term_message ADD COLUMN {column_sql}")
-
-
-def _table_columns(conn, table_name: str) -> set[str]:
-    if _is_postgres_enabled():
-        rows = conn.execute(
-            """
-            SELECT column_name AS name
-            FROM information_schema.columns
-            WHERE table_schema = 'public' AND table_name = ?
-            """,
-            (table_name,),
-        ).fetchall()
-    else:
-        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-    return {row["name"] for row in rows}
-
-
 def init_db():
     """初始化数据库结构"""
     with get_conn() as conn:
         conn.executescript(_schema_for_current_db())
-        _migrate(conn)
 
 
 # =========================
@@ -2084,7 +1564,6 @@ def append_short_term_message(
         int: 新消息的 id
     """
     with get_conn() as conn:
-        _ensure_short_term_message_state_columns(conn)
         insert_sql = """
             INSERT INTO short_term_message
             (session_id, role, content, action, affinity_delta, trust_delta,
@@ -2118,7 +1597,6 @@ def append_short_term_message(
 def get_short_term_message(session_id: str, message_id: int) -> dict | None:
     """Return one persisted message, scoped to its session."""
     with get_conn() as conn:
-        _ensure_short_term_message_state_columns(conn)
         row = conn.execute(
             """
             SELECT *
@@ -2464,7 +1942,6 @@ def get_messages_paginated(session_id: str, offset: int, limit: int) -> tuple[li
     - offset=20, limit=20: 获取次新的20条（用于"加载更多"）
     """
     with get_conn() as conn:
-        _ensure_short_term_message_state_columns(conn)
         # 先统计总数
         total_count = conn.execute(
             "SELECT COUNT(*) FROM short_term_message WHERE session_id = ?",
@@ -2497,7 +1974,6 @@ def get_messages_paginated(session_id: str, offset: int, limit: int) -> tuple[li
 def get_session_messages(session_id: str, limit: int = 1000) -> list[dict]:
     """按时间正序获取单个 session 的消息，用于回放和质量评分。"""
     with get_conn() as conn:
-        _ensure_short_term_message_state_columns(conn)
         rows = conn.execute(
             """
             SELECT id AS message_id, role, content, character_id, character_name,
@@ -2531,7 +2007,6 @@ def get_messages_by_player_and_character(
     """
 
     with get_conn() as conn:
-        _ensure_short_term_message_state_columns(conn)
         exclude_clause = ""
         params: list = [character_id, player_id]
 
@@ -4008,7 +3483,6 @@ def _commit_dialogue_turn_in_transaction(
 
     response = dialogue_turn["response"]
     temporary_ids: dict[int, int] = {}
-    _ensure_short_term_message_state_columns(conn)
     for message in dialogue_turn.get("messages") or []:
         reply_to_message_id = message.get("reply_to_message_id")
         if isinstance(reply_to_message_id, int) and reply_to_message_id < 0:

@@ -56,31 +56,6 @@ def test_character_card_update_keeps_account_avatar_independent():
     assert repository.get_user_character_card(user_id)["avatar_url"] == "data:image/png;base64,persona"
 
 
-def test_migration_backfills_existing_users(monkeypatch, tmp_path):
-    from memoria.core.config import configs
-
-    monkeypatch.setattr(configs, "database_url", "")
-    monkeypatch.setattr(configs, "database_path", str(tmp_path / "legacy.db"))
-    repository.init_db()
-    with repository.get_conn() as conn:
-        conn.execute("DELETE FROM user_character_card")
-        conn.execute(
-            """
-            INSERT INTO users
-            (user_id, username, password_hash, gender, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            ("usr_legacy", "旧旅人", "hash", "male", "2020-01-01", "2020-01-01"),
-        )
-        repository._migrate(conn)
-
-    card = repository.get_user_character_card("usr_legacy")
-
-    assert card is not None
-    assert card["display_name"] == "旧旅人"
-    assert card["gender"] == "male"
-
-
 def test_runtime_affection_creates_player_edge_without_touching_semantic_revision():
     user_id, _ = _create_user()
     character_id = f"npc_{uuid.uuid4().hex[:8]}"

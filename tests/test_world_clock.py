@@ -11,6 +11,7 @@ import pytest
 from fastapi import HTTPException
 
 from memoria.core import character_loader, event_runtime, prompt_builder, world_clock
+from memoria.core.cron_schedule import next_cron_run
 from memoria.core.event_schema import (
     EffectType,
     EventContext,
@@ -296,12 +297,12 @@ def test_local_time_dst_day_and_week_boundaries():
 
 def test_player_local_cron_conversion_handles_dst():
     before_first_fallback = datetime(2026, 11, 1, 4, 59, tzinfo=UTC)
-    first = event_runtime.next_cron_run(
+    first = next_cron_run(
         "30 1 * * *",
         before_first_fallback,
         timezone_name="America/New_York",
     )
-    second = event_runtime.next_cron_run(
+    second = next_cron_run(
         "30 1 * * *",
         first,
         timezone_name="America/New_York",
@@ -310,7 +311,7 @@ def test_player_local_cron_conversion_handles_dst():
     assert second == datetime(2026, 11, 1, 6, 30, tzinfo=UTC)
 
     before_spring_gap = datetime(2026, 3, 8, 5, 0, tzinfo=UTC)
-    after_gap = event_runtime.next_cron_run(
+    after_gap = next_cron_run(
         "30 2 * * *",
         before_spring_gap,
         timezone_name="America/New_York",
@@ -763,41 +764,6 @@ def test_concurrent_schedulers_execute_due_event_once(monkeypatch):
 
     assert execution_count == 1
     assert sorted(len(results) for results in scheduler_results) == [0, 1]
-
-
-def test_scheduled_results_persist_state_and_inbox(monkeypatch):
-    saved_state = []
-    inbox = []
-    result = EventTriggerResult(
-        event_id="scheduled_event",
-        event_name="定时事件",
-        triggered=True,
-        notification="时间到了",
-        state_changes={
-            "affection_level": 5,
-            "trust_level": 2,
-            "current_mood": "happy",
-        },
-    )
-    monkeypatch.setattr(
-        event_runtime.repository,
-        "save_runtime_state",
-        lambda *args: saved_state.append(args),
-    )
-    monkeypatch.setattr(
-        event_runtime.repository,
-        "enqueue_player_event",
-        lambda *args, **kwargs: inbox.append((args, kwargs)) or 1,
-    )
-    event_runtime._persist_scheduled_event_results(
-        _scheduled_event(),
-        _scheduled_context(),
-        [result],
-        datetime(2026, 7, 12, 12, 0, tzinfo=UTC),
-    )
-    assert saved_state[0][2:] == (30, 32, "happy")
-    assert inbox[0][0][1] == "时间到了"
-    assert json.loads(inbox[0][1]["payload"])[0]["event_id"] == "scheduled_event"
 
 
 def test_atomic_schedule_completion_rolls_back_when_lease_is_lost():

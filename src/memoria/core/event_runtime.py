@@ -17,9 +17,7 @@ from memoria.core import character_loader, world_clock
 from memoria.core.config import configs
 from memoria.core.cron_schedule import (
     collect_due_cron_runs,
-    cron_matches,
     next_cron_run,
-    validate_cron_schedule,
 )
 from memoria.core.event_detector import get_event_detector
 from memoria.core.event_executor import get_event_executor
@@ -913,75 +911,6 @@ def _load_scheduled_event_context(
         trigger_source="schedule",
         current_user_turn_persisted=True,
     )
-
-
-def _persist_scheduled_event_results(
-    event: EventDefinition,
-    context: EventContext,
-    results: list[EventTriggerResult],
-    world_now: datetime,
-) -> None:
-    _, affinity, trust, mood, _, notification = apply_event_results_to_dialogue_state(
-        results,
-        "",
-        context.current_affinity,
-        context.current_trust,
-        context.current_mood,
-    )
-    repository.save_runtime_state(
-        context.character_id,
-        context.player_id,
-        affinity,
-        trust,
-        mood,
-    )
-
-    messages: list[str] = []
-    if notification:
-        messages.append(notification)
-    for result in results:
-        if result.dialogue_override:
-            messages.append(result.dialogue_override)
-        for proactive in result.proactive_dialogues:
-            if isinstance(proactive, dict):
-                text = proactive.get("dialogue") or proactive.get("content")
-                if text:
-                    messages.append(str(text))
-    content = "\n".join(dict.fromkeys(messages)) or f"{event.event_name} 已触发。"
-    repository.enqueue_player_event(
-        context.player_id,
-        content,
-        event_id=event.event_id,
-        character_id=context.character_id,
-        session_id=(
-            None if context.session_id.startswith("schedule:") else context.session_id
-        ),
-        title=event.event_name,
-        payload=json.dumps(
-            [result.model_dump(mode="json") for result in results],
-            ensure_ascii=False,
-        ),
-        world_created_at=world_now.isoformat(),
-    )
-
-    if context.active_multi_session_id and messages:
-        try:
-            from memoria.core.group_dialogue_runtime import run_event_group_dialogue_pulse
-
-            run_event_group_dialogue_pulse(
-                context.active_multi_session_id,
-                event_text=content,
-                character_id=context.character_id,
-            )
-        except Exception:
-            logger.error(
-                "Scheduled event group-dialogue pulse failed",
-                extra={
-                    "event_id": event.event_id,
-                    "session_id": context.active_multi_session_id,
-                },
-                exc_info=True,
-            )
 
 
 def run_due_time_events(

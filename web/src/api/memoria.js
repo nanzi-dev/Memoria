@@ -448,14 +448,14 @@ export const knowledgeApi = {
 // ═══════════════════════════════════════════════
 export const dialogue = {
   /** 开始单角色对话会话 */
-  startSession(characterId, playerId, playerName = '旅行者', locale = 'zh-CN') {
+  startSession(characterId, playerId, playerName = '旅行者') {
     return request('/dialogue/session/start', {
       method: 'POST',
       body: JSON.stringify({
         character_id: characterId,
         player_id: playerId,
         player_name: playerName,
-        locale,
+        locale: 'zh-CN',
       }),
     });
   },
@@ -517,7 +517,7 @@ export const dialogue = {
 // ═══════════════════════════════════════════════
 export const multiDialogue = {
   /** 开始多角色群聊 */
-  startSession(playerId, playerName, characterIds, groupName = null, locale = 'zh-CN') {
+  startSession(playerId, playerName, characterIds, groupName = null) {
     return request('/multi-dialogue/session/start', {
       method: 'POST',
       body: JSON.stringify({
@@ -525,7 +525,7 @@ export const multiDialogue = {
         player_name: playerName,
         group_name: groupName,
         character_ids: characterIds,
-        locale,
+        locale: 'zh-CN',
       }),
     });
   },

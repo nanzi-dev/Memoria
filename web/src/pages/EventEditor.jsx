@@ -438,7 +438,7 @@ function EventDependencySelect({ value, onChange, eventOptions, placeholder, all
     <select
       value={normalizedValue}
       onChange={event => onChange(event.target.value)}
-      className="min-h-[42px] w-full min-w-0 rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+      className="min-h-11 w-full min-w-0 rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
     >
       {allowEmpty && <option value="">{placeholder || '选择事件'}</option>}
       {valueIsMissing && (
@@ -463,7 +463,7 @@ function SubConditionEditor({ condition, onChange, onDelete, eventOptions, depth
           onClick={onDelete}
           aria-label="删除子条件"
           title="删除子条件"
-          className="inline-flex h-9 w-9 items-center justify-center text-cyber-green/30 transition-colors hover:text-red-400"
+          className="inline-flex h-11 w-11 items-center justify-center text-cyber-green/30 transition-colors hover:text-red-400"
         >
           <Trash2 size={10} />
         </button>
@@ -491,7 +491,7 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
         <select
           value={t}
           onChange={e => onChange({ ...DEFAULT_SUB_CONDITION, trigger_type: e.target.value })}
-          className="min-h-[42px] max-w-full rounded border border-cyber-green/30 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/60 focus:outline-none"
+          className="min-h-11 max-w-full rounded border border-cyber-green/30 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/60 focus:outline-none"
         >
           {unavailable && <option value={t}>{t}（未实现）</option>}
           {TRIGGER_TYPES.filter(tt => isSub ? tt.value !== 'composite' : true).map(tt => (
@@ -512,7 +512,7 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
           <select
             value={condition.comparison || 'gte'}
             onChange={e => update('comparison', e.target.value)}
-            className="min-h-[42px] rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green/70"
+            className="min-h-11 rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green/70"
           >
             {COMPARISONS.map(c => (
               <option key={c.value} value={c.value}>{c.label}</option>
@@ -523,13 +523,13 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
             value={condition.threshold ?? ''}
             onChange={e => update('threshold', e.target.value === '' ? null : Number(e.target.value))}
             placeholder="数值"
-            className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+            className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
           />
         </div>
       )}
 
       {(t === 'affinity_threshold' || t === 'trust_threshold') && (
-        <label className="flex min-h-[40px] items-center gap-2 text-[10px] font-mono text-cyber-green/45">
+        <label className="flex min-h-11 items-center gap-2 text-[10px] font-mono text-cyber-green/45">
           <input
             type="checkbox"
             checked={Boolean(condition.crossing)}
@@ -546,7 +546,7 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
           <select
             value={condition.state_field || 'affinity'}
             onChange={e => update('state_field', e.target.value)}
-            className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green sm:max-w-xs"
+            className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green sm:max-w-xs"
           >
             <option value="affinity">好感度变化量</option>
             <option value="trust">信任度变化量</option>
@@ -559,7 +559,7 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
           <select
             value={condition.comparison || 'gte'}
             onChange={e => update('comparison', e.target.value)}
-            className="min-h-[42px] rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green/70"
+            className="min-h-11 rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green/70"
           >
             {COMPARISONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
           </select>
@@ -569,7 +569,7 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
             value={condition.count ?? ''}
             onChange={e => update('count', e.target.value === '' ? null : Number(e.target.value))}
             placeholder="历史总轮数"
-            className="min-h-[42px] rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+            className="min-h-11 rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
           />
         </div>
       )}
@@ -584,7 +584,7 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
                 min="0"
                 value={condition.duration_minutes ?? ''}
                 onChange={e => update('duration_minutes', e.target.value === '' ? null : Number(e.target.value))}
-                className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+                className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
               />
             </label>
             <label className="text-[10px] font-mono text-cyber-green/40">
@@ -594,7 +594,7 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
                 value={condition.schedule || ''}
                 onChange={e => update('schedule', e.target.value)}
                 placeholder="0 9 * * *"
-                className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+                className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
               />
             </label>
           </div>
@@ -606,7 +606,7 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
               max="100"
               value={condition.catch_up_replay_limit ?? 1}
               onChange={event => update('catch_up_replay_limit', Math.min(100, Math.max(1, Number(event.target.value) || 1)))}
-              className="min-h-[42px] w-28 rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+              className="min-h-11 w-28 rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
             />
           </label>
         </div>
@@ -618,7 +618,7 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
             <select
               value={condition.match_mode || 'any'}
               onChange={e => update('match_mode', e.target.value)}
-              className="min-h-[42px] rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green/70"
+              className="min-h-11 rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green/70"
             >
               {MATCH_MODES.map(mode => (
                 <option key={mode.value} value={mode.value}>{mode.label}</option>
@@ -637,7 +637,7 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
         <select
           value={condition.mood || 'neutral'}
           onChange={e => update('mood', e.target.value)}
-          className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green sm:max-w-xs"
+          className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green sm:max-w-xs"
         >
           {MOODS.map(m => (
             <option key={m} value={m}>{m}</option>
@@ -661,7 +661,7 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
             <select
               value={condition.event_status || 'succeeded'}
               onChange={e => update('event_status', e.target.value)}
-              className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green"
+              className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green"
             >
               {EVENT_STATUSES.map(status => <option key={status} value={status}>{status}</option>)}
             </select>
@@ -673,7 +673,7 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
               min="1"
               value={condition.min_occurrences ?? 1}
               onChange={e => update('min_occurrences', Math.max(1, Number(e.target.value) || 1))}
-              className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+              className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
             />
           </label>
         </div>
@@ -688,7 +688,7 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
                 type="time"
                 value={condition.time_window_start || ''}
                 onChange={e => update('time_window_start', e.target.value)}
-                className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green"
+                className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green"
               />
             </label>
             <label className="text-[10px] font-mono text-cyber-green/40">
@@ -697,7 +697,7 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
                 type="time"
                 value={condition.time_window_end || ''}
                 onChange={e => update('time_window_end', e.target.value)}
-                className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green"
+                className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green"
               />
             </label>
           </div>
@@ -717,7 +717,7 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
                         : [...(condition.weekdays || []), day].sort();
                       update('weekdays', weekdays);
                     }}
-                    className={`h-10 w-10 rounded border text-[10px] font-mono transition-colors ${
+                    className={`h-11 w-11 rounded border text-[10px] font-mono transition-colors ${
                       selected
                         ? 'border-cyber-green/40 bg-cyber-green/10 text-cyber-green'
                         : 'border-cyber-green/15 text-cyber-green/35 hover:text-cyber-green/70'
@@ -739,7 +739,7 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
           min="0"
           value={condition.cooldown_hours ?? 0}
           onChange={e => update('cooldown_hours', Math.max(0, Number(e.target.value)))}
-          className="min-h-[40px] w-20 rounded border border-cyber-green/20 bg-cyber-surface px-2 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+          className="min-h-11 w-20 rounded border border-cyber-green/20 bg-cyber-surface px-2 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
         />
         <span className="text-[10px] text-cyber-green/30">小时 (0=一次性)</span>
       </div>
@@ -750,7 +750,7 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
             <select
               value={condition.logic_operator || 'and'}
               onChange={e => update('logic_operator', e.target.value)}
-              className="min-h-[42px] rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green/70"
+              className="min-h-11 rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green/70"
             >
               <option value="and">AND（全部满足）</option>
               <option value="or">OR（任一满足）</option>
@@ -761,7 +761,7 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
                 const subs = [...(condition.sub_conditions || []), cloneJson(DEFAULT_SUB_CONDITION)];
                 update('sub_conditions', subs);
               }}
-              className="flex min-h-[42px] items-center justify-center gap-1 rounded border border-cyber-green/20 px-3 text-[10px] font-mono text-cyber-green/50 transition-colors hover:text-cyber-green"
+              className="flex min-h-11 items-center justify-center gap-1 rounded border border-cyber-green/20 px-3 text-[10px] font-mono text-cyber-green/50 transition-colors hover:text-cyber-green"
             >
               <Plus size={10} /> 添加子条件
             </button>
@@ -841,7 +841,7 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
           <select
             value={t}
             onChange={e => onChange({ ...cloneJson(DEFAULT_EFFECT), effect_type: e.target.value })}
-            className="min-h-[42px] min-w-0 rounded border border-cyber-green/30 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/60 focus:outline-none"
+            className="min-h-11 min-w-0 rounded border border-cyber-green/30 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/60 focus:outline-none"
           >
             {unavailable && <option value={t}>{t}（未实现）</option>}
             {EFFECT_TYPES.map(et => (
@@ -854,7 +854,7 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
           onClick={onDelete}
           aria-label={`删除效果 ${index + 1}`}
           title="删除效果"
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center text-cyber-green/30 transition-colors hover:text-red-400"
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center text-cyber-green/30 transition-colors hover:text-red-400"
         >
           <Trash2 size={14} />
         </button>
@@ -879,7 +879,7 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
                   next[e.target.value] = value;
                   update('state_changes', next);
                 }}
-                className="min-h-[42px] min-w-0 rounded border border-cyber-green/20 bg-cyber-surface px-2 text-[11px] font-mono text-cyber-green"
+                className="min-h-11 min-w-0 rounded border border-cyber-green/20 bg-cyber-surface px-2 text-[11px] font-mono text-cyber-green"
               >
                 {!['affection_level', 'trust_level', 'current_mood'].includes(key) && (
                   <option value={key}>{key}（不支持）</option>
@@ -892,7 +892,7 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
                 <select
                   value={value ?? 'neutral'}
                   onChange={e => update('state_changes', { ...(effect.state_changes || {}), [key]: e.target.value })}
-                  className="min-h-[42px] min-w-0 rounded border border-cyber-green/20 bg-cyber-surface px-2 text-[11px] font-mono text-cyber-green"
+                  className="min-h-11 min-w-0 rounded border border-cyber-green/20 bg-cyber-surface px-2 text-[11px] font-mono text-cyber-green"
                 >
                   {MOODS.map(mood => <option key={mood} value={mood}>{mood}</option>)}
                 </select>
@@ -905,7 +905,7 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
                     [key]: e.target.value === '' ? '' : Number(e.target.value),
                   })}
                   placeholder="变化值"
-                  className="min-h-[42px] min-w-0 rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+                  className="min-h-11 min-w-0 rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
                 />
               )}
               <button
@@ -917,7 +917,7 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
                 }}
                 aria-label={`删除状态字段 ${key}`}
                 title="删除状态字段"
-                className="inline-flex h-10 w-10 items-center justify-center text-cyber-green/30 hover:text-red-400"
+                className="inline-flex h-11 w-11 items-center justify-center text-cyber-green/30 hover:text-red-400"
               >
                 <X size={12} />
               </button>
@@ -931,7 +931,7 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
               if (nextKey) update('state_changes', { ...changes, [nextKey]: nextKey === 'current_mood' ? 'neutral' : 0 });
             }}
             disabled={['affection_level', 'trust_level', 'current_mood'].every(key => key in (effect.state_changes || {}))}
-            className="flex min-h-[40px] items-center gap-1 text-[10px] font-mono text-cyber-green/45 hover:text-cyber-green disabled:opacity-30"
+            className="flex min-h-11 items-center gap-1 text-[10px] font-mono text-cyber-green/45 hover:text-cyber-green disabled:opacity-30"
           >
             <Plus size={11} /> 添加状态字段
           </button>
@@ -953,14 +953,14 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
             value={effect.dialogue_text || ''}
             onChange={e => update('dialogue_text', e.target.value)}
             placeholder="对话内容"
-            className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+            className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
           />
           <input
             type="text"
             value={effect.dialogue_action || ''}
             onChange={e => update('dialogue_action', e.target.value)}
             placeholder="动作描述"
-            className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+            className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
           />
         </div>
       )}
@@ -981,7 +981,7 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
               value={effect.memory_importance ?? 5}
               onChange={e => update('memory_importance', Number(e.target.value))}
               min={1} max={10}
-              className="min-h-[40px] w-20 rounded border border-cyber-green/20 bg-cyber-surface px-2 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+              className="min-h-11 w-20 rounded border border-cyber-green/20 bg-cyber-surface px-2 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
             />
           </div>
         </div>
@@ -991,7 +991,7 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
         <select
           value={effect.target_mood || 'neutral'}
           onChange={e => update('target_mood', e.target.value)}
-          className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green sm:max-w-xs"
+          className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green sm:max-w-xs"
         >
           {MOODS.map(m => (
             <option key={m} value={m}>{m}</option>
@@ -1006,12 +1006,12 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
             value={effect.notification_message || ''}
             onChange={e => update('notification_message', e.target.value)}
             placeholder="通知消息"
-            className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+            className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
           />
           <select
             value={effect.notification_type || 'info'}
             onChange={e => update('notification_type', e.target.value)}
-            className="min-h-[42px] rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green/70"
+            className="min-h-11 rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green/70"
           >
             <option value="info">Info</option>
             <option value="success">Success</option>
@@ -1053,7 +1053,7 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
                   )}
                   aria-label={`删除分支 ${branchIndex + 1}`}
                   title="删除分支"
-                  className="inline-flex h-9 w-9 items-center justify-center text-cyber-green/30 hover:text-red-400"
+                  className="inline-flex h-11 w-11 items-center justify-center text-cyber-green/30 hover:text-red-400"
                 >
                   <Trash2 size={12} />
                 </button>
@@ -1085,7 +1085,7 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
               ...(effect.branch_conditions || []),
               cloneJson(DEFAULT_BRANCH_CONDITION),
             ])}
-            className="flex min-h-[42px] items-center gap-1 rounded border border-cyber-green/20 px-3 text-[10px] font-mono text-cyber-green/50 hover:text-cyber-green"
+            className="flex min-h-11 items-center gap-1 rounded border border-cyber-green/20 px-3 text-[10px] font-mono text-cyber-green/50 hover:text-cyber-green"
           >
             <Plus size={11} /> 添加分支
           </button>
@@ -1099,14 +1099,14 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
             value={effect.proactive_character_id || ''}
             onChange={e => update('proactive_character_id', e.target.value)}
             placeholder="主动发言角色 ID（可选）"
-            className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+            className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
           />
           <input
             type="text"
             value={effect.target_session_id || ''}
             onChange={e => update('target_session_id', e.target.value)}
             placeholder="目标会话 ID（可选）"
-            className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+            className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none"
           />
           <textarea
             value={effect.proactive_prompt || ''}
@@ -1129,7 +1129,7 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
               step="0.01"
               value={effect.progress ?? ''}
               onChange={e => update('progress', e.target.value === '' ? null : Number(e.target.value))}
-              className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+              className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
             />
           </label>
           <label className="text-[10px] font-mono text-cyber-green/40">
@@ -1139,7 +1139,7 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
               step="0.01"
               value={effect.progress_delta ?? ''}
               onChange={e => update('progress_delta', e.target.value === '' ? null : Number(e.target.value))}
-              className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+              className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
             />
           </label>
           <label className="text-[10px] font-mono text-cyber-green/40">
@@ -1147,7 +1147,7 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
             <select
               value={effect.event_status || ''}
               onChange={e => update('event_status', e.target.value)}
-              className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green"
+              className="min-h-11 w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green"
             >
               <option value="">不修改</option>
               {PROGRESS_STATUSES.map(status => <option key={status} value={status}>{status}</option>)}
@@ -1344,7 +1344,7 @@ export default function EventEditor() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-cyber-bg flex items-center justify-center">
+      <div className="min-h-dvh memoria-page memoria-app-page flex items-center justify-center">
         <Loader2 className="animate-spin text-cyber-green" size={32} />
       </div>
     );
@@ -1352,8 +1352,8 @@ export default function EventEditor() {
 
   if (loadError) {
     return (
-      <div className="min-h-screen bg-cyber-bg flex items-center justify-center px-6">
-        <div className="w-full max-w-md rounded-lg border border-red-400/20 bg-cyber-surface/50 p-6 text-center">
+      <div className="min-h-dvh memoria-page memoria-app-page flex items-center justify-center px-6">
+        <div className="memoria-panel w-full max-w-md p-6 text-center">
           <AlertCircle className="mx-auto text-red-400/80" size={32} />
           <h1 className="mt-4 font-display text-base text-cyber-green tracking-[0.16em]">
             EVENT LOAD FAILED
@@ -1362,14 +1362,14 @@ export default function EventEditor() {
           <div className="mt-5 flex justify-center gap-3">
             <button
               onClick={() => navigate('/events')}
-              className="flex min-h-[40px] items-center gap-2 rounded border border-cyber-green/20 px-4 py-2 text-xs font-mono text-cyber-green/70 hover:border-cyber-green/40 hover:text-cyber-green"
+              className="memoria-button"
             >
               <ArrowLeft size={14} />
               返回
             </button>
             <button
               onClick={() => setReloadVersion(value => value + 1)}
-              className="min-h-[40px] rounded border border-cyber-green/30 bg-cyber-green/10 px-4 py-2 text-xs font-mono text-cyber-green hover:bg-cyber-green/20"
+              className="memoria-button memoria-button-primary"
             >
               重试
             </button>
@@ -1398,15 +1398,15 @@ export default function EventEditor() {
   };
 
   return (
-    <div className="min-h-screen bg-cyber-bg">
+    <div className="min-h-dvh memoria-page memoria-app-page">
       {/* Header */}
-      <div className="sticky top-0 z-20 bg-cyber-bg/95 backdrop-blur border-b border-cyber-green/15">
+      <div className="memoria-app-header sticky top-0 z-20 border-b">
         <div className="mx-auto grid max-w-6xl grid-cols-[auto_1fr_auto] items-center gap-2 px-4 py-3 sm:gap-4 sm:px-6 sm:py-4">
           <button
             onClick={() => navigate('/events')}
             aria-label="返回事件列表"
             title="返回事件列表"
-            className="flex min-h-[44px] items-center gap-1 text-sm font-mono text-cyber-green/60 transition-colors hover:text-cyber-green"
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center gap-1 text-sm font-mono text-cyber-green/60 transition-colors hover:text-cyber-green"
           >
             <ArrowLeft size={16} />
             <span className="hidden sm:inline">Events</span>
@@ -1437,7 +1437,9 @@ export default function EventEditor() {
             <button
               onClick={handleSave}
               disabled={saveDisabled}
-              className="flex min-h-[44px] items-center gap-1 rounded border border-cyber-green/30 bg-cyber-green/10 px-2 text-xs font-mono text-cyber-green transition-colors hover:bg-cyber-green/20 disabled:opacity-50 sm:px-4 sm:text-sm"
+              aria-label="保存事件"
+              title="保存事件"
+              className="flex min-h-[44px] min-w-[44px] items-center justify-center gap-1 rounded border border-cyber-green/30 bg-cyber-green/10 px-2 text-xs font-mono text-cyber-green transition-colors hover:bg-cyber-green/20 disabled:opacity-50 sm:px-4 sm:text-sm"
             >
               {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
               <span className="hidden sm:inline">Save</span>
@@ -1575,7 +1577,7 @@ export default function EventEditor() {
               onClick={() => setAdvancedOpen(!advancedOpen)}
               type="button"
               aria-expanded={advancedOpen}
-              className="flex min-h-[40px] items-center gap-1 text-[10px] font-mono text-cyber-green/40 transition-colors hover:text-cyber-green/70"
+              className="flex min-h-11 items-center gap-1 text-[10px] font-mono text-cyber-green/40 transition-colors hover:text-cyber-green/70"
             >
               {advancedOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
               高级设置
@@ -1633,7 +1635,7 @@ export default function EventEditor() {
                   />
                 </div>
                 <div className="flex flex-col justify-end gap-2 sm:flex-row sm:items-center lg:flex-col lg:items-start">
-                  <label className="flex min-h-[40px] cursor-pointer items-center gap-2">
+                  <label className="flex min-h-11 cursor-pointer items-center gap-2">
                     <input
                       type="checkbox"
                       checked={form.is_active}
@@ -1642,7 +1644,7 @@ export default function EventEditor() {
                     />
                     <span className="text-[10px] font-mono text-cyber-green/40">启用事件</span>
                   </label>
-                  <label className="flex min-h-[40px] cursor-pointer items-center gap-2">
+                  <label className="flex min-h-11 cursor-pointer items-center gap-2">
                     <input
                       type="checkbox"
                       checked={form.stop_processing}
@@ -1687,7 +1689,7 @@ export default function EventEditor() {
               <h2 className="font-mono text-sm text-cyber-green/70">事件效果</h2>
               <button
                 onClick={() => updateField('effects', [...form.effects, { ...DEFAULT_EFFECT }])}
-                className="flex min-h-[42px] items-center justify-center gap-1 rounded border border-cyber-green/20 px-3 text-[10px] font-mono text-cyber-green/50 transition-colors hover:text-cyber-green"
+                className="flex min-h-11 items-center justify-center gap-1 rounded border border-cyber-green/20 px-3 text-[10px] font-mono text-cyber-green/50 transition-colors hover:text-cyber-green"
               >
                 <Plus size={12} /> 添加效果
               </button>

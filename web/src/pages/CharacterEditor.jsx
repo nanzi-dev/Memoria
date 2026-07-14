@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, Check, ChevronLeft, ChevronRight, Upload, Download, RefreshCw, Languages } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Check, ChevronLeft, ChevronRight, Upload, Download, RefreshCw } from 'lucide-react';
 import { characterAdmin } from '../api/memoria';
 import StepIdentity from '../components/editor/StepIdentity';
 import StepPersonality from '../components/editor/StepPersonality';
@@ -15,12 +15,6 @@ const STEPS = [
   { id: 'speech', label: '语言风格 Speech', Icon: null },
   { id: 'background', label: '背景 Background', Icon: null },
   { id: 'interaction', label: '交互规则 Rules', Icon: null },
-];
-
-const EDITOR_LOCALES = [
-  { value: 'default', label: 'Default' },
-  { value: 'zh-CN', label: 'zh-CN' },
-  { value: 'en-US', label: 'en-US' },
 ];
 
 const LOCALIZABLE_FIELDS = {
@@ -92,9 +86,9 @@ function sanitizeLocaleOverride(override) {
 function sanitizeI18n(i18n) {
   if (!isPlainObject(i18n)) return {};
   return Object.fromEntries(
-    EDITOR_LOCALES
-      .filter(({ value }) => value !== 'default' && isPlainObject(i18n[value]))
-      .map(({ value }) => [value, sanitizeLocaleOverride(i18n[value])]),
+    ['zh-CN', 'en-US']
+      .filter(locale => isPlainObject(i18n[locale]))
+      .map(locale => [locale, sanitizeLocaleOverride(i18n[locale])]),
   );
 }
 
@@ -102,11 +96,6 @@ function mergeCharacterData(importedData) {
   const merged = deepMerge(DEFAULT_DATA, isPlainObject(importedData) ? importedData : {});
   merged.i18n = sanitizeI18n(merged.i18n);
   return merged;
-}
-
-function isLocalizablePath(path) {
-  const [root, field] = path.split('.');
-  return Boolean(field && LOCALIZABLE_FIELDS[root]?.has(field));
 }
 
 function normalizeImportedCharacter(rawData) {
@@ -135,7 +124,6 @@ export default function CharacterEditor() {
   const dialog = useDialog();
   const fileInputRef = useRef(null);
   const [currentStep, setCurrentStep] = useState(0);
-  const [activeLocale, setActiveLocale] = useState('default');
   const [formData, setFormData] = useState(() => mergeCharacterData({}));
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(!!characterId);
@@ -158,7 +146,6 @@ export default function CharacterEditor() {
     let cancelled = false;
     if (!characterId) {
       setFormData(mergeCharacterData({}));
-      setActiveLocale('default');
       setLoading(false);
       setLoadedCharacterId('');
       setLoadError('');
@@ -171,7 +158,6 @@ export default function CharacterEditor() {
     setLoadError('');
     setSaveMessage('');
     setCurrentStep(0);
-    setActiveLocale('default');
 
     (async () => {
       try {
@@ -218,20 +204,6 @@ export default function CharacterEditor() {
     });
   }, []);
 
-  const localizedUpdateField = useCallback((path, value) => {
-    if (activeLocale === 'default') {
-      updateField(path, value);
-      return;
-    }
-    if (!isLocalizablePath(path)) return;
-    updateField(`i18n.${activeLocale}.${path}`, value);
-  }, [activeLocale, updateField]);
-
-  const editorData = useMemo(() => {
-    if (activeLocale === 'default') return formData;
-    return deepMerge(formData, sanitizeLocaleOverride(formData.i18n?.[activeLocale]));
-  }, [activeLocale, formData]);
-
   async function handleSave() {
     if (characterId && loadedCharacterId !== characterId) return;
     setSaving(true);
@@ -247,6 +219,8 @@ export default function CharacterEditor() {
       if (!data.meta?.name) data.meta.name = data.character_id;
       if (!data.meta?.display_name) data.meta.display_name = data.meta.name;
       data.meta.last_updated = new Date().toISOString().split('T')[0];
+      if (!isPlainObject(data.speech_style)) data.speech_style = {};
+      data.speech_style.language = 'zh-CN';
 
       // Try backend API first
       try {
@@ -287,7 +261,6 @@ export default function CharacterEditor() {
       setFormData(data);
       setIsActive(true);
       setCurrentStep(0);
-      setActiveLocale('default');
       setSaveMessage('Imported character JSON. Review and save.');
     } catch (e) {
       setSaveMessage(`Error: ${e.message}`);
@@ -358,7 +331,7 @@ export default function CharacterEditor() {
 
   if (characterId && (loading || loadedCharacterId !== characterId) && !loadError) {
     return (
-      <div className="min-h-screen bg-cyber-bg flex items-center justify-center">
+      <div className="min-h-dvh character-editor-page memoria-app-page flex items-center justify-center">
         <Loader2 className="animate-spin text-cyber-green" size={32} />
       </div>
     );
@@ -366,20 +339,20 @@ export default function CharacterEditor() {
 
   if (loadError) {
     return (
-      <div className="min-h-dvh character-editor-page flex items-center justify-center px-4">
-        <div className="w-full max-w-md border border-red-400/30 bg-cyber-surface p-6 text-center">
+      <div className="min-h-dvh character-editor-page memoria-app-page flex items-center justify-center px-4">
+        <div className="memoria-panel w-full max-w-md p-6 text-center">
           <p className="font-mono text-sm text-red-300 break-words">{loadError}</p>
           <div className="mt-5 flex items-center justify-center gap-3">
             <button
               onClick={() => navigate('/')}
-              className="flex min-h-[40px] items-center gap-2 border border-cyber-green/20 px-3 font-mono text-sm text-cyber-green/70 hover:text-cyber-green"
+              className="memoria-button"
             >
               <ArrowLeft size={16} />
               Back
             </button>
             <button
               onClick={() => setReloadVersion(version => version + 1)}
-              className="flex min-h-[40px] items-center gap-2 border border-cyber-green/40 bg-cyber-green/10 px-3 font-mono text-sm text-cyber-green hover:bg-cyber-green/20"
+              className="memoria-button memoria-button-primary"
             >
               <RefreshCw size={16} />
               Retry
@@ -393,13 +366,13 @@ export default function CharacterEditor() {
   const StepComponent = [StepIdentity, StepPersonality, StepSpeechStyle, StepBackground, StepInteraction][currentStep];
 
   return (
-    <div className="min-h-dvh character-editor-page">
+    <div className="min-h-dvh character-editor-page memoria-app-page">
       {/* Header */}
-      <div className="sticky top-0 z-20 bg-cyber-surface/90 backdrop-blur-xl border-b border-cyber-green/20 shadow-[0_10px_34px_rgba(0,0,0,0.22)]">
+      <div className="memoria-app-header sticky top-0 z-20 border-b">
         <div className="max-w-5xl mx-auto px-3 sm:px-4 py-3 flex flex-wrap items-center justify-between gap-3">
           <button
             onClick={() => navigate('/')}
-            className="flex items-center gap-1 min-h-[40px] px-2 -ml-2 text-cyber-green/60 hover:text-cyber-green transition-colors font-mono text-sm"
+            className="flex min-h-[44px] items-center gap-1 px-2 -ml-2 text-cyber-green/60 hover:text-cyber-green transition-colors font-mono text-sm"
           >
             <ArrowLeft size={16} />
             Back
@@ -411,7 +384,9 @@ export default function CharacterEditor() {
             {characterId ? (
               <button
                 onClick={handleExportFile}
-                className="flex items-center gap-1 min-h-[40px] px-3 py-1 text-xs font-mono text-cyber-green/70 hover:text-cyber-green border border-cyber-green/20 hover:border-cyber-green/40 rounded transition-colors"
+                aria-label="导出角色 JSON"
+                title="导出角色 JSON"
+                className="memoria-button"
               >
                 <Download size={14} />
                 <span className="hidden sm:inline">Export JSON</span>
@@ -427,7 +402,9 @@ export default function CharacterEditor() {
                 />
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-1 min-h-[40px] px-3 py-1 text-xs font-mono text-cyber-green/70 hover:text-cyber-green border border-cyber-green/20 hover:border-cyber-green/40 rounded transition-colors"
+                  aria-label="导入角色 JSON"
+                  title="导入角色 JSON"
+                  className="memoria-button"
                 >
                   <Upload size={14} />
                   <span className="hidden sm:inline">Import JSON</span>
@@ -439,7 +416,7 @@ export default function CharacterEditor() {
                 <button
                   onClick={handleToggleActive}
                   disabled={actionPending}
-                  className={`min-h-[40px] px-3 py-1 text-xs font-mono rounded transition-colors border ${
+                  className={`min-h-[44px] rounded-lg border px-3 py-1 text-xs font-mono transition-colors ${
                     isActive
                       ? 'text-amber-400/70 hover:text-amber-400 border-amber-400/20 hover:border-amber-400/40'
                       : 'text-green-400/70 hover:text-green-400 border-green-400/20 hover:border-green-400/40'
@@ -450,7 +427,7 @@ export default function CharacterEditor() {
                 <button
                   onClick={handleDelete}
                   disabled={actionPending}
-                  className="min-h-[40px] px-3 py-1 text-xs font-mono text-red-400/60 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 rounded transition-colors disabled:opacity-50"
+                  className="min-h-[44px] rounded-lg border border-red-400/20 px-3 py-1 text-xs font-mono text-red-400/60 transition-colors hover:border-red-400/40 hover:bg-red-400/5 hover:text-red-400 disabled:opacity-50"
                 >
                   Delete
                 </button>
@@ -459,7 +436,7 @@ export default function CharacterEditor() {
             <button
               onClick={handleSave}
               disabled={saving || actionPending}
-              className="flex items-center gap-1 min-h-[40px] px-4 py-1.5 bg-cyber-green/10 border border-cyber-green/30 text-cyber-green font-mono text-sm rounded hover:bg-cyber-green/20 transition-colors disabled:opacity-50"
+              className="memoria-button memoria-button-primary px-4 text-sm disabled:opacity-50"
             >
               {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
               Save
@@ -474,7 +451,7 @@ export default function CharacterEditor() {
               <button
                 key={step.id}
                 onClick={() => setCurrentStep(idx)}
-              className={`shrink-0 flex items-center gap-2 min-h-[40px] px-3 py-1.5 rounded text-xs font-mono transition-all ${
+              className={`shrink-0 flex items-center gap-2 min-h-[44px] px-3 py-1.5 rounded-lg text-xs font-mono transition-all ${
                   idx === currentStep
                     ? 'bg-cyber-green/12 text-cyber-green border border-cyber-green/35 shadow-[0_0_18px_rgba(167,239,158,0.08)]'
                     : idx < currentStep
@@ -505,133 +482,43 @@ export default function CharacterEditor() {
         </div>
       )}
 
-      {/* Form content - Paper folder style */}
+      {/* Form content */}
       <div className="relative z-10 max-w-4xl mx-auto px-3 sm:px-4 py-5 sm:py-8">
-        <div className="relative">
-          {/* Paper folder background */}
-          <div
-            className="rounded-lg shadow-2xl overflow-hidden"
-            style={{
-              background: 'linear-gradient(135deg, #3D3226 0%, #4A3B2C 30%, #3D3226 60%, #362B20 100%)',
-              border: '1px solid #5A4A38',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05)',
-            }}
-          >
-            {/* Folder tab */}
-            <div
-              className="relative mx-3 sm:mx-8 -mt-0.5"
-              style={{
-                background: '#4A3B2C',
-                borderTopLeftRadius: 8,
-                borderTopRightRadius: 8,
-                border: '1px solid #5A4A38',
-                borderBottom: 'none',
-                padding: '8px 16px',
-                display: 'inline-block',
-              }}
-            >
-              <p className="text-center font-mono text-xs text-amber-800/80 tracking-wider">
-                ★ CHARACTER FILE ★
-              </p>
+        <div className="memoria-panel overflow-hidden">
+          <div className="flex flex-col gap-3 border-b border-cyber-green/10 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase text-cyber-green/45">Character file</p>
+              <h2 className="mt-1 break-words font-mono text-base font-bold text-zinc-100 sm:text-xl">
+                CHARACTER PROFILE
+              </h2>
             </div>
-
-            {/* Paper card */}
-            <div
-              className="mx-3 sm:mx-6 mb-4 sm:mb-6 rounded-sm"
-              style={{
-                background: 'linear-gradient(to bottom, #F5EDE0 0%, #EDE4D4 100%)',
-                border: '1px solid #C4B594',
-                boxShadow: '0 2px 12px rgba(0,0,0,0.3), inset 0 0 30px rgba(139,119,90,0.1)',
-              }}
-            >
-              {/* Card header */}
-              <div className="p-4 sm:p-6 pb-4 border-b" style={{ borderColor: '#C4B594' }}>
-                <div className="flex items-start sm:items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <h2 className="text-base sm:text-xl font-bold text-cyber-ink font-mono tracking-wide break-words">
-                      CHARACTER RESUME / PROFILE CARD
-                    </h2>
-                    <p className="text-xs text-amber-700/60 font-mono mt-1">
-                      CHARACTER RESUME / PROFILE CARD
-                    </p>
-                  </div>
-                  {/* Decorative compass/mark */}
-                  <div className="hidden sm:block text-cyber-ink/20 shrink-0">
-                    <svg width="40" height="40" viewBox="0 0 40 40">
-                      <circle cx="20" cy="20" r="18" fill="none" stroke="currentColor" strokeWidth="1" />
-                      <circle cx="20" cy="20" r="8" fill="none" stroke="currentColor" strokeWidth="0.5" />
-                      <line x1="20" y1="2" x2="20" y2="8" stroke="currentColor" strokeWidth="1" />
-                      <line x1="20" y1="32" x2="20" y2="38" stroke="currentColor" strokeWidth="1" />
-                      <line x1="2" y1="20" x2="8" y2="20" stroke="currentColor" strokeWidth="1" />
-                      <line x1="32" y1="20" x2="38" y2="20" stroke="currentColor" strokeWidth="1" />
-                      <polygon points="20,4 23,18 20,22 17,18" fill="currentColor" />
-                    </svg>
-                  </div>
-                </div>
-              </div>
-
-              {/* Form body */}
-              <div className="p-4 sm:p-6">
-                <div className="mb-6 flex items-center gap-3 border-b border-amber-700/20 pb-4">
-                  <Languages size={17} className="shrink-0 text-amber-900/55" />
-                  <div className="grid min-w-0 flex-1 grid-cols-3 overflow-hidden rounded border border-amber-700/20 bg-amber-50/35">
-                    {EDITOR_LOCALES.map(locale => (
-                      <button
-                        key={locale.value}
-                        type="button"
-                        onClick={() => setActiveLocale(locale.value)}
-                        aria-pressed={activeLocale === locale.value}
-                        className={`min-h-[44px] min-w-0 border-r border-amber-700/15 px-2 font-mono text-xs last:border-r-0 transition-colors ${
-                          activeLocale === locale.value
-                            ? 'bg-amber-200/60 font-bold text-amber-950'
-                            : 'text-amber-900/50 hover:bg-amber-100/45 hover:text-amber-950/75'
-                        }`}
-                      >
-                        {locale.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <StepComponent
-                  formData={editorData}
-                  updateField={localizedUpdateField}
-                  characterId={characterId}
-                  showAvatar={activeLocale === 'default'}
-                  showRelationships={activeLocale === 'default'}
-                  showVoice={activeLocale === 'default'}
-                />
-              </div>
-
-              {/* Card footer - status + stamp */}
-              <div className="p-4 sm:p-6 pt-4 border-t flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4" style={{ borderColor: '#C4B594' }}>
-                <div className="flex items-center gap-4">
-                  <div>
-                    <span className="text-[10px] text-amber-700/60 font-mono uppercase">最后更新</span>
-                    <p className="text-xs font-mono text-amber-700/80">
-                      {formData.meta?.last_updated || new Date().toISOString().split('T')[0]}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Red stamp */}
-                <div
-                  className="relative"
-                  style={{
-                    transform: 'rotate(-8deg)',
-                    border: isActive ? '2px solid #0B6E0B' : '2px solid #8B0000',
-                    borderRadius: 4,
-                    padding: '4px 12px',
-                    opacity: 0.6,
-                  }}
-                >
-                  <span className={`text-xs font-bold font-mono whitespace-nowrap ${isActive ? 'text-green-800/70' : 'text-red-900/70'}`}>
-                    {isActive ? '启用档案' : '禁用档案'}
-                  </span>
-                </div>
-              </div>
-            </div>
+            <span className={`inline-flex min-h-8 w-fit items-center rounded-md border px-2.5 text-[10px] font-bold ${
+              isActive
+                ? 'border-cyber-green/20 bg-cyber-green/[0.06] text-cyber-green/75'
+                : 'border-red-400/20 bg-red-400/[0.06] text-red-300/75'
+            }`}>
+              {isActive ? 'ACTIVE' : 'DISABLED'}
+            </span>
           </div>
+
+          <div className="p-4 sm:p-6">
+            <StepComponent
+              formData={formData}
+              updateField={updateField}
+              characterId={characterId}
+              showAvatar
+              showRelationships
+              showVoice
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-cyber-green/10 px-4 py-3 text-[10px] sm:px-6">
+            <span className="text-zinc-600">LAST UPDATED</span>
+            <span className="text-cyber-green/50">
+              {formData.meta?.last_updated || new Date().toISOString().split('T')[0]}
+            </span>
+          </div>
+        </div>
 
           {/* Step navigation */}
           <div className="flex items-center justify-between gap-2 mt-6">
@@ -665,7 +552,6 @@ export default function CharacterEditor() {
               </button>
             )}
           </div>
-        </div>
       </div>
     </div>
   );

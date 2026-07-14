@@ -10,7 +10,6 @@
 
 import json
 import logging
-from typing import Optional
 
 from memoria.core import llm_client, relationship_context
 from memoria.core.memory_extractor import clean_summary_text

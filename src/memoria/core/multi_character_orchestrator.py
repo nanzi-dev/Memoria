@@ -15,7 +15,7 @@ import random
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from memoria.core import (
     character_loader,
@@ -30,7 +30,7 @@ from memoria.core.config import configs
 from memoria.core.knowledge_retriever import retrieve_knowledge
 from memoria.core.locale import DEFAULT_LOCALE, Locale
 from memoria.core.memory_extractor import extract_player_memory
-from memoria.core.speaking_strategy import HybridStrategy, SpeakingStrategy
+from memoria.core.speaking_strategy import HybridStrategy
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)

@@ -3,6 +3,44 @@ import assert from 'node:assert/strict';
 
 import { dialogue, multiDialogue, userApi } from '../src/api/memoria.js';
 
+test('new dialogue sessions always use Chinese', async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return {
+      ok: true,
+      json: async () => ({}),
+    };
+  };
+
+  try {
+    await dialogue.startSession('npc-one', 'player-one', '旅人');
+    await multiDialogue.startSession(
+      'player-one',
+      '旅人',
+      ['npc-one', 'npc-two'],
+      '同行者',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    character_id: 'npc-one',
+    player_id: 'player-one',
+    player_name: '旅人',
+    locale: 'zh-CN',
+  });
+  assert.deepEqual(JSON.parse(calls[1].options.body), {
+    player_id: 'player-one',
+    player_name: '旅人',
+    group_name: '同行者',
+    character_ids: ['npc-one', 'npc-two'],
+    locale: 'zh-CN',
+  });
+});
+
 test('dialogue APIs include caller request IDs for idempotent retries', async () => {
   const calls = [];
   const originalFetch = globalThis.fetch;
