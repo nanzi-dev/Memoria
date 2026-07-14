@@ -12,6 +12,7 @@ Prompt 组装模块
 # =========================
 from memoria.core import relationship_context
 from memoria.core.character_schema import CharacterCard
+from memoria.core.locale import DEFAULT_LOCALE, Locale, language_instruction
 
 
 SYSTEM_PROMPT_TEMPLATE = """你现在要完全代入并扮演游戏中的角色"{name}"，
@@ -177,6 +178,7 @@ def build_system_prompt(
     relationship_graph_lines: list[str] = None,
     time_context: dict | None = None,
     knowledge_context: str = "",
+    locale: Locale = DEFAULT_LOCALE,
 ):
     """
     构建 system prompt（核心函数）
@@ -230,7 +232,7 @@ def build_system_prompt(
     # -------------------------
     # Prompt 渲染
     # -------------------------
-    return SYSTEM_PROMPT_TEMPLATE.format(
+    prompt = SYSTEM_PROMPT_TEMPLATE.format(
         name = card.meta.name,
         relationship_graph_context=relationship_graph_context,
         time_context_section=_format_time_context(time_context),
@@ -283,14 +285,20 @@ def build_system_prompt(
 
         mood_values=_join(mood_values),
     )
+    return prompt + language_instruction(locale)
 
-def build_opening_line_prompt(card: CharacterCard, runtime_state: dict, player_name: str) -> str:
+def build_opening_line_prompt(
+    card: CharacterCard,
+    runtime_state: dict,
+    player_name: str,
+    locale: Locale = DEFAULT_LOCALE,
+) -> str:
     """会话开场白用的简短追加指令，拼在 system prompt 后面一起发送。"""
     return (
         f"\n【特别说明】这是与玩家'{player_name}'的新一轮见面对话，"
         f"请你作为{card.meta.name}，根据当前好感度（{runtime_state.get('affinity', 0)}）和心情，"
         f"主动说一句开场白打招呼，不需要玩家先说话。仍然按要求只输出 JSON。"
-    )
+    ) + language_instruction(locale)
 
 
 # =========================
@@ -309,6 +317,7 @@ def build_multi_character_system_prompt(
     time_context: dict | None = None,
     knowledge_context: str = "",
     dialogue_target: dict | None = None,
+    locale: Locale = DEFAULT_LOCALE,
 ) -> str:
     """
     构建多角色场景的系统提示
@@ -594,14 +603,15 @@ def build_multi_character_system_prompt(
         "⚠️ 直接输出 JSON 对象，前后不要有任何其他内容！"
     ])
     
-    return "\n".join(prompt_parts)
+    return "\n".join(prompt_parts) + language_instruction(locale)
 
 
 def build_multi_character_opening_prompt(
     card: CharacterCard,
     runtime_state: dict,
     player_name: str,
-    other_character_names: list[str]
+    other_character_names: list[str],
+    locale: Locale = DEFAULT_LOCALE,
 ) -> str:
     """
     构建多角色场景的开场白提示（追加到system prompt后）
@@ -623,4 +633,4 @@ def build_multi_character_opening_prompt(
         f"场景中还有：{other_names}。"
         f"请你作为{card.meta.name}，根据当前好感度（{affinity}）和心情，"
         f"主动说一句开场白，欢迎玩家或介绍场景。仍然按要求只输出 JSON。"
-    )
+    ) + language_instruction(locale)

@@ -1,6 +1,7 @@
 """群聊逐消息决策脉冲与长期记忆分发测试。"""
 
 from types import SimpleNamespace
+import uuid
 
 import pytest
 from pydantic import ValidationError
@@ -185,6 +186,93 @@ def test_pulse_redecides_after_each_message_and_can_reply_to_npc(monkeypatch):
         {"character_id": "c2", "target": 2, "trigger_source": "npc_follow_up"},
         {"character_id": "c1", "target": 3, "trigger_source": "npc_follow_up"},
     ]
+
+
+def test_pulse_persists_each_reply_once_for_next_decision(monkeypatch):
+    from memoria.core import multi_character_orchestrator
+
+    suffix = uuid.uuid4().hex[:8]
+    session_id = f"pulse-session-{suffix}"
+    player_id = f"pulse-player-{suffix}"
+    assert multi_character_orchestrator.repository.create_multi_character_session(
+        session_id,
+        player_id,
+        "Player",
+        ["c1", "c2"],
+    )
+    player_message_id = (
+        multi_character_orchestrator.repository.append_multi_character_message(
+            session_id,
+            role="user",
+            content="怎么行动？",
+            trigger_source="player",
+        )
+    )
+
+    orchestrator = _orchestrator()
+    orchestrator.session_id = session_id
+    orchestrator.player_id = player_id
+    observed_histories = []
+
+    def decide(**kwargs):
+        history = kwargs["history"]
+        observed_histories.append([message["content"] for message in history])
+        if len(observed_histories) == 1:
+            return _decision(
+                speaker_id="c1",
+                reply_to_message_id=player_message_id,
+            )
+        if len(observed_histories) == 2:
+            return _decision(
+                speaker_id="c2",
+                reply_to_message_id=history[-1]["message_id"],
+                reply_to_character_id="c1",
+                intent="agree",
+            )
+        return _decision(action="wait", speaker_id=None)
+
+    def generate(character_id, _player_message, **kwargs):
+        decision = kwargs["decision"]
+        return {
+            "character_id": character_id,
+            "character_name": "甲" if character_id == "c1" else "乙",
+            "dialogue": "先侦查。" if character_id == "c1" else "我补充路线。",
+            "world_created_at": "2026-01-01T08:00:00+00:00",
+            "reply_to_message_id": decision.reply_to_message_id,
+            "reply_to_character_id": decision.reply_to_character_id,
+            "intent": decision.intent,
+            "topic": decision.topic,
+            "trigger_source": kwargs["trigger_source"],
+        }
+
+    monkeypatch.setattr(orchestrator, "_decide_dialogue_action", decide)
+    monkeypatch.setattr(orchestrator, "_generate_character_response", generate)
+
+    responses = orchestrator.run_dialogue_pulse(
+        trigger_source="player",
+        trigger_text="怎么行动？",
+        trigger_message_id=player_message_id,
+        max_messages=3,
+        persist_state=False,
+        clock_snapshot=SimpleNamespace(
+            world_now=SimpleNamespace(
+                isoformat=lambda: "2026-01-01T08:00:00+00:00"
+            )
+        ),
+    )
+
+    history = multi_character_orchestrator.repository.get_multi_character_history(
+        session_id,
+        limit_messages=None,
+    )
+    assert observed_histories == [
+        ["怎么行动？"],
+        ["怎么行动？", "先侦查。"],
+        ["怎么行动？", "先侦查。", "我补充路线。"],
+    ]
+    assert [message["content"] for message in history] == observed_histories[-1]
+    assert len({response["message_id"] for response in responses}) == 2
+    assert history[-1]["reply_to_message_id"] == responses[0]["message_id"]
 
 
 @pytest.mark.parametrize(

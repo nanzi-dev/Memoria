@@ -59,6 +59,41 @@ def test_session_start_creates_session_without_llm_opening(monkeypatch):
     assert res.messages == []
 
 
+def test_session_start_recovery_keeps_persisted_locale(monkeypatch):
+    from memoria.api import dialogue
+
+    active = {
+        "session_id": "session-en",
+        "character_id": "char-1",
+        "player_id": "player-1",
+        "player_name": "Tester",
+        "status": "active",
+        "locale": "en-US",
+    }
+    monkeypatch.setattr(dialogue.repository, "get_all_player_sessions", lambda player_id: [])
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_latest_active_session",
+        lambda player_id, character_id=None: active,
+    )
+    monkeypatch.setattr(dialogue, "_current_character_state", lambda *args: (0, 0, "neutral"))
+    monkeypatch.setattr(dialogue, "_messages_for_session", lambda session_id: [])
+
+    response = dialogue.session_start(
+        dialogue.SessionStartRequest(
+            character_id="char-1",
+            player_id="player-1",
+            player_name="Tester",
+            locale="zh-CN",
+        ),
+        BackgroundTasks(),
+        current_user_id="player-1",
+    )
+
+    assert response.recovered is True
+    assert response.locale == "en-US"
+
+
 def test_session_start_rejects_disabled_character_without_existing_session(monkeypatch):
     from memoria.api import dialogue
 
@@ -90,7 +125,7 @@ def test_session_start_recovers_latest_message_world_timestamp(monkeypatch):
     monkeypatch.setattr(
         dialogue,
         "_current_character_state",
-        lambda character_id, player_id: (12, 8, "neutral"),
+        lambda *args: (12, 8, "neutral"),
     )
     monkeypatch.setattr(
         dialogue,

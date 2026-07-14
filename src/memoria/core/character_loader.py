@@ -16,6 +16,7 @@ from pathlib import Path
 
 from memoria.db import repository
 from memoria.core.character_schema import CharacterCard
+from memoria.core.locale import Locale
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,11 @@ def list_character_ids(owner_user_id: str | None = None):
 # 加载角色卡（带缓存）
 # =========================
 @lru_cache(maxsize=256)
-def load_character_card(character_id: str, owner_user_id: str | None = None) -> CharacterCard:
+def load_character_card(
+    character_id: str,
+    owner_user_id: str | None = None,
+    locale: Locale | None = None,
+) -> CharacterCard:
     """
     加载角色卡（核心函数）
 
@@ -89,7 +94,7 @@ def load_character_card(character_id: str, owner_user_id: str | None = None) -> 
         if db_card and db_card.get("card_data"):
             logger.debug(f"从数据库加载角色卡: owner={owner_user_id}, character_id={character_id}")
             raw = normalize_character_data(json.loads(db_card["card_data"]))
-            return CharacterCard.model_validate(raw)
+            return _localized_character_card(raw, locale)
 
     except Exception as e:
         logger.warning(f"从数据库加载角色卡 '{character_id}' 失败: {e}")
@@ -126,7 +131,7 @@ def load_character_card(character_id: str, owner_user_id: str | None = None) -> 
         # -------------------------
         # Pydantic 校验（核心）
         # -------------------------
-        return CharacterCard.model_validate(raw)
+        return _localized_character_card(raw, locale)
     
     except json.JSONDecodeError as e:
         raise ValueError(
@@ -141,7 +146,11 @@ def load_character_card(character_id: str, owner_user_id: str | None = None) -> 
 # =========================
 # 热重载角色卡
 # =========================
-def reload_character_card(character_id: str, owner_user_id: str | None = None) -> CharacterCard:
+def reload_character_card(
+    character_id: str,
+    owner_user_id: str | None = None,
+    locale: Locale | None = None,
+) -> CharacterCard:
     """
     热重载角色卡（清除缓存并重新加载）
 
@@ -156,4 +165,26 @@ def reload_character_card(character_id: str, owner_user_id: str | None = None) -
     load_character_card.cache_clear()
     
     # 重新加载
-    return load_character_card(character_id, owner_user_id)
+    return load_character_card(character_id, owner_user_id, locale)
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge mappings; supplied lists and scalar values replace."""
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _localized_character_card(raw: dict, locale: Locale | None) -> CharacterCard:
+    card = CharacterCard.model_validate(raw)
+    if locale is None or locale not in card.i18n:
+        return card
+
+    base = card.model_dump(mode="python")
+    override = card.i18n[locale].model_dump(exclude_none=True)
+    base.pop("i18n", None)
+    return CharacterCard.model_validate(_deep_merge(base, override))

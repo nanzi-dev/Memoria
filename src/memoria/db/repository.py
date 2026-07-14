@@ -258,6 +258,8 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash   TEXT NOT NULL,         -- sha256 hash
     gender          TEXT DEFAULT 'unknown', -- male/female/unknown
     avatar_url      TEXT,                  -- base64 data URL
+    tts_auto_play   INTEGER NOT NULL DEFAULT 0,
+    stt_auto_send   INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT,
     updated_at      TEXT
 );
@@ -557,6 +559,7 @@ CREATE TABLE IF NOT EXISTS session (
     status          TEXT DEFAULT 'active',  -- active / ended
     group_name      TEXT,           -- 多角色群聊名称
     group_thread_id TEXT,           -- 逻辑群聊线程 ID，同一群聊多段 session 共享
+    locale          TEXT NOT NULL DEFAULT 'zh-CN',
     
     -- 多角色会话标识
     is_multi_character INTEGER DEFAULT 0  -- 0=单角色, 1=多角色群聊
@@ -1153,6 +1156,9 @@ def _migrate(conn):
     add_column("session_summary", "summary_status TEXT DEFAULT 'completed'")
     add_column("session", "group_name TEXT")
     add_column("session", "group_thread_id TEXT")
+    add_column("session", "locale TEXT NOT NULL DEFAULT 'zh-CN'")
+    add_column("users", "tts_auto_play INTEGER NOT NULL DEFAULT 0")
+    add_column("users", "stt_auto_send INTEGER NOT NULL DEFAULT 0")
     add_column("event_definition", "schedule TEXT")
     add_column("event_definition", "template_id TEXT")
     add_column("event_definition", "exclusive_group TEXT")
@@ -1735,15 +1741,21 @@ def save_long_term_fact_if_checkpoint(
 # =========================
 # session 管理
 # =========================
-def create_session(session_id: str, character_id: str, player_id: str, player_name: str):
+def create_session(
+    session_id: str,
+    character_id: str,
+    player_id: str,
+    player_name: str,
+    locale: str = "zh-CN",
+):
     with get_conn() as conn:
         conn.execute(
             """
             INSERT OR IGNORE INTO session
-            (session_id, character_id, player_id, player_name, created_at, status)
-            VALUES (?, ?, ?, ?, ?, 'active')
+            (session_id, character_id, player_id, player_name, created_at, status, locale)
+            VALUES (?, ?, ?, ?, ?, 'active', ?)
             """,
-            (session_id, character_id, player_id, player_name, _now()),
+            (session_id, character_id, player_id, player_name, _now(), locale),
         )
         
 def get_session(session_id: str) -> dict | None:
@@ -1812,6 +1824,36 @@ def get_latest_active_session(player_id: str, character_id: str | None = None) -
     return _row_to_dict(row)
 
 
+def get_latest_session_locale(
+    character_id: str,
+    player_id: str,
+    preferred_session_id: str | None = None,
+) -> str:
+    """Return a persisted locale for a single-character history response."""
+    if preferred_session_id:
+        preferred = get_session(preferred_session_id)
+        if preferred and (
+            preferred.get("character_id") == character_id
+            and preferred.get("player_id") == player_id
+            and not preferred.get("is_multi_character")
+        ):
+            return preferred.get("locale") or "zh-CN"
+
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT locale
+            FROM session
+            WHERE character_id = ? AND player_id = ?
+              AND COALESCE(is_multi_character, 0) = 0
+            ORDER BY created_at DESC, session_id DESC
+            LIMIT 1
+            """,
+            (character_id, player_id),
+        ).fetchone()
+    return (row["locale"] if row else None) or "zh-CN"
+
+
 # =========================
 # short term memory（对话历史）
 # =========================
@@ -1865,6 +1907,22 @@ def append_short_term_message(
             ),
         )
         return cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
+
+
+def get_short_term_message(session_id: str, message_id: int) -> dict | None:
+    """Return one persisted message, scoped to its session."""
+    with get_conn() as conn:
+        _ensure_short_term_message_state_columns(conn)
+        row = conn.execute(
+            """
+            SELECT *
+            FROM short_term_message
+            WHERE session_id = ? AND id = ?
+            LIMIT 1
+            """,
+            (session_id, message_id),
+        ).fetchone()
+    return _decode_message_row(row) if row else None
         
 def get_short_term_history(session_id: str, limit_turns: int) -> list[dict]:
     """
@@ -1958,6 +2016,7 @@ def get_sessions_by_player_and_character(character_id: str, player_id: str) -> l
                 s.ended_at,
                 s.status,
                 s.group_name,
+                s.locale,
                 CASE
                     WHEN COALESCE(s.is_multi_character, 0) = 1 THEN COALESCE(s.group_thread_id, s.session_id)
                     ELSE s.group_thread_id
@@ -2045,7 +2104,11 @@ def get_all_player_sessions(player_id: str) -> list[dict]:
                 s.ended_at,
                 s.status,
                 s.group_name,
-                s.group_thread_id,
+                s.locale,
+                CASE
+                    WHEN COALESCE(s.is_multi_character, 0) = 1 THEN COALESCE(s.group_thread_id, s.session_id)
+                    ELSE s.group_thread_id
+                END AS group_thread_id,
                 s.is_multi_character,
                 c.name,
                 c.display_name,
@@ -2611,6 +2674,68 @@ def save_character_card_to_db(
     except Exception as e:
         logger.error(f"保存角色卡失败: {e}")
         return False
+
+
+def patch_character_card_voice(
+    owner_user_id: str,
+    character_id: str,
+    updates: dict,
+) -> bool:
+    """在事务内只更新角色卡 voice 字段，避免覆盖并发的整卡编辑。"""
+    try:
+        with get_conn() as conn:
+            if _is_postgres_enabled():
+                row = conn.execute(
+                    """
+                    SELECT card_data
+                    FROM character_card
+                    WHERE owner_user_id = ? AND character_id = ?
+                    FOR UPDATE
+                    """,
+                    (owner_user_id, character_id),
+                ).fetchone()
+            else:
+                conn.execute("BEGIN IMMEDIATE")
+                row = conn.execute(
+                    """
+                    SELECT card_data
+                    FROM character_card
+                    WHERE owner_user_id = ? AND character_id = ?
+                    """,
+                    (owner_user_id, character_id),
+                ).fetchone()
+            if row is None:
+                return False
+
+            card_data = json.loads(row["card_data"])
+            voice = card_data.get("voice")
+            if not isinstance(voice, dict):
+                voice = {}
+                card_data["voice"] = voice
+            voice.update(updates)
+            conn.execute(
+                """
+                UPDATE character_card
+                SET card_data = ?, updated_at = ?
+                WHERE owner_user_id = ? AND character_id = ?
+                """,
+                (
+                    json.dumps(card_data, ensure_ascii=False),
+                    _now(),
+                    owner_user_id,
+                    character_id,
+                ),
+            )
+        logger.info(
+            "角色声音设置已更新: owner=%s, character_id=%s",
+            owner_user_id,
+            character_id,
+        )
+        return True
+    except Exception as e:
+        logger.error(f"更新角色声音设置失败: {e}")
+        return False
+
 
 def get_character_card_from_db(owner_user_id: str, character_id: str, include_inactive: bool = False) -> dict | None:
     """
@@ -4468,6 +4593,7 @@ def create_multi_character_session(
     character_ids: list[str],
     group_name: str | None = None,
     group_thread_id: str | None = None,
+    locale: str = "zh-CN",
 ) -> bool:
     """
     创建多角色群聊会话
@@ -4493,10 +4619,20 @@ def create_multi_character_session(
             conn.execute(
                 """
                 INSERT INTO session
-                (session_id, character_id, player_id, player_name, created_at, status, group_name, group_thread_id, is_multi_character)
-                VALUES (?, ?, ?, ?, ?, 'active', ?, ?, 1)
+                (session_id, character_id, player_id, player_name, created_at, status,
+                 group_name, group_thread_id, is_multi_character, locale)
+                VALUES (?, ?, ?, ?, ?, 'active', ?, ?, 1, ?)
                 """,
-                (session_id, character_ids[0], player_id, player_name, _now(), clean_group_name, thread_id),
+                (
+                    session_id,
+                    character_ids[0],
+                    player_id,
+                    player_name,
+                    _now(),
+                    clean_group_name,
+                    thread_id,
+                    locale,
+                ),
             )
             
             # 添加参与者
@@ -4596,7 +4732,7 @@ def get_multi_character_thread_sessions(session_id: str) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
             """
-            SELECT session_id, status, group_name, group_thread_id, created_at, ended_at
+            SELECT session_id, status, group_name, group_thread_id, locale, created_at, ended_at
             FROM session
             WHERE player_id = ?
               AND COALESCE(is_multi_character, 0) = 1
@@ -4653,7 +4789,7 @@ def append_multi_character_message(
         character_name: 发言角色显示名称
     """
     with get_conn() as conn:
-        sql = """
+        insert_sql = """
             INSERT INTO short_term_message
             (session_id, role, content, character_id, character_name, created_at,
              knowledge_sources, world_created_at, reply_to_message_id,
@@ -4661,9 +4797,9 @@ def append_multi_character_message(
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         if _is_postgres_enabled():
-            sql += " RETURNING id"
+            insert_sql += " RETURNING id"
         cursor = conn.execute(
-            sql,
+            insert_sql,
             (
                 session_id,
                 role,
@@ -6149,6 +6285,23 @@ def update_user_profile(user_id: str, username: str = None, gender: str = None, 
         conn.execute(
             f"UPDATE users SET {', '.join(fields)} WHERE user_id = ?",
             params,
+        )
+
+
+def update_user_speech_settings(
+    user_id: str,
+    *,
+    tts_auto_play: bool,
+    stt_auto_send: bool,
+) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE users
+            SET tts_auto_play = ?, stt_auto_send = ?, updated_at = ?
+            WHERE user_id = ?
+            """,
+            (int(tts_auto_play), int(stt_auto_send), _now(), user_id),
         )
 
 

@@ -649,7 +649,7 @@ async def test_continue_multi_session_creates_new_active_session_without_reactiv
     from memoria.api import multi_dialogue
 
     created = {}
-    ended_source = _multi_session("old-session", status="ended")
+    ended_source = {**_multi_session("old-session", status="ended"), "locale": "en-US"}
 
     monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: ended_source)
     monkeypatch.setattr(
@@ -697,6 +697,8 @@ async def test_continue_multi_session_creates_new_active_session_without_reactiv
     assert created["group_thread_id"] == "thread-1"
     assert created["group_name"] == "小队"
     assert created["character_ids"] == ["c1", "c2"]
+    assert created["locale"] == "en-US"
+    assert response.locale == "en-US"
     assert ended_source["status"] == "ended"
 
 

@@ -5,6 +5,8 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
+
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -27,6 +29,19 @@ class Configs(BaseSettings):
     # 轻量任务专用 LLM 配置（可选，留空则使用主 LLM）
     llm_light_base_url: str = ""
     llm_light_api_key: SecretStr = ""
+
+    # OpenAI Speech 配置（与角色对话模型独立）
+    speech_api_key: SecretStr = ""
+    speech_base_url: str = "https://api.openai.com/v1"
+    speech_stt_model: str = "gpt-4o-mini-transcribe"
+    speech_tts_model: str = "gpt-4o-mini-tts"
+    speech_output_format: Literal["mp3", "opus", "aac", "flac", "wav", "pcm"] = "wav"
+    speech_storage_path: str = "./data/speech"
+    speech_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    speech_stt_upload_max_bytes: int = Field(default=25 * 1024 * 1024, ge=1024)
+    speech_custom_voice_upload_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024)
+    speech_cache_max_age_seconds: int = Field(default=7 * 24 * 60 * 60, ge=0)
+    speech_cache_max_bytes: int = Field(default=512 * 1024 * 1024, ge=0)
     
     # 应用配置
     database_path: str = "./data/sqlite_db/memoria.db"

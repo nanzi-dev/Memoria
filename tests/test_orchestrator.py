@@ -853,7 +853,7 @@ class TestDialogueTurn:
             orchestrator.run_dialogue_turn("sid", "你好")
 
 
-def test_group_dialogue_prepares_player_memory_checkpoint_once(monkeypatch):
+def test_group_dialogue_saves_player_memory_for_all_participants(monkeypatch):
     from types import SimpleNamespace
     from memoria.core import multi_character_orchestrator as module
 
@@ -869,6 +869,7 @@ def test_group_dialogue_prepares_player_memory_checkpoint_once(monkeypatch):
     )
     extracted_histories = []
     observed_facts = []
+    saved_facts = []
 
     monkeypatch.setattr(module, "_clock_snapshot_for_player", lambda player_id: clock_snapshot)
     monkeypatch.setattr(
@@ -896,6 +897,13 @@ def test_group_dialogue_prepares_player_memory_checkpoint_once(monkeypatch):
         return [{"dialogue": "记住了"}]
 
     monkeypatch.setattr(module, "extract_player_memory", extract_player_memory)
+    monkeypatch.setattr(
+        module.repository,
+        "save_long_term_fact",
+        lambda character_id, player_id, fact: saved_facts.append(
+            (character_id, player_id, fact)
+        ),
+    )
     monkeypatch.setattr(orchestrator, "_ensure_has_active_participants", lambda: None)
     monkeypatch.setattr(orchestrator, "_decide_group_response_count", lambda *args: 2)
     monkeypatch.setattr(orchestrator, "_generate_group_discussion", generate_group_discussion)
@@ -908,3 +916,66 @@ def test_group_dialogue_prepares_player_memory_checkpoint_once(monkeypatch):
     assert result == [{"dialogue": "记住了"}]
     assert len(extracted_histories) == 1
     assert observed_facts == ["玩家喜欢茉莉花茶"]
+    assert saved_facts == [
+        ("char-a", "player", "玩家喜欢茉莉花茶"),
+        ("char-b", "player", "玩家喜欢茉莉花茶"),
+    ]
+
+
+def test_group_dialogue_single_response_saves_memory_for_non_speakers(monkeypatch):
+    from types import SimpleNamespace
+    from memoria.core import multi_character_orchestrator as module
+
+    orchestrator = module.MultiCharacterOrchestrator.__new__(
+        module.MultiCharacterOrchestrator
+    )
+    orchestrator.session_id = "group-session"
+    orchestrator.player_id = "player"
+    orchestrator.participants = [
+        {"character_id": "speaker"},
+        {"character_id": "listener-a"},
+        {"character_id": "listener-b"},
+    ]
+
+    clock_snapshot = SimpleNamespace(
+        world_now=SimpleNamespace(isoformat=lambda: "2026-07-12T12:00:00+08:00")
+    )
+    saved_character_ids = []
+
+    monkeypatch.setattr(module, "_clock_snapshot_for_player", lambda player_id: clock_snapshot)
+    monkeypatch.setattr(
+        module.repository,
+        "append_multi_character_message",
+        lambda *args, **kwargs: 1,
+    )
+    monkeypatch.setattr(
+        module.repository,
+        "is_long_term_memory_checkpoint",
+        lambda *args, **kwargs: True,
+    )
+    monkeypatch.setattr(
+        module.repository,
+        "get_multi_character_thread_history",
+        lambda *args, **kwargs: [{"role": "user", "content": "我周末会带蛋糕来"}],
+    )
+    monkeypatch.setattr(
+        module.repository,
+        "save_long_term_fact",
+        lambda character_id, player_id, fact: saved_character_ids.append(character_id),
+    )
+    monkeypatch.setattr(module, "extract_player_memory", lambda history: "玩家周末会带蛋糕来")
+    monkeypatch.setattr(orchestrator, "_ensure_has_active_participants", lambda: None)
+    monkeypatch.setattr(orchestrator, "_decide_next_speaker", lambda player_message: "speaker")
+    monkeypatch.setattr(
+        orchestrator,
+        "_generate_character_response",
+        lambda character_id, player_message, *, clock_snapshot=None: {
+            "character_id": character_id,
+            "dialogue": "我等你。",
+        },
+    )
+
+    result = orchestrator.process_player_message("我周末会带蛋糕来")
+
+    assert result["character_id"] == "speaker"
+    assert saved_character_ids == ["speaker", "listener-a", "listener-b"]

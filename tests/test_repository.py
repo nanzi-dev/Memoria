@@ -84,6 +84,62 @@ class TestMigrations:
         assert "idx_event_schedule_lease" in indexes
         assert "idx_event_schedule_due_real" in indexes
 
+    def test_init_db_adds_locale_and_speech_defaults(self, tmp_path, monkeypatch):
+        database_path = tmp_path / "legacy_speech.db"
+        with sqlite3.connect(database_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE session (
+                    session_id TEXT PRIMARY KEY,
+                    character_id TEXT,
+                    player_id TEXT,
+                    player_name TEXT,
+                    created_at TEXT,
+                    status TEXT,
+                    group_name TEXT,
+                    group_thread_id TEXT,
+                    is_multi_character INTEGER DEFAULT 0
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO session VALUES ('legacy-session', 'c1', 'p1', 'P', 'now', 'active', NULL, NULL, 0)"
+            )
+            conn.execute(
+                """
+                CREATE TABLE users (
+                    user_id TEXT PRIMARY KEY,
+                    username TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    gender TEXT DEFAULT 'unknown',
+                    avatar_url TEXT,
+                    created_at TEXT,
+                    updated_at TEXT
+                )
+                """
+            )
+            conn.execute(
+                "INSERT INTO users (user_id, username, password_hash) VALUES ('legacy-user', 'legacy', 'hash')"
+            )
+
+        monkeypatch.setattr(configs, "database_url", "")
+        monkeypatch.setattr(configs, "database_path", str(database_path))
+
+        repository.init_db()
+
+        with sqlite3.connect(database_path) as conn:
+            conn.row_factory = sqlite3.Row
+            session = conn.execute(
+                "SELECT locale FROM session WHERE session_id='legacy-session'"
+            ).fetchone()
+            user = conn.execute(
+                "SELECT tts_auto_play, stt_auto_send FROM users WHERE user_id='legacy-user'"
+            ).fetchone()
+
+        assert session["locale"] == "zh-CN"
+        assert user["tts_auto_play"] == 0
+        assert user["stt_auto_send"] == 0
+
 
 class TestRuntimeState:
     def test_get_state_new_player(self):
@@ -119,6 +175,14 @@ class TestSession:
         assert s is not None
         assert s["status"] == "active"
         assert s["player_name"] == "Tester"
+
+    def test_create_persists_locale(self):
+        sid = str(uuid.uuid4())
+        repository.create_session(sid, "tc-locale", "tp-locale", "Tester", "en-US")
+
+        session = repository.get_session(sid)
+
+        assert session["locale"] == "en-US"
 
     def test_end_session(self):
         sid = str(uuid.uuid4())
@@ -390,6 +454,45 @@ class TestMultiSession:
         repository.update_participant_speak_time(sid,"c1")
         hist = repository.get_multi_character_history(sid,5)
         assert len(hist) >= 1
+
+    def test_multi_message_returns_stable_id_and_history_exposes_it(self):
+        sid = str(uuid.uuid4())
+        player_id = f"group_ids_{uuid.uuid4().hex[:8]}"
+        assert repository.create_multi_character_session(
+            sid,
+            player_id,
+            "Player",
+            ["stable-c1", "stable-c2"],
+            locale="en-US",
+        )
+
+        message_id = repository.append_multi_character_message(
+            sid, "assistant", "Hello", "stable-c1", "One"
+        )
+        history = repository.get_multi_character_history(sid, 10)
+
+        assert repository.get_session(sid)["locale"] == "en-US"
+        assert isinstance(message_id, int)
+        assert history[-1]["message_id"] == message_id
+
+
+class TestSpeechSettings:
+    def test_defaults_and_updates_persist(self):
+        user_id = f"speech_user_{uuid.uuid4().hex[:8]}"
+        repository.create_user(user_id, f"speech_{uuid.uuid4().hex[:8]}", "hash")
+
+        initial = repository.get_user_by_id(user_id)
+        repository.update_user_speech_settings(
+            user_id,
+            tts_auto_play=True,
+            stt_auto_send=True,
+        )
+        updated = repository.get_user_by_id(user_id)
+
+        assert initial["tts_auto_play"] == 0
+        assert initial["stt_auto_send"] == 0
+        assert updated["tts_auto_play"] == 1
+        assert updated["stt_auto_send"] == 1
 
     def test_disabled_character_stays_in_group_but_is_not_active_participant(self):
         sid = str(uuid.uuid4())
@@ -700,6 +803,78 @@ class TestMultiSession:
         assert empty == []
         assert empty_has_more is False
         assert empty_latest_id == third_id
+
+    def test_update_multi_character_message_preserves_single_row_and_speak_count(self):
+        suffix = uuid.uuid4().hex[:8]
+        session_id = f"update-group-{suffix}"
+        player_id = f"update-player-{suffix}"
+        character_id = f"update-character-{suffix}"
+        other_character_id = f"update-other-{suffix}"
+        for candidate_id in (character_id, other_character_id):
+            card = json.dumps({
+                "character_id": candidate_id,
+                "meta": {"name": candidate_id, "display_name": candidate_id},
+            })
+            assert repository.save_character_card_to_db(
+                player_id,
+                candidate_id,
+                card,
+                name=candidate_id,
+                display_name=candidate_id,
+            )
+        assert repository.create_multi_character_session(
+            session_id,
+            player_id,
+            "Player",
+            [character_id, other_character_id],
+        )
+        player_message_id = repository.append_multi_character_message(
+            session_id,
+            "user",
+            "原问题",
+        )
+        message_id = repository.append_multi_character_message(
+            session_id,
+            "assistant",
+            "原回复",
+            character_id,
+            "角色一",
+            reply_to_message_id=player_message_id,
+            intent="answer",
+        )
+
+        assert repository.update_multi_character_message(
+            message_id,
+            session_id,
+            content="事件改写后的回复",
+            character_id=character_id,
+            character_name="角色一",
+            world_created_at="2026-01-01T08:00:00+00:00",
+            knowledge_sources=[{"document_id": "doc-1"}],
+            reply_to_message_id=player_message_id,
+            reply_to_character_id=None,
+            intent="reveal",
+            topic="计划",
+            trigger_source="player",
+        )
+
+        history = repository.get_multi_character_history(
+            session_id,
+            limit_messages=None,
+        )
+        participants = repository.get_session_participants(session_id)
+        assert [message["content"] for message in history] == [
+            "原问题",
+            "事件改写后的回复",
+        ]
+        assert history[-1]["message_id"] == message_id
+        assert history[-1]["intent"] == "reveal"
+        assert history[-1]["knowledge_sources"] == [{"document_id": "doc-1"}]
+        assert next(
+            participant["message_count"]
+            for participant in participants
+            if participant["character_id"] == character_id
+        ) == 1
 
     def test_group_message_notifications_aggregate_and_mark_only_owned_thread(self):
         player_id = f"gun_{uuid.uuid4().hex[:8]}"

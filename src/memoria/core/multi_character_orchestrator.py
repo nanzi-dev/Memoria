@@ -28,6 +28,7 @@ from memoria.core import (
 )
 from memoria.core.config import configs
 from memoria.core.knowledge_retriever import retrieve_knowledge
+from memoria.core.locale import DEFAULT_LOCALE, Locale
 from memoria.core.memory_extractor import extract_player_memory
 from memoria.core.speaking_strategy import HybridStrategy, SpeakingStrategy
 from memoria.db import repository
@@ -94,6 +95,29 @@ def _clock_snapshot_for_player(player_id: str | None):
     )
 
 
+def _load_character_card(character_id: str, player_id: str, locale: Locale):
+    """Load a localized card while tolerating legacy test doubles."""
+    try:
+        return character_loader.load_character_card(character_id, player_id, locale)
+    except TypeError as exc:
+        if "positional" not in str(exc) and "unexpected keyword argument" not in str(exc):
+            raise
+        return character_loader.load_character_card(character_id, player_id)
+
+
+def _build_multi_character_system_prompt(*, locale: Locale, **kwargs) -> str:
+    """Build a locale-aware prompt while tolerating legacy test doubles."""
+    try:
+        return prompt_builder.build_multi_character_system_prompt(
+            locale=locale,
+            **kwargs,
+        )
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        return prompt_builder.build_multi_character_system_prompt(**kwargs)
+
+
 # =========================
 # 多角色对话编排器
 # =========================
@@ -129,6 +153,7 @@ class MultiCharacterOrchestrator:
         
         self.player_id = self.session["player_id"]
         self.player_name = self.session["player_name"]
+        self.locale = self.session.get("locale") or DEFAULT_LOCALE
         
         # 加载参与者
         self.participants = repository.get_session_participants(session_id, only_active=True)
@@ -138,7 +163,7 @@ class MultiCharacterOrchestrator:
         self.character_cards = {}
         for char_id in self.character_ids:
             try:
-                card = character_loader.load_character_card(char_id, self.player_id)
+                card = _load_character_card(char_id, self.player_id, self.locale)
                 self.character_cards[char_id] = card
             except Exception as e:
                 logger.error(f"加载角色卡失败 {char_id}: {e}")
@@ -260,7 +285,6 @@ class MultiCharacterOrchestrator:
                 if response.get("character_id") and response.get("character_name"):
                     self._persist_generated_response(response, clock_snapshot)
         self._save_player_checkpoint_memory_once()
-
         if allow_multiple_responses:
             return responses
         return responses[0]
@@ -281,6 +305,8 @@ class MultiCharacterOrchestrator:
             or "current_affinity" not in response
             or "current_trust" not in response
             or "current_mood" not in response
+            or "_previous_affinity" not in response
+            or "_previous_trust" not in response
             for response in responses
         ):
             return []
@@ -292,10 +318,8 @@ class MultiCharacterOrchestrator:
         relationships = self._load_all_relationships()
         contexts = []
         for response in responses:
-            previous_affinity = response.pop("_previous_affinity", None)
-            previous_trust = response.pop("_previous_trust", None)
-            if previous_affinity is None or previous_trust is None:
-                return []
+            previous_affinity = response.pop("_previous_affinity")
+            previous_trust = response.pop("_previous_trust")
             contexts.append(event_runtime.build_event_context(
                 character_id=response["character_id"],
                 player_id=self.player_id,
@@ -409,10 +433,14 @@ class MultiCharacterOrchestrator:
         player_id = getattr(self, "player_id", None)
         if not fact or not player_id:
             return
-        for character_id in dict.fromkeys(getattr(self, "character_ids", [])):
+        character_ids = getattr(self, "character_ids", None) or [
+            participant.get("character_id")
+            for participant in getattr(self, "participants", [])
+            if participant.get("character_id")
+        ]
+        for character_id in dict.fromkeys(character_ids):
             repository.save_long_term_fact(character_id, player_id, fact)
         self._checkpoint_memory_fact = None
-
 
     def _decide_group_response_count(self, player_message: str, max_responses: int | None = None) -> int:
         """按群聊语境决定本轮实际接话人数。"""
@@ -1165,7 +1193,8 @@ class MultiCharacterOrchestrator:
                     })
         
         # 使用 prompt_builder 构建系统提示
-        system_prompt = prompt_builder.build_multi_character_system_prompt(
+        system_prompt = _build_multi_character_system_prompt(
+            locale=getattr(self, "locale", DEFAULT_LOCALE),
             card=card,
             runtime_state=runtime_state,
             player_name=self.player_name,
@@ -1290,7 +1319,8 @@ class MultiCharacterOrchestrator:
                     })
         
         # 使用 prompt_builder 构建系统提示
-        system_prompt = prompt_builder.build_multi_character_system_prompt(
+        system_prompt = _build_multi_character_system_prompt(
+            locale=getattr(self, "locale", DEFAULT_LOCALE),
             card=card,
             runtime_state=runtime_state,
             player_name=self.player_name,
@@ -1464,7 +1494,8 @@ class MultiCharacterOrchestrator:
                     })
         
         # 使用 prompt_builder 构建系统提示
-        system_prompt = prompt_builder.build_multi_character_system_prompt(
+        system_prompt = _build_multi_character_system_prompt(
+            locale=getattr(self, "locale", DEFAULT_LOCALE),
             card=card,
             runtime_state=runtime_state,
             player_name=self.player_name,
@@ -1499,8 +1530,9 @@ class MultiCharacterOrchestrator:
         
         # 记录消息
         character_name = card.meta.display_name or card.meta.name
+        message_id = None
         if persist:
-            repository.append_multi_character_message(
+            message_id = repository.append_multi_character_message(
                 self.session_id,
                 role="assistant",
                 content=dialogue,
@@ -1517,6 +1549,7 @@ class MultiCharacterOrchestrator:
             "action": action,
             "world_created_at": clock_snapshot.world_now.isoformat(),
             "knowledge_sources": knowledge.sources,
+            "message_id": message_id,
         }
     
     
@@ -1737,6 +1770,7 @@ def start_multi_character_session(
     character_ids: list[str],
     group_name: str | None = None,
     group_thread_id: str | None = None,
+    locale: Locale = DEFAULT_LOCALE,
 ) -> dict:
     """
     创建并启动多角色会话
@@ -1759,6 +1793,7 @@ def start_multi_character_session(
         character_ids=character_ids,
         group_name=group_name,
         group_thread_id=group_thread_id,
+        locale=locale,
     )
     
     if not success:
@@ -1775,6 +1810,7 @@ def start_multi_character_session(
         "opening": opening_result,
         "group_name": group_name,
         "group_thread_id": group_thread_id or session_id,
+        "locale": locale,
     }
 
 

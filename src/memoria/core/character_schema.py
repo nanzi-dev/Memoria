@@ -7,7 +7,11 @@
 - 在加载阶段进行数据校验，避免运行时缺字段问题
 """
 
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from memoria.core.locale import Locale
 
 # =========================
 # 基础元信息
@@ -187,6 +191,122 @@ class SafetyConstraints(BaseModel):
     """角色安全约束"""
     topics_to_avoid: list[str] = Field(default_factory=list)        # 需要避免讨论的话题列表
     out_of_character_handling: str = ""                             # OOC处理方式
+
+
+class CharacterVoice(BaseModel):
+    """Speech synthesis settings stored with a character card."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    builtin_voice: str = Field(default="alloy", alias="builtinVoice")
+    custom_voice_id: str | None = Field(default=None, alias="customVoiceId")
+    custom_voice_status: Literal[
+        "unconfigured", "pending", "ready", "unavailable", "failed"
+    ] = Field(default="unconfigured", alias="customVoiceStatus")
+    tts_instructions: str = Field(default="", alias="ttsInstructions")
+
+
+class _TranslationOverride(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class MetaTranslationOverride(_TranslationOverride):
+    name: str | None = None
+    display_name: str | None = None
+    aliases: list[str] | None = None
+    game_module: str | None = None
+    created_by: str | None = None
+
+
+class IdentityTranslationOverride(_TranslationOverride):
+    age: str | int | None = None
+    gender: str | None = None
+    occupation: str | None = None
+    race_or_species: str | None = None
+    appearance: str | None = None
+    social_status: str | None = None
+    core_identity_summary: str | None = None
+
+
+class PersonalityTranslationOverride(_TranslationOverride):
+    mbti_or_archetype: str | None = None
+    core_traits: list[str] | None = None
+    values_and_beliefs: list[str] | None = None
+    fears_and_tabooes: list[str] | None = None
+    quirks_and_habits: list[str] | None = None
+    moral_alignment: str | None = None
+
+
+class SpeechStyleTranslationOverride(_TranslationOverride):
+    tone_register: str | None = None
+    vocabulary_notes: str | None = None
+    sentence_patterns: list[str] | None = None
+    catchphrases: list[str] | None = None
+    things_never_to_say: list[str] | None = None
+    language: str | None = None
+    formality_default: str | None = None
+
+
+class KeyEventTranslationOverride(_TranslationOverride):
+    event: str | None = None
+    description: str | None = None
+    emotional_weight: int | None = None
+
+
+class SecretTranslationOverride(_TranslationOverride):
+    secret: str | None = None
+    description: str | None = None
+    reveal_conditions: str | None = None
+
+
+class BackgroundTranslationOverride(_TranslationOverride):
+    story_bio: str | None = None
+    key_events: list[KeyEventTranslationOverride] | None = None
+    secrets: list[SecretTranslationOverride] | None = None
+
+
+class GoalsTranslationOverride(_TranslationOverride):
+    current_goals: list[str] | None = None
+    long_term_goals: list[str] | None = None
+    what_triggers_anger: list[str] | None = None
+    what_brings_joy: list[str] | None = None
+
+
+class InteractionRulesTranslationOverride(_TranslationOverride):
+    initial_attitude_to_player: str | None = None
+    topics_to_avoid_unless_trusted: list[str] | None = None
+    topics_he_or_she_loves_to_discuss: list[str] | None = None
+    response_to_rudeness: list[str] | None = None
+    gift_reactions: list[tuple[str, str]] | None = None
+
+
+class ActionVocabularyTranslationOverride(_TranslationOverride):
+    greeting_actions: list[str] | None = None
+    farewell_actions: list[str] | None = None
+    agreement_actions: list[str] | None = None
+    disagreement_actions: list[str] | None = None
+    emotional_reactions: list[str] | None = None
+    default_action: str | None = None
+    fallback_priority: list[str] | None = None
+
+
+class SafetyTranslationOverride(_TranslationOverride):
+    topics_to_avoid: list[str] | None = None
+    out_of_character_handling: str | None = None
+
+
+class CharacterTranslationOverride(_TranslationOverride):
+    """Prompt-visible fields that a locale overlay may replace."""
+
+    meta: MetaTranslationOverride | None = None
+    identity: IdentityTranslationOverride | None = None
+    personality: PersonalityTranslationOverride | None = None
+    speech_style: SpeechStyleTranslationOverride | None = None
+    background: BackgroundTranslationOverride | None = None
+    goals_and_motivations: GoalsTranslationOverride | None = None
+    interaction_rules: InteractionRulesTranslationOverride | None = None
+    action_vocabulary: ActionVocabularyTranslationOverride | None = None
+    safety_constraints: SafetyTranslationOverride | None = None
     
 
 # =========================
@@ -204,6 +324,8 @@ class CharacterCard(BaseModel):
     character_id: str = Field(..., description="角色唯一ID")   # 角色唯一ID
     version: str = "1.0.0"                                      # 角色卡版本号
     avatar_url: str | None = Field(default=None, description="角色头像（base64 data URL 或网络 URL）")
+    voice: CharacterVoice = Field(default_factory=CharacterVoice)
+    i18n: dict[Locale, CharacterTranslationOverride] = Field(default_factory=dict)
 
     meta: Meta = Field(..., description="角色基础元信息")       # 角色基础元信息
     identity: Identity = Field(..., description="角色身份信息")   # 角色身份

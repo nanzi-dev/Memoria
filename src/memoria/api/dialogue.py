@@ -15,6 +15,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from memoria.core import character_loader, orchestrator, world_clock
 from memoria.core.memory_extractor import summarize_session
+from memoria.core.locale import DEFAULT_LOCALE, Locale
 from memoria.api.user import require_current_user_id
 from memoria.api.knowledge_models import KnowledgeSource
 from memoria.db import repository
@@ -30,6 +31,7 @@ class SessionStartRequest(BaseModel):
     character_id: str
     player_id: str
     player_name: str = "旅行者"
+    locale: Locale = DEFAULT_LOCALE
     
 class DialogueTurnRequest(BaseModel):
     session_id: str
@@ -66,6 +68,7 @@ class SessionStartResponse(BaseModel):
     assistant_message_id: int | None = None
     recovered: bool = False
     messages: list[HistoryMessage] = []
+    locale: Locale = DEFAULT_LOCALE
 
 
 class DialogueTurnResponse(BaseModel):
@@ -128,6 +131,7 @@ class SessionInfo(BaseModel):
     name: str | None = None
     display_name: str | None = None
     avatar_url: str | None = None
+    locale: Locale = DEFAULT_LOCALE
 
 
 class HistoryResponse(BaseModel):
@@ -136,6 +140,7 @@ class HistoryResponse(BaseModel):
     current_affinity: float
     current_trust: float
     current_mood: str
+    locale: Locale = DEFAULT_LOCALE
     
 
 # =========================
@@ -148,6 +153,7 @@ class SessionRecoveryResponse(BaseModel):
     character_id: str | None = None
     character: dict | None = None  # 角色摘要信息
     messages: list[HistoryMessage] = []
+    locale: Locale = DEFAULT_LOCALE
 
 
 IDLE_SESSION_TIMEOUT = timedelta(minutes=5)
@@ -176,12 +182,25 @@ def _ensure_character_can_chat(character_id: str, player_id: str) -> None:
         raise HTTPException(status_code=400, detail="角色卡已禁用，不能新建或继续单聊")
 
 
-def _current_character_state(character_id: str, player_id: str) -> tuple[int, int, str]:
+def _load_character_card(character_id: str, player_id: str, locale: Locale):
+    try:
+        return character_loader.load_character_card(character_id, player_id, locale)
+    except TypeError as exc:
+        if "positional" not in str(exc) and "unexpected keyword argument" not in str(exc):
+            raise
+        return character_loader.load_character_card(character_id, player_id)
+
+
+def _current_character_state(
+    character_id: str,
+    player_id: str,
+    locale: Locale = DEFAULT_LOCALE,
+) -> tuple[int, int, str]:
     current_affinity = 0
     current_trust = 0
     current_mood = "neutral"
     try:
-        card = character_loader.load_character_card(character_id, player_id)
+        card = _load_character_card(character_id, player_id, locale)
         runtime_state = repository.get_runtime_state(character_id, player_id, card)
         current_affinity = runtime_state.get("affection_level", 0)
         current_trust = runtime_state.get("trust_level", 0)
@@ -191,14 +210,24 @@ def _current_character_state(character_id: str, player_id: str) -> tuple[int, in
     return current_affinity, current_trust, current_mood
 
 
-def _start_empty_session(character_id: str, player_id: str, player_name: str) -> SessionStartResponse:
+def _start_empty_session(
+    character_id: str,
+    player_id: str,
+    player_name: str,
+    locale: Locale,
+) -> SessionStartResponse:
     """创建会话但不阻塞等待开场白生成。"""
     _ensure_character_can_chat(character_id, player_id)
-    card = character_loader.load_character_card(character_id, player_id)
+    card = _load_character_card(character_id, player_id, locale)
     runtime_state = repository.get_runtime_state(character_id, player_id, card)
     world_created_at = world_clock.get_clock_snapshot(player_id).world_now.isoformat()
     session_id = str(uuid.uuid4())
-    repository.create_session(session_id, character_id, player_id, player_name)
+    try:
+        repository.create_session(session_id, character_id, player_id, player_name, locale)
+    except TypeError as exc:
+        if "positional" not in str(exc) and "unexpected keyword argument" not in str(exc):
+            raise
+        repository.create_session(session_id, character_id, player_id, player_name)
     return SessionStartResponse(
         session_id=session_id,
         opening_line="",
@@ -209,6 +238,7 @@ def _start_empty_session(character_id: str, player_id: str, player_name: str) ->
         assistant_message_id=None,
         recovered=False,
         messages=[],
+        locale=locale,
     )
 
 
@@ -351,7 +381,10 @@ def session_start(
         _close_idle_sessions(req.player_id, background_tasks)
         active_session = repository.get_latest_active_session(req.player_id, req.character_id)
         if active_session:
-            current_affinity, current_trust, _ = _current_character_state(req.character_id, req.player_id)
+            locale = active_session.get("locale") or DEFAULT_LOCALE
+            current_affinity, current_trust, _ = _current_character_state(
+                req.character_id, req.player_id, locale
+            )
             messages = _messages_for_session(active_session["session_id"])
             world_created_at = next(
                 (
@@ -373,9 +406,12 @@ def session_start(
                 assistant_message_id=None,
                 recovered=True,
                 messages=messages,
+                locale=locale,
             )
 
-        return _start_empty_session(req.character_id, req.player_id, req.player_name)
+        return _start_empty_session(
+            req.character_id, req.player_id, req.player_name, req.locale
+        )
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -456,6 +492,7 @@ def latest_session(
         session_id=session["session_id"],
         character_id=session["character_id"],
         messages=_messages_for_session(session["session_id"]),
+        locale=session.get("locale") or DEFAULT_LOCALE,
     )
 
 
@@ -483,7 +520,14 @@ def get_history(
     )
 
     # 尝试加载角色卡片（可能不存在于磁盘）
-    current_affinity, current_trust, current_mood = _current_character_state(character_id, player_id)
+    locale = repository.get_latest_session_locale(
+        character_id,
+        player_id,
+        preferred_session_id=exclude_session_id,
+    )
+    current_affinity, current_trust, current_mood = _current_character_state(
+        character_id, player_id, locale
+    )
 
     return HistoryResponse(
         messages=[HistoryMessage(**m) for m in messages],
@@ -491,6 +535,7 @@ def get_history(
         current_affinity=current_affinity,
         current_trust=current_trust,
         current_mood=current_mood,
+        locale=locale,
     )
 
 # =========================
