@@ -387,8 +387,8 @@ function TriggerConditionForm({ condition, onChange, isSub = false, depth = 0 })
         </select>
       </div>
 
-      {/* Threshold-based: affinity, trust, dialogue_count, time_based */}
-      {(t === 'affinity_threshold' || t === 'trust_threshold' || t === 'dialogue_count' || t === 'time_based') && (
+      {/* Threshold-based: affinity, trust, dialogue_count */}
+      {(t === 'affinity_threshold' || t === 'trust_threshold' || t === 'dialogue_count') && (
         <div className="flex items-center gap-2">
           <select
             value={condition.comparison || 'gte'}
@@ -401,16 +401,56 @@ function TriggerConditionForm({ condition, onChange, isSub = false, depth = 0 })
           </select>
           <input
             type="number"
-            value={t === 'time_based' ? (condition.duration_minutes || '') : (t === 'dialogue_count' ? (condition.count || '') : (condition.threshold ?? ''))}
+            value={t === 'dialogue_count' ? (condition.count || '') : (condition.threshold ?? '')}
             onChange={e => {
               const v = e.target.value === '' ? null : Number(e.target.value);
-              if (t === 'time_based') update('duration_minutes', v);
-              else if (t === 'dialogue_count') update('count', v);
+              if (t === 'dialogue_count') update('count', v);
               else update('threshold', v);
             }}
             placeholder="数值"
             className="bg-cyber-surface border border-cyber-green/20 text-cyber-green text-xs font-mono rounded px-2 py-1 w-24 focus:outline-none focus:border-cyber-green/50"
           />
+        </div>
+      )}
+
+      {t === 'time_based' && (
+        <div className="space-y-3 rounded-lg border border-cyan-300/10 bg-cyan-300/[0.025] p-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-[10px] font-mono text-cyber-green/45">延迟分钟数</label>
+              <input
+                type="number"
+                min="1"
+                value={condition.duration_minutes || ''}
+                onChange={event => update('duration_minutes', event.target.value === '' ? null : Math.max(1, Number(event.target.value)))}
+                placeholder="例如 60"
+                className="min-h-[40px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green outline-none focus:border-cyber-green/50"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-[10px] font-mono text-cyber-green/45">Cron 计划</label>
+              <input
+                type="text"
+                value={condition.schedule || ''}
+                onChange={event => update('schedule', event.target.value)}
+                placeholder="0 9 * * *"
+                className="min-h-[40px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green outline-none focus:border-cyber-green/50"
+              />
+            </div>
+          </div>
+          <p className="text-[10px] leading-4 text-cyber-green/28">填写分钟数或 Cron 计划之一。Cron 按玩家的世界时区计算，例如 <code>0 9 * * *</code> 表示每天世界时间 09:00。</p>
+          <div>
+            <label className="mb-1 block text-[10px] font-mono text-cyber-green/45">补偿重放上限</label>
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={condition.catch_up_replay_limit ?? 1}
+              onChange={event => update('catch_up_replay_limit', Math.min(100, Math.max(1, Number(event.target.value) || 1)))}
+              className="min-h-[40px] w-28 rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs font-mono text-cyber-green outline-none focus:border-cyber-green/50"
+            />
+            <p className="mt-1 text-[10px] leading-4 text-cyber-green/28">跳时或高倍速造成多次过期时，最多实际执行 1-100 次；其余次数只累计为漏触发记录。</p>
+          </div>
         </div>
       )}
 
@@ -877,7 +917,7 @@ export default function EventEditor() {
       setSaveMsg('事件尚未正确加载，无法保存');
       return;
     }
-    const validationErrors = validateEventForm(form);
+    const { errors: validationErrors } = validateEventForm(form);
     if (validationErrors.length) {
       setSaveMsg(validationErrors.join('；'));
       return;

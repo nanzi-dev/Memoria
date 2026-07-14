@@ -75,6 +75,7 @@ class MultiDialogueTurnResponse(BaseModel):
     current_affinity: Optional[float] = None
     current_trust: Optional[float] = None
     current_mood: Optional[str] = None
+    world_created_at: Optional[str] = None
     knowledge_sources: list[KnowledgeSource] = Field(default_factory=list)
 
 

@@ -65,6 +65,199 @@ def test_world_time_formula_pause_resume_scale_and_sync():
     assert synced.time_scale == 5
 
 
+def test_clock_revision_conflict_leaves_clock_and_schedule_unchanged():
+    player_id = _create_user("revision")
+    start = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+    initial = world_clock.get_clock_snapshot(player_id, real_now=start)
+    event_id = f"evt_{uuid.uuid4().hex[:8]}"
+    next_run_at = (start + timedelta(hours=1)).isoformat()
+    repository.save_event_schedule_state(
+        event_id,
+        "npc_luo_xiaohei",
+        player_id,
+        "0 * * * *",
+        next_run_at=next_run_at,
+        next_due_real_at=next_run_at,
+    )
+
+    updated = world_clock.update_clock(
+        player_id,
+        time_scale=2,
+        expected_revision=initial.clock_revision,
+        real_now=start,
+    )
+    before_clock = repository.get_player_world_clock(player_id)
+    before_schedule = repository.list_event_schedules_for_player(player_id)[0]
+
+    with pytest.raises(world_clock.ClockRevisionConflict):
+        world_clock.update_clock(
+            player_id,
+            time_scale=5,
+            expected_revision=initial.clock_revision,
+            real_now=start,
+        )
+
+    assert updated.clock_revision == initial.clock_revision + 1
+    assert repository.get_player_world_clock(player_id) == before_clock
+    assert repository.list_event_schedules_for_player(player_id)[0] == before_schedule
+
+
+def test_active_schedule_lease_rolls_back_entire_clock_change():
+    player_id = _create_user("busy")
+    start = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+    initial = world_clock.get_clock_snapshot(player_id, real_now=start)
+    event_id = f"evt_{uuid.uuid4().hex[:8]}"
+    character_id = "npc_luo_xiaohei"
+    next_run_at = (start + timedelta(hours=1)).isoformat()
+    repository.save_event_schedule_state(
+        event_id,
+        character_id,
+        player_id,
+        "0 * * * *",
+        next_run_at=next_run_at,
+        next_due_real_at=next_run_at,
+    )
+    assert repository.claim_event_schedule(
+        event_id,
+        character_id,
+        player_id,
+        lease_owner="worker-a",
+        lease_expires_at=(start + timedelta(minutes=5)).isoformat(),
+        real_now_iso=start.isoformat(),
+        expected_next_run_at=next_run_at,
+        expected_next_due_real_at=next_run_at,
+    )
+    before_clock = repository.get_player_world_clock(player_id)
+    before_schedule = repository.list_event_schedules_for_player(player_id)[0]
+
+    with pytest.raises(world_clock.ClockScheduleBusy):
+        world_clock.update_clock(
+            player_id,
+            time_scale=5,
+            expected_revision=initial.clock_revision,
+            real_now=start,
+        )
+
+    assert repository.get_player_world_clock(player_id) == before_clock
+    assert repository.list_event_schedules_for_player(player_id)[0] == before_schedule
+
+
+def test_scale_pause_resume_and_timezone_changes_reproject_schedule():
+    player_id = _create_user("projection")
+    start = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+    initial = world_clock.get_clock_snapshot(player_id, real_now=start)
+    event_id = f"evt_{uuid.uuid4().hex[:8]}"
+    next_run_at = (start + timedelta(hours=9)).isoformat()
+    repository.save_event_schedule_state(
+        event_id,
+        "npc_luo_xiaohei",
+        player_id,
+        "0 9 * * *",
+        next_run_at=next_run_at,
+        next_due_real_at=next_run_at,
+    )
+
+    doubled = world_clock.update_clock(
+        player_id,
+        time_scale=2,
+        expected_revision=initial.clock_revision,
+        real_now=start,
+    )
+    schedule = repository.list_event_schedules_for_player(player_id)[0]
+    assert schedule["next_run_at"] == next_run_at
+    assert schedule["next_due_real_at"] == (start + timedelta(hours=4, minutes=30)).isoformat()
+
+    paused = world_clock.update_clock(
+        player_id,
+        time_scale=0,
+        expected_revision=doubled.clock_revision,
+        real_now=start,
+    )
+    assert repository.list_event_schedules_for_player(player_id)[0]["next_due_real_at"] is None
+
+    resumed = world_clock.update_clock(
+        player_id,
+        time_scale=1,
+        expected_revision=paused.clock_revision,
+        real_now=start,
+    )
+    assert repository.list_event_schedules_for_player(player_id)[0]["next_due_real_at"] == next_run_at
+
+    changed_timezone = world_clock.update_clock(
+        player_id,
+        timezone_name="Asia/Shanghai",
+        expected_revision=resumed.clock_revision,
+        real_now=start,
+    )
+    schedule = repository.list_event_schedules_for_player(player_id)[0]
+    assert changed_timezone.timezone == "Asia/Shanghai"
+    assert schedule["next_run_at"] == (start + timedelta(hours=1)).isoformat()
+    assert schedule["next_due_real_at"] == (start + timedelta(hours=1)).isoformat()
+
+
+def test_forward_jump_preserves_catch_up_point_and_backward_jump_reschedules():
+    player_id = _create_user("jump")
+    start = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+    initial = world_clock.get_clock_snapshot(player_id, real_now=start)
+    event_id = f"evt_{uuid.uuid4().hex[:8]}"
+    first_due = (start + timedelta(hours=1)).isoformat()
+    repository.save_event_schedule_state(
+        event_id,
+        "npc_luo_xiaohei",
+        player_id,
+        "0 * * * *",
+        next_run_at=first_due,
+        next_due_real_at=first_due,
+    )
+
+    advanced = world_clock.advance_clock(
+        player_id,
+        timedelta(hours=3),
+        expected_revision=initial.clock_revision,
+        real_now=start,
+    )
+    schedule = repository.list_event_schedules_for_player(player_id)[0]
+    assert schedule["next_run_at"] == first_due
+    assert schedule["next_due_real_at"] == start.isoformat()
+
+    moved_back = world_clock.set_clock(
+        player_id,
+        start - timedelta(hours=1, minutes=30),
+        expected_revision=advanced.clock_revision,
+        real_now=start,
+    )
+    schedule = repository.list_event_schedules_for_player(player_id)[0]
+    assert moved_back.world_now == start - timedelta(hours=1, minutes=30)
+    assert schedule["next_run_at"] == (start - timedelta(hours=1)).isoformat()
+    assert schedule["next_due_real_at"] == (start + timedelta(minutes=30)).isoformat()
+
+
+def test_timezone_change_with_forward_set_uses_new_local_calendar():
+    player_id = _create_user("timezone_jump")
+    start = datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+    initial = world_clock.get_clock_snapshot(player_id, real_now=start)
+    repository.save_event_schedule_state(
+        f"evt_{uuid.uuid4().hex[:8]}",
+        "npc_luo_xiaohei",
+        player_id,
+        "0 9 * * *",
+        next_run_at=(start + timedelta(hours=9)).isoformat(),
+        next_due_real_at=(start + timedelta(hours=9)).isoformat(),
+    )
+
+    changed = world_clock._apply_clock_change(
+        player_id,
+        timezone_name="Asia/Shanghai",
+        world_now=start + timedelta(hours=10),
+        expected_revision=initial.clock_revision,
+        real_now=start,
+    )
+
+    schedule = repository.list_event_schedules_for_player(player_id)[0]
+    assert changed.timezone == "Asia/Shanghai"
+    assert schedule["next_run_at"] == (start + timedelta(days=1, hours=1)).isoformat()
+
+
 @pytest.mark.parametrize("scale", [-1, 3, 1.5, True])
 def test_world_clock_rejects_invalid_scale(scale):
     with pytest.raises(ValueError):
@@ -159,8 +352,13 @@ def test_paused_player_schedule_does_not_trigger(monkeypatch):
         "player_id": "scheduled_player",
         "schedule": "*/5 * * * *",
         "next_run_at": "2026-07-12T10:00:00+00:00",
+        "next_due_real_at": "2026-07-12T12:00:00+00:00",
     }
-    monkeypatch.setattr(event_runtime.repository, "list_active_event_schedules", lambda **kwargs: [row])
+    monkeypatch.setattr(
+        event_runtime.repository,
+        "list_due_event_schedules",
+        lambda *args, **kwargs: [row],
+    )
     monkeypatch.setattr(
         event_runtime.world_clock,
         "get_clock_snapshot",
@@ -190,9 +388,14 @@ def test_catch_up_runs_once_and_advances_beyond_world_now(monkeypatch):
         "player_id": "scheduled_player",
         "schedule": "*/5 * * * *",
         "next_run_at": "2026-07-12T10:00:00+00:00",
+        "next_due_real_at": "2026-07-12T12:00:00+00:00",
     }
     completed = []
-    monkeypatch.setattr(event_runtime.repository, "list_active_event_schedules", lambda **kwargs: [row])
+    monkeypatch.setattr(
+        event_runtime.repository,
+        "list_due_event_schedules",
+        lambda *args, **kwargs: [row],
+    )
     monkeypatch.setattr(
         event_runtime.world_clock,
         "get_clock_snapshot",
@@ -232,6 +435,162 @@ def test_catch_up_runs_once_and_advances_beyond_world_now(monkeypatch):
     assert len(results) == 1
     assert len(completed) == 1
     assert datetime.fromisoformat(completed[0]["next_run_at"]) > world_now
+    assert completed[0]["missed_count"] == 24
+
+
+def test_catch_up_replay_limit_executes_bounded_runs_and_counts_misses(monkeypatch):
+    real_now = datetime(2026, 7, 12, 10, 20, tzinfo=UTC)
+    first_due = datetime(2026, 7, 12, 10, 0, tzinfo=UTC)
+    row = {
+        "event_id": "scheduled_event",
+        "character_id": "npc_luo_xiaohei",
+        "player_id": "scheduled_player",
+        "schedule": "*/5 * * * *",
+        "next_run_at": first_due.isoformat(),
+        "next_due_real_at": first_due.isoformat(),
+        "missed_count": 4,
+    }
+    scheduled_for = []
+    completed = []
+    monkeypatch.setattr(
+        event_runtime.repository,
+        "list_due_event_schedules",
+        lambda *args, **kwargs: [row],
+    )
+    monkeypatch.setattr(
+        event_runtime.world_clock,
+        "get_clock_snapshot",
+        lambda *args, **kwargs: world_clock.WorldClockSnapshot(
+            player_id=row["player_id"],
+            timezone="UTC",
+            time_scale=1,
+            real_now=real_now,
+            world_now=real_now,
+        ),
+    )
+    monkeypatch.setattr(event_runtime.repository, "claim_event_schedule", lambda *args, **kwargs: True)
+    monkeypatch.setattr(event_runtime.repository, "get_event_definition", lambda *args: {"event_id": row["event_id"]})
+    monkeypatch.setattr(
+        event_runtime,
+        "_event_definition_from_row",
+        lambda event_row: EventDefinition(
+            event_id=row["event_id"],
+            event_name="关键定时事件",
+            trigger_condition=TriggerCondition(
+                trigger_type=TriggerType.TIME_BASED,
+                schedule=row["schedule"],
+                catch_up_replay_limit=3,
+            ),
+            effects=[],
+        ),
+    )
+
+    def load_context(event, schedule_state, world_now):
+        scheduled_for.append(schedule_state["next_run_at"])
+        return _scheduled_context()
+
+    monkeypatch.setattr(event_runtime, "_load_scheduled_event_context", load_context)
+    monkeypatch.setattr(
+        event_runtime,
+        "execute_event_with_chain",
+        lambda *args: [EventTriggerResult(event_id=row["event_id"], event_name="关键定时事件", triggered=True)],
+    )
+    monkeypatch.setattr(event_runtime, "_persist_scheduled_event_results", lambda *args: None)
+    monkeypatch.setattr(
+        event_runtime.repository,
+        "complete_event_schedule",
+        lambda *args, **kwargs: completed.append(kwargs) or True,
+    )
+
+    results = event_runtime.run_due_time_events(now=real_now)
+
+    assert len(results) == 3
+    assert scheduled_for == [
+        first_due.isoformat(),
+        (first_due + timedelta(minutes=5)).isoformat(),
+        (first_due + timedelta(minutes=10)).isoformat(),
+    ]
+    assert completed[0]["missed_count"] == 6
+    assert completed[0]["next_run_at"] == (first_due + timedelta(minutes=25)).isoformat()
+
+
+def test_reconcile_projects_running_clock_and_leaves_paused_schedule_null():
+    real_now = datetime(2026, 7, 12, 10, 0, tzinfo=UTC)
+    running_player = _create_user("reconcile_running")
+    paused_player = _create_user("reconcile_paused")
+    running = world_clock.get_clock_snapshot(running_player, real_now=real_now)
+    paused = world_clock.get_clock_snapshot(paused_player, real_now=real_now)
+    paused = world_clock.update_clock(
+        paused_player,
+        time_scale=0,
+        expected_revision=paused.clock_revision,
+        real_now=real_now,
+    )
+    due = (real_now + timedelta(hours=2)).isoformat()
+    for player_id in (running_player, paused_player):
+        repository.save_event_schedule_state(
+            f"evt_{uuid.uuid4().hex[:8]}",
+            "npc_luo_xiaohei",
+            player_id,
+            "0 * * * *",
+            next_run_at=due,
+            next_due_real_at=None,
+        )
+
+    assert event_runtime.reconcile_event_schedule_due_times(now=real_now) == 1
+    running_schedule = repository.list_event_schedules_for_player(running.player_id)[0]
+    paused_schedule = repository.list_event_schedules_for_player(paused.player_id)[0]
+    assert running_schedule["next_due_real_at"] == due
+    assert paused_schedule["next_due_real_at"] is None
+
+
+def test_due_schedule_cursor_paginates_beyond_500_rows():
+    player_id = _create_user("pagination")
+    due = datetime(2026, 7, 12, 10, 0, tzinfo=UTC).isoformat()
+    with repository.get_conn() as conn:
+        conn.executemany(
+            """
+            INSERT INTO event_schedule_state
+            (event_id, character_id, player_id, schedule, next_run_at,
+             next_due_real_at, status, created_at, updated_at)
+            VALUES (?, ?, ?, '* * * * *', ?, ?, 'active', ?, ?)
+            """,
+            [
+                (
+                    f"evt_{index:04d}",
+                    "npc_luo_xiaohei",
+                    player_id,
+                    due,
+                    due,
+                    due,
+                    due,
+                )
+                for index in range(525)
+            ],
+        )
+
+    rows = []
+    after = None
+    while True:
+        page = repository.list_due_event_schedules(
+            due,
+            limit=73,
+            player_id=player_id,
+            after=after,
+        )
+        rows.extend(page)
+        if len(page) < 73:
+            break
+        last = page[-1]
+        after = (
+            last["next_due_real_at"],
+            last["event_id"],
+            last["character_id"],
+            last["player_id"],
+        )
+
+    assert len(rows) == 525
+    assert len({row["event_id"] for row in rows}) == 525
 
 
 def test_schedule_claim_prevents_stale_second_worker():
@@ -287,6 +646,7 @@ def test_concurrent_schedulers_execute_due_event_once(monkeypatch):
         "player_id": player_id,
         "schedule": "*/5 * * * *",
         "next_run_at": scheduled_for,
+        "next_due_real_at": scheduled_for,
     }
     repository.save_event_schedule_state(
         event_id,
@@ -294,13 +654,14 @@ def test_concurrent_schedulers_execute_due_event_once(monkeypatch):
         player_id,
         row["schedule"],
         next_run_at=scheduled_for,
+        next_due_real_at=scheduled_for,
     )
 
     scan_barrier = Barrier(2)
     execution_lock = Lock()
     execution_count = 0
 
-    def list_schedules(**kwargs):
+    def list_schedules(*args, **kwargs):
         scan_barrier.wait(timeout=5)
         return [row]
 
@@ -318,7 +679,7 @@ def test_concurrent_schedulers_execute_due_event_once(monkeypatch):
 
     monkeypatch.setattr(
         event_runtime.repository,
-        "list_active_event_schedules",
+        "list_due_event_schedules",
         list_schedules,
     )
     monkeypatch.setattr(
@@ -533,6 +894,25 @@ def test_single_and_group_prompts_share_world_context():
     for expected in ("2026-07-12", "12:00:00", "Asia/Shanghai", "2x", "2 小时"):
         assert expected in single
         assert expected in group
+
+
+def test_english_time_context_and_negative_elapsed_are_explicit():
+    snapshot = world_clock.WorldClockSnapshot(
+        player_id="english-player",
+        timezone="America/New_York",
+        time_scale=1,
+        real_now=datetime(2026, 7, 13, 3, 0, tzinfo=UTC),
+        world_now=datetime(2026, 7, 13, 3, 0, tzinfo=UTC),
+    )
+    context = snapshot.prompt_context(
+        datetime(2026, 7, 13, 4, 0, tzinfo=UTC),
+        locale="en-US",
+    )
+    assert context["weekday"] == "Sunday"
+    assert context["period"] == "late night"
+    assert context["last_interaction_elapsed"] == (
+        "The recorded interaction is later than the current world time"
+    )
 
 
 def test_group_orchestrator_paths_share_clock_snapshot_with_prompt_and_messages(monkeypatch):
@@ -782,6 +1162,74 @@ def test_single_dialogue_uses_elapsed_world_time_and_shared_message_timestamp(
     ]
 
 
+def test_single_session_opening_returns_saved_world_timestamp(monkeypatch):
+    from memoria.core import orchestrator
+
+    snapshot = world_clock.WorldClockSnapshot(
+        player_id="opening-player",
+        timezone="Asia/Shanghai",
+        time_scale=1,
+        real_now=datetime(2026, 7, 14, 8, 0, tzinfo=UTC),
+        world_now=datetime(2026, 7, 14, 16, 0, tzinfo=UTC),
+    )
+    card = SimpleNamespace(
+        speech_style=SimpleNamespace(language="zh-CN"),
+        action_vocabulary=SimpleNamespace(default_action="idle"),
+    )
+    saved_messages = []
+
+    monkeypatch.setattr(orchestrator.character_loader, "load_character_card", lambda *args: card)
+    monkeypatch.setattr(
+        orchestrator.repository,
+        "get_runtime_state",
+        lambda *args, **kwargs: {
+            "affection_level": 12,
+            "trust_level": 8,
+            "current_mood": "neutral",
+            "known_player_facts": [],
+        },
+    )
+    monkeypatch.setattr(orchestrator.world_clock, "get_clock_snapshot", lambda player_id: snapshot)
+    monkeypatch.setattr(
+        orchestrator.repository,
+        "get_last_character_interaction_world_at",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(orchestrator.repository, "create_session", lambda *args: None)
+    monkeypatch.setattr(orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        orchestrator,
+        "_load_single_character_prompt_context",
+        lambda *args, **kwargs: {
+            "relationship_graph_lines": [],
+            "known_player_facts": [],
+            "cross_mode_memories": [],
+        },
+    )
+    monkeypatch.setattr(orchestrator, "_build_system_prompt", lambda *args, **kwargs: "system")
+    monkeypatch.setattr(
+        orchestrator.prompt_builder,
+        "build_opening_line_prompt",
+        lambda *args, **kwargs: " opening",
+    )
+    monkeypatch.setattr(
+        orchestrator.llm_client,
+        "call_role_turn",
+        lambda *args, **kwargs: {"dialogue": "晚上好。", "action": "idle"},
+    )
+    monkeypatch.setattr(
+        orchestrator.repository,
+        "append_short_term_message",
+        lambda *args, **kwargs: saved_messages.append((args, kwargs)) or 42,
+    )
+
+    result = orchestrator.start_session("npc", snapshot.player_id, "玩家")
+
+    assert result["world_created_at"] == snapshot.world_now.isoformat()
+    assert result["assistant_message_id"] == 42
+    assert saved_messages[0][1]["world_created_at"] == result["world_created_at"]
+
+
 def test_single_and_group_messages_store_same_world_timestamp():
     player_id = _create_user("messages")
     world_created_at = "2026-07-12T08:30:00+00:00"
@@ -823,6 +1271,16 @@ def test_single_and_group_messages_store_same_world_timestamp():
         world_created_at,
     ]
 
+    single_history, _ = repository.get_messages_by_player_and_character(
+        "npc_luo_xiaohei",
+        player_id,
+    )
+    group_history, _ = repository.get_multi_character_thread_history_paginated(
+        group_session,
+    )
+    assert single_history[-1]["world_created_at"] == world_created_at
+    assert group_history[-1]["world_created_at"] == world_created_at
+
 
 def test_world_clock_api_auth_isolation_and_inbox_ownership():
     from memoria.api import user as user_api
@@ -855,6 +1313,7 @@ def test_world_clock_api_auth_isolation_and_inbox_ownership():
 
     updated = user_api.put_world_clock(
         user_api.UpdateWorldClockRequest(
+            expected_revision=1,
             timezone="Asia/Shanghai",
             time_scale=0,
         ),
@@ -881,4 +1340,3 @@ def test_world_clock_api_auth_isolation_and_inbox_ownership():
         inbox_id,
         user_id=player_a,
     ).success is True
-

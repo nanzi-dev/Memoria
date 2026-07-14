@@ -71,19 +71,55 @@ async def test_world_clock_http_api_auth_validation_sync_and_isolation(
         )
         assert initial.status_code == 200
         assert initial.json()["time_scale"] == 1
+        revision = initial.json()["clock_revision"]
 
         updated = await client.put(
             "/api/v1/user/world-clock",
             headers=headers_a,
-            json={"timezone": "Asia/Shanghai", "time_scale": 5},
+            json={
+                "expected_revision": revision,
+                "timezone": "Asia/Shanghai",
+                "timezone_mode": "fixed",
+                "time_scale": 5,
+            },
         )
         assert updated.status_code == 200
         assert updated.json()["timezone"] == "Asia/Shanghai"
         assert updated.json()["time_scale"] == 5
+        revision = updated.json()["clock_revision"]
+
+        stale = await client.put(
+            "/api/v1/user/world-clock",
+            headers=headers_a,
+            json={"expected_revision": revision - 1, "time_scale": 2},
+        )
+        assert stale.status_code == 409
+
+        set_clock = await client.post(
+            "/api/v1/user/world-clock/set",
+            headers=headers_a,
+            json={
+                "expected_revision": revision,
+                "world_now": "2026-07-14T09:30:00+08:00",
+            },
+        )
+        assert set_clock.status_code == 200
+        assert set_clock.json()["world_now"] == "2026-07-14T01:30:00+00:00"
+        revision = set_clock.json()["clock_revision"]
+
+        advanced = await client.post(
+            "/api/v1/user/world-clock/advance",
+            headers=headers_a,
+            json={"expected_revision": revision, "seconds": 3600},
+        )
+        assert advanced.status_code == 200
+        assert advanced.json()["world_now"] > set_clock.json()["world_now"]
+        revision = advanced.json()["clock_revision"]
 
         synced = await client.post(
             "/api/v1/user/world-clock/sync",
             headers=headers_a,
+            json={"expected_revision": revision},
         )
         assert synced.status_code == 200
         assert synced.json()["time_scale"] == 5
@@ -92,19 +128,28 @@ async def test_world_clock_http_api_auth_validation_sync_and_isolation(
         invalid_timezone = await client.put(
             "/api/v1/user/world-clock",
             headers=headers_a,
-            json={"timezone": "Mars/Olympus_Mons"},
+            json={
+                "expected_revision": synced.json()["clock_revision"],
+                "timezone": "Mars/Olympus_Mons",
+            },
         )
         assert invalid_timezone.status_code == 400
         invalid_scale = await client.put(
             "/api/v1/user/world-clock",
             headers=headers_a,
-            json={"time_scale": 3},
+            json={
+                "expected_revision": synced.json()["clock_revision"],
+                "time_scale": 3,
+            },
         )
         assert invalid_scale.status_code == 400
         boolean_scale = await client.put(
             "/api/v1/user/world-clock",
             headers=headers_a,
-            json={"time_scale": True},
+            json={
+                "expected_revision": synced.json()["clock_revision"],
+                "time_scale": True,
+            },
         )
         assert boolean_scale.status_code == 422
 

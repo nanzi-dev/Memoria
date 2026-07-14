@@ -14,6 +14,7 @@ import json
 import logging
 import sqlite3
 import uuid
+from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from memoria.core.config import configs
@@ -275,9 +276,11 @@ CREATE TABLE IF NOT EXISTS auth_token (
 CREATE TABLE IF NOT EXISTS player_world_clock (
     player_id        TEXT PRIMARY KEY,
     timezone         TEXT NOT NULL DEFAULT 'UTC',
+    timezone_mode    TEXT NOT NULL DEFAULT 'fixed',
     anchor_real_utc  TEXT NOT NULL,
     anchor_world_utc TEXT NOT NULL,
     time_scale       REAL NOT NULL DEFAULT 1,
+    clock_revision   INTEGER NOT NULL DEFAULT 1,
     updated_at       TEXT NOT NULL,
     FOREIGN KEY (player_id) REFERENCES users(user_id)
 );
@@ -391,6 +394,8 @@ CREATE TABLE IF NOT EXISTS event_schedule_state (
     last_checked_at TEXT,
     last_run_at     TEXT,
     next_run_at     TEXT,
+    next_due_real_at TEXT,
+    missed_count    INTEGER NOT NULL DEFAULT 0,
     status          TEXT DEFAULT 'active',
     lease_owner     TEXT,
     lease_expires_at TEXT,
@@ -803,6 +808,8 @@ def _migrate(conn):
             last_checked_at TEXT,
             last_run_at     TEXT,
             next_run_at     TEXT,
+            next_due_real_at TEXT,
+            missed_count    INTEGER NOT NULL DEFAULT 0,
             status          TEXT DEFAULT 'active',
             created_at      TEXT,
             updated_at      TEXT,
@@ -832,9 +839,11 @@ def _migrate(conn):
         CREATE TABLE IF NOT EXISTS player_world_clock (
             player_id        TEXT PRIMARY KEY,
             timezone         TEXT NOT NULL DEFAULT 'UTC',
+            timezone_mode    TEXT NOT NULL DEFAULT 'fixed',
             anchor_real_utc  TEXT NOT NULL,
             anchor_world_utc TEXT NOT NULL,
             time_scale       REAL NOT NULL DEFAULT 1,
+            clock_revision   INTEGER NOT NULL DEFAULT 1,
             updated_at       TEXT NOT NULL,
             FOREIGN KEY (player_id) REFERENCES users(user_id)
         );
@@ -985,11 +994,15 @@ def _migrate(conn):
     add_column("event_schedule_state", "last_checked_at TEXT")
     add_column("event_schedule_state", "last_run_at TEXT")
     add_column("event_schedule_state", "next_run_at TEXT")
+    add_column("event_schedule_state", "next_due_real_at TEXT")
+    add_column("event_schedule_state", "missed_count INTEGER NOT NULL DEFAULT 0")
     add_column("event_schedule_state", "status TEXT DEFAULT 'active'")
     add_column("event_schedule_state", "lease_owner TEXT")
     add_column("event_schedule_state", "lease_expires_at TEXT")
     add_column("event_schedule_state", "created_at TEXT")
     add_column("event_schedule_state", "updated_at TEXT")
+    add_column("player_world_clock", "timezone_mode TEXT NOT NULL DEFAULT 'fixed'")
+    add_column("player_world_clock", "clock_revision INTEGER NOT NULL DEFAULT 1")
     add_column("short_term_message", "action TEXT")
     add_column("short_term_message", "affinity_delta REAL")
     add_column("short_term_message", "trust_delta REAL")
@@ -1000,6 +1013,12 @@ def _migrate(conn):
     add_column("short_term_message", "knowledge_sources TEXT")
     add_column("short_term_message", "world_created_at TEXT")
     add_column("shared_memory", "owner_user_id TEXT")
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_event_schedule_due_real
+        ON event_schedule_state(status, next_due_real_at)
+        """
+    )
     conn.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_event_schedule_lease
@@ -1067,8 +1086,9 @@ def get_or_create_player_world_clock(
         conn.execute(
             """
             INSERT INTO player_world_clock
-            (player_id, timezone, anchor_real_utc, anchor_world_utc, time_scale, updated_at)
-            VALUES (?, ?, ?, ?, 1, ?)
+            (player_id, timezone, timezone_mode, anchor_real_utc, anchor_world_utc,
+             time_scale, clock_revision, updated_at)
+            VALUES (?, ?, 'fixed', ?, ?, 1, 1, ?)
             ON CONFLICT(player_id) DO NOTHING
             """,
             (player_id, timezone_name, real_now_iso, real_now_iso, real_now_iso),
@@ -1089,36 +1109,86 @@ def get_player_world_clock(player_id: str) -> dict | None:
     return _row_to_dict(row)
 
 
-def save_player_world_clock(
+class ClockRevisionConflictError(RuntimeError):
+    pass
+
+
+class ClockScheduleBusyError(RuntimeError):
+    pass
+
+
+def update_player_world_clock_and_schedules(
+    *,
     player_id: str,
+    expected_revision: int,
     timezone_name: str,
+    timezone_mode: str,
     anchor_real_utc: str,
     anchor_world_utc: str,
     time_scale: int,
     updated_at: str,
-) -> None:
+    resolve_schedule: Callable[[dict], tuple[str | None, str | None]],
+) -> dict:
+    """Atomically update a clock and all active schedules derived from it."""
     with get_conn() as conn:
-        conn.execute(
+        cursor = conn.execute(
             """
-            INSERT INTO player_world_clock
-            (player_id, timezone, anchor_real_utc, anchor_world_utc, time_scale, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(player_id) DO UPDATE SET
-                timezone=excluded.timezone,
-                anchor_real_utc=excluded.anchor_real_utc,
-                anchor_world_utc=excluded.anchor_world_utc,
-                time_scale=excluded.time_scale,
-                updated_at=excluded.updated_at
+            UPDATE player_world_clock
+            SET timezone = ?, timezone_mode = ?, anchor_real_utc = ?,
+                anchor_world_utc = ?, time_scale = ?,
+                clock_revision = clock_revision + 1, updated_at = ?
+            WHERE player_id = ? AND clock_revision = ?
             """,
             (
-                player_id,
                 timezone_name,
+                timezone_mode,
                 anchor_real_utc,
                 anchor_world_utc,
                 time_scale,
                 updated_at,
+                player_id,
+                expected_revision,
             ),
         )
+        if cursor.rowcount != 1:
+            raise ClockRevisionConflictError("world clock revision is stale")
+
+        schedules = conn.execute(
+            """
+            SELECT * FROM event_schedule_state
+            WHERE player_id = ? AND status = 'active'
+              AND next_run_at IS NOT NULL
+            """,
+            (player_id,),
+        ).fetchall()
+        for raw_schedule in schedules:
+            schedule = dict(raw_schedule)
+            lease_expires_at = schedule.get("lease_expires_at")
+            if lease_expires_at and lease_expires_at > updated_at:
+                raise ClockScheduleBusyError("a scheduled event is currently executing")
+            next_run_at, next_due_real_at = resolve_schedule(schedule)
+            conn.execute(
+                """
+                UPDATE event_schedule_state
+                SET next_run_at = ?, next_due_real_at = ?,
+                    lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+                WHERE event_id = ? AND character_id = ? AND player_id = ?
+                """,
+                (
+                    next_run_at,
+                    next_due_real_at,
+                    updated_at,
+                    schedule["event_id"],
+                    schedule["character_id"],
+                    player_id,
+                ),
+            )
+
+        row = conn.execute(
+            "SELECT * FROM player_world_clock WHERE player_id = ?",
+            (player_id,),
+        ).fetchone()
+    return dict(row)
 
 
 # =========================
@@ -1845,7 +1915,8 @@ def get_messages_paginated(session_id: str, offset: int, limit: int) -> tuple[li
             SELECT id AS message_id, role, content, action,
                    affinity_delta, trust_delta,
                    current_affinity, current_trust, current_mood,
-                   event_notification, knowledge_sources, created_at
+                   event_notification, knowledge_sources, created_at,
+                   world_created_at
             FROM short_term_message
             WHERE session_id = ?
             ORDER BY id DESC
@@ -1870,7 +1941,8 @@ def get_session_messages(session_id: str, limit: int = 1000) -> list[dict]:
             SELECT id AS message_id, role, content, character_id, character_name,
                    action, affinity_delta, trust_delta,
                    current_affinity, current_trust, current_mood,
-                   event_notification, knowledge_sources, created_at
+                   event_notification, knowledge_sources, created_at,
+                   world_created_at
             FROM short_term_message
             WHERE session_id = ?
             ORDER BY id ASC
@@ -1922,6 +1994,7 @@ def get_messages_by_player_and_character(
                 m.event_notification,
                 m.knowledge_sources,
                 m.created_at,
+                m.world_created_at,
                 m.session_id
             FROM short_term_message m
             INNER JOIN session s
@@ -2676,9 +2749,11 @@ def save_event_schedule_state(
     player_id: str,
     schedule: str,
     next_run_at: str = None,
+    next_due_real_at: str = None,
     last_checked_at: str = None,
     last_run_at: str = None,
     status: str = "active",
+    missed_count: int = 0,
 ) -> bool:
     """保存时间驱动事件的调度状态。"""
     try:
@@ -2687,19 +2762,23 @@ def save_event_schedule_state(
                 """
                 INSERT INTO event_schedule_state
                 (event_id, character_id, player_id, schedule, last_checked_at,
-                 last_run_at, next_run_at, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 last_run_at, next_run_at, next_due_real_at, missed_count,
+                 status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(event_id, character_id, player_id)
                 DO UPDATE SET
                     schedule=excluded.schedule,
                     last_checked_at=excluded.last_checked_at,
                     last_run_at=excluded.last_run_at,
                     next_run_at=excluded.next_run_at,
+                    next_due_real_at=excluded.next_due_real_at,
+                    missed_count=excluded.missed_count,
                     status=excluded.status,
                     updated_at=excluded.updated_at
                 """,
                 (event_id, character_id, player_id, schedule, last_checked_at,
-                 last_run_at, next_run_at, status, _now(), _now()),
+                 last_run_at, next_run_at, next_due_real_at, missed_count,
+                 status, _now(), _now()),
             )
         return True
     except Exception as e:
@@ -2707,20 +2786,35 @@ def save_event_schedule_state(
         return False
 
 
-def list_due_event_schedules(now_iso: str, limit: int = 50, player_id: str | None = None) -> list[dict]:
-    """列出到期的调度事件。"""
+def list_due_event_schedules(
+    now_iso: str,
+    limit: int = 50,
+    player_id: str | None = None,
+    after: tuple[str, str, str, str] | None = None,
+) -> list[dict]:
+    """List schedules due against indexed real UTC time."""
     with get_conn() as conn:
         query = """
             SELECT * FROM event_schedule_state
             WHERE status = 'active'
               AND next_run_at IS NOT NULL
-              AND next_run_at <= ?
+              AND next_due_real_at IS NOT NULL
+              AND next_due_real_at <= ?
         """
         params = [now_iso]
         if player_id:
             query += " AND player_id = ?"
             params.append(player_id)
-        query += " ORDER BY next_run_at ASC LIMIT ?"
+        if after:
+            query += """
+                AND (next_due_real_at, event_id, character_id, player_id)
+                    > (?, ?, ?, ?)
+            """
+            params.extend(after)
+        query += """
+            ORDER BY next_due_real_at, event_id, character_id, player_id
+            LIMIT ?
+        """
         params.append(limit)
         rows = conn.execute(query, params).fetchall()
     return [dict(r) for r in rows]
@@ -2755,6 +2849,7 @@ def claim_event_schedule(
     lease_expires_at: str,
     real_now_iso: str,
     expected_next_run_at: str,
+    expected_next_due_real_at: str | None = None,
 ) -> bool:
     """Conditionally claim a schedule using a real-UTC lease."""
     with get_conn() as conn:
@@ -2765,6 +2860,10 @@ def claim_event_schedule(
             WHERE event_id = ? AND character_id = ? AND player_id = ?
               AND status = 'active'
               AND next_run_at = ?
+              AND (
+                next_due_real_at = ?
+                OR (next_due_real_at IS NULL AND ? IS NULL)
+              )
               AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
             """,
             (
@@ -2775,6 +2874,8 @@ def claim_event_schedule(
                 character_id,
                 player_id,
                 expected_next_run_at,
+                expected_next_due_real_at,
+                expected_next_due_real_at,
                 real_now_iso,
             ),
         )
@@ -2790,12 +2891,15 @@ def complete_event_schedule(
     last_checked_at: str,
     last_run_at: str,
     next_run_at: str,
+    next_due_real_at: str | None = None,
+    missed_count: int = 0,
 ) -> bool:
     with get_conn() as conn:
         cursor = conn.execute(
             """
             UPDATE event_schedule_state
             SET last_checked_at = ?, last_run_at = ?, next_run_at = ?,
+                next_due_real_at = ?, missed_count = ?,
                 lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
             WHERE event_id = ? AND character_id = ? AND player_id = ?
               AND lease_owner = ?
@@ -2804,11 +2908,94 @@ def complete_event_schedule(
                 last_checked_at,
                 last_run_at,
                 next_run_at,
+                next_due_real_at,
+                missed_count,
                 _now(),
                 event_id,
                 character_id,
                 player_id,
                 lease_owner,
+            ),
+        )
+    return cursor.rowcount == 1
+
+
+def get_next_event_schedule(player_id: str) -> dict | None:
+    """Return the player's earliest active schedule for clock UI display."""
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT s.*, d.event_name
+            FROM event_schedule_state s
+            LEFT JOIN event_definition d
+              ON d.owner_user_id = s.player_id AND d.event_id = s.event_id
+            WHERE s.player_id = ? AND s.status = 'active'
+              AND s.next_run_at IS NOT NULL
+            ORDER BY
+              CASE WHEN s.next_due_real_at IS NULL THEN 1 ELSE 0 END,
+              s.next_due_real_at ASC,
+              s.next_run_at ASC
+            LIMIT 1
+            """,
+            (player_id,),
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def list_event_schedules_for_player(player_id: str) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM event_schedule_state
+            WHERE player_id = ?
+            ORDER BY next_run_at ASC
+            """,
+            (player_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_event_schedules_missing_due_projection() -> list[dict]:
+    """Return active schedules that need a real-time due projection."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM event_schedule_state
+            WHERE status = 'active'
+              AND next_run_at IS NOT NULL
+              AND next_due_real_at IS NULL
+            ORDER BY player_id, next_run_at
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def set_event_schedule_due_projection(
+    event_id: str,
+    character_id: str,
+    player_id: str,
+    *,
+    expected_next_run_at: str,
+    next_due_real_at: str,
+) -> bool:
+    """Backfill a missing projection without changing schedule ownership."""
+    with get_conn() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE event_schedule_state
+            SET next_due_real_at = ?, updated_at = ?
+            WHERE event_id = ? AND character_id = ? AND player_id = ?
+              AND status = 'active'
+              AND next_run_at = ?
+              AND next_due_real_at IS NULL
+            """,
+            (
+                next_due_real_at,
+                _now(),
+                event_id,
+                character_id,
+                player_id,
+                expected_next_run_at,
             ),
         )
     return cursor.rowcount == 1
@@ -3450,7 +3637,7 @@ def get_multi_character_history(
             rows = conn.execute(
                 f"""
                 SELECT role, content, character_id, character_name,
-                       knowledge_sources, created_at
+                       knowledge_sources, created_at, world_created_at
                 FROM short_term_message
                 WHERE session_id = ?
                   {created_after_clause}
@@ -3464,7 +3651,7 @@ def get_multi_character_history(
         rows = conn.execute(
             f"""
             SELECT role, content, character_id, character_name,
-                   knowledge_sources, created_at
+                   knowledge_sources, created_at, world_created_at
             FROM short_term_message
             WHERE session_id = ?
               {created_after_clause}
@@ -3506,7 +3693,7 @@ def get_multi_character_thread_history(
                 f"""
                 SELECT m.id AS message_id, m.session_id, m.role, m.content,
                        m.character_id, m.character_name, m.knowledge_sources,
-                       m.created_at
+                       m.created_at, m.world_created_at
                 FROM short_term_message m
                 INNER JOIN session s ON s.session_id = m.session_id
                 WHERE s.player_id = ?
@@ -3527,7 +3714,7 @@ def get_multi_character_thread_history(
             f"""
             SELECT m.id AS message_id, m.session_id, m.role, m.content,
                    m.character_id, m.character_name, m.knowledge_sources,
-                   m.created_at
+                   m.created_at, m.world_created_at
             FROM short_term_message m
             INNER JOIN session s ON s.session_id = m.session_id
             WHERE s.player_id = ?
@@ -3572,7 +3759,7 @@ def get_multi_character_thread_history_paginated(
             """
             SELECT m.id AS message_id, m.session_id, m.role, m.content,
                    m.character_id, m.character_name, m.knowledge_sources,
-                   m.created_at
+                   m.created_at, m.world_created_at
             FROM short_term_message m
             INNER JOIN session s ON s.session_id = m.session_id
             WHERE s.player_id = ?

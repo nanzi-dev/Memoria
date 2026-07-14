@@ -43,6 +43,7 @@ class TriggerConditionDTO(BaseModel):
     count: Optional[int] = None
     duration_minutes: Optional[int] = None
     schedule: Optional[str] = None
+    catch_up_replay_limit: int = Field(default=1, ge=1, le=100)
     mood: Optional[str] = None
     sub_conditions: Optional[list["TriggerConditionDTO"]] = None
     logic_operator: Optional[str] = "and"
@@ -115,6 +116,9 @@ class EventListItem(BaseModel):
     trigger_type: Optional[str] = None
     schedule: Optional[str] = None
     template_id: Optional[str] = None
+    next_run_at: Optional[str] = None
+    next_due_real_at: Optional[str] = None
+    missed_count: int = 0
 
 
 class EventDetail(EventListItem):
@@ -223,6 +227,13 @@ def list_events(
             character_id=character_id,
             only_active=only_active,
         )
+        schedules_by_event: dict[str, list[dict]] = {}
+        for schedule_state in repository.list_event_schedules_for_player(
+            current_user_id
+        ):
+            schedules_by_event.setdefault(schedule_state["event_id"], []).append(
+                schedule_state
+            )
         result = []
         for r in rows:
             try:
@@ -230,6 +241,15 @@ def list_events(
                 trigger_type = trigger_cfg.get("trigger_type")
             except Exception:
                 trigger_type = None
+
+            event_schedules = schedules_by_event.get(r["event_id"], [])
+            event_schedules.sort(
+                key=lambda item: (
+                    item.get("next_due_real_at") is None,
+                    item.get("next_due_real_at") or item.get("next_run_at") or "",
+                )
+            )
+            next_schedule = event_schedules[0] if event_schedules else {}
 
             result.append(EventListItem(
                 event_id=r["event_id"],
@@ -245,6 +265,12 @@ def list_events(
                 trigger_type=trigger_type,
                 schedule=r.get("schedule"),
                 template_id=r.get("template_id"),
+                next_run_at=next_schedule.get("next_run_at"),
+                next_due_real_at=next_schedule.get("next_due_real_at"),
+                missed_count=sum(
+                    int(item.get("missed_count") or 0)
+                    for item in event_schedules
+                ),
             ))
         return result
     except Exception as e:
