@@ -1509,6 +1509,17 @@ export default function EventEditor() {
               {selectedTemplate?.description && (
                 <p className="mt-2 text-[10px] font-mono text-cyber-green/35">{selectedTemplate.description}</p>
               )}
+              {selectedTemplate && (
+                <div className="mt-3 border-t border-cyber-green/10 pt-3">
+                  <p className="mb-2 text-[10px] font-mono uppercase tracking-[0.15em] text-cyber-green/30">
+                    模板预览
+                  </p>
+                  <PipelinePreview
+                    triggerCondition={selectedTemplate.trigger_config}
+                    effects={selectedTemplate.effects_config || []}
+                  />
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
