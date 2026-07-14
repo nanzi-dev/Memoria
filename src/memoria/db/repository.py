@@ -773,9 +773,6 @@ ON session(character_id, player_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_session_multi
 ON session(is_multi_character, player_id, created_at DESC);
 
-CREATE INDEX IF NOT EXISTS idx_session_group_thread
-ON session(group_thread_id, created_at DESC);
-
 CREATE INDEX IF NOT EXISTS idx_multi_participant
 ON multi_session_participant(session_id, is_active);
 
@@ -820,9 +817,6 @@ ON auth_token(user_id, expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_player_event_inbox_unread
 ON player_event_inbox(player_id, read_at, id DESC);
-
-CREATE INDEX IF NOT EXISTS idx_player_group_inbox_unread
-ON player_event_inbox(player_id, group_thread_id, read_at, id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_group_dialogue_state_scan
 ON group_dialogue_state(player_id, lease_expires_at, last_autonomous_pulse_at);
@@ -1121,9 +1115,6 @@ def _migrate(conn):
         CREATE INDEX IF NOT EXISTS idx_event_unlock_lookup
         ON event_unlock(player_id, character_id, unlocked_at DESC);
 
-        CREATE INDEX IF NOT EXISTS idx_player_group_inbox_unread
-        ON player_event_inbox(player_id, group_thread_id, read_at, id DESC);
-
         CREATE INDEX IF NOT EXISTS idx_group_dialogue_state_scan
         ON group_dialogue_state(player_id, lease_expires_at, last_autonomous_pulse_at);
 
@@ -1215,6 +1206,12 @@ def _migrate(conn):
         """
         CREATE INDEX IF NOT EXISTS idx_event_schedule_lease
         ON event_schedule_state(status, lease_expires_at)
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_session_group_thread
+        ON session(group_thread_id, created_at DESC)
         """
     )
     conn.execute(

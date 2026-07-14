@@ -97,13 +97,17 @@ class TestMigrations:
                     created_at TEXT,
                     status TEXT,
                     group_name TEXT,
-                    group_thread_id TEXT,
                     is_multi_character INTEGER DEFAULT 0
                 )
                 """
             )
             conn.execute(
-                "INSERT INTO session VALUES ('legacy-session', 'c1', 'p1', 'P', 'now', 'active', NULL, NULL, 0)"
+                """
+                INSERT INTO session
+                (session_id, character_id, player_id, player_name, created_at,
+                 status, group_name, is_multi_character)
+                VALUES ('legacy-session', 'c1', 'p1', 'P', 'now', 'active', NULL, 0)
+                """
             )
             conn.execute(
                 """
@@ -121,6 +125,24 @@ class TestMigrations:
             conn.execute(
                 "INSERT INTO users (user_id, username, password_hash) VALUES ('legacy-user', 'legacy', 'hash')"
             )
+            conn.execute(
+                """
+                CREATE TABLE player_event_inbox (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    player_id TEXT NOT NULL,
+                    event_id TEXT,
+                    character_id TEXT,
+                    session_id TEXT,
+                    event_type TEXT NOT NULL DEFAULT 'event',
+                    title TEXT,
+                    content TEXT NOT NULL,
+                    payload TEXT,
+                    world_created_at TEXT,
+                    created_at TEXT NOT NULL,
+                    read_at TEXT
+                )
+                """
+            )
 
         monkeypatch.setattr(configs, "database_url", "")
         monkeypatch.setattr(configs, "database_path", str(database_path))
@@ -135,10 +157,34 @@ class TestMigrations:
             user = conn.execute(
                 "SELECT tts_auto_play, stt_auto_send FROM users WHERE user_id='legacy-user'"
             ).fetchone()
+            session_columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(session)").fetchall()
+            }
+            session_indexes = {
+                row[1]
+                for row in conn.execute("PRAGMA index_list(session)").fetchall()
+            }
+            inbox_columns = {
+                row[1]
+                for row in conn.execute(
+                    "PRAGMA table_info(player_event_inbox)"
+                ).fetchall()
+            }
+            inbox_indexes = {
+                row[1]
+                for row in conn.execute(
+                    "PRAGMA index_list(player_event_inbox)"
+                ).fetchall()
+            }
 
         assert session["locale"] == "zh-CN"
         assert user["tts_auto_play"] == 0
         assert user["stt_auto_send"] == 0
+        assert "group_thread_id" in session_columns
+        assert "idx_session_group_thread" in session_indexes
+        assert "group_thread_id" in inbox_columns
+        assert "idx_player_group_inbox_unread" in inbox_indexes
 
 
 class TestRuntimeState:
