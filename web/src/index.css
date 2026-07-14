@@ -53,6 +53,11 @@
 }
 
 /* ═══ Home page: PillNav inline (below title, not fixed) ═══ */
+.pill-nav-inline {
+  position: relative;
+  z-index: 100;
+}
+
 .pill-nav-inline .pill-nav-container {
   position: relative;
   top: auto;
@@ -61,6 +66,19 @@
 }
 .pill-nav-inline .pill-nav-items {
   background: transparent;
+}
+@media (max-width: 768px) {
+  .pill-nav-inline .pill-nav-container,
+  .pill-nav-inline .pill-nav {
+    width: auto;
+  }
+
+  .pill-nav-inline .mobile-menu-popover {
+    top: calc(100% + 0.75rem);
+    right: 0;
+    left: auto;
+    width: min(220px, calc(100vw - 2rem));
+  }
 }
 
 /* ═══ Chat scanning line animation ═══ */

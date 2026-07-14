@@ -1,6 +1,6 @@
 # Memoria - 角色模拟系统
 
-一个基于大语言模型的沉浸式角色扮演对话系统，支持动态记忆管理、外部知识库 RAG、情感状态追踪、事件系统和个性化交互体验。
+一个基于大语言模型的沉浸式角色扮演对话系统，支持动态记忆管理、外部知识库 RAG、情感状态追踪、事件系统、中英双语会话和语音交互。
 
 [![GitHub stars](https://img.shields.io/github/stars/nanzi-dev/Memoria?style=social)](https://github.com/nanzi-dev/Memoria)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -18,6 +18,7 @@
     - [外部知识库 RAG](#外部知识库-rag)
     - [关系与情感追踪](#关系与情感追踪)
     - [多角色对话系统](#多角色对话系统)
+    - [多语言与语音](#多语言与语音)
     - [事件系统](#事件系统)
     - [沉浸感保护](#沉浸感保护)
     - [多模型支持](#多模型支持)
@@ -72,6 +73,13 @@
 - **多角色记忆**：个人记忆、角色间记忆、群体记忆三层管理；群聊结束时统一生成整场摘要并保存为群体记忆
 - **动态参与者管理**：支持运行时添加/移除角色
 
+### 多语言与语音
+- **会话语言切换**：单聊和群聊支持 `zh-CN` / `en-US`，会话持久化语言并向 Prompt 注入最高优先级语言约束
+- **角色卡 i18n**：角色卡可为中英文维护局部覆盖，加载时按会话语言深度合并
+- **语音输入**：浏览器录音上传到认证 STT 接口，按会话语言转写，可配置自动发送
+- **语音播放**：单聊和群聊的角色消息支持 TTS、自动播放和本地文件缓存
+- **角色声音**：支持内置声音与自定义声音授权、创建、状态查询和解绑；自定义声音不可用时回退内置声音
+
 ### 事件系统
 - **多类型触发条件**：好感度阈值、信任度阈值、关键词匹配、对话次数、时间、情绪、复合条件
 - **丰富的事件效果**：状态修改、内容解锁、对话触发、记忆添加、情绪改变、玩家通知、关系修改、事件链、NPC 主动对话
@@ -92,9 +100,9 @@
 - **JSON 强制输出**：支持结构化输出的模型可获得更好的稳定性
 
 ### Web 前端
-- **登录与用户资料**：支持用户注册、登录、资料编辑和头像设置
+- **登录与用户资料**：支持用户注册、登录、资料编辑和头像设置；浏览器登录态只使用 HttpOnly Cookie，不把 token 持久化到 `localStorage`
 - **角色卡编辑器**：分步编辑角色身份、性格、语言风格、背景和交互规则
-- **会话体验**：支持单角色对话、会话恢复、多角色群聊和会话列表；好感度/信任度变化只在当前会话新回复上展示，历史加载消息不回放旧变化提示
+- **会话体验**：支持单角色对话、会话恢复、多角色群聊、会话语言选择、录音转写和角色语音播放；好感度/信任度变化只在当前会话新回复上展示，历史加载消息不回放旧变化提示
 - **管理视图**：提供事件列表/编辑器、角色关系图谱和知识库管理页面
 
 ---
@@ -111,6 +119,7 @@ Memoria/
 │   │   ├── multi_dialogue.py   # 多角色对话 API
 │   │   ├── relationship.py     # 角色关系 API
 │   │   ├── knowledge.py        # 知识库、文档与检索预览 API
+│   │   ├── speech.py           # STT、TTS 与角色自定义声音 API
 │   │   ├── developer.py        # 回放、性能指标、质量评分等开发者 API
 │   │   └── user.py             # 用户注册、登录、资料和头像 API
 │   ├── characters/             # 角色卡 JSON 配置文件
@@ -129,6 +138,9 @@ Memoria/
 │   │   ├── knowledge_retriever.py    # 知识检索、排序与 Prompt 注入
 │   │   ├── knowledge_vector_store.py # 知识向量存储
 │   │   ├── world_clock.py      # 用户世界时钟
+│   │   ├── locale.py           # 会话语言约束与 STT 语言映射
+│   │   ├── speech_provider.py  # OpenAI Speech HTTP 适配层
+│   │   ├── speech_service.py   # 语音鉴权、缓存与角色声音工作流
 │   │   ├── character_loader.py # 角色卡加载与缓存
 │   │   ├── character_schema.py # 角色卡数据模型
 │   │   ├── event_detector.py   # 事件检测引擎
@@ -150,7 +162,8 @@ Memoria/
 ├── data/                       # 运行时数据
 │   ├── sqlite_db/              # SQLite 开发数据库
 │   ├── chroma_db/              # 向量数据库 (ChromaDB)
-│   └── knowledge/              # 知识库上传原文件
+│   ├── knowledge/              # 知识库上传原文件
+│   └── speech/                 # TTS 文件缓存
 ├── scripts/                    # 工具脚本
 │   ├── chat.sh                 # CLI 聊天启动脚本
 │   ├── cli_chat.py             # 命令行对话工具
@@ -288,8 +301,8 @@ npm run dev
 
 | 文档 | 内容 |
 |------|------|
-| [API 文档](docs/API.md) | 完整 REST API 参考（对话/角色卡/事件/关系/多角色/知识库/用户/系统管理），含请求/响应示例 |
-| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（24 张表）、记忆与知识检索架构、角色卡开发规范 |
+| [API 文档](docs/API.md) | 完整 REST API 参考（对话/角色卡/事件/关系/多角色/知识库/语音/用户/系统管理），含请求/响应示例 |
+| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（30 张表）、记忆、知识检索与语音架构、角色卡开发规范 |
 | [开发路线图](docs/ROADMAP.md) | 已完成功能和未来规划 |
 | [故障排查](docs/FAQ.md) | 常见问题解决方案、调试技巧、性能优化建议 |
 | [贡献指南](docs/CONTRIBUTING.md) | 如何贡献代码、Commit 规范、代码审查标准 |
@@ -310,6 +323,14 @@ LLM_MODEL=deepseek-chat                        # 主对话模型
 LLM_LIGHT_BASE_URL=                            # 轻量 API 基础 URL
 LLM_LIGHT_API_KEY=                             # 轻量 API 密钥
 LLM_LIGHT_MODEL=                               # 轻量模型名称
+
+# ====== OpenAI Speech 配置（可选） ======
+SPEECH_API_KEY=                                # 语音服务 API 密钥
+SPEECH_BASE_URL=https://api.openai.com/v1
+SPEECH_STT_MODEL=gpt-4o-mini-transcribe
+SPEECH_TTS_MODEL=gpt-4o-mini-tts
+SPEECH_OUTPUT_FORMAT=wav
+SPEECH_STORAGE_PATH=./data/speech
 
 # ====== 应用配置 ======
 DATABASE_PATH=./data/sqlite_db/memoria.db      # SQLite 数据库文件路径（默认开发模式）
@@ -348,13 +369,13 @@ PYTHONPATH=src pytest tests/test_multi_dialogue_api.py -v # 多角色 API
 PYTHONPATH=src pytest tests/test_system.py -v            # 系统端点与限流
 ```
 
-当前测试集合以 `pytest --collect-only -q` 为准；当前项目收集到 328 个测试，覆盖核心编排、持久化、事件、单聊/群聊 API、安全、知识库、向量存储、世界时钟和系统端点。
+当前测试集合以 `pytest --collect-only -q` 为准；当前项目收集到 448 个测试，覆盖核心编排、持久化、事件、单聊/群聊 API、安全、知识库、语音、向量存储、世界时钟和系统端点。
 
 ---
 
 ## 许可证
 
-本项目使用 **MIT 许可证**。
+本项目使用 [MIT 许可证](LICENSE)。
 
 ---
 

@@ -275,6 +275,71 @@ def test_pulse_persists_each_reply_once_for_next_decision(monkeypatch):
     assert history[-1]["reply_to_message_id"] == responses[0]["message_id"]
 
 
+def test_unpersisted_pulse_uses_staged_messages_for_next_decision(monkeypatch):
+    from memoria.core import multi_character_orchestrator
+
+    orchestrator = _orchestrator()
+    observed_histories = []
+
+    def decide(**kwargs):
+        history = kwargs["history"]
+        observed_histories.append([dict(message) for message in history])
+        if len(observed_histories) == 1:
+            return _decision(speaker_id="c1", reply_to_message_id=1)
+        if len(observed_histories) == 2:
+            return _decision(
+                speaker_id="c2",
+                reply_to_message_id=history[-1]["message_id"],
+                reply_to_character_id="c1",
+            )
+        return _decision(action="wait", speaker_id=None)
+
+    def generate(character_id, _player_message, **kwargs):
+        decision = kwargs["decision"]
+        return {
+            "character_id": character_id,
+            "character_name": "甲" if character_id == "c1" else "乙",
+            "dialogue": "先侦查。" if character_id == "c1" else "我补充路线。",
+            "reply_to_message_id": decision.reply_to_message_id,
+            "reply_to_character_id": decision.reply_to_character_id,
+            "intent": decision.intent,
+            "topic": decision.topic,
+            "trigger_source": kwargs["trigger_source"],
+        }
+
+    monkeypatch.setattr(
+        multi_character_orchestrator.repository,
+        "get_multi_character_thread_history",
+        lambda *args, **kwargs: [
+            {"message_id": 1, "role": "user", "content": "怎么行动？"}
+        ],
+    )
+    monkeypatch.setattr(orchestrator, "_decide_dialogue_action", decide)
+    monkeypatch.setattr(orchestrator, "_generate_character_response", generate)
+
+    responses = orchestrator.run_dialogue_pulse(
+        trigger_source="event",
+        trigger_text="怎么行动？",
+        max_messages=3,
+        persist_state=False,
+        persist_messages=False,
+        clock_snapshot=SimpleNamespace(world_now=SimpleNamespace(isoformat=lambda: "now")),
+    )
+
+    assert [response["message_id"] for response in responses] == [-1, -2]
+    assert responses[1]["reply_to_message_id"] == -1
+    assert [message["content"] for message in observed_histories[1]] == [
+        "怎么行动？",
+        "先侦查。",
+    ]
+    assert observed_histories[1][-1]["message_id"] == -1
+    assert [message["content"] for message in observed_histories[2]] == [
+        "怎么行动？",
+        "先侦查。",
+        "我补充路线。",
+    ]
+
+
 @pytest.mark.parametrize(
     ("decisions", "expected_count", "waiting_for_player"),
     [

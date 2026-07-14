@@ -3,6 +3,10 @@
  */
 const API_BASE = '/api/v1';
 
+function pathSegment(value) {
+  return encodeURIComponent(String(value));
+}
+
 function formatApiError(errorBody, status) {
   const detail = errorBody?.detail;
   if (typeof detail === 'string' && detail.trim()) return detail;
@@ -35,13 +39,6 @@ async function throwResponseError(resp) {
   throw error;
 }
 
-function authenticatedHeaders(headers = {}) {
-  const authenticated = { ...headers };
-  const token = localStorage.getItem('memoria-token');
-  if (token) authenticated.Authorization = `Bearer ${token}`;
-  return authenticated;
-}
-
 async function request(url, options = {}) {
   const headers = { ...options.headers };
   if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
@@ -50,7 +47,7 @@ async function request(url, options = {}) {
   const resp = await fetch(`${API_BASE}${url}`, {
     ...options,
     credentials: 'include',
-    headers: authenticatedHeaders(headers),
+    headers,
   });
   if (!resp.ok) await throwResponseError(resp);
   return resp.json();
@@ -60,7 +57,7 @@ async function requestBlob(url, options = {}) {
   const resp = await fetch(`${API_BASE}${url}`, {
     ...options,
     credentials: 'include',
-    headers: authenticatedHeaders(options.headers),
+    headers: { ...options.headers },
   });
   if (!resp.ok) await throwResponseError(resp);
   return resp.blob();
@@ -106,23 +103,10 @@ export const userApi = {
   async uploadAvatar(file) {
     const formData = new FormData();
     formData.append('file', file);
-    const headers = {};
-    const token = localStorage.getItem('memoria-token');
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    const resp = await fetch(`${API_BASE}/user/avatar/upload`, {
+    return request('/user/avatar/upload', {
       method: 'POST',
-      headers,
-      credentials: 'include',
       body: formData,
     });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      const error = new Error(formatApiError(err, resp.status));
-      error.status = resp.status;
-      error.body = err;
-      throw error;
-    }
-    return resp.json();
   },
   setAvatarUrl(url) {
     return request('/user/avatar/url', {
@@ -166,7 +150,7 @@ export const userApi = {
     return request(`/user/event-inbox?unread_only=${unreadOnly}&limit=${limit}`);
   },
   markEventRead(inboxId) {
-    return request(`/user/event-inbox/${inboxId}/read`, { method: 'POST' });
+    return request(`/user/event-inbox/${pathSegment(inboxId)}/read`, { method: 'POST' });
   },
 };
 
@@ -175,7 +159,7 @@ export const characterAdmin = {
     return request(`/admin/characters?only_active=${onlyActive}`);
   },
   get(characterId) {
-    return request(`/admin/characters/${characterId}`);
+    return request(`/admin/characters/${pathSegment(characterId)}`);
   },
   create(characterData) {
     return request('/admin/characters', {
@@ -184,40 +168,40 @@ export const characterAdmin = {
     });
   },
   update(characterId, characterData) {
-    return request(`/admin/characters/${characterId}`, {
+    return request(`/admin/characters/${pathSegment(characterId)}`, {
       method: 'PUT',
       body: JSON.stringify({ character_data: characterData }),
     });
   },
   delete(characterId, permanent = false) {
-    return request(`/admin/characters/${characterId}?permanent=${permanent}`, {
+    return request(`/admin/characters/${pathSegment(characterId)}?permanent=${permanent}`, {
       method: 'DELETE',
     });
   },
   activate(characterId) {
-    return request(`/admin/characters/${characterId}/activate`, { method: 'POST' });
+    return request(`/admin/characters/${pathSegment(characterId)}/activate`, { method: 'POST' });
   },
   async uploadAvatar(characterId, file) {
     const formData = new FormData();
     formData.append('file', file);
-    return request(`/admin/characters/${characterId}/avatar/upload`, {
+    return request(`/admin/characters/${pathSegment(characterId)}/avatar/upload`, {
       method: 'POST',
       body: formData,
     });
   },
   setAvatarUrl(characterId, url) {
-    return request(`/admin/characters/${characterId}/avatar/url`, {
+    return request(`/admin/characters/${pathSegment(characterId)}/avatar/url`, {
       method: 'POST', body: JSON.stringify({ url }) });
   },
   getVoiceStatus(characterId) {
-    return request(`/admin/characters/${characterId}/voice`);
+    return request(`/admin/characters/${pathSegment(characterId)}/voice`);
   },
   uploadVoiceConsent(characterId, locale, recording, name = null) {
     const formData = new FormData();
     formData.append('locale', locale);
     formData.append('recording', recording);
     if (name?.trim()) formData.append('name', name.trim());
-    return request(`/admin/characters/${characterId}/voice/consent`, {
+    return request(`/admin/characters/${pathSegment(characterId)}/voice/consent`, {
       method: 'POST',
       body: formData,
     });
@@ -226,13 +210,13 @@ export const characterAdmin = {
     const formData = new FormData();
     formData.append('audio_sample', audioSample);
     if (name?.trim()) formData.append('name', name.trim());
-    return request(`/admin/characters/${characterId}/voice`, {
+    return request(`/admin/characters/${pathSegment(characterId)}/voice`, {
       method: 'POST',
       body: formData,
     });
   },
   unbindCustomVoice(characterId) {
-    return request(`/admin/characters/${characterId}/voice`, { method: 'DELETE' });
+    return request(`/admin/characters/${pathSegment(characterId)}/voice`, { method: 'DELETE' });
   },
 };
 
@@ -251,7 +235,7 @@ export const eventAdmin = {
     return request(`/admin/event-templates${qs ? '?' + qs : ''}`);
   },
   get(eventId) {
-    return request(`/admin/events/${eventId}`);
+    return request(`/admin/events/${pathSegment(eventId)}`);
   },
   create(eventData) {
     return request('/admin/events', {
@@ -260,23 +244,23 @@ export const eventAdmin = {
     });
   },
   update(eventId, eventData) {
-    return request(`/admin/events/${eventId}`, {
+    return request(`/admin/events/${pathSegment(eventId)}`, {
       method: 'PUT',
       body: JSON.stringify(eventData),
     });
   },
   delete(eventId) {
-    return request(`/admin/events/${eventId}`, { method: 'DELETE' });
+    return request(`/admin/events/${pathSegment(eventId)}`, { method: 'DELETE' });
   },
   toggle(eventId, active) {
-    return request(`/admin/events/${eventId}/toggle?active=${active}`, { method: 'POST' });
+    return request(`/admin/events/${pathSegment(eventId)}/toggle?active=${active}`, { method: 'POST' });
   },
   history(eventId, characterId = null, playerId = null, limit = 50) {
     const params = new URLSearchParams();
     if (characterId) params.set('character_id', characterId);
     if (playerId) params.set('player_id', playerId);
     params.set('limit', String(limit));
-    return request(`/admin/events/${eventId}/history?${params.toString()}`);
+    return request(`/admin/events/${pathSegment(eventId)}/history?${params.toString()}`);
   },
   allHistory(characterId = null, playerId = null, limit = 100) {
     const params = new URLSearchParams();
@@ -286,10 +270,16 @@ export const eventAdmin = {
     return request(`/admin/events/history/all?${params.toString()}`);
   },
   resetHistory(eventId, characterId, playerId) {
-    return request(`/admin/events/${eventId}/history?character_id=${characterId}&player_id=${playerId}`, { method: 'DELETE' });
+    const params = new URLSearchParams({
+      character_id: characterId,
+      player_id: playerId,
+    });
+    return request(`/admin/events/${pathSegment(eventId)}/history?${params.toString()}`, {
+      method: 'DELETE',
+    });
   },
   simulate(eventId, data) {
-    return request(`/admin/events/${encodeURIComponent(eventId)}/simulate`, {
+    return request(`/admin/events/${pathSegment(eventId)}/simulate`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -303,13 +293,13 @@ export const eventAdmin = {
   },
   pauseSchedule(eventId, characterId) {
     return request(
-      `/admin/event-schedules/${encodeURIComponent(eventId)}/${encodeURIComponent(characterId)}/pause`,
+      `/admin/event-schedules/${pathSegment(eventId)}/${pathSegment(characterId)}/pause`,
       { method: 'POST' }
     );
   },
   resumeSchedule(eventId, characterId) {
     return request(
-      `/admin/event-schedules/${encodeURIComponent(eventId)}/${encodeURIComponent(characterId)}/resume`,
+      `/admin/event-schedules/${pathSegment(eventId)}/${pathSegment(characterId)}/resume`,
       { method: 'POST' }
     );
   },
@@ -321,7 +311,7 @@ export const eventAdmin = {
   },
   executions(eventId, limit = 100) {
     return request(
-      `/admin/events/${encodeURIComponent(eventId)}/executions?limit=${encodeURIComponent(limit)}`
+      `/admin/events/${pathSegment(eventId)}/executions?limit=${encodeURIComponent(limit)}`
     );
   },
 };
@@ -329,16 +319,18 @@ export const eventAdmin = {
 export const relationshipAdmin = {
   /** 获取关系网络（力导引图数据） */
   network(characterIds = null) {
-    const params = characterIds ? `?character_ids=${characterIds}` : '';
-    return request(`/relationships/network${params}`);
+    const params = new URLSearchParams();
+    if (characterIds) params.set('character_ids', characterIds);
+    const query = params.toString();
+    return request(`/relationships/network${query ? `?${query}` : ''}`);
   },
   /** 获取指定角色的所有关系 */
   listForCharacter(characterId) {
-    return request(`/relationships/character/${characterId}`);
+    return request(`/relationships/character/${pathSegment(characterId)}`);
   },
   /** 获取两个角色之间的关系 */
   get(charIdA, charIdB) {
-    return request(`/relationships/pair/${charIdA}/${charIdB}`);
+    return request(`/relationships/pair/${pathSegment(charIdA)}/${pathSegment(charIdB)}`);
   },
   /** 创建/更新关系 */
   save(data) {
@@ -346,12 +338,14 @@ export const relationshipAdmin = {
   },
   /** 更新关系 */
   update(charIdA, charIdB, data) {
-    return request(`/relationships/pair/${charIdA}/${charIdB}`, {
+    return request(`/relationships/pair/${pathSegment(charIdA)}/${pathSegment(charIdB)}`, {
       method: 'PUT', body: JSON.stringify(data) });
   },
   /** 删除关系 */
   remove(charIdA, charIdB) {
-    return request(`/relationships/${charIdA}/${charIdB}`, { method: 'DELETE' });
+    return request(`/relationships/${pathSegment(charIdA)}/${pathSegment(charIdB)}`, {
+      method: 'DELETE',
+    });
   },
 };
 
@@ -369,25 +363,25 @@ export const knowledgeApi = {
     });
   },
   getBase(knowledgeBaseId) {
-    return request(`/knowledge/bases/${knowledgeBaseId}`);
+    return request(`/knowledge/bases/${pathSegment(knowledgeBaseId)}`);
   },
   updateBase(knowledgeBaseId, data) {
-    return request(`/knowledge/bases/${knowledgeBaseId}`, {
+    return request(`/knowledge/bases/${pathSegment(knowledgeBaseId)}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   },
   setEnabled(knowledgeBaseId, isEnabled) {
-    return request(`/knowledge/bases/${knowledgeBaseId}/enabled`, {
+    return request(`/knowledge/bases/${pathSegment(knowledgeBaseId)}/enabled`, {
       method: 'PATCH',
       body: JSON.stringify({ is_enabled: isEnabled }),
     });
   },
   deleteBase(knowledgeBaseId) {
-    return request(`/knowledge/bases/${knowledgeBaseId}`, { method: 'DELETE' });
+    return request(`/knowledge/bases/${pathSegment(knowledgeBaseId)}`, { method: 'DELETE' });
   },
   setBindings(knowledgeBaseId, bindings) {
-    return request(`/knowledge/bases/${knowledgeBaseId}/bindings`, {
+    return request(`/knowledge/bases/${pathSegment(knowledgeBaseId)}/bindings`, {
       method: 'PUT',
       body: JSON.stringify({ bindings }),
     });
@@ -396,27 +390,27 @@ export const knowledgeApi = {
     return request('/knowledge/binding-targets');
   },
   listDocuments(knowledgeBaseId) {
-    return request(`/knowledge/bases/${knowledgeBaseId}/documents`);
+    return request(`/knowledge/bases/${pathSegment(knowledgeBaseId)}/documents`);
   },
   uploadDocument(knowledgeBaseId, file) {
     const formData = new FormData();
     formData.append('file', file);
-    return request(`/knowledge/bases/${knowledgeBaseId}/documents/upload`, {
+    return request(`/knowledge/bases/${pathSegment(knowledgeBaseId)}/documents/upload`, {
       method: 'POST',
       body: formData,
     });
   },
   pasteDocument(knowledgeBaseId, data) {
-    return request(`/knowledge/bases/${knowledgeBaseId}/documents/paste`, {
+    return request(`/knowledge/bases/${pathSegment(knowledgeBaseId)}/documents/paste`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
   deleteDocument(documentId) {
-    return request(`/knowledge/documents/${documentId}`, { method: 'DELETE' });
+    return request(`/knowledge/documents/${pathSegment(documentId)}`, { method: 'DELETE' });
   },
   retryDocument(documentId) {
-    return request(`/knowledge/documents/${documentId}/retry`, { method: 'POST' });
+    return request(`/knowledge/documents/${pathSegment(documentId)}/retry`, { method: 'POST' });
   },
   preview(data) {
     return request('/knowledge/preview', {
@@ -475,13 +469,19 @@ export const dialogue = {
   },
   /** 获取会话历史 */
   getHistory(characterId, playerId, offset = 0, limit = 20, excludeSessionId = null) {
-    let url = `/dialogue/history?character_id=${characterId}&player_id=${playerId}&offset=${offset}&limit=${limit}`;
-    if (excludeSessionId) url += `&exclude_session_id=${encodeURIComponent(excludeSessionId)}`;
-    return request(url);
+    const params = new URLSearchParams({
+      character_id: characterId,
+      player_id: playerId,
+      offset: String(offset),
+      limit: String(limit),
+    });
+    if (excludeSessionId) params.set('exclude_session_id', excludeSessionId);
+    return request(`/dialogue/history?${params.toString()}`);
   },
   /** 获取玩家所有会话（单聊 + 群聊） */
   listPlayerSessions(playerId) {
-    return request(`/dialogue/sessions/player?player_id=${playerId}`);
+    const params = new URLSearchParams({ player_id: playerId });
+    return request(`/dialogue/sessions/player?${params.toString()}`);
   },
 };
 
@@ -523,7 +523,7 @@ export const multiDialogue = {
     });
   },
   continueSession(sessionId) {
-    return request(`/multi-dialogue/session/${sessionId}/continue`, { method: 'POST' });
+    return request(`/multi-dialogue/session/${pathSegment(sessionId)}/continue`, { method: 'POST' });
   },
   endSessionOnUnload(sessionId) {
     if (!sessionId) return;
@@ -544,7 +544,7 @@ export const multiDialogue = {
   },
   /** 获取多角色会话信息 */
   getSessionInfo(sessionId) {
-    return request(`/multi-dialogue/session/${sessionId}`);
+    return request(`/multi-dialogue/session/${pathSegment(sessionId)}`);
   },
   /** 获取多角色对话历史 */
   getHistory(sessionId, offset = 0, limit = 20, afterMessageId = null) {
@@ -553,11 +553,11 @@ export const multiDialogue = {
       limit: String(limit),
     });
     if (afterMessageId != null) params.set('after_message_id', String(afterMessageId));
-    return request(`/multi-dialogue/history/${sessionId}?${params.toString()}`);
+    return request(`/multi-dialogue/history/${pathSegment(sessionId)}?${params.toString()}`);
   },
   /** 清除逻辑群聊线程的聚合未读通知 */
   markThreadRead(groupThreadId) {
-    return request(`/multi-dialogue/thread/${encodeURIComponent(groupThreadId)}/read`, {
+    return request(`/multi-dialogue/thread/${pathSegment(groupThreadId)}/read`, {
       method: 'POST',
     });
   },
@@ -581,7 +581,7 @@ export const speechApi = {
   getMessageAudio(mode, sessionId, messageId, signal = undefined) {
     const routeMode = mode === 'group' ? 'group' : 'single';
     return requestBlob(
-      `/speech/${routeMode}/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/audio`,
+      `/speech/${routeMode}/sessions/${pathSegment(sessionId)}/messages/${pathSegment(messageId)}/audio`,
       { signal },
     );
   },

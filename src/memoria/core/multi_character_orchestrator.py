@@ -15,7 +15,7 @@ import random
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
 from memoria.core import (
     character_loader,
@@ -55,7 +55,7 @@ class DialogueDecision(BaseModel):
 
     action: Literal["speak", "wait"]
     speaker_id: str | None = None
-    reply_to_message_id: int | None = Field(default=None, ge=1)
+    reply_to_message_id: int | None = None
     reply_to_character_id: str | None = None
     intent: DialogueIntent | None = None
     topic: str | None = None
@@ -63,6 +63,13 @@ class DialogueDecision(BaseModel):
     follow_up_expected: bool = False
     wait_for_player: bool = False
     stop_reason: str | None = None
+
+    @field_validator("reply_to_message_id")
+    @classmethod
+    def validate_reply_to_message_id(cls, value: int | None) -> int | None:
+        if value == 0:
+            raise ValueError("reply_to_message_id must be non-zero")
+        return value
 
 
 # =========================
@@ -584,12 +591,15 @@ class MultiCharacterOrchestrator:
         max_messages = min(3, max(1, int(max_messages or 1)))
         responses: list[dict] = []
         decisions: list[DialogueDecision] = []
+        staged_messages: list[dict] = []
 
         for step in range(max_messages):
             history = repository.get_multi_character_thread_history(
                 self.session_id,
                 limit_messages=30,
             )
+            if not persist_messages and staged_messages:
+                history = [*history, *staged_messages]
             decision = self._decide_dialogue_action(
                 history=history,
                 trigger_source=trigger_source,
@@ -614,6 +624,7 @@ class MultiCharacterOrchestrator:
                 target_message=target,
                 clock_snapshot=clock_snapshot,
                 persist=False,
+                history_override=history,
             )
             if persist_messages:
                 if all(
@@ -638,6 +649,23 @@ class MultiCharacterOrchestrator:
                     and result.get("character_name")
                 ):
                     self._persist_generated_response(result, clock_snapshot)
+            else:
+                temporary_message_id = -(len(staged_messages) + 1)
+                result["message_id"] = temporary_message_id
+                staged_messages.append({
+                    "message_id": temporary_message_id,
+                    "role": "assistant",
+                    "content": result.get("dialogue", ""),
+                    "character_id": result.get("character_id"),
+                    "character_name": result.get("character_name"),
+                    "world_created_at": result.get("world_created_at"),
+                    "knowledge_sources": result.get("knowledge_sources") or [],
+                    "reply_to_message_id": result.get("reply_to_message_id"),
+                    "reply_to_character_id": result.get("reply_to_character_id"),
+                    "intent": result.get("intent"),
+                    "topic": result.get("topic"),
+                    "trigger_source": result.get("trigger_source"),
+                })
             responses.append(result)
             self.last_speaker_id = decision.speaker_id
             if decision.wait_for_player:
@@ -1246,6 +1274,7 @@ class MultiCharacterOrchestrator:
         target_message: dict | None = None,
         clock_snapshot=None,
         persist: bool = True,
+        history_override: list[dict] | None = None,
     ) -> dict:
         """
         生成角色对玩家的回应
@@ -1284,11 +1313,13 @@ class MultiCharacterOrchestrator:
                 "zh-CN",
             ),
         )
-        history = repository.get_multi_character_thread_history(
-            self.session_id,
-            limit_messages=20,
-            created_after=relationship_history_cutoff
-        )
+        history = history_override
+        if history is None:
+            history = repository.get_multi_character_thread_history(
+                self.session_id,
+                limit_messages=20,
+                created_after=relationship_history_cutoff
+            )
         knowledge = retrieve_knowledge(
             owner_user_id=self.player_id,
             character_id=character_id,

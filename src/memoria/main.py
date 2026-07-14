@@ -9,6 +9,7 @@ import asyncio
 import os
 import logging
 import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -53,7 +54,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("memoria")
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.5.0"
 
 # =========================
 # 配置校验
@@ -72,22 +73,31 @@ def _validate_config():
 # 速率限制（认证用户优先，未登录回退 IP）
 # =========================
 _request_counts: dict[str, list[float]] = {}
+_request_counts_lock = threading.Lock()
+_last_rate_limit_cleanup = 0.0
 _RATE_LIMIT_WINDOW = 60.0   # 60 seconds
 _RATE_LIMIT_MAX = 60        # max 60 requests per window
 
 def _check_rate_limit(player_id: str) -> bool:
     """检查指定限流 key 是否允许请求。"""
-    import time
-    now = time.time()
-    if player_id not in _request_counts:
-        _request_counts[player_id] = []
-    timestamps = _request_counts[player_id]
-    # 清理过期记录
-    timestamps[:] = [t for t in timestamps if now - t < _RATE_LIMIT_WINDOW]
-    if len(timestamps) >= _RATE_LIMIT_MAX:
-        return False
-    timestamps.append(now)
-    return True
+    global _last_rate_limit_cleanup
+
+    now = time.monotonic()
+    cutoff = now - _RATE_LIMIT_WINDOW
+    with _request_counts_lock:
+        if now - _last_rate_limit_cleanup >= _RATE_LIMIT_WINDOW:
+            for key, timestamps in list(_request_counts.items()):
+                timestamps[:] = [timestamp for timestamp in timestamps if timestamp > cutoff]
+                if not timestamps:
+                    del _request_counts[key]
+            _last_rate_limit_cleanup = now
+
+        timestamps = _request_counts.setdefault(player_id, [])
+        timestamps[:] = [timestamp for timestamp in timestamps if timestamp > cutoff]
+        if len(timestamps) >= _RATE_LIMIT_MAX:
+            return False
+        timestamps.append(now)
+        return True
 
 
 def _get_rate_limit_key(request: Request) -> str:
@@ -215,10 +225,11 @@ async def ready():
         with get_conn() as conn:
             conn.execute("SELECT 1")
         return {"status": "ready", "database": "ok"}
-    except Exception as e:
+    except Exception:
+        logger.exception("数据库就绪检查失败")
         return JSONResponse(
             status_code=503,
-            content={"status": "not_ready", "database": str(e)}
+            content={"status": "not_ready", "database": "unavailable"}
         )
 
 

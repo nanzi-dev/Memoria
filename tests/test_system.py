@@ -2,7 +2,9 @@
 Phase 5 系统级测试：健康检查、配置校验、速率限制、懒加载
 """
 import asyncio
+import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 import sys
 from pathlib import Path
@@ -44,6 +46,11 @@ class TestHealthEndpoints:
 
         response = asyncio.run(ready())
         assert response.status_code == 503
+        assert json.loads(response.body) == {
+            "status": "not_ready",
+            "database": "unavailable",
+        }
+        assert b"DB down" not in response.body
 
 
 class TestLogLevel:
@@ -152,6 +159,30 @@ class TestRateLimiting:
         for _ in range(60):
             _check_rate_limit(p1)
         assert _check_rate_limit(p2), "Different player should not be limited"
+
+    def test_rate_limit_is_thread_safe(self):
+        from memoria.main import _check_rate_limit
+        import uuid
+
+        pid = f"rl_concurrent_{uuid.uuid4().hex[:6]}"
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            results = list(executor.map(lambda _: _check_rate_limit(pid), range(120)))
+
+        assert sum(results) == 60
+
+    def test_rate_limit_prunes_stale_keys(self, monkeypatch):
+        from memoria import main
+
+        monkeypatch.setattr(main, "_RATE_LIMIT_WINDOW", 10.0)
+        monkeypatch.setattr(main, "_last_rate_limit_cleanup", 0.0)
+        monkeypatch.setattr(main.time, "monotonic", iter([1.0, 12.0]).__next__)
+        with main._request_counts_lock:
+            main._request_counts.clear()
+
+        assert main._check_rate_limit("ip:stale")
+        assert main._check_rate_limit("ip:current")
+        assert "ip:stale" not in main._request_counts
+        assert "ip:current" in main._request_counts
 
     def test_rate_limit_key_prefers_authenticated_user(self, monkeypatch):
         from memoria.main import _get_rate_limit_key

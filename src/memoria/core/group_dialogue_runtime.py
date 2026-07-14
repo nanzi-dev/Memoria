@@ -6,7 +6,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from memoria.core import character_loader, world_clock
+from memoria.core import character_loader, multi_character_memory, world_clock
 from memoria.core.config import configs
 from memoria.core.multi_character_orchestrator import MultiCharacterOrchestrator
 from memoria.db import repository
@@ -193,11 +193,15 @@ def run_group_dialogue_pulse(
             max_messages=max_messages,
             clock_snapshot=snapshot,
             persist_state=False,
-            extract_memory=True,
+            persist_messages=False,
+            extract_memory=False,
         )
         pulse_state = getattr(orchestrator, "last_pulse_state", {})
-        if not repository.complete_group_dialogue_pulse(
+        responses = repository.commit_group_dialogue_pulse(
             group_thread_id,
+            carrier["session_id"],
+            state["player_id"],
+            responses,
             lease_owner=owner,
             real_now_iso=real_now.isoformat(),
             world_now_iso=snapshot.world_now.isoformat(),
@@ -210,18 +214,30 @@ def run_group_dialogue_pulse(
             last_speaker_id=pulse_state.get("last_speaker_id"),
             waiting_for_player=bool(pulse_state.get("waiting_for_player")),
             unresolved_hooks=pulse_state.get("unresolved_hooks") or [],
-        ):
-            raise RuntimeError("群聊脉冲完成前租约已丢失")
-
+            group_name=carrier.get("group_name"),
+        )
         if responses:
-            repository.upsert_group_message_notification(
-                state["player_id"],
-                group_thread_id,
-                carrier["session_id"],
-                len(responses),
-                group_name=carrier.get("group_name"),
-                world_created_at=snapshot.world_now.isoformat(),
-            )
+            try:
+                multi_character_memory.process_dialogue_pulse_memories(
+                    session_id=carrier["session_id"],
+                    recent_messages=[
+                        {
+                            "role": "assistant",
+                            "content": response.get("dialogue", ""),
+                            "character_id": response.get("character_id"),
+                            "character_name": response.get("character_name"),
+                        }
+                        for response in responses
+                    ],
+                    character_ids=character_ids,
+                    player_id=state["player_id"],
+                )
+            except Exception:
+                logger.error(
+                    "自主群聊脉冲记忆提取失败: thread=%s",
+                    group_thread_id,
+                    exc_info=True,
+                )
         return responses
     except Exception:
         repository.release_group_dialogue_state(group_thread_id, lease_owner=owner)

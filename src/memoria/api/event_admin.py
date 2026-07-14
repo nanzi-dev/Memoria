@@ -451,33 +451,26 @@ def _validate_event_configuration(
     return condition, parsed_effects
 
 
-def _register_definition_schedule(
+def _build_definition_schedule_state(
     *,
     event_id: str,
     character_id: str | None,
     player_id: str,
     schedule: str | None,
     is_active: bool = True,
-) -> None:
+) -> dict | None:
     if not schedule:
-        return
+        return None
     if not character_id:
         raise HTTPException(status_code=400, detail="定时事件必须绑定角色")
     _validate_cron(schedule)
-    if not event_runtime.register_time_event_schedule(
+    return event_runtime.build_time_event_schedule_state(
         event_id=event_id,
         character_id=character_id,
         player_id=player_id,
         schedule=schedule,
-    ):
-        raise HTTPException(status_code=500, detail="事件已保存，但调度注册失败")
-    if not is_active:
-        repository.set_event_schedule_status(
-            event_id,
-            character_id,
-            player_id,
-            "paused",
-        )
+        status="active" if is_active else "paused",
+    )
 
 
 # =========================
@@ -642,12 +635,20 @@ def create_event(
         [e.model_dump() for e in req.effects], ensure_ascii=False
     )
 
-    success = repository.save_event_definition(
+    schedule_state = _build_definition_schedule_state(
+        event_id=req.event_id,
+        character_id=character_id,
+        player_id=current_user_id,
+        schedule=schedule,
+        is_active=req.is_active,
+    )
+    success = repository.save_event_definition_with_schedule(
         owner_user_id=current_user_id,
         event_id=req.event_id,
         event_name=req.event_name,
         trigger_config=trigger_json,
         effects_config=effects_json,
+        schedule_state=schedule_state,
         character_id=character_id,
         description=req.description,
         priority=req.priority,
@@ -661,13 +662,6 @@ def create_event(
 
     if not success:
         raise HTTPException(status_code=500, detail="保存事件到数据库失败")
-    _register_definition_schedule(
-        event_id=req.event_id,
-        character_id=character_id,
-        player_id=current_user_id,
-        schedule=schedule,
-        is_active=req.is_active,
-    )
 
     return OperationResponse(
         success=True,
@@ -750,12 +744,20 @@ def update_event(
         if not character_id:
             raise HTTPException(status_code=400, detail="定时事件必须绑定角色")
 
-    success = repository.save_event_definition(
+    schedule_state = _build_definition_schedule_state(
+        event_id=event_id,
+        character_id=character_id,
+        player_id=current_user_id,
+        schedule=schedule,
+        is_active=is_active,
+    )
+    success = repository.save_event_definition_with_schedule(
         owner_user_id=current_user_id,
         event_id=event_id,
         event_name=event_name,
         trigger_config=trigger_json,
         effects_config=effects_json,
+        schedule_state=schedule_state,
         character_id=character_id,
         description=description,
         priority=priority,
@@ -769,23 +771,6 @@ def update_event(
 
     if not success:
         raise HTTPException(status_code=500, detail="更新事件失败")
-    previous_character_id = existing.get("character_id")
-    if not schedule or not character_id:
-        repository.delete_event_schedules(event_id, current_user_id)
-    else:
-        if previous_character_id and previous_character_id != character_id:
-            repository.delete_event_schedules(
-                event_id,
-                current_user_id,
-                previous_character_id,
-            )
-        _register_definition_schedule(
-            event_id=event_id,
-            character_id=character_id,
-            player_id=current_user_id,
-            schedule=schedule,
-            is_active=is_active,
-        )
 
     return OperationResponse(
         success=True,
@@ -839,44 +824,35 @@ def toggle_event(
     if not existing:
         raise HTTPException(status_code=404, detail=f"事件 '{event_id}' 不存在")
 
-    success = repository.save_event_definition(
+    character_id = existing.get("character_id")
+    schedule = existing.get("schedule")
+    schedule_state = _build_definition_schedule_state(
+        event_id=event_id,
+        character_id=character_id,
+        player_id=current_user_id,
+        schedule=schedule,
+        is_active=active,
+    )
+    success = repository.save_event_definition_with_schedule(
         owner_user_id=current_user_id,
         event_id=event_id,
         event_name=existing["event_name"],
         trigger_config=existing["trigger_config"],
         effects_config=existing["effects_config"],
-        character_id=existing.get("character_id"),
+        schedule_state=schedule_state,
+        character_id=character_id,
         description=existing.get("description"),
         priority=existing.get("priority", 0),
         exclusive_group=existing.get("exclusive_group"),
         max_triggers_per_turn=existing.get("max_triggers_per_turn") or 3,
         stop_processing=bool(existing.get("stop_processing", 0)),
         is_active=active,
-        schedule=existing.get("schedule"),
+        schedule=schedule,
         template_id=existing.get("template_id"),
     )
 
     if not success:
         raise HTTPException(status_code=500, detail="切换事件状态失败")
-
-    character_id = existing.get("character_id")
-    schedule = existing.get("schedule")
-    if character_id and schedule:
-        if active:
-            _register_definition_schedule(
-                event_id=event_id,
-                character_id=character_id,
-                player_id=current_user_id,
-                schedule=schedule,
-                is_active=True,
-            )
-        else:
-            repository.set_event_schedule_status(
-                event_id,
-                character_id,
-                current_user_id,
-                "paused",
-            )
 
     status_text = "已启用" if active else "已禁用"
     return OperationResponse(

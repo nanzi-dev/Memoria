@@ -9,6 +9,7 @@ import mimetypes
 import secrets
 import re
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Header, Response, Cookie, Depends, Query
 from pydantic import BaseModel, Field, StrictInt
@@ -130,6 +131,8 @@ def _resize_image(data: bytes, max_dim: int = 512) -> bytes | None:
         import io
         img = Image.open(io.BytesIO(data))
         img.thumbnail((max_dim, max_dim), Image.LANCZOS)
+        if img.mode != "RGB":
+            img = img.convert("RGB")
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=85)
         return buf.getvalue()
@@ -167,7 +170,7 @@ def require_current_user_id(
 class RegisterRequest(BaseModel):
     username: str
     password: str
-    gender: str = "unknown"
+    gender: Literal["male", "female", "unknown"] = "unknown"
 
 class LoginRequest(BaseModel):
     username: str
@@ -175,7 +178,7 @@ class LoginRequest(BaseModel):
 
 class UpdateProfileRequest(BaseModel):
     username: str | None = None
-    gender: str | None = None
+    gender: Literal["male", "female", "unknown"] | None = None
 
 
 class UpdateSpeechSettingsRequest(BaseModel):
@@ -403,8 +406,6 @@ def update_profile(
         existing = repository.get_user_by_username(req.username)
         if existing and existing["user_id"] != uid:
             raise HTTPException(409, "用户名已被占用")
-    if req.gender and req.gender not in ("male", "female", "unknown"):
-        raise HTTPException(400, "性别只能是 male/female/unknown")
     repository.update_user_profile(uid, username=req.username, gender=req.gender)
     user = repository.get_user_by_id(uid)
     return _build_user_response(user)

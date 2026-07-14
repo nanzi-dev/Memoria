@@ -408,6 +408,54 @@ class TestEventDefinition:
         assert repository.delete_event_definition(owner_a, eid)
         assert repository.get_event_definition(owner_b, eid) is not None
 
+    def test_definition_and_schedule_save_rolls_back_together(self):
+        owner = f"user_atomic_{uuid.uuid4().hex[:8]}"
+        event_id = f"ev_atomic_{uuid.uuid4().hex[:8]}"
+        character_id = f"char_atomic_{uuid.uuid4().hex[:8]}"
+        old_next_run = "2026-07-15T09:00:00+00:00"
+
+        assert repository.save_event_definition(
+            owner,
+            event_id,
+            "Old event",
+            "{}",
+            "[]",
+            character_id=character_id,
+            schedule="0 9 * * *",
+        )
+        assert repository.save_event_schedule_state(
+            event_id=event_id,
+            character_id=character_id,
+            player_id=owner,
+            schedule="0 9 * * *",
+            next_run_at=old_next_run,
+            status="active",
+        )
+
+        assert repository.save_event_definition_with_schedule(
+            owner_user_id=owner,
+            event_id=event_id,
+            event_name="New event",
+            trigger_config="{}",
+            effects_config="[]",
+            schedule_state={
+                "event_id": "different-event",
+                "character_id": character_id,
+                "player_id": owner,
+                "schedule": "0 10 * * *",
+                "next_run_at": "2026-07-15T10:00:00+00:00",
+            },
+            character_id=character_id,
+            schedule="0 10 * * *",
+        ) is False
+
+        definition = repository.get_event_definition(owner, event_id)
+        schedule = repository.get_event_schedule(event_id, character_id, owner)
+        assert definition["event_name"] == "Old event"
+        assert definition["schedule"] == "0 9 * * *"
+        assert schedule["schedule"] == "0 9 * * *"
+        assert schedule["next_run_at"] == old_next_run
+
 
 class TestEventDeepIntegrationRepository:
     def test_context_schedule_template_crud(self):
@@ -1085,6 +1133,161 @@ class TestDedup:
         g1 = repository.save_group_memory("dg1","全体集结出发",["x"],0.5)
         g2 = repository.save_group_memory("dg1","全体集结出发了",["x"],0.8)
         assert g2 == g1
+
+
+class TestGroupDialoguePulseCommit:
+    def test_commit_maps_temporary_ids_and_updates_all_state(self):
+        suffix = uuid.uuid4().hex[:8]
+        session_id = f"atomic-group-session-{suffix}"
+        thread_id = f"atomic-group-thread-{suffix}"
+        player_id = f"atomic-group-player-{suffix}"
+        assert repository.create_multi_character_session(
+            session_id,
+            player_id,
+            "Player",
+            ["c1", "c2"],
+            group_name="行动组",
+            group_thread_id=thread_id,
+        )
+        repository.save_group_dialogue_state(thread_id, player_id)
+        assert repository.claim_group_dialogue_state(
+            thread_id,
+            lease_owner="worker-1",
+            lease_expires_at="2026-01-02T12:10:00+00:00",
+            real_now_iso="2026-01-02T12:00:00+00:00",
+        )
+
+        committed = repository.commit_group_dialogue_pulse(
+            thread_id,
+            session_id,
+            player_id,
+            [
+                {
+                    "message_id": -1,
+                    "character_id": "c1",
+                    "character_name": "甲",
+                    "dialogue": "先侦查。",
+                    "current_affinity": 3,
+                    "current_trust": 12,
+                    "current_mood": "警觉",
+                },
+                {
+                    "message_id": -2,
+                    "character_id": "c2",
+                    "character_name": "乙",
+                    "dialogue": "我补充路线。",
+                    "reply_to_message_id": -1,
+                    "reply_to_character_id": "c1",
+                    "current_affinity": 4,
+                    "current_trust": 13,
+                    "current_mood": "专注",
+                },
+            ],
+            lease_owner="worker-1",
+            real_now_iso="2026-01-02T12:00:00+00:00",
+            world_now_iso="2026-01-02T20:00:00+00:00",
+            autonomous_message_count=2,
+            daily_message_date="2026-01-02",
+            current_topic="侦查",
+            topic_source="goal",
+            last_reply_to_message_id=-1,
+            last_reply_to_character_id="c1",
+            last_speaker_id="c2",
+            waiting_for_player=False,
+            unresolved_hooks=[{"message_id": -2, "character_id": "c2"}],
+            group_name="行动组",
+        )
+
+        assert committed[0]["message_id"] > 0
+        assert committed[1]["message_id"] > committed[0]["message_id"]
+        assert committed[1]["reply_to_message_id"] == committed[0]["message_id"]
+        state = repository.get_group_dialogue_state(thread_id)
+        assert state["lease_owner"] is None
+        assert state["last_reply_to_message_id"] == committed[0]["message_id"]
+        assert state["unresolved_hooks"][0]["message_id"] == committed[1]["message_id"]
+        assert state["daily_message_count"] == 2
+        participants = {
+            row["character_id"]: row
+            for row in repository.get_session_participants(session_id, only_active=False)
+        }
+        assert participants["c1"]["message_count"] == 1
+        assert participants["c2"]["message_count"] == 1
+        inbox = repository.list_player_event_inbox(player_id)
+        assert len(inbox) == 1
+        assert inbox[0]["unread_count"] == 2
+
+    def test_notification_failure_rolls_back_entire_pulse(self, monkeypatch):
+        suffix = uuid.uuid4().hex[:8]
+        session_id = f"rollback-group-session-{suffix}"
+        thread_id = f"rollback-group-thread-{suffix}"
+        player_id = f"rollback-group-player-{suffix}"
+        assert repository.create_multi_character_session(
+            session_id,
+            player_id,
+            "Player",
+            ["c1", "c2"],
+            group_thread_id=thread_id,
+        )
+        repository.save_group_dialogue_state(thread_id, player_id)
+        assert repository.claim_group_dialogue_state(
+            thread_id,
+            lease_owner="worker-rollback",
+            lease_expires_at="2026-01-02T12:10:00+00:00",
+            real_now_iso="2026-01-02T12:00:00+00:00",
+        )
+        monkeypatch.setattr(
+            repository,
+            "_upsert_group_message_notification_in_transaction",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("inbox failed")),
+        )
+
+        with pytest.raises(RuntimeError, match="inbox failed"):
+            repository.commit_group_dialogue_pulse(
+                thread_id,
+                session_id,
+                player_id,
+                [{
+                    "message_id": -1,
+                    "character_id": "c1",
+                    "character_name": "甲",
+                    "dialogue": "准备。",
+                    "current_affinity": 9,
+                    "current_trust": 18,
+                    "current_mood": "警觉",
+                }],
+                lease_owner="worker-rollback",
+                real_now_iso="2026-01-02T12:00:00+00:00",
+                world_now_iso="2026-01-02T20:00:00+00:00",
+                autonomous_message_count=1,
+                daily_message_date="2026-01-02",
+                current_topic="准备",
+                topic_source="goal",
+                last_reply_to_message_id=None,
+                last_reply_to_character_id=None,
+                last_speaker_id="c1",
+                waiting_for_player=False,
+                unresolved_hooks=[],
+            )
+
+        assert repository.get_multi_character_history(
+            session_id,
+            limit_messages=None,
+        ) == []
+        state = repository.get_group_dialogue_state(thread_id)
+        assert state["lease_owner"] == "worker-rollback"
+        assert state["daily_message_count"] == 0
+        participants = repository.get_session_participants(session_id, only_active=False)
+        assert all(row["message_count"] == 0 for row in participants)
+        assert repository.list_player_event_inbox(player_id) == []
+        with repository.get_conn() as conn:
+            relationship = conn.execute(
+                """
+                SELECT 1 FROM relationship_state
+                WHERE player_id = ? AND character_id = 'c1'
+                """,
+                (player_id,),
+            ).fetchone()
+        assert relationship is None
 
 
 # ═══════════════════════════════════════════════

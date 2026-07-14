@@ -1,0 +1,128 @@
+[
+  {
+    "character_id_a": "graytide_erin_voss",
+    "character_id_b": "graytide_rowan_cade",
+    "relationship_type": "互相利用的旧识",
+    "affinity": 18,
+    "description": "艾琳需要罗文的走私航线，罗文则欠她一次未被公开的救援。"
+  },
+  {
+    "character_id_a": "graytide_erin_voss",
+    "character_id_b": "graytide_mira_thorne",
+    "relationship_type": "谨慎合作",
+    "affinity": 42,
+    "description": "两人都重视证据，但对是否公开禁档存在分歧。"
+  },
+  {
+    "character_id_a": "graytide_erin_voss",
+    "character_id_b": "graytide_oskar_bell",
+    "relationship_type": "调查者与关键证人",
+    "affinity": 12,
+    "description": "艾琳相信奥斯卡隐瞒了钟塔停摆的真实原因。"
+  },
+  {
+    "character_id_a": "graytide_erin_voss",
+    "character_id_b": "graytide_silas_crowe",
+    "relationship_type": "政治对手",
+    "affinity": -48,
+    "description": "塞拉斯多次以港务安全为由阻止艾琳查阅议会账册。"
+  },
+  {
+    "character_id_a": "graytide_erin_voss",
+    "character_id_b": "graytide_noa_finch",
+    "relationship_type": "保护人与线人",
+    "affinity": 55,
+    "description": "诺娅负责递送匿名电报，艾琳承诺不暴露她的来源。"
+  },
+  {
+    "character_id_a": "graytide_rowan_cade",
+    "character_id_b": "graytide_mira_thorne",
+    "relationship_type": "不情愿的情报交换",
+    "affinity": 8,
+    "description": "罗文提供港外见闻，米拉替他鉴别旧航图真伪。"
+  },
+  {
+    "character_id_a": "graytide_rowan_cade",
+    "character_id_b": "graytide_oskar_bell",
+    "relationship_type": "机械同好",
+    "affinity": 36,
+    "description": "两人曾共同改造飞艇的逆风稳压器。"
+  },
+  {
+    "character_id_a": "graytide_rowan_cade",
+    "character_id_b": "graytide_silas_crowe",
+    "relationship_type": "债务纠葛",
+    "affinity": -35,
+    "description": "塞拉斯掌握罗文一份被涂改的货运许可证。"
+  },
+  {
+    "character_id_a": "graytide_rowan_cade",
+    "character_id_b": "graytide_noa_finch",
+    "relationship_type": "航线搭档",
+    "affinity": 47,
+    "description": "诺娅知道如何在封港时把电报送上罗文的飞艇。"
+  },
+  {
+    "character_id_a": "graytide_mira_thorne",
+    "character_id_b": "graytide_oskar_bell",
+    "relationship_type": "学术争论者",
+    "affinity": 28,
+    "description": "米拉研究钟塔文献，奥斯卡坚持机器的磨损比文献可靠。"
+  },
+  {
+    "character_id_a": "graytide_mira_thorne",
+    "character_id_b": "graytide_evelyn_moor",
+    "relationship_type": "长期盟友",
+    "affinity": 61,
+    "description": "伊芙琳曾帮助米拉安全处理受灰潮污染的档案。"
+  },
+  {
+    "character_id_a": "graytide_mira_thorne",
+    "character_id_b": "graytide_silas_crowe",
+    "relationship_type": "制度内的敌手",
+    "affinity": -57,
+    "description": "塞拉斯要求封存第七码头记录，米拉拒绝执行。"
+  },
+  {
+    "character_id_a": "graytide_mira_thorne",
+    "character_id_b": "graytide_atlas_07",
+    "relationship_type": "保管人与证物",
+    "affinity": 33,
+    "description": "米拉把阿特拉斯视为拥有证词权利的见证者，而非普通器械。"
+  },
+  {
+    "character_id_a": "graytide_oskar_bell",
+    "character_id_b": "graytide_evelyn_moor",
+    "relationship_type": "互相担忧的朋友",
+    "affinity": 52,
+    "description": "伊芙琳监督奥斯卡的以太暴露，奥斯卡替诊所维护净化泵。"
+  },
+  {
+    "character_id_a": "graytide_oskar_bell",
+    "character_id_b": "graytide_atlas_07",
+    "relationship_type": "维修者与失忆自动机",
+    "affinity": 69,
+    "description": "奥斯卡修复了阿特拉斯的发声轮，却没有触碰被人为封死的记忆匣。"
+  },
+  {
+    "character_id_a": "graytide_evelyn_moor",
+    "character_id_b": "graytide_silas_crowe",
+    "relationship_type": "公共卫生冲突",
+    "affinity": -31,
+    "description": "伊芙琳主张公开病例，塞拉斯担心消息引发撤资与封港。"
+  },
+  {
+    "character_id_a": "graytide_evelyn_moor",
+    "character_id_b": "graytide_noa_finch",
+    "relationship_type": "医患与朋友",
+    "affinity": 58,
+    "description": "诺娅长期替诊所送药，也隐瞒自己偶发的银雾咳嗽。"
+  },
+  {
+    "character_id_a": "graytide_noa_finch",
+    "character_id_b": "graytide_atlas_07",
+    "relationship_type": "信号伙伴",
+    "affinity": 44,
+    "description": "诺娅能用电报码与阿特拉斯损坏的听觉继电器交流。"
+  }
+]

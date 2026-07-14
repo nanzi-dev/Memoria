@@ -35,7 +35,7 @@ def test_create_event_rejects_character_not_owned_by_user(monkeypatch):
     )
     monkeypatch.setattr(
         event_admin.repository,
-        "save_event_definition",
+        "save_event_definition_with_schedule",
         lambda **kwargs: pytest.fail("invalid event must not be saved"),
     )
 
@@ -59,7 +59,6 @@ def test_create_event_uses_condition_schedule_when_top_level_is_blank(monkeypatc
     from memoria.api import event_admin
 
     saved = {}
-    registered = {}
     monkeypatch.setattr(event_admin.repository, "get_event_definition", lambda *args: None)
     monkeypatch.setattr(
         event_admin.repository,
@@ -68,13 +67,13 @@ def test_create_event_uses_condition_schedule_when_top_level_is_blank(monkeypatc
     )
     monkeypatch.setattr(
         event_admin.repository,
-        "save_event_definition",
+        "save_event_definition_with_schedule",
         lambda **kwargs: saved.update(kwargs) or True,
     )
     monkeypatch.setattr(
         event_admin.event_runtime,
-        "register_time_event_schedule",
-        lambda **kwargs: registered.update(kwargs) or True,
+        "build_time_event_schedule_state",
+        lambda **kwargs: kwargs,
     )
 
     response = event_admin.create_event(
@@ -93,7 +92,8 @@ def test_create_event_uses_condition_schedule_when_top_level_is_blank(monkeypatc
 
     assert response.success is True
     assert saved["schedule"] == "0 9 * * *"
-    assert registered["schedule"] == "0 9 * * *"
+    assert saved["schedule_state"]["schedule"] == "0 9 * * *"
+    assert saved["schedule_state"]["status"] == "active"
 
 
 def test_update_event_persists_changed_character(monkeypatch):
@@ -114,7 +114,7 @@ def test_update_event_persists_changed_character(monkeypatch):
     )
     monkeypatch.setattr(
         event_admin.repository,
-        "save_event_definition",
+        "save_event_definition_with_schedule",
         lambda **kwargs: saved.update(kwargs) or True,
     )
 
@@ -132,7 +132,6 @@ def test_update_event_uses_condition_schedule_when_top_level_is_blank(monkeypatc
     from memoria.api import event_admin
 
     saved = {}
-    registered = {}
     monkeypatch.setattr(
         event_admin.repository,
         "get_event_definition",
@@ -140,13 +139,13 @@ def test_update_event_uses_condition_schedule_when_top_level_is_blank(monkeypatc
     )
     monkeypatch.setattr(
         event_admin.repository,
-        "save_event_definition",
+        "save_event_definition_with_schedule",
         lambda **kwargs: saved.update(kwargs) or True,
     )
     monkeypatch.setattr(
         event_admin.event_runtime,
-        "register_time_event_schedule",
-        lambda **kwargs: registered.update(kwargs) or True,
+        "build_time_event_schedule_state",
+        lambda **kwargs: kwargs,
     )
 
     response = event_admin.update_event(
@@ -163,7 +162,8 @@ def test_update_event_uses_condition_schedule_when_top_level_is_blank(monkeypatc
 
     assert response.success is True
     assert saved["schedule"] == "30 8 * * 1-5"
-    assert registered["schedule"] == "30 8 * * 1-5"
+    assert saved["schedule_state"]["schedule"] == "30 8 * * 1-5"
+    assert saved["schedule_state"]["status"] == "active"
 
 
 def test_update_event_can_clear_character_for_global_event(monkeypatch):
@@ -177,7 +177,7 @@ def test_update_event_can_clear_character_for_global_event(monkeypatch):
     )
     monkeypatch.setattr(
         event_admin.repository,
-        "save_event_definition",
+        "save_event_definition_with_schedule",
         lambda **kwargs: saved.update(kwargs) or True,
     )
 
@@ -188,6 +188,40 @@ def test_update_event_can_clear_character_for_global_event(monkeypatch):
     )
 
     assert saved["character_id"] is None
+    assert saved["schedule_state"] is None
+
+
+def test_toggle_event_atomically_pauses_definition_and_schedule(monkeypatch):
+    from memoria.api import event_admin
+
+    saved = {}
+    existing = _event_row()
+    existing["schedule"] = "0 9 * * *"
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_event_definition",
+        lambda *args: existing,
+    )
+    monkeypatch.setattr(
+        event_admin.repository,
+        "save_event_definition_with_schedule",
+        lambda **kwargs: saved.update(kwargs) or True,
+    )
+    monkeypatch.setattr(
+        event_admin.event_runtime,
+        "build_time_event_schedule_state",
+        lambda **kwargs: kwargs,
+    )
+
+    response = event_admin.toggle_event(
+        "evt_test",
+        active=False,
+        current_user_id="user-1",
+    )
+
+    assert response.success is True
+    assert saved["is_active"] is False
+    assert saved["schedule_state"]["status"] == "paused"
 
 
 def test_register_event_schedule_rejects_unknown_character(monkeypatch):
@@ -396,7 +430,7 @@ def test_create_event_rejects_invalid_or_unimplemented_configuration(
     monkeypatch.setattr(event_admin.repository, "get_event_definition", lambda *args: None)
     monkeypatch.setattr(
         event_admin.repository,
-        "save_event_definition",
+        "save_event_definition_with_schedule",
         lambda **kwargs: pytest.fail("invalid event must not be saved"),
     )
     request = event_admin.EventCreateRequest(

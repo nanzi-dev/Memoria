@@ -99,6 +99,44 @@ curl -X POST "https://api.deepseek.com/v1/chat/completions" \
 
 ---
 
+### Q: 浏览器登录后仍然显示未登录
+
+仓库内 Web 前端只使用服务端写入的 `memoria-token` HttpOnly Cookie，不从响应 token 构造 Bearer 头，也不把 token 保存到 `localStorage`。排查时确认：
+
+1. 前端请求使用 `credentials: include`，API 与 Web 的域名、端口和反向代理 Cookie 转发配置正确。
+2. 本地 HTTP 开发使用 `AUTH_COOKIE_SECURE=false`；只有 HTTPS 部署才设置为 `true`。
+3. 浏览器未阻止当前站点 Cookie，登录响应中存在 `Set-Cookie`。
+4. 旧版前端保存过的 `localStorage` token 会在启动时清理，不应再依赖该值恢复登录。
+
+脚本或第三方 API 客户端仍可使用 `Authorization: Bearer <token>`、查询参数 token 或 Cookie；Cookie-only 约束只针对仓库内浏览器客户端。
+
+---
+
+### Q: 语音转写或播放返回 503
+
+语音服务与主对话模型使用独立配置。未设置 `SPEECH_API_KEY` 时，STT、TTS 和自定义声音接口会返回未配置错误；`LLM_API_KEY` 不会自动复用。
+
+```bash
+SPEECH_API_KEY=sk-xxx
+SPEECH_BASE_URL=https://api.openai.com/v1
+SPEECH_STT_MODEL=gpt-4o-mini-transcribe
+SPEECH_TTS_MODEL=gpt-4o-mini-tts
+SPEECH_OUTPUT_FORMAT=wav
+SPEECH_STORAGE_PATH=./data/speech
+```
+
+修改配置后重启后端。仍失败时检查：
+
+1. `SPEECH_BASE_URL` 是否提供 OpenAI 兼容的转写和语音合成端点。
+2. 会话必须属于当前登录用户，且请求的 `mode` 必须与单聊或群聊会话类型一致。
+3. STT 文件只支持 MP3、MP4、MPEG、MPGA、M4A、WAV 和 WebM，并受上传大小限制。
+4. TTS 只允许合成 assistant/角色消息；生成文件写入 `SPEECH_STORAGE_PATH/cache`。
+5. Custom Voices 还要求供应商账户支持对应 API；不支持时可继续使用角色卡的内置声音。
+
+当前语言只支持 `zh-CN` 和 `en-US`。STT 语言来自会话 `locale`，恢复会话后不会自动改用浏览器当前语言。
+
+---
+
 ### Q: 角色对话不符合人设
 
 **可能原因：** 角色卡定义不够详细、Prompt 构建有问题、模型能力不足。
@@ -259,7 +297,9 @@ sqlite3 data/sqlite_db/memoria.db \
 
 ### Q: API 返回 429 Too Many Requests
 
-触发了写操作速率限制（60次/60秒）。登录请求优先按认证用户限流，未登录或 token 无效时按客户端 IP 限流；`X-Player-ID` 不会作为可信限流依据。
+触发了写操作速率限制（60 次/60 秒）。登录请求优先按认证用户限流，未登录或 token 无效时按客户端 IP 限流；`X-Player-ID` 不会作为可信限流依据。计数器使用线程锁和单调时钟，并周期清理过期 key。
+
+当前额度只在单个应用进程内共享；多 worker 或多实例部署不会形成全局限额。生产环境需要在反向代理或 Redis 等集中式存储上实现统一限流。
 
 ### Q: 启动时出现配置警告
 

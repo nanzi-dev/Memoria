@@ -13,6 +13,11 @@ pydantic-settings==2.6.1
 
 # LLM 客户端
 openai==1.54.3
+httpx==0.25.2
+
+# HTTP 与图像处理
+requests==2.34.2
+Pillow==12.2.0
 
 # 数据库（默认 SQLite；配置 DATABASE_URL 后使用 PostgreSQL）
 # sqlite3 is built-in
@@ -24,11 +29,13 @@ sentence-transformers==2.3.1
 # NumPy 版本限制 (chromadb 0.4.22 不支持 NumPy 2.0+)
 numpy<2.0,>=1.22.5
 
+# 知识文档解析
+pypdf==5.1.0
+python-docx==1.1.2
 
 # 测试依赖
 pytest==7.4.3
 pytest-asyncio==0.21.1
-httpx==0.25.2
 pytest-cov==4.1.0
 
 # 开发工具（可选）

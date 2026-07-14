@@ -8,6 +8,7 @@ import {
   useState,
 } from 'react';
 import { userApi } from '../api/memoria';
+import { shouldApplyClockRevision } from './worldClockState';
 
 const UserContext = createContext(null);
 const CLOCK_REFRESH_MS = 60_000;
@@ -24,7 +25,6 @@ export function useUser() {
 
 export function UserProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(() => localStorage.getItem('memoria-token'));
   const [loading, setLoading] = useState(true);
   const [worldClock, setWorldClockState] = useState(null);
   const [clockStatus, setClockStatus] = useState({
@@ -41,6 +41,10 @@ export function UserProvider({ children }) {
 
   const applyClock = useCallback((clock, timing = {}) => {
     if (!clock?.world_now) return;
+    if (!shouldApplyClockRevision(
+      clockRevisionRef.current,
+      clock.clock_revision,
+    )) return;
     const worldMilliseconds = Date.parse(clock.world_now);
     if (!Number.isFinite(worldMilliseconds)) return;
 
@@ -178,6 +182,7 @@ export function UserProvider({ children }) {
 
   useEffect(() => {
     let cancelled = false;
+    localStorage.removeItem('memoria-token');
     const requestStart = nowPerformance();
     userApi.getMe()
       .then(async nextUser => {
@@ -187,8 +192,6 @@ export function UserProvider({ children }) {
       })
       .catch(() => {
         if (cancelled) return;
-        localStorage.removeItem('memoria-token');
-        setToken(null);
         setUser(null);
         setWorldClockState(null);
         clockAnchorRef.current = null;
@@ -259,8 +262,6 @@ export function UserProvider({ children }) {
   const login = useCallback(async (username, password) => {
     const requestStart = nowPerformance();
     const response = await userApi.login(username, password);
-    localStorage.setItem('memoria-token', response.token);
-    setToken(response.token);
     setUser(response.user);
     await initializeClock(response.user, { requestStart, requestEnd: nowPerformance() });
     return response.user;
@@ -269,16 +270,13 @@ export function UserProvider({ children }) {
   const register = useCallback(async (username, password, gender) => {
     const requestStart = nowPerformance();
     const response = await userApi.register(username, password, gender);
-    localStorage.setItem('memoria-token', response.token);
-    setToken(response.token);
     setUser(response.user);
     await initializeClock(response.user, { requestStart, requestEnd: nowPerformance() });
     return response.user;
   }, [initializeClock]);
 
   const logout = useCallback(() => {
-    localStorage.removeItem('memoria-token');
-    setToken(null);
+    userApi.logout().catch(() => {});
     setUser(null);
     setWorldClockState(null);
     setClockStatus({ state: 'idle', message: '', lastSyncedAt: null });
@@ -287,7 +285,6 @@ export function UserProvider({ children }) {
     clockRevisionRef.current = null;
     lastClockSyncPerformanceRef.current = null;
     timezoneReportedForRef.current = null;
-    userApi.logout().catch(() => {});
   }, []);
 
   const refresh = useCallback(async () => {
@@ -315,7 +312,6 @@ export function UserProvider({ children }) {
 
   const contextValue = useMemo(() => ({
     user,
-    token,
     loading,
     worldClock,
     clockStatus,
@@ -334,7 +330,6 @@ export function UserProvider({ children }) {
     markEventRead,
   }), [
     user,
-    token,
     loading,
     worldClock,
     clockStatus,

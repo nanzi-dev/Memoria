@@ -107,8 +107,8 @@ def test_ended_thread_creates_carrier_session_and_persists_notification(monkeypa
         "group_name": "行动组",
     }
     created = {}
-    completed = {}
-    notified = {}
+    committed = {}
+    memories = {}
 
     monkeypatch.setattr(group_dialogue_runtime.repository, "get_group_dialogue_state", lambda thread_id: state)
     monkeypatch.setattr(group_dialogue_runtime.repository, "get_latest_group_thread_session", lambda thread_id: latest_session)
@@ -137,22 +137,22 @@ def test_ended_thread_creates_carrier_session_and_persists_notification(monkeypa
     )
     monkeypatch.setattr(
         group_dialogue_runtime.repository,
-        "complete_group_dialogue_pulse",
-        lambda group_thread_id, **kwargs: completed.update(
-            group_thread_id=group_thread_id,
-            **kwargs,
-        ) or True,
-    )
-    monkeypatch.setattr(
-        group_dialogue_runtime.repository,
-        "upsert_group_message_notification",
-        lambda player_id, group_thread_id, session_id, new_message_count, **kwargs: notified.update(
-            player_id=player_id,
+        "commit_group_dialogue_pulse",
+        lambda group_thread_id, session_id, player_id, responses, **kwargs: committed.update(
             group_thread_id=group_thread_id,
             session_id=session_id,
-            new_message_count=new_message_count,
+            player_id=player_id,
+            responses=responses,
             **kwargs,
-        ) or 1,
+        ) or [
+            {**response, "message_id": index + 10}
+            for index, response in enumerate(responses)
+        ],
+    )
+    monkeypatch.setattr(
+        group_dialogue_runtime.multi_character_memory,
+        "process_dialogue_pulse_memories",
+        lambda **kwargs: memories.update(kwargs),
     )
 
     class FakeOrchestrator:
@@ -162,16 +162,17 @@ def test_ended_thread_creates_carrier_session_and_persists_notification(monkeypa
 
         def run_dialogue_pulse(self, **kwargs):
             assert kwargs["max_messages"] == 3
-            assert kwargs["extract_memory"] is True
+            assert kwargs["extract_memory"] is False
             assert kwargs["persist_state"] is False
+            assert kwargs["persist_messages"] is False
             self.last_pulse_state = {
                 "current_topic": "敌军逼近",
                 "last_speaker_id": "c1",
                 "waiting_for_player": True,
             }
             return [
-                {"message_id": 10, "character_id": "c1", "dialogue": "准备迎敌。"},
-                {"message_id": 11, "character_id": "c2", "dialogue": "我守后方。"},
+                {"message_id": -1, "character_id": "c1", "dialogue": "准备迎敌。"},
+                {"message_id": -2, "character_id": "c2", "dialogue": "我守后方。"},
             ]
 
     monkeypatch.setattr(group_dialogue_runtime, "MultiCharacterOrchestrator", FakeOrchestrator)
@@ -188,8 +189,10 @@ def test_ended_thread_creates_carrier_session_and_persists_notification(monkeypa
     assert len(responses) == 2
     assert created["group_thread_id"] == "thread-1"
     assert created["character_ids"] == ["c1", "c2"]
-    assert completed["lease_owner"] == "worker-1"
-    assert completed["autonomous_message_count"] == 0
-    assert completed["waiting_for_player"] is True
-    assert notified["new_message_count"] == 2
-    assert notified["group_thread_id"] == "thread-1"
+    assert committed["lease_owner"] == "worker-1"
+    assert committed["autonomous_message_count"] == 0
+    assert committed["waiting_for_player"] is True
+    assert committed["group_thread_id"] == "thread-1"
+    assert committed["player_id"] == "player-1"
+    assert memories["session_id"] == committed["session_id"]
+    assert memories["character_ids"] == ["c1", "c2"]

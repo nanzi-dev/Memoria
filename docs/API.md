@@ -4,7 +4,7 @@
 
 访问 http://127.0.0.1:8001/docs 可查看 Swagger 交互式文档，http://127.0.0.1:8001/redoc 可查看 ReDoc 文档。
 
-除用户注册/登录外，业务接口通常需要登录态。认证方式支持 `Authorization: Bearer <token>`、`?token=<token>` 或登录后写入的 `memoria-token` HttpOnly Cookie。带 `player_id` 的接口会校验 `player_id` 必须等于当前登录用户 ID。角色卡、事件定义和角色关系都按当前登录用户隔离；不同用户可以拥有相同的 `character_id` / `event_id`。
+除用户注册/登录外，业务接口通常需要登录态。API 客户端可使用 `Authorization: Bearer <token>`、`?token=<token>` 或登录后写入的 `memoria-token` HttpOnly Cookie。仓库内 Web 前端只使用 HttpOnly Cookie，并在启动时清理旧版 `localStorage` token。带 `player_id` 的接口会校验 `player_id` 必须等于当前登录用户 ID。角色卡、事件定义和角色关系都按当前登录用户隔离；不同用户可以拥有相同的 `character_id` / `event_id`。
 
 ---
   - [对话系统 API](#对话系统-api)
@@ -13,6 +13,7 @@
   - [角色关系 API](#角色关系-api)
   - [多角色对话 API](#多角色对话-api)
   - [知识库 API](#知识库-api)
+  - [语音 API](#语音-api)
   - [用户 API](#用户-api)
   - [开发者体验 API](#开发者体验-api)
   - [系统管理 API](#系统管理-api)
@@ -48,11 +49,14 @@ Content-Type: application/json
 {
   "character_id": "npc_luo_xiaohei",
   "player_id": "player_001",
-  "player_name": "旅行者"
+  "player_name": "旅行者",
+  "locale": "zh-CN"
 }
 ```
 
 如果该玩家与角色已有活跃会话，接口会复用原会话并返回 `recovered: true` 与最近消息；否则创建空会话，开场白为空字符串。角色卡被禁用后不能创建新的单聊；已有历史仍可通过历史接口查看，继续发送消息会返回 400。
+
+`locale` 可选，支持 `zh-CN` 和 `en-US`，默认 `zh-CN`。语言会持久化到会话，并控制角色卡 i18n 合并、Prompt 输出语言和 STT 转写语言。
 
 **响应示例：**
 ```json
@@ -414,6 +418,8 @@ Content-Type: application/json
 
 本节接口均需要登录态。事件定义只属于当前登录用户；创建、更新和注册调度时，非空 `character_id` 必须指向当前用户拥有的角色卡，禁用角色仍可用于维护已有事件。`character_id: null` 或空字符串表示当前用户下的全局事件。
 
+创建、更新和启用/禁用接口会在同一个数据库事务内保存事件定义及其调度状态；任一步失败都不会留下半保存数据。对话或上下文检测中的 once/cooldown 事件使用数据库 claim 保护，并发请求至多一个成功提交记忆、解锁、通知和触发日志。
+
 ---
 
 ### 1. 获取事件列表
@@ -564,6 +570,8 @@ Content-Type: application/json
 
 更新请求可包含 `character_id`，其含义和所有权校验与创建事件一致；传 `null` 可把角色专属事件改为全局事件。
 
+更新 `character_id` 或 `schedule` 时，旧调度会与新定义一起原子替换；清空调度会在同一事务中删除旧调度。
+
 **响应示例：**
 ```json
 {
@@ -602,6 +610,8 @@ Content-Type: application/json
 ```
 **查询参数：**
 - `active` : 是否启用
+
+存在 cron 调度时，启用状态与调度的 `active` / `paused` 状态原子切换。
 
 **响应示例：**
 ```json
@@ -811,7 +821,7 @@ Content-Type: application/json
 POST /api/v1/admin/events/schedules/run-due?limit=50
 ```
 
-用于后台任务或调试入口。会检查已注册且到期的调度事件，执行事件效果和事件链，并更新下一次执行时间。
+用于后台任务或调试入口。会检查已注册且到期的调度事件，执行事件效果和事件链，并更新下一次执行时间。若事件链规划失败，本次 cron 不会推进；接口记录失败信息并保留当前到期时间，修复事件配置后可再次执行。
 
 **响应示例：**
 ```json
@@ -859,6 +869,27 @@ GET /api/v1/admin/event-context?character_id=&player_id=&status=&limit=100
   }
 ]
 ```
+
+---
+
+### 14. 查询与控制事件调度
+
+```http
+GET  /api/v1/admin/event-schedules?event_id=&status=&limit=200
+POST /api/v1/admin/event-schedules/{event_id}/{character_id}/pause
+POST /api/v1/admin/event-schedules/{event_id}/{character_id}/resume
+```
+
+`status` 只支持 `active` 或 `paused`，`limit` 最大按 1000 处理。暂停会清除当前租约；恢复会按玩家世界时钟和 cron 表达式重新计算 `next_run_at`。
+
+### 15. 查询事件执行指标与历史
+
+```http
+GET /api/v1/admin/event-metrics?event_id=
+GET /api/v1/admin/events/{event_id}/executions?limit=100
+```
+
+指标接口可按事件过滤，返回执行总数、成功/失败/跳过数量、去重数量和耗时统计。执行历史包含 `execution_id`、幂等键、触发来源、状态、效果、结果、错误、耗时和完成时间。
 
 ---
 
@@ -973,6 +1004,8 @@ Content-Type: application/json
 
 编排器还会根据关系图谱最近修订时间过滤旧上下文：长期记忆、共享记忆和群体记忆只剔除修订前的关系相关事实，非关系事实继续保留；跨 session 原始群聊历史按修订时间截止，不能推翻当前图谱。同一会话中如果已经产生了与当前图谱冲突的关系发言，例如图谱已改为某个自定义关系但历史回复仍说师徒，该发言会在送入 LLM 前跳过，避免错误历史继续强化。
 
+自主或事件驱动的群聊脉冲会原子提交本次全部角色消息、关系与参与者状态、脉冲完成状态和未读通知；失败时整体不可见。长期记忆提取在提交后以 best effort 执行，不影响已提交消息与通知的一致性。
+
 ### 1. 开始多角色会话
 ```http
 POST /api/v1/multi-dialogue/session/start
@@ -982,7 +1015,8 @@ Content-Type: application/json
   "player_id": "player_001",
   "player_name": "旅行者",
   "group_name": "森林小队",
-  "character_ids": ["npc_luo_xiaohei", "npc_wuxian"]
+  "character_ids": ["npc_luo_xiaohei", "npc_wuxian"],
+  "locale": "zh-CN"
 }
 ```
 
@@ -991,6 +1025,7 @@ Content-Type: application/json
 - `player_name`: 玩家显示名称
 - `group_name` (可选): 群聊名称，会写入会话列表
 - `character_ids`: 参与角色 ID 列表（2-5 个且不得重复）；不存在、属于其他用户或已禁用的角色都会被拒绝
+- `locale` (可选): `zh-CN` 或 `en-US`，默认 `zh-CN`；持久化后控制整个群聊线程的输出和语音语言
 
 **响应示例：**
 ```json
@@ -1346,9 +1381,55 @@ Content-Type: application/json
 
 ---
 
+## 语音 API
+
+本节接口均需要登录态。STT/TTS 使用独立的 `SPEECH_*` 配置；未设置 `SPEECH_API_KEY` 时返回 503。会话必须属于当前用户，且 `mode` 必须与单聊/群聊类型一致。
+
+### 1. 语音转写
+
+```http
+POST /api/v1/speech/transcriptions
+Content-Type: multipart/form-data
+
+session_id=<session-id>
+mode=single
+file=@recording.webm
+```
+
+`mode` 支持 `single` / `group`。支持 MP3、MP4、MPEG、MPGA、M4A、WAV 和 WebM，转写语言取自会话 `locale`。
+
+```json
+{
+  "text": "转写后的文本",
+  "locale": "zh-CN"
+}
+```
+
+### 2. 获取消息语音
+
+```http
+GET /api/v1/speech/single/sessions/{session_id}/messages/{message_id}/audio
+GET /api/v1/speech/group/sessions/{session_id}/messages/{message_id}/audio
+```
+
+仅 assistant/角色消息可合成。响应是配置格式的音频文件，默认 WAV，并包含私有缓存、ETag、`X-Speech-Cache` 和 `X-AI-Generated-Audio` 响应头；生成文件缓存到 `SPEECH_STORAGE_PATH`。
+
+### 3. 角色声音
+
+```http
+GET    /api/v1/admin/characters/{character_id}/voice
+POST   /api/v1/admin/characters/{character_id}/voice/consent
+POST   /api/v1/admin/characters/{character_id}/voice
+DELETE /api/v1/admin/characters/{character_id}/voice
+```
+
+授权接口使用 multipart 字段 `locale`、`recording` 和可选 `name`；创建接口使用 `audio_sample` 和可选 `name`。自定义声音只对当前用户拥有的角色生效；供应商账户不支持 Custom Voices 时，角色仍可使用角色卡中的内置声音。
+
+---
+
 ## 用户 API
 
-用户接口用于 Web 前端登录态、玩家资料和头像管理。登录成功后服务端会同时返回 token 并写入 `memoria-token` HttpOnly Cookie；后续接口支持三种认证方式：`Authorization: Bearer <token>`、`?token=<token>` 或 Cookie。
+用户接口用于 Web 前端登录态、玩家资料、语音偏好和头像管理。登录成功后服务端会同时返回 token 并写入 `memoria-token` HttpOnly Cookie；通用 API 客户端支持 Bearer、查询参数或 Cookie，仓库内 Web 前端只使用 Cookie。
 
 ### 1. 注册
 ```http
@@ -1440,33 +1521,51 @@ Content-Type: application/json
 
 传空字符串会清除头像。
 
-### 8. 获取或更新世界时钟
+### 8. 更新语音偏好
+
+```http
+PUT /api/v1/user/speech-settings
+Content-Type: application/json
+
+{
+  "tts_auto_play": true,
+  "stt_auto_send": false
+}
+```
+
+响应为更新后的用户资料。`tts_auto_play` 控制角色消息自动播放，`stt_auto_send` 控制录音转写后是否自动发送。
+
+### 9. 获取或更新世界时钟
 
 ```http
 GET /api/v1/user/world-clock
 PUT /api/v1/user/world-clock
 ```
 
-更新请求中的字段均可选；`timezone` 必须是有效 IANA 时区，`time_scale` 只允许 `0`、`1`、`2`、`5`、`10`，其中 `0` 表示暂停。
+更新请求必须带当前 `expected_revision`，其余字段可选；`timezone` 必须是有效 IANA 时区，`timezone_mode` 支持 `fixed` / `device`，`time_scale` 只允许 `0`、`1`、`2`、`5`、`10`，其中 `0` 表示暂停。修订号不匹配时返回 409，避免多个页面覆盖彼此的时钟修改。
 
 ```json
 {
+  "expected_revision": 3,
   "timezone": "Asia/Shanghai",
+  "timezone_mode": "device",
   "time_scale": 2
 }
 ```
 
-响应包含 `world_now`、`real_now`、`timezone`、`time_scale` 和 `paused`。
+响应包含 `world_now`、`real_now`、`timezone`、`timezone_mode`、`time_scale`、`paused`、`clock_revision`、`real_offset_seconds` 和最近待执行事件 `next_event`。Web 客户端只接受不低于当前本地 `clock_revision` 的响应，因此较旧的 GET 即使晚于更新请求返回，也不会覆盖新的时钟状态。
 
-### 9. 将世界时间同步到真实时间
+### 10. 修改世界时间
 
 ```http
 POST /api/v1/user/world-clock/sync
+POST /api/v1/user/world-clock/set
+POST /api/v1/user/world-clock/advance
 ```
 
-保留当前时区和倍率，把世界时间锚点重置为当前真实 UTC 时间。
+三个接口都必须提交 `expected_revision`。`sync` 保留当前时区和倍率，把世界时间锚点重置为当前真实 UTC 时间；`set` 额外提交 ISO 8601 `world_now`；`advance` 提交正整数 `seconds`，上限为 366 天。
 
-### 10. 查询事件收件箱
+### 11. 查询事件收件箱
 
 ```http
 GET /api/v1/user/event-inbox?unread_only=true&limit=50
@@ -1474,7 +1573,7 @@ GET /api/v1/user/event-inbox?unread_only=true&limit=50
 
 `limit` 范围为 1-100。通知包含来源事件/角色/会话、内容、世界创建时间、真实创建时间和 `read_at`。
 
-### 11. 标记事件通知已读
+### 12. 标记事件通知已读
 
 ```http
 POST /api/v1/user/event-inbox/{inbox_id}/read
@@ -1544,7 +1643,7 @@ GET /health
 ```json
 {
   "status": "ok",
-  "version": "0.4.0"
+  "version": "0.5.0"
 }
 ```
 
@@ -1570,9 +1669,11 @@ GET /ready
 ```json
 {
   "status": "not_ready",
-  "database": "down"
+  "database": "unavailable"
 }
 ```
+
+具体数据库异常只写入服务端日志，不返回给客户端。
 
 ---
 
@@ -1602,7 +1703,7 @@ Authorization: Bearer token-value
 
 ### 4. 速率限制（Rate Limiting）
 
-所有 `/api/*` 写操作（非 GET/HEAD/OPTIONS）均受速率限制保护。服务端优先使用认证 token 解析出的用户 ID 作为限流 key，未登录或 token 无效时退回客户端 IP；不会信任客户端传入的 `X-Player-ID`。
+所有 `/api/*` 写操作（非 GET/HEAD/OPTIONS）均受速率限制保护。服务端优先使用认证 token 解析出的用户 ID 作为限流 key，未登录或 token 无效时退回客户端 IP；不会信任客户端传入的 `X-Player-ID`。计数器使用单调时钟和线程锁，并周期清理过期 key。
 
 | 项目       | 值                    |
 |------------|-----------------------|
@@ -1611,6 +1712,8 @@ Authorization: Bearer token-value
 | 识别方式   | 登录用户 ID           |
 | 兜底策略   | 未登录则使用客户端 IP |
 | 超限响应码 | HTTP 429             |
+
+当前限流器保存在单个应用进程内；多 worker 或多实例部署不会共享额度，生产环境需要外部集中式限流器才能获得全局配额。
 
 **超限响应示例：**
 ```json

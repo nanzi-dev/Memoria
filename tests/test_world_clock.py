@@ -1035,6 +1035,129 @@ def test_unimplemented_scheduled_effect_rolls_back_all_side_effects():
     ) == []
 
 
+def test_scheduled_planning_failure_keeps_cron_due_for_retry(monkeypatch):
+    player_id = _create_user("schedule_retry")
+    character_id = "npc_luo_xiaohei"
+    event_id = f"schedule_retry_{uuid.uuid4().hex[:8]}"
+    real_now = datetime(2026, 7, 14, 12, 0, tzinfo=UTC)
+    scheduled_for = real_now.isoformat()
+    schedule = "0 * * * *"
+    condition = TriggerCondition(
+        trigger_type=TriggerType.TIME_BASED,
+        schedule=schedule,
+    )
+    invalid_effect = EventEffect(
+        effect_type=EffectType.MODIFY_RELATIONSHIP,
+        target_character_id="npc_wuxian",
+        relationship_change={"affinity": 1},
+    )
+    assert repository.save_event_definition(
+        owner_user_id=player_id,
+        event_id=event_id,
+        event_name="可重试定时事件",
+        trigger_config=condition.model_dump_json(),
+        effects_config=json.dumps([invalid_effect.model_dump(mode="json")]),
+        character_id=character_id,
+        schedule=schedule,
+    )
+    repository.save_runtime_state(character_id, player_id, 10, 20, "neutral")
+    assert repository.save_event_schedule_state(
+        event_id,
+        character_id,
+        player_id,
+        schedule,
+        next_run_at=scheduled_for,
+        next_due_real_at=scheduled_for,
+    )
+    snapshot = world_clock.WorldClockSnapshot(
+        player_id=player_id,
+        timezone="UTC",
+        time_scale=1,
+        real_now=real_now,
+        world_now=real_now,
+    )
+    monkeypatch.setattr(
+        event_runtime.world_clock,
+        "get_clock_snapshot",
+        lambda *args, **kwargs: snapshot,
+    )
+    monkeypatch.setattr(
+        event_runtime,
+        "reconcile_event_schedule_due_times",
+        lambda **kwargs: 0,
+    )
+    monkeypatch.setattr(
+        event_runtime,
+        "_load_scheduled_event_context",
+        lambda event, schedule_state, world_now: EventContext(
+            character_id=character_id,
+            player_id=player_id,
+            session_id=f"schedule:{event_id}",
+            current_affinity=10,
+            current_trust=20,
+            current_mood="neutral",
+            player_message="",
+            dialogue_count=0,
+            total_dialogue_count=0,
+            session_duration_minutes=0,
+            world_time=world_now.isoformat(),
+            trigger_source="schedule",
+        ),
+    )
+
+    assert event_runtime.run_due_time_events(now=real_now, player_id=player_id) == []
+
+    execution_key = (
+        f"schedule:{event_id}:{character_id}:{player_id}:{scheduled_for}"
+    )
+    failed_schedule = repository.get_event_schedule(
+        event_id,
+        character_id,
+        player_id,
+    )
+    assert failed_schedule["next_run_at"] == scheduled_for
+    assert failed_schedule["next_due_real_at"] == scheduled_for
+    assert failed_schedule["lease_owner"] is None
+    assert "modify_relationship" in failed_schedule["last_error"]
+    assert failed_schedule["last_failed_at"] == scheduled_for
+    assert repository.get_event_execution_batch(player_id, execution_key) is None
+    assert repository.list_event_execution_history(
+        player_id,
+        event_id=event_id,
+    ) == []
+    assert repository.list_player_event_inbox(player_id) == []
+
+    repaired_effect = EventEffect(
+        effect_type=EffectType.NOTIFY_PLAYER,
+        notification_message="修复后成功",
+    )
+    assert repository.save_event_definition(
+        owner_user_id=player_id,
+        event_id=event_id,
+        event_name="可重试定时事件",
+        trigger_config=condition.model_dump_json(),
+        effects_config=json.dumps([repaired_effect.model_dump(mode="json")]),
+        character_id=character_id,
+        schedule=schedule,
+    )
+
+    retried = event_runtime.run_due_time_events(now=real_now, player_id=player_id)
+
+    assert [result.status for result in retried] == ["succeeded"]
+    completed_schedule = repository.get_event_schedule(
+        event_id,
+        character_id,
+        player_id,
+    )
+    assert completed_schedule["next_run_at"] == (
+        real_now + timedelta(hours=1)
+    ).isoformat()
+    assert completed_schedule["last_error"] is None
+    assert completed_schedule["last_failed_at"] is None
+    assert repository.get_event_execution_batch(player_id, execution_key) is not None
+    assert len(repository.list_player_event_inbox(player_id)) == 1
+
+
 def test_single_and_group_prompts_share_world_context():
     from memoria.core import character_loader
 

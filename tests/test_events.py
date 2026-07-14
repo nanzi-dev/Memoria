@@ -2,7 +2,9 @@
 事件执行器与检测器深入测试
 """
 import pytest, sys, json, uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from unittest.mock import Mock, patch, MagicMock
@@ -531,6 +533,103 @@ class TestEventReliability:
         metrics = repository.get_event_execution_metrics(player_id, event_id)
         assert metrics["succeeded_count"] == 1
         assert metrics["deduplicated_count"] == 1
+
+    @pytest.mark.parametrize("cooldown_hours", [0, 2])
+    def test_concurrent_once_or_cooldown_event_commits_side_effects_once(
+        self,
+        monkeypatch,
+        cooldown_hours,
+    ):
+        from memoria.core import event_runtime
+        from memoria.core.event_schema import (
+            EffectType,
+            EventDefinition,
+            EventEffect,
+            TriggerCondition,
+            TriggerType,
+        )
+        from memoria.db import repository
+
+        suffix = uuid.uuid4().hex[:8]
+        player_id = f"guard_player_{suffix}"
+        character_id = f"guard_character_{suffix}"
+        event_id = f"guard_event_{suffix}"
+        memory_text = f"并发唯一记忆 {suffix}"
+        unlock_key = f"guard_unlock_{suffix}"
+        event = EventDefinition(
+            event_id=event_id,
+            event_name="并发触发保护",
+            trigger_condition=TriggerCondition(
+                trigger_type=TriggerType.KEYWORD_MATCH,
+                keywords=["可靠性"],
+                cooldown_hours=cooldown_hours,
+            ),
+            effects=[
+                EventEffect(
+                    effect_type=EffectType.ADD_MEMORY,
+                    memory_text=memory_text,
+                ),
+                EventEffect(
+                    effect_type=EffectType.UNLOCK_CONTENT,
+                    unlock_keys=[unlock_key],
+                ),
+                EventEffect(
+                    effect_type=EffectType.NOTIFY_PLAYER,
+                    notification_message=f"并发唯一通知 {suffix}",
+                ),
+            ],
+        )
+        assert repository.save_event_definition(
+            owner_user_id=player_id,
+            event_id=event_id,
+            event_name=event.event_name,
+            trigger_config=event.trigger_condition.model_dump_json(),
+            effects_config=json.dumps(
+                [effect.model_dump(mode="json") for effect in event.effects],
+                ensure_ascii=False,
+            ),
+        )
+
+        claim_barrier = Barrier(2)
+        original_claim = repository.claim_event_trigger_guard
+
+        def synchronized_claim(**kwargs):
+            claim_barrier.wait(timeout=5)
+            return original_claim(**kwargs)
+
+        monkeypatch.setattr(
+            event_runtime.repository,
+            "claim_event_trigger_guard",
+            synchronized_claim,
+        )
+
+        def run(execution_key):
+            context = self._context(
+                execution_key=execution_key,
+                character_id=character_id,
+                player_id=player_id,
+            )
+            return event_runtime.detect_and_execute_events(context, [event])[0]
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(run, f"guard:{suffix}:{index}")
+                for index in range(2)
+            ]
+            results = [future.result(timeout=10) for future in futures]
+
+        assert sorted(result.status for result in results) == ["skipped", "succeeded"]
+        assert repository.get_long_term_facts(character_id, player_id, 10).count(
+            memory_text
+        ) == 1
+        assert repository.list_event_unlocks(player_id, character_id) == [unlock_key]
+        assert len(repository.list_player_event_inbox(player_id)) == 1
+        assert len(
+            repository.get_event_trigger_history(
+                event_id=event_id,
+                player_id=player_id,
+            )
+        ) == 1
 
     def test_failed_effect_rolls_back_every_planned_side_effect(self):
         from memoria.core import event_runtime

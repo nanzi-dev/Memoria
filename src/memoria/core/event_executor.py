@@ -143,6 +143,8 @@ class EventExecutor:
         operations: dict[str, Any],
         *,
         context_state: dict[str, Any] | None = None,
+        trigger_claim_token: str | None = None,
+        trigger_character_scope: str | None = None,
     ) -> dict[str, Any]:
         return {
             "execution_id": result.execution_id,
@@ -160,6 +162,8 @@ class EventExecutor:
             "context_snapshot": context.model_dump_json(),
             "effects_applied": json.dumps(result.effects_applied, ensure_ascii=False),
             "context_state": context_state,
+            "trigger_claim_token": trigger_claim_token,
+            "trigger_character_scope": trigger_character_scope,
             **operations,
         }
 

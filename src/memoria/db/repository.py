@@ -9,7 +9,7 @@
 """
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 import sqlite3
@@ -367,6 +367,18 @@ CREATE TABLE IF NOT EXISTS event_trigger_log (
     status          TEXT DEFAULT 'succeeded',
     
     FOREIGN KEY (player_id, event_id) REFERENCES event_definition(owner_user_id, event_id)
+);
+
+CREATE TABLE IF NOT EXISTS event_trigger_guard (
+    player_id       TEXT NOT NULL,
+    event_id        TEXT NOT NULL,
+    character_scope TEXT NOT NULL,
+    last_triggered_at TEXT,
+    claim_token     TEXT,
+    claim_expires_at TEXT,
+    updated_at      TEXT NOT NULL,
+
+    PRIMARY KEY (player_id, event_id, character_scope)
 );
 
 -- =========================
@@ -933,6 +945,17 @@ def _migrate(conn):
             created_at      TEXT NOT NULL,
             completed_at    TEXT,
             PRIMARY KEY (player_id, execution_key)
+        );
+
+        CREATE TABLE IF NOT EXISTS event_trigger_guard (
+            player_id       TEXT NOT NULL,
+            event_id        TEXT NOT NULL,
+            character_scope TEXT NOT NULL,
+            last_triggered_at TEXT,
+            claim_token     TEXT,
+            claim_expires_at TEXT,
+            updated_at      TEXT NOT NULL,
+            PRIMARY KEY (player_id, event_id, character_scope)
         );
 
         CREATE TABLE IF NOT EXISTS event_execution (
@@ -2891,6 +2914,69 @@ def activate_character_card(owner_user_id: str, character_id: str) -> bool:
 # =========================
 # 事件系统 - 事件定义
 # =========================
+def _save_event_definition_in_transaction(
+    conn,
+    *,
+    owner_user_id: str,
+    event_id: str,
+    event_name: str,
+    trigger_config: str,
+    effects_config: str,
+    character_id: str = None,
+    description: str = None,
+    priority: int = 0,
+    exclusive_group: str = None,
+    max_triggers_per_turn: int = 3,
+    stop_processing: bool = False,
+    is_active: bool = True,
+    schedule: str = None,
+    template_id: str = None,
+) -> None:
+    now = _now()
+    conn.execute(
+        """
+        INSERT INTO event_definition
+        (owner_user_id, event_id, event_name, description, character_id, trigger_config,
+         effects_config, priority, exclusive_group, max_triggers_per_turn,
+         stop_processing, is_active, created_at, updated_at, schedule, template_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(owner_user_id, event_id)
+        DO UPDATE SET
+            event_name=excluded.event_name,
+            description=excluded.description,
+            character_id=excluded.character_id,
+            trigger_config=excluded.trigger_config,
+            effects_config=excluded.effects_config,
+            priority=excluded.priority,
+            exclusive_group=excluded.exclusive_group,
+            max_triggers_per_turn=excluded.max_triggers_per_turn,
+            stop_processing=excluded.stop_processing,
+            is_active=excluded.is_active,
+            updated_at=excluded.updated_at,
+            schedule=excluded.schedule,
+            template_id=excluded.template_id
+        """,
+        (
+            owner_user_id,
+            event_id,
+            event_name,
+            description,
+            character_id,
+            trigger_config,
+            effects_config,
+            priority,
+            exclusive_group,
+            max_triggers_per_turn,
+            1 if stop_processing else 0,
+            1 if is_active else 0,
+            now,
+            now,
+            schedule,
+            template_id,
+        ),
+    )
+
+
 def save_event_definition(
     owner_user_id: str,
     event_id: str,
@@ -2910,32 +2996,22 @@ def save_event_definition(
     """保存事件定义"""
     try:
         with get_conn() as conn:
-            conn.execute(
-                """
-                INSERT INTO event_definition
-                (owner_user_id, event_id, event_name, description, character_id, trigger_config,
-                 effects_config, priority, exclusive_group, max_triggers_per_turn,
-                 stop_processing, is_active, created_at, updated_at, schedule, template_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(owner_user_id, event_id)
-                DO UPDATE SET
-                    event_name=excluded.event_name,
-                    description=excluded.description,
-                    character_id=excluded.character_id,
-                    trigger_config=excluded.trigger_config,
-                    effects_config=excluded.effects_config,
-                    priority=excluded.priority,
-                    exclusive_group=excluded.exclusive_group,
-                    max_triggers_per_turn=excluded.max_triggers_per_turn,
-                    stop_processing=excluded.stop_processing,
-                    is_active=excluded.is_active,
-                    updated_at=excluded.updated_at,
-                    schedule=excluded.schedule,
-                    template_id=excluded.template_id
-                """,
-                (owner_user_id, event_id, event_name, description, character_id, trigger_config,
-                 effects_config, priority, exclusive_group, max_triggers_per_turn,
-                 1 if stop_processing else 0, 1 if is_active else 0, _now(), _now(), schedule, template_id),
+            _save_event_definition_in_transaction(
+                conn,
+                owner_user_id=owner_user_id,
+                event_id=event_id,
+                event_name=event_name,
+                trigger_config=trigger_config,
+                effects_config=effects_config,
+                character_id=character_id,
+                description=description,
+                priority=priority,
+                exclusive_group=exclusive_group,
+                max_triggers_per_turn=max_triggers_per_turn,
+                stop_processing=stop_processing,
+                is_active=is_active,
+                schedule=schedule,
+                template_id=template_id,
             )
         return True
     except Exception as e:
@@ -2988,6 +3064,10 @@ def delete_event_definition(owner_user_id: str, event_id: str) -> bool:
             )
             conn.execute(
                 "DELETE FROM event_trigger_log WHERE player_id = ? AND event_id = ?",
+                (owner_user_id, event_id),
+            )
+            conn.execute(
+                "DELETE FROM event_trigger_guard WHERE player_id = ? AND event_id = ?",
                 (owner_user_id, event_id),
             )
             deleted = conn.execute(
@@ -3093,6 +3173,144 @@ def get_last_trigger_time(event_id: str, character_id: str | None, player_id: st
             ).fetchone()
 
     return row["triggered_at"] if row else None
+
+
+def claim_event_trigger_guard(
+    *,
+    player_id: str,
+    event_id: str,
+    character_scope: str,
+    cooldown_hours: int,
+    claim_token: str,
+    claimed_at: str,
+    claim_expires_at: str,
+) -> bool:
+    """领取 once/cooldown 事件的持久化触发权。"""
+    scope = character_scope or ""
+    with get_conn() as conn:
+        if scope:
+            legacy = conn.execute(
+                """
+                SELECT triggered_at FROM event_trigger_log
+                WHERE player_id = ? AND event_id = ? AND character_id = ?
+                  AND status = 'succeeded'
+                ORDER BY triggered_at DESC
+                LIMIT 1
+                """,
+                (player_id, event_id, scope),
+            ).fetchone()
+        else:
+            legacy = conn.execute(
+                """
+                SELECT triggered_at FROM event_trigger_log
+                WHERE player_id = ? AND event_id = ? AND status = 'succeeded'
+                ORDER BY triggered_at DESC
+                LIMIT 1
+                """,
+                (player_id, event_id),
+            ).fetchone()
+        legacy_last_triggered_at = legacy["triggered_at"] if legacy else None
+        conn.execute(
+            """
+            INSERT INTO event_trigger_guard
+            (player_id, event_id, character_scope, last_triggered_at,
+             claim_token, claim_expires_at, updated_at)
+            VALUES (?, ?, ?, ?, NULL, NULL, ?)
+            ON CONFLICT(player_id, event_id, character_scope) DO NOTHING
+            """,
+            (
+                player_id,
+                event_id,
+                scope,
+                legacy_last_triggered_at,
+                claimed_at,
+            ),
+        )
+        lock_suffix = " FOR UPDATE" if _is_postgres_enabled() else ""
+        row = conn.execute(
+            """
+            SELECT last_triggered_at, claim_token, claim_expires_at
+            FROM event_trigger_guard
+            WHERE player_id = ? AND event_id = ? AND character_scope = ?
+            """ + lock_suffix,
+            (player_id, event_id, scope),
+        ).fetchone()
+        last_triggered_at = row["last_triggered_at"] or legacy_last_triggered_at
+        if not row["last_triggered_at"] and legacy_last_triggered_at:
+            conn.execute(
+                """
+                UPDATE event_trigger_guard
+                SET last_triggered_at = ?, updated_at = ?
+                WHERE player_id = ? AND event_id = ? AND character_scope = ?
+                """,
+                (
+                    legacy_last_triggered_at,
+                    claimed_at,
+                    player_id,
+                    event_id,
+                    scope,
+                ),
+            )
+
+        claimed_time = datetime.fromisoformat(claimed_at.replace("Z", "+00:00"))
+        if claimed_time.tzinfo is None:
+            claimed_time = claimed_time.replace(tzinfo=timezone.utc)
+        if last_triggered_at:
+            last_time = datetime.fromisoformat(
+                last_triggered_at.replace("Z", "+00:00")
+            )
+            if last_time.tzinfo is None:
+                last_time = last_time.replace(tzinfo=timezone.utc)
+            if cooldown_hours == 0:
+                return False
+            if claimed_time - last_time < timedelta(hours=cooldown_hours):
+                return False
+
+        existing_claim = row["claim_token"]
+        existing_expiry = row["claim_expires_at"]
+        if existing_claim and existing_claim != claim_token and existing_expiry:
+            expires_at = datetime.fromisoformat(existing_expiry.replace("Z", "+00:00"))
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at > claimed_time:
+                return False
+
+        cursor = conn.execute(
+            """
+            UPDATE event_trigger_guard
+            SET claim_token = ?, claim_expires_at = ?, updated_at = ?
+            WHERE player_id = ? AND event_id = ? AND character_scope = ?
+            """,
+            (
+                claim_token,
+                claim_expires_at,
+                claimed_at,
+                player_id,
+                event_id,
+                scope,
+            ),
+        )
+        return cursor.rowcount == 1
+
+
+def release_event_trigger_guard(
+    *,
+    player_id: str,
+    event_id: str,
+    character_scope: str,
+    claim_token: str,
+) -> bool:
+    with get_conn() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE event_trigger_guard
+            SET claim_token = NULL, claim_expires_at = NULL, updated_at = ?
+            WHERE player_id = ? AND event_id = ? AND character_scope = ?
+              AND claim_token = ?
+            """,
+            (_now(), player_id, event_id, character_scope or "", claim_token),
+        )
+    return cursor.rowcount == 1
 
 
 def get_event_execution_batch(player_id: str, execution_key: str) -> dict | None:
@@ -3302,6 +3520,25 @@ def commit_event_execution_batch(
                     schedule_completion=schedule_completion,
                     now=now,
                 )
+            for execution in executions:
+                claim_token = execution.get("trigger_claim_token")
+                if not claim_token:
+                    continue
+                conn.execute(
+                    """
+                    UPDATE event_trigger_guard
+                    SET claim_token = NULL, claim_expires_at = NULL, updated_at = ?
+                    WHERE player_id = ? AND event_id = ? AND character_scope = ?
+                      AND claim_token = ?
+                    """,
+                    (
+                        now,
+                        player_id,
+                        execution["event_id"],
+                        execution.get("trigger_character_scope") or "",
+                        claim_token,
+                    ),
+                )
             return {"deduplicated": True, "batch": dict(row), "inserted_memories": []}
 
         for execution in executions:
@@ -3333,6 +3570,30 @@ def commit_event_execution_batch(
 
             if execution["status"] != "succeeded":
                 continue
+
+            claim_token = execution.get("trigger_claim_token")
+            if claim_token:
+                consumed = conn.execute(
+                    """
+                    UPDATE event_trigger_guard
+                    SET last_triggered_at = ?, claim_token = NULL,
+                        claim_expires_at = NULL, updated_at = ?
+                    WHERE player_id = ? AND event_id = ? AND character_scope = ?
+                      AND claim_token = ?
+                    """,
+                    (
+                        now,
+                        now,
+                        player_id,
+                        execution["event_id"],
+                        execution.get("trigger_character_scope") or "",
+                        claim_token,
+                    ),
+                )
+                if consumed.rowcount != 1:
+                    raise RuntimeError(
+                        "event trigger claim was lost before atomic completion"
+                    )
 
             conn.execute(
                 """
@@ -3603,6 +3864,14 @@ def delete_trigger_history(
             """,
             (event_id, character_id, player_id),
         )
+        conn.execute(
+            """
+            DELETE FROM event_trigger_guard
+            WHERE event_id = ? AND player_id = ?
+              AND character_scope IN (?, '')
+            """,
+            (event_id, player_id, character_id),
+        )
         return cur.rowcount
 
 
@@ -3682,6 +3951,56 @@ def list_event_context_states(
     return [dict(r) for r in rows]
 
 
+def _save_event_schedule_state_in_transaction(
+    conn,
+    *,
+    event_id: str,
+    character_id: str,
+    player_id: str,
+    schedule: str,
+    next_run_at: str = None,
+    next_due_real_at: str = None,
+    last_checked_at: str = None,
+    last_run_at: str = None,
+    status: str = "active",
+    missed_count: int = 0,
+) -> None:
+    now = _now()
+    conn.execute(
+        """
+        INSERT INTO event_schedule_state
+        (event_id, character_id, player_id, schedule, last_checked_at,
+         last_run_at, next_run_at, next_due_real_at, missed_count,
+         status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(event_id, character_id, player_id)
+        DO UPDATE SET
+            schedule=excluded.schedule,
+            last_checked_at=excluded.last_checked_at,
+            last_run_at=excluded.last_run_at,
+            next_run_at=excluded.next_run_at,
+            next_due_real_at=excluded.next_due_real_at,
+            missed_count=excluded.missed_count,
+            status=excluded.status,
+            updated_at=excluded.updated_at
+        """,
+        (
+            event_id,
+            character_id,
+            player_id,
+            schedule,
+            last_checked_at,
+            last_run_at,
+            next_run_at,
+            next_due_real_at,
+            missed_count,
+            status,
+            now,
+            now,
+        ),
+    )
+
+
 def save_event_schedule_state(
     event_id: str,
     character_id: str,
@@ -3697,31 +4016,81 @@ def save_event_schedule_state(
     """保存时间驱动事件的调度状态。"""
     try:
         with get_conn() as conn:
-            conn.execute(
-                """
-                INSERT INTO event_schedule_state
-                (event_id, character_id, player_id, schedule, last_checked_at,
-                 last_run_at, next_run_at, next_due_real_at, missed_count,
-                 status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(event_id, character_id, player_id)
-                DO UPDATE SET
-                    schedule=excluded.schedule,
-                    last_checked_at=excluded.last_checked_at,
-                    last_run_at=excluded.last_run_at,
-                    next_run_at=excluded.next_run_at,
-                    next_due_real_at=excluded.next_due_real_at,
-                    missed_count=excluded.missed_count,
-                    status=excluded.status,
-                    updated_at=excluded.updated_at
-                """,
-                (event_id, character_id, player_id, schedule, last_checked_at,
-                 last_run_at, next_run_at, next_due_real_at, missed_count,
-                 status, _now(), _now()),
+            _save_event_schedule_state_in_transaction(
+                conn,
+                event_id=event_id,
+                character_id=character_id,
+                player_id=player_id,
+                schedule=schedule,
+                next_run_at=next_run_at,
+                next_due_real_at=next_due_real_at,
+                last_checked_at=last_checked_at,
+                last_run_at=last_run_at,
+                status=status,
+                missed_count=missed_count,
             )
         return True
     except Exception as e:
         logger.error(f"保存事件调度状态失败: {e}")
+        return False
+
+
+def save_event_definition_with_schedule(
+    owner_user_id: str,
+    event_id: str,
+    event_name: str,
+    trigger_config: str,
+    effects_config: str,
+    *,
+    schedule_state: dict | None,
+    character_id: str = None,
+    description: str = None,
+    priority: int = 0,
+    exclusive_group: str = None,
+    max_triggers_per_turn: int = 3,
+    stop_processing: bool = False,
+    is_active: bool = True,
+    schedule: str = None,
+    template_id: str = None,
+) -> bool:
+    """Atomically save an event definition and its single schedule state."""
+    try:
+        with get_conn() as conn:
+            _save_event_definition_in_transaction(
+                conn,
+                owner_user_id=owner_user_id,
+                event_id=event_id,
+                event_name=event_name,
+                trigger_config=trigger_config,
+                effects_config=effects_config,
+                character_id=character_id,
+                description=description,
+                priority=priority,
+                exclusive_group=exclusive_group,
+                max_triggers_per_turn=max_triggers_per_turn,
+                stop_processing=stop_processing,
+                is_active=is_active,
+                schedule=schedule,
+                template_id=template_id,
+            )
+            if schedule_state is not None:
+                if schedule_state.get("event_id") != event_id:
+                    raise ValueError("Schedule event_id does not match definition")
+                if schedule_state.get("player_id") != owner_user_id:
+                    raise ValueError("Schedule player_id does not match definition owner")
+
+            conn.execute(
+                """
+                DELETE FROM event_schedule_state
+                WHERE event_id = ? AND player_id = ?
+                """,
+                (event_id, owner_user_id),
+            )
+            if schedule_state is not None:
+                _save_event_schedule_state_in_transaction(conn, **schedule_state)
+        return True
+    except Exception as e:
+        logger.error(f"原子保存事件定义和调度失败: {e}")
         return False
 
 
@@ -4169,7 +4538,8 @@ def enqueue_player_event(
         return cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
 
 
-def upsert_group_message_notification(
+def _upsert_group_message_notification_in_transaction(
+    conn,
     player_id: str,
     group_thread_id: str,
     session_id: str,
@@ -4183,69 +4553,89 @@ def upsert_group_message_notification(
     if increment <= 0:
         return 0
 
-    with get_conn() as conn:
-        row = conn.execute(
-            """
-            SELECT id, unread_count
-            FROM player_event_inbox
-            WHERE player_id = ? AND event_type = 'group_message'
-              AND group_thread_id = ? AND read_at IS NULL
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (player_id, group_thread_id),
-        ).fetchone()
-        if row:
-            unread_count = int(row["unread_count"] or 0) + increment
-            conn.execute(
-                """
-                UPDATE player_event_inbox
-                SET session_id = ?, unread_count = ?, content = ?, title = ?,
-                    world_created_at = ?, created_at = ?, payload = ?
-                WHERE id = ?
-                """,
-                (
-                    session_id,
-                    unread_count,
-                    f"群聊中有 {unread_count} 条新消息",
-                    group_name or "群聊新消息",
-                    world_created_at,
-                    _now(),
-                    json.dumps(
-                        {"group_thread_id": group_thread_id, "unread_count": unread_count},
-                        ensure_ascii=False,
-                    ),
-                    row["id"],
-                ),
-            )
-            return int(row["id"])
-
-        sql = """
-            INSERT INTO player_event_inbox
-            (player_id, session_id, event_type, group_thread_id, unread_count,
-             title, content, payload, world_created_at, created_at)
-            VALUES (?, ?, 'group_message', ?, ?, ?, ?, ?, ?, ?)
+    row = conn.execute(
         """
-        if _is_postgres_enabled():
-            sql += " RETURNING id"
-        cursor = conn.execute(
-            sql,
+        SELECT id, unread_count
+        FROM player_event_inbox
+        WHERE player_id = ? AND event_type = 'group_message'
+          AND group_thread_id = ? AND read_at IS NULL
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (player_id, group_thread_id),
+    ).fetchone()
+    if row:
+        unread_count = int(row["unread_count"] or 0) + increment
+        conn.execute(
+            """
+            UPDATE player_event_inbox
+            SET session_id = ?, unread_count = ?, content = ?, title = ?,
+                world_created_at = ?, created_at = ?, payload = ?
+            WHERE id = ?
+            """,
             (
-                player_id,
                 session_id,
-                group_thread_id,
-                increment,
+                unread_count,
+                f"群聊中有 {unread_count} 条新消息",
                 group_name or "群聊新消息",
-                f"群聊中有 {increment} 条新消息",
-                json.dumps(
-                    {"group_thread_id": group_thread_id, "unread_count": increment},
-                    ensure_ascii=False,
-                ),
                 world_created_at,
                 _now(),
+                json.dumps(
+                    {"group_thread_id": group_thread_id, "unread_count": unread_count},
+                    ensure_ascii=False,
+                ),
+                row["id"],
             ),
         )
-        return int(cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid)
+        return int(row["id"])
+
+    sql = """
+        INSERT INTO player_event_inbox
+        (player_id, session_id, event_type, group_thread_id, unread_count,
+         title, content, payload, world_created_at, created_at)
+        VALUES (?, ?, 'group_message', ?, ?, ?, ?, ?, ?, ?)
+    """
+    if _is_postgres_enabled():
+        sql += " RETURNING id"
+    cursor = conn.execute(
+        sql,
+        (
+            player_id,
+            session_id,
+            group_thread_id,
+            increment,
+            group_name or "群聊新消息",
+            f"群聊中有 {increment} 条新消息",
+            json.dumps(
+                {"group_thread_id": group_thread_id, "unread_count": increment},
+                ensure_ascii=False,
+            ),
+            world_created_at,
+            _now(),
+        ),
+    )
+    return int(cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid)
+
+
+def upsert_group_message_notification(
+    player_id: str,
+    group_thread_id: str,
+    session_id: str,
+    new_message_count: int,
+    *,
+    group_name: str | None = None,
+    world_created_at: str | None = None,
+) -> int:
+    with get_conn() as conn:
+        return _upsert_group_message_notification_in_transaction(
+            conn,
+            player_id,
+            group_thread_id,
+            session_id,
+            new_message_count,
+            group_name=group_name,
+            world_created_at=world_created_at,
+        )
 
 
 def list_player_event_inbox(
@@ -5230,41 +5620,236 @@ def complete_group_dialogue_pulse(
 ) -> bool:
     """完成自主脉冲并在持有租约时提交线程状态和每日计数。"""
     with get_conn() as conn:
-        cursor = conn.execute(
-            """
-            UPDATE group_dialogue_state
-            SET current_topic = ?, topic_source = ?,
-                last_reply_to_message_id = ?, last_reply_to_character_id = ?,
-                last_speaker_id = ?, waiting_for_player = ?, unresolved_hooks = ?,
-                last_autonomous_pulse_at = ?, last_autonomous_world_at = ?,
-                daily_message_date = ?,
-                daily_message_count = CASE
-                    WHEN daily_message_date = ? THEN daily_message_count + ?
-                    ELSE ?
-                END,
-                lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
-            WHERE group_thread_id = ? AND lease_owner = ?
-            """,
-            (
-                current_topic,
-                topic_source,
-                last_reply_to_message_id,
-                last_reply_to_character_id,
-                last_speaker_id,
-                1 if waiting_for_player else 0,
-                json.dumps(unresolved_hooks or [], ensure_ascii=False),
-                real_now_iso,
-                world_now_iso,
-                daily_message_date,
-                daily_message_date,
-                autonomous_message_count,
-                autonomous_message_count,
-                real_now_iso,
-                group_thread_id,
-                lease_owner,
-            ),
+        return _complete_group_dialogue_pulse_in_transaction(
+            conn,
+            group_thread_id,
+            lease_owner=lease_owner,
+            real_now_iso=real_now_iso,
+            world_now_iso=world_now_iso,
+            autonomous_message_count=autonomous_message_count,
+            daily_message_date=daily_message_date,
+            current_topic=current_topic,
+            topic_source=topic_source,
+            last_reply_to_message_id=last_reply_to_message_id,
+            last_reply_to_character_id=last_reply_to_character_id,
+            last_speaker_id=last_speaker_id,
+            waiting_for_player=waiting_for_player,
+            unresolved_hooks=unresolved_hooks,
         )
+
+
+def _complete_group_dialogue_pulse_in_transaction(
+    conn,
+    group_thread_id: str,
+    *,
+    lease_owner: str,
+    real_now_iso: str,
+    world_now_iso: str,
+    autonomous_message_count: int,
+    daily_message_date: str,
+    current_topic: str | None,
+    topic_source: str | None,
+    last_reply_to_message_id: int | None,
+    last_reply_to_character_id: str | None,
+    last_speaker_id: str | None,
+    waiting_for_player: bool,
+    unresolved_hooks: list[dict] | None,
+) -> bool:
+    cursor = conn.execute(
+        """
+        UPDATE group_dialogue_state
+        SET current_topic = ?, topic_source = ?,
+            last_reply_to_message_id = ?, last_reply_to_character_id = ?,
+            last_speaker_id = ?, waiting_for_player = ?, unresolved_hooks = ?,
+            last_autonomous_pulse_at = ?, last_autonomous_world_at = ?,
+            daily_message_date = ?,
+            daily_message_count = CASE
+                WHEN daily_message_date = ? THEN daily_message_count + ?
+                ELSE ?
+            END,
+            lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+        WHERE group_thread_id = ? AND lease_owner = ?
+        """,
+        (
+            current_topic,
+            topic_source,
+            last_reply_to_message_id,
+            last_reply_to_character_id,
+            last_speaker_id,
+            1 if waiting_for_player else 0,
+            json.dumps(unresolved_hooks or [], ensure_ascii=False),
+            real_now_iso,
+            world_now_iso,
+            daily_message_date,
+            daily_message_date,
+            autonomous_message_count,
+            autonomous_message_count,
+            real_now_iso,
+            group_thread_id,
+            lease_owner,
+        ),
+    )
     return cursor.rowcount == 1
+
+
+def commit_group_dialogue_pulse(
+    group_thread_id: str,
+    session_id: str,
+    player_id: str,
+    responses: list[dict],
+    *,
+    lease_owner: str,
+    real_now_iso: str,
+    world_now_iso: str,
+    autonomous_message_count: int,
+    daily_message_date: str,
+    current_topic: str | None,
+    topic_source: str | None,
+    last_reply_to_message_id: int | None,
+    last_reply_to_character_id: str | None,
+    last_speaker_id: str | None,
+    waiting_for_player: bool,
+    unresolved_hooks: list[dict] | None,
+    group_name: str | None = None,
+) -> list[dict]:
+    """原子提交自主群聊消息、角色状态、线程状态和玩家通知。"""
+    committed_responses = [dict(response) for response in responses]
+    message_id_map: dict[int, int] = {}
+
+    def resolved_message_id(value):
+        if not isinstance(value, int) or value >= 0:
+            return value
+        if value not in message_id_map:
+            raise ValueError(f"未解析的群聊临时消息 ID: {value}")
+        return message_id_map[value]
+
+    with get_conn() as conn:
+        for response in committed_responses:
+            temporary_message_id = response.get("message_id")
+            reply_to_message_id = resolved_message_id(
+                response.get("reply_to_message_id")
+            )
+            insert_sql = """
+                INSERT INTO short_term_message
+                (session_id, role, content, character_id, character_name, created_at,
+                 knowledge_sources, world_created_at, reply_to_message_id,
+                 reply_to_character_id, intent, topic, trigger_source)
+                VALUES (?, 'assistant', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            if _is_postgres_enabled():
+                insert_sql += " RETURNING id"
+            cursor = conn.execute(
+                insert_sql,
+                (
+                    session_id,
+                    response.get("dialogue", ""),
+                    response.get("character_id"),
+                    response.get("character_name"),
+                    real_now_iso,
+                    _encode_knowledge_sources(response.get("knowledge_sources") or []),
+                    response.get("world_created_at") or world_now_iso,
+                    reply_to_message_id,
+                    response.get("reply_to_character_id"),
+                    response.get("intent"),
+                    response.get("topic"),
+                    response.get("trigger_source"),
+                ),
+            )
+            message_id = int(
+                cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
+            )
+            if isinstance(temporary_message_id, int) and temporary_message_id < 0:
+                message_id_map[temporary_message_id] = message_id
+            response["message_id"] = message_id
+            response["reply_to_message_id"] = reply_to_message_id
+
+        latest_relationships: dict[str, dict] = {}
+        participant_counts: dict[str, int] = {}
+        for response in committed_responses:
+            character_id = response.get("character_id")
+            if not character_id:
+                continue
+            participant_counts[character_id] = participant_counts.get(character_id, 0) + 1
+            if all(
+                key in response
+                for key in ("current_affinity", "current_trust", "current_mood")
+            ):
+                latest_relationships[character_id] = response
+
+        for character_id, response in latest_relationships.items():
+            conn.execute(
+                """
+                INSERT INTO relationship_state
+                (character_id, player_id, affection_level, trust_level,
+                 current_mood, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(character_id, player_id)
+                DO UPDATE SET
+                    affection_level = excluded.affection_level,
+                    trust_level = excluded.trust_level,
+                    current_mood = excluded.current_mood,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    character_id,
+                    player_id,
+                    response["current_affinity"],
+                    response["current_trust"],
+                    response["current_mood"],
+                    real_now_iso,
+                ),
+            )
+
+        for character_id, message_count in participant_counts.items():
+            conn.execute(
+                """
+                UPDATE multi_session_participant
+                SET last_spoke_at = ?,
+                    message_count = message_count + ?
+                WHERE session_id = ? AND character_id = ?
+                """,
+                (real_now_iso, message_count, session_id, character_id),
+            )
+
+        resolved_hooks = []
+        for hook in unresolved_hooks or []:
+            resolved_hook = dict(hook)
+            resolved_hook["message_id"] = resolved_message_id(
+                resolved_hook.get("message_id")
+            )
+            resolved_hooks.append(resolved_hook)
+
+        completed = _complete_group_dialogue_pulse_in_transaction(
+            conn,
+            group_thread_id,
+            lease_owner=lease_owner,
+            real_now_iso=real_now_iso,
+            world_now_iso=world_now_iso,
+            autonomous_message_count=autonomous_message_count,
+            daily_message_date=daily_message_date,
+            current_topic=current_topic,
+            topic_source=topic_source,
+            last_reply_to_message_id=resolved_message_id(last_reply_to_message_id),
+            last_reply_to_character_id=last_reply_to_character_id,
+            last_speaker_id=last_speaker_id,
+            waiting_for_player=waiting_for_player,
+            unresolved_hooks=resolved_hooks,
+        )
+        if not completed:
+            raise RuntimeError("群聊脉冲完成前租约已丢失")
+
+        if committed_responses:
+            _upsert_group_message_notification_in_transaction(
+                conn,
+                player_id,
+                group_thread_id,
+                session_id,
+                len(committed_responses),
+                group_name=group_name,
+                world_created_at=world_now_iso,
+            )
+
+    return committed_responses
 
 
 def release_group_dialogue_state(group_thread_id: str, *, lease_owner: str) -> bool:

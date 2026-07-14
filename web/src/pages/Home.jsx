@@ -106,7 +106,7 @@ export default function Home() {
         <p className="text-cyber-green/40 font-mono text-[11px] mb-8 tracking-[0.24em] sm:tracking-[0.4em] uppercase pointer-events-none select-none text-center">
           Character Archive
         </p>
-        <div className="pointer-events-auto pill-nav-inline mb-10 max-w-[calc(100vw-1rem)] overflow-x-auto px-3 sm:px-6 py-2.5 rounded-full border border-cyber-green/20 bg-[#0d0d14]/60 backdrop-blur-md shadow-[0_0_20px_rgba(167,239,158,0.06),0_0_40px_rgba(167,239,158,0.03)]">
+        <div className="pointer-events-auto pill-nav-inline mb-10 max-w-[calc(100vw-1rem)] overflow-visible px-3 sm:px-6 py-2.5 rounded-full border border-cyber-green/20 bg-[#0d0d14]/60 backdrop-blur-md shadow-[0_0_20px_rgba(167,239,158,0.06),0_0_40px_rgba(167,239,158,0.03)]">
           <div className="flex items-center gap-1">
             {/* User entry button — replaces the M logo's role as auth entry */}
             <button

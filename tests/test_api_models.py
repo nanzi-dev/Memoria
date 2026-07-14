@@ -169,6 +169,38 @@ class TestCodeReviewFixesAPI:
         assert r.user_message_id == 101
         assert r.assistant_message_id == 102
 
+    def test_user_gender_models_reject_unknown_values(self):
+        from memoria.api.user import RegisterRequest, UpdateProfileRequest
+
+        assert RegisterRequest(
+            username="tester",
+            password="password1",
+        ).gender == "unknown"
+        with pytest.raises(ValidationError):
+            RegisterRequest(
+                username="tester",
+                password="password1",
+                gender="invalid",
+            )
+        with pytest.raises(ValidationError):
+            UpdateProfileRequest(gender="invalid")
+
+    def test_user_avatar_resize_accepts_rgba_images(self):
+        import io
+
+        from PIL import Image
+        from memoria.api.user import _resize_image
+
+        source = io.BytesIO()
+        Image.new("RGBA", (32, 32), (255, 0, 0, 128)).save(source, format="PNG")
+
+        resized = _resize_image(source.getvalue())
+
+        assert resized is not None
+        with Image.open(io.BytesIO(resized)) as image:
+            assert image.format == "JPEG"
+            assert image.mode == "RGB"
+
     def test_dialogue_turn_response_message_ids_optional(self):
         from memoria.api.dialogue import DialogueTurnResponse
         r = DialogueTurnResponse(

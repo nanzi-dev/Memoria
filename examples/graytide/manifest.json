@@ -1,0 +1,100 @@
+{
+  "module_id": "graytide",
+  "title": "灰潮港：第十三声钟鸣",
+  "version": "1.0.0",
+  "locale": "zh-CN",
+  "demo_username": "memoria_demo",
+  "group": {
+    "session_id": "graytide_investigation_session",
+    "thread_id": "graytide_investigation_thread",
+    "name": "第十三声钟鸣联合调查组",
+    "character_ids": [
+      "graytide_erin_voss",
+      "graytide_rowan_cade",
+      "graytide_mira_thorne",
+      "graytide_oskar_bell",
+      "graytide_evelyn_moor",
+      "graytide_silas_crowe",
+      "graytide_noa_finch",
+      "graytide_atlas_07"
+    ]
+  },
+  "knowledge_bases": [
+    {
+      "key": "world",
+      "name": "[灰潮港] 城市与灰潮档案",
+      "description": "灰潮港公开世界观、地理、历史与城市法令。graytide-module",
+      "documents": [
+        "knowledge/city_and_geography.md",
+        "knowledge/history_and_law.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "global",
+          "target_id": ""
+        }
+      ]
+    },
+    {
+      "key": "investigation",
+      "name": "[灰潮港] 第十三声钟鸣调查卷宗",
+      "description": "联合调查组掌握的时间线、证物和矛盾证词。graytide-module",
+      "documents": [
+        "knowledge/case_timeline.md",
+        "knowledge/evidence_ledger.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "group_thread",
+          "target_id": "graytide_investigation_thread"
+        }
+      ]
+    },
+    {
+      "key": "factions",
+      "name": "[灰潮港] 派系与人物记录",
+      "description": "港务议会、潮汐工会、档案院及关键人物的非公开记录。graytide-module",
+      "documents": [
+        "knowledge/factions.md",
+        "knowledge/private_dossiers.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "character",
+          "target_id": "graytide_erin_voss"
+        },
+        {
+          "target_type": "character",
+          "target_id": "graytide_mira_thorne"
+        },
+        {
+          "target_type": "character",
+          "target_id": "graytide_silas_crowe"
+        }
+      ]
+    },
+    {
+      "key": "technical",
+      "name": "[灰潮港] 以太工程与医疗手册",
+      "description": "钟塔机械、雾笛系统、以太病理与自动机维护资料。graytide-module",
+      "documents": [
+        "knowledge/clocktower_engineering.md",
+        "knowledge/aether_medicine.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "character",
+          "target_id": "graytide_oskar_bell"
+        },
+        {
+          "target_type": "character",
+          "target_id": "graytide_evelyn_moor"
+        },
+        {
+          "target_type": "character",
+          "target_id": "graytide_atlas_07"
+        }
+      ]
+    }
+  ]
+}

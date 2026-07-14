@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { Menu, X } from 'lucide-react';
 import { gsap } from 'gsap';
 import './PillNav.css';
 
@@ -20,7 +21,6 @@ const PillNav = ({
   const circleRefs = useRef([]);
   const tlRefs = useRef([]);
   const activeTweenRefs = useRef([]);
-  const hamburgerRef = useRef(null);
   const mobileMenuRef = useRef(null);
   const navItemsRef = useRef(null);
 
@@ -113,18 +113,7 @@ const PillNav = ({
   const toggleMobileMenu = () => {
     const newState = !isMobileMenuOpen;
     setIsMobileMenuOpen(newState);
-    const hamburger = hamburgerRef.current;
     const menu = mobileMenuRef.current;
-    if (hamburger) {
-      const lines = hamburger.querySelectorAll('.hamburger-line');
-      if (newState) {
-        gsap.to(lines[0], { rotation: 45, y: 3, duration: 0.3, ease });
-        gsap.to(lines[1], { rotation: -45, y: -3, duration: 0.3, ease });
-      } else {
-        gsap.to(lines[0], { rotation: 0, y: 0, duration: 0.3, ease });
-        gsap.to(lines[1], { rotation: 0, y: 0, duration: 0.3, ease });
-      }
-    }
     if (menu) {
       if (newState) {
         gsap.set(menu, { visibility: 'visible' });
@@ -185,15 +174,22 @@ const PillNav = ({
         <button
           className="mobile-menu-button mobile-only"
           onClick={toggleMobileMenu}
-          aria-label="Toggle menu"
-          ref={hamburgerRef}
+          aria-label={isMobileMenuOpen ? '关闭导航菜单' : '打开导航菜单'}
+          aria-expanded={isMobileMenuOpen}
+          aria-controls="primary-mobile-menu"
         >
-          <span className="hamburger-line" />
-          <span className="hamburger-line" />
+          {isMobileMenuOpen
+            ? <X size={18} aria-hidden="true" />
+            : <Menu size={18} aria-hidden="true" />}
         </button>
       </nav>
 
-      <div className="mobile-menu-popover mobile-only" ref={mobileMenuRef} style={cssVars}>
+      <div
+        id="primary-mobile-menu"
+        className="mobile-menu-popover mobile-only"
+        ref={mobileMenuRef}
+        style={cssVars}
+      >
         <ul className="mobile-menu-list">
           {items.map((item, i) => (
             <li key={item.href || `mobile-item-${i}`}>

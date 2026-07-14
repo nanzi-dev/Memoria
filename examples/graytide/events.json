@@ -1,0 +1,544 @@
+[
+  {
+    "event_id": "graytide_fog_warning",
+    "event_name": "灰潮预警",
+    "description": "玩家提及灰潮或银雾时，提醒港区基础安全规则。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": ["灰潮", "银雾", "雾警"],
+      "match_mode": "any",
+      "cooldown_hours": 2
+    },
+    "effects": [
+      {
+        "effect_type": "notify_player",
+        "notification_message": "灰潮预警：关闭裸露以太阀，沿蓝灯标记前往高处。",
+        "notification_type": "warning"
+      }
+    ],
+    "priority": 30,
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_atlas_hears_bell",
+    "event_name": "自动机听见第十三声",
+    "description": "阿特拉斯在 NPC 回应出现特定钟声词时恢复一段断裂记录。",
+    "character_id": "graytide_atlas_07",
+    "trigger_condition": {
+      "trigger_type": "npc_keyword_match",
+      "keywords": ["第十三声", "缺失齿轮"],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "阿特拉斯记起第十三声并非来自主钟，而是从地下传动轴反向传入。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "change_mood",
+        "target_mood": "警觉"
+      }
+    ],
+    "priority": 70,
+    "exclusive_group": "graytide_bell_revelation",
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_mira_trust_archive",
+    "event_name": "米拉开放禁档",
+    "description": "米拉的信任达到门槛后开放潮痕纪年册。",
+    "character_id": "graytide_mira_thorne",
+    "trigger_condition": {
+      "trigger_type": "trust_threshold",
+      "threshold": 35,
+      "comparison": "gte",
+      "crossing": true,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": ["graytide_archive_tidemark_register"]
+      },
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "我可以让你看纪年册，但你必须先答应：原件不离开这张桌子。",
+        "dialogue_action": "lower_voice"
+      }
+    ],
+    "priority": 65,
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_rowan_manifest",
+    "event_name": "罗文交出货单",
+    "description": "罗文好感达到门槛后交出被删改的零号货单。",
+    "character_id": "graytide_rowan_cade",
+    "trigger_condition": {
+      "trigger_type": "affinity_threshold",
+      "threshold": 25,
+      "comparison": "gte",
+      "crossing": true,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": ["graytide_manifest_zero"]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 4
+        }
+      }
+    ],
+    "priority": 55,
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_erin_fifth_question",
+    "event_name": "艾琳的第五个问题",
+    "description": "与艾琳进行足够轮次的对话后，她会要求玩家给出当前推论。",
+    "character_id": "graytide_erin_voss",
+    "trigger_condition": {
+      "trigger_type": "dialogue_count",
+      "count": 5,
+      "comparison": "gte",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "五个问题够我们绕开寒暄了。现在说说，你认为谁有能力让整座城听见一声不存在的钟？",
+        "dialogue_action": "present_notebook"
+      }
+    ],
+    "priority": 40,
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_oskar_under_pressure",
+    "event_name": "奥斯卡承认压力",
+    "description": "奥斯卡处于焦虑情绪时透露维护日志曾被替换。",
+    "character_id": "graytide_oskar_bell",
+    "trigger_condition": {
+      "trigger_type": "mood_match",
+      "mood": "焦虑",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "奥斯卡承认事发前一夜的钟塔维护日志不是他的笔迹。",
+        "memory_importance": 8
+      }
+    ],
+    "priority": 52,
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_silas_trust_drop",
+    "event_name": "塞拉斯收紧口风",
+    "description": "单轮信任显著下降时，塞拉斯终止非正式谈话。",
+    "character_id": "graytide_silas_crowe",
+    "trigger_condition": {
+      "trigger_type": "state_delta",
+      "state_field": "trust",
+      "threshold": -8,
+      "comparison": "lte",
+      "cooldown_hours": 1
+    },
+    "effects": [
+      {
+        "effect_type": "change_mood",
+        "target_mood": "戒备"
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "塞拉斯结束了非正式交流，后续问题将被记录。",
+        "notification_type": "warning"
+      }
+    ],
+    "priority": 75,
+    "stop_processing": true,
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_dawn_low_tide",
+    "event_name": "黎明低潮窗口",
+    "description": "工作日黎明的低潮会露出旧海堤检修门。",
+    "trigger_condition": {
+      "trigger_type": "world_time_window",
+      "time_window_start": "05:20",
+      "time_window_end": "06:10",
+      "weekdays": [0, 1, 2, 3, 4],
+      "cooldown_hours": 20
+    },
+    "effects": [
+      {
+        "effect_type": "notify_player",
+        "notification_message": "低潮窗口开启：旧海堤检修门将在约五十分钟内可通行。",
+        "notification_type": "info"
+      }
+    ],
+    "priority": 25,
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_midnight_power_dip",
+    "event_name": "午夜以太压降",
+    "description": "午夜前后的例行压降会让地下传动声更清晰。",
+    "trigger_condition": {
+      "trigger_type": "world_time_window",
+      "time_window_start": "23:50",
+      "time_window_end": "00:20",
+      "cooldown_hours": 22
+    },
+    "effects": [
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": ["graytide_listen_underground_drive"]
+      }
+    ],
+    "priority": 28,
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_composite_bell_theory",
+    "event_name": "反向钟声理论",
+    "description": "玩家同时提到地下传动与第十三声时形成关键理论。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "keyword_match",
+          "keywords": ["地下传动", "反向传动"],
+          "match_mode": "any"
+        },
+        {
+          "trigger_type": "keyword_match",
+          "keywords": ["第十三声"],
+          "match_mode": "any"
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.55,
+        "event_status": "active"
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "调查进展：第十三声可能由地下传动轴反向注入钟塔。",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 80,
+    "exclusive_group": "graytide_bell_revelation",
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_open_cipher_ledger",
+    "event_name": "解开潮位账册",
+    "description": "识别账册暗号后触发下一段证物事件。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": ["蓝灯不照第七码头", "零号货单"],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_event",
+        "next_event_id": "graytide_ledger_followup"
+      }
+    ],
+    "priority": 62,
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_ledger_followup",
+    "event_name": "账册夹层",
+    "description": "事件链后继：账册夹层中藏有一张逆向齿轮订货凭证。",
+    "trigger_condition": {
+      "trigger_type": "event_history",
+      "event_id": "graytide_open_cipher_ledger",
+      "event_status": "succeeded",
+      "min_occurrences": 1,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "账册夹层的凭证显示，逆向棘轮由克劳工业代理采购，收货点是废弃潮汐泵站。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": ["graytide_pump_station_route"]
+      }
+    ],
+    "priority": 63,
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_atlas_memory_key",
+    "event_name": "阿特拉斯记忆钥匙",
+    "description": "特定维护口令使阿特拉斯开放受损记录的校验摘要。",
+    "character_id": "graytide_atlas_07",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": ["黄铜记忆匣", "维护口令七零七"],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "校验摘要：记录未自然损坏。封锁时间早于钟鸣十一分钟。",
+        "dialogue_action": "project_memory_checksum"
+      }
+    ],
+    "priority": 68,
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_evelyn_diagnosis",
+    "event_name": "伊芙琳的诊断",
+    "description": "讨论银雾咳嗽时触发医学判断。",
+    "character_id": "graytide_evelyn_moor",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": ["银雾咳嗽", "以太病", "手套发蓝"],
+      "match_mode": "any",
+      "cooldown_hours": 3
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "这不是传染病。蓝色结晶说明患者接触过未经中和的钟塔冷凝液。",
+        "dialogue_action": "inspect_sample"
+      },
+      {
+        "effect_type": "add_memory",
+        "memory_text": "钟塔冷凝液暴露会导致短暂银雾咳嗽和指套蓝染。",
+        "memory_importance": 7
+      }
+    ],
+    "priority": 48,
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_noa_telegram",
+    "event_name": "诺娅的延迟电报",
+    "description": "玩家询问断线电报时，诺娅交出未投递副本。",
+    "character_id": "graytide_noa_finch",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": ["断线电报", "延迟报码", "三短一长"],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": ["graytide_telegram_copy_13"]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "affection_level": 3,
+          "trust_level": 5
+        }
+      }
+    ],
+    "priority": 50,
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_mira_silas_dispute",
+    "event_name": "禁档归属争议",
+    "description": "讨论第七码头禁档时记录米拉与塞拉斯的公开分歧。",
+    "character_id": "graytide_mira_thorne",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": ["第七码头禁档", "封存令"],
+      "match_mode": "any",
+      "cooldown_hours": 6
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "米拉公开拒绝执行塞拉斯签发的第七码头永久封存令。",
+        "memory_importance": 6
+      }
+    ],
+    "priority": 34,
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_case_progress",
+    "event_name": "调查阶段推进",
+    "description": "玩家把货单、冷凝液和反向棘轮联系起来时推进主事件。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": ["货单", "冷凝液", "反向棘轮"],
+      "match_mode": "all",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "update_event_progress",
+        "progress_delta": 0.25,
+        "event_status": "active"
+      }
+    ],
+    "priority": 84,
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_group_proactive",
+    "event_name": "调查组主动复盘",
+    "description": "玩家提出复盘请求时由艾琳在固定群聊中主动总结矛盾点。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": ["复盘证据", "重新梳理"],
+      "match_mode": "any",
+      "cooldown_hours": 1
+    },
+    "effects": [
+      {
+        "effect_type": "npc_proactive_dialogue",
+        "target_session_id": "graytide_investigation_session",
+        "proactive_character_id": "graytide_erin_voss",
+        "proactive_prompt": "按时间顺序总结已确认事实，只指出证词矛盾，不替玩家宣布凶手。"
+      }
+    ],
+    "priority": 45,
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_clock_inspection_duration",
+    "event_name": "钟塔检修时限",
+    "description": "会话持续十五分钟后提醒调查者检查机械层。",
+    "character_id": "graytide_oskar_bell",
+    "trigger_condition": {
+      "trigger_type": "time_based",
+      "duration_minutes": 15,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "notify_player",
+        "notification_message": "奥斯卡提醒：机械层的余压已经降到可安全检查范围。",
+        "notification_type": "info"
+      }
+    ],
+    "priority": 20,
+    "is_active": true
+  },
+  {
+    "event_id": "graytide_harbor_siren_schedule",
+    "event_name": "港区雾笛例检",
+    "description": "每天世界时间六点整触发一次港区雾笛例检提示。",
+    "character_id": "graytide_oskar_bell",
+    "trigger_condition": {
+      "trigger_type": "time_based",
+      "schedule": "0 6 * * *",
+      "catch_up_replay_limit": 1,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "notify_player",
+        "notification_message": "港区雾笛例检开始。第三短鸣缺失，疑似第七码头支路未响应。",
+        "notification_type": "info"
+      }
+    ],
+    "priority": 18,
+    "is_active": true,
+    "schedule": "0 6 * * *"
+  },
+  {
+    "event_id": "graytide_extension_item_valve_key",
+    "event_name": "扩展夹具：取得阀门钥匙",
+    "description": "未启用的物品系统兼容性样本。",
+    "trigger_condition": {
+      "trigger_type": "item_acquired",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "grant_item",
+        "item_id": "graytide_reverse_valve_key"
+      }
+    ],
+    "priority": 1,
+    "is_active": false
+  },
+  {
+    "event_id": "graytide_extension_quest_pump",
+    "event_name": "扩展夹具：泵站任务",
+    "description": "未启用的任务系统兼容性样本。",
+    "trigger_condition": {
+      "trigger_type": "quest_completed",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "start_quest",
+        "quest_id": "graytide_restore_pump_station"
+      }
+    ],
+    "priority": 1,
+    "is_active": false
+  },
+  {
+    "event_id": "graytide_extension_relationship",
+    "event_name": "扩展夹具：关系联动",
+    "description": "未启用的角色关系变化兼容性样本。",
+    "trigger_condition": {
+      "trigger_type": "relationship_change",
+      "threshold": 10,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "modify_relationship",
+        "target_character_id": "graytide_silas_crowe",
+        "relationship_change": {
+          "affinity": -5
+        }
+      }
+    ],
+    "priority": 1,
+    "is_active": false
+  },
+  {
+    "event_id": "graytide_edge_regex_telegram",
+    "event_name": "边界夹具：电报码正则",
+    "description": "未启用的正则关键词边界样本，用于验证中文标点与报码空格。",
+    "character_id": "graytide_noa_finch",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": ["三短[、, ]?一长", "七码头\\s*十三"],
+      "match_mode": "regex",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "notify_player",
+        "notification_message": "检测到灰潮港电报码边界样本。",
+        "notification_type": "info"
+      }
+    ],
+    "priority": 1,
+    "is_active": false
+  }
+]

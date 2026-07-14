@@ -268,21 +268,37 @@ def _plan_event_chain(
     roots: list[EventDefinition],
     context: EventContext,
     definitions_by_id: dict[str, EventDefinition],
+    *,
+    enforce_cooldown: bool = False,
 ) -> tuple[list[EventTriggerResult], list[dict[str, Any]]]:
     return _plan_event_roots(
         [(event, context) for event in roots],
         definitions_by_id,
+        enforce_cooldown=enforce_cooldown,
     )
 
 
 def _plan_event_roots(
     roots: list[tuple[EventDefinition, EventContext]],
     definitions_by_id: dict[str, EventDefinition],
+    *,
+    enforce_cooldown: bool = False,
 ) -> tuple[list[EventTriggerResult], list[dict[str, Any]]]:
     executor = get_event_executor()
     results: list[EventTriggerResult] = []
     executions: list[dict[str, Any]] = []
     planned_event_ids: set[str] = set()
+
+    def release_claim(execution: dict[str, Any]) -> None:
+        claim_token = execution.get("trigger_claim_token")
+        if not claim_token:
+            return
+        repository.release_event_trigger_guard(
+            player_id=execution["player_id"],
+            event_id=execution["event_id"],
+            character_scope=execution.get("trigger_character_scope") or "",
+            claim_token=claim_token,
+        )
 
     def visit(
         event: EventDefinition,
@@ -307,24 +323,88 @@ def _plan_event_roots(
                 "last_event_id": path[-1] if path else chain_context.last_event_id,
             }
         )
-        result, operations = executor.plan_event(
-            event,
-            event_context,
-            execution_key=chain_context.execution_key,
-        )
-        results.append(result)
-        executions.append(
-            executor.build_execution_record(
+        claim_token = None
+        character_scope = event_context.character_id if event.character_id else ""
+        if enforce_cooldown:
+            claimed_at = datetime.now(timezone.utc)
+            claim_token = uuid.uuid4().hex
+            claimed = repository.claim_event_trigger_guard(
+                player_id=event_context.player_id,
+                event_id=event.event_id,
+                character_scope=character_scope,
+                cooldown_hours=event.trigger_condition.cooldown_hours or 0,
+                claim_token=claim_token,
+                claimed_at=claimed_at.isoformat(),
+                claim_expires_at=(claimed_at + timedelta(minutes=5)).isoformat(),
+            )
+            if not claimed:
+                result = EventTriggerResult(
+                    execution_id=uuid.uuid4().hex,
+                    execution_key=chain_context.execution_key,
+                    event_id=event.event_id,
+                    event_name=event.event_name,
+                    character_id=event_context.character_id,
+                    triggered=False,
+                    status="skipped",
+                    error="事件已触发或仍在冷却中",
+                )
+                results.append(result)
+                executions.append(
+                    executor.build_execution_record(
+                        event,
+                        event_context,
+                        result,
+                        {
+                            "memories": [],
+                            "unlock_keys": [],
+                            "inbox_items": [],
+                            "proactive_messages": [],
+                        },
+                    )
+                )
+                return
+
+        try:
+            result, operations = executor.plan_event(
                 event,
                 event_context,
-                result,
-                operations,
-                context_state=(
-                    _context_state_for_result(event, event_context, result)
-                    if result.status == "succeeded"
-                    else None
-                ),
+                execution_key=chain_context.execution_key,
             )
+        except Exception:
+            if claim_token:
+                repository.release_event_trigger_guard(
+                    player_id=event_context.player_id,
+                    event_id=event.event_id,
+                    character_scope=character_scope,
+                    claim_token=claim_token,
+                )
+            raise
+        if result.status != "succeeded" and claim_token:
+            repository.release_event_trigger_guard(
+                player_id=event_context.player_id,
+                event_id=event.event_id,
+                character_scope=character_scope,
+                claim_token=claim_token,
+            )
+            claim_token = None
+        results.append(result)
+        executions.append(
+            {
+                "player_id": event_context.player_id,
+                **executor.build_execution_record(
+                    event,
+                    event_context,
+                    result,
+                    operations,
+                    context_state=(
+                        _context_state_for_result(event, event_context, result)
+                        if result.status == "succeeded"
+                        else None
+                    ),
+                    trigger_claim_token=claim_token,
+                    trigger_character_scope=character_scope,
+                ),
+            }
         )
         if result.status != "succeeded":
             return
@@ -335,8 +415,13 @@ def _plan_event_roots(
                 continue
             visit(next_event, event_context, depth + 1, (*path, event.event_id))
 
-    for root, root_context in roots:
-        visit(root, root_context, 0, ())
+    try:
+        for root, root_context in roots:
+            visit(root, root_context, 0, ())
+    except Exception:
+        for execution in executions:
+            release_claim(execution)
+        raise
     return results, executions
 
 
@@ -408,15 +493,27 @@ def _commit_planned_batch(
         [result.model_dump(mode="json") for result in results],
         ensure_ascii=False,
     )
-    commit = repository.commit_event_execution_batch(
-        player_id=context.player_id,
-        execution_key=str(context.execution_key),
-        trigger_source=context.trigger_source,
-        results_data=results_data,
-        executions=executions,
-        runtime_states=runtime_states,
-        schedule_completion=schedule_completion,
-    )
+    try:
+        commit = repository.commit_event_execution_batch(
+            player_id=context.player_id,
+            execution_key=str(context.execution_key),
+            trigger_source=context.trigger_source,
+            results_data=results_data,
+            executions=executions,
+            runtime_states=runtime_states,
+            schedule_completion=schedule_completion,
+        )
+    except Exception:
+        for execution in executions:
+            claim_token = execution.get("trigger_claim_token")
+            if claim_token:
+                repository.release_event_trigger_guard(
+                    player_id=context.player_id,
+                    event_id=execution["event_id"],
+                    character_scope=execution.get("trigger_character_scope") or "",
+                    claim_token=claim_token,
+                )
+        raise
     if commit["deduplicated"]:
         return _restore_batch_results(commit["batch"])
     get_event_executor()._sync_vector_memories(commit.get("inserted_memories") or [])
@@ -482,6 +579,7 @@ def detect_and_execute_events(
         triggered_events,
         context,
         definitions_by_id,
+        enforce_cooldown=True,
     )
     for result in results:
         event = definitions_by_id.get(result.event_id)
@@ -568,7 +666,11 @@ def detect_and_execute_event_contexts(
         if event.stop_processing:
             break
 
-    results, executions = _plan_event_roots(roots, definitions_by_id)
+    results, executions = _plan_event_roots(
+        roots,
+        definitions_by_id,
+        enforce_cooldown=True,
+    )
     root_contexts = {event.event_id: context for event, context in roots}
     for result in results:
         event = definitions_by_id.get(result.event_id)
@@ -663,14 +765,15 @@ def _parse_iso(value: str | None) -> datetime | None:
         return None
 
 
-def register_time_event_schedule(
+def build_time_event_schedule_state(
     event_id: str,
     character_id: str,
     player_id: str,
     schedule: str,
     base_time: datetime | None = None,
-) -> bool:
-    """Register a cron schedule against the player's local world calendar."""
+    status: str = "active",
+) -> dict[str, Any]:
+    """Build a cron schedule state against the player's local world calendar."""
     snapshot = world_clock.get_clock_snapshot(player_id)
     world_base = world_clock.as_utc(base_time or snapshot.world_now)
     next_run = next_cron_run(
@@ -684,17 +787,36 @@ def register_time_event_schedule(
         snapshot.real_now,
         snapshot.time_scale,
     )
-    return repository.save_event_schedule_state(
-        event_id=event_id,
-        character_id=character_id,
-        player_id=player_id,
-        schedule=schedule,
-        next_run_at=next_run.isoformat(),
-        next_due_real_at=(
+    return {
+        "event_id": event_id,
+        "character_id": character_id,
+        "player_id": player_id,
+        "schedule": schedule,
+        "next_run_at": next_run.isoformat(),
+        "next_due_real_at": (
             next_due_real.isoformat() if next_due_real is not None else None
         ),
-        last_checked_at=world_base.isoformat(),
-        status="active",
+        "last_checked_at": world_base.isoformat(),
+        "status": status,
+    }
+
+
+def register_time_event_schedule(
+    event_id: str,
+    character_id: str,
+    player_id: str,
+    schedule: str,
+    base_time: datetime | None = None,
+) -> bool:
+    """Register a cron schedule against the player's local world calendar."""
+    return repository.save_event_schedule_state(
+        **build_time_event_schedule_state(
+            event_id=event_id,
+            character_id=character_id,
+            player_id=player_id,
+            schedule=schedule,
+            base_time=base_time,
+        )
     )
 
 
@@ -987,6 +1109,17 @@ def run_due_time_events(
                     context,
                     definitions_by_id,
                 )
+                failed_executions = [
+                    execution
+                    for execution in executions
+                    if execution["status"] == "failed"
+                ]
+                if failed_executions:
+                    errors = [
+                        execution.get("error") or execution["event_id"]
+                        for execution in failed_executions
+                    ]
+                    raise RuntimeError("; ".join(errors))
                 for execution in executions:
                     if execution["status"] != "succeeded":
                         continue

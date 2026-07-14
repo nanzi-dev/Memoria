@@ -181,12 +181,11 @@
   height: var(--nav-h);
   border-radius: 50%;
   background: var(--base, #000);
+  color: var(--pill-text, #A7EF9E);
   border: none;
   display: none;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
   cursor: pointer;
   padding: 0;
   position: relative;
@@ -196,15 +195,6 @@
   .mobile-menu-button {
     display: flex;
   }
-}
-
-.hamburger-line {
-  width: 16px;
-  height: 2px;
-  background: var(--pill-bg, #fff);
-  border-radius: 1px;
-  transition: all 0.01s ease;
-  transform-origin: center;
 }
 
 .mobile-menu-popover {
