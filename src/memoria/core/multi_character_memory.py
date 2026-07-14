@@ -237,6 +237,150 @@ def _parse_json_array_response(response: str) -> list:
     return data if isinstance(data, list) else []
 
 
+def _parse_json_object_response(response: str) -> dict:
+    """从轻量模型响应中提取 JSON 对象。"""
+    if not response:
+        return {}
+    text = response.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()[1:]
+        if lines and lines[-1].startswith("```"):
+            lines.pop()
+        text = "\n".join(lines).strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end <= start:
+            return {}
+        try:
+            data = json.loads(text[start:end + 1])
+        except json.JSONDecodeError:
+            return {}
+    return data if isinstance(data, dict) else {}
+
+
+def extract_dialogue_pulse_memories(
+    recent_messages: list[dict],
+    character_ids: list[str],
+) -> dict:
+    """一次调用提取脉冲内玩家事实、共同经历和受限秘密。"""
+    clean_character_ids = list(dict.fromkeys(cid for cid in character_ids if cid))
+    dialogue_text = _format_messages_for_extraction(recent_messages)
+    if not dialogue_text.strip() or not clean_character_ids:
+        return {"player_facts": [], "shared_facts": [], "secret_facts": []}
+
+    prompt = f"""
+分析以下多角色群聊脉冲，只提取值得长期记住的新事实。
+
+实际在场角色ID：
+{json.dumps(clean_character_ids, ensure_ascii=False)}
+
+脉冲内容：
+{dialogue_text}
+
+规则：
+- player_facts：玩家明确透露的个人事实；不要把 NPC 的经历误记成玩家事实
+- shared_facts：所有在场角色共同见证的决定、事件、承诺或关系变化
+- secret_facts：只有部分在场角色可以知道的事实，每条必须给 allowed_character_ids
+- allowed_character_ids 只能来自实际在场角色ID；不确定谁能知道时不要提取为秘密
+- 忽略寒暄、修辞、推测和无剧情价值的闲聊
+- 每类最多 5 条，没有则返回空数组
+- 只返回合法 JSON 对象，不使用 Markdown 或解释文字
+
+格式：
+{{
+  "player_facts": ["玩家事实"],
+  "shared_facts": ["共同经历"],
+  "secret_facts": [
+    {{"fact": "秘密事实", "allowed_character_ids": ["角色ID"]}}
+  ]
+}}
+"""
+    try:
+        raw = llm_client.call_light_task(prompt, allow_reasoning_fallback=False)
+        payload = _parse_json_object_response(raw)
+    except Exception as exc:
+        logger.error("群聊脉冲记忆提取失败: %s", exc)
+        payload = {}
+
+    player_facts = [
+        str(fact).strip()
+        for fact in payload.get("player_facts", [])[:5]
+        if isinstance(fact, str) and fact.strip()
+    ]
+    shared_facts = [
+        str(fact).strip()
+        for fact in payload.get("shared_facts", [])[:5]
+        if isinstance(fact, str) and fact.strip()
+    ]
+    allowed = set(clean_character_ids)
+    secret_facts = []
+    for row in payload.get("secret_facts", [])[:5]:
+        if not isinstance(row, dict):
+            continue
+        fact = str(row.get("fact") or "").strip()
+        allowed_ids = [
+            character_id
+            for character_id in row.get("allowed_character_ids", [])
+            if character_id in allowed
+        ]
+        if fact and allowed_ids:
+            secret_facts.append({
+                "fact": fact,
+                "allowed_character_ids": list(dict.fromkeys(allowed_ids)),
+            })
+    return {
+        "player_facts": player_facts,
+        "shared_facts": shared_facts,
+        "secret_facts": secret_facts,
+    }
+
+
+def process_dialogue_pulse_memories(
+    session_id: str,
+    recent_messages: list[dict],
+    character_ids: list[str],
+    player_id: str,
+) -> dict:
+    """提取一次并按在场/知情范围持久化整个对话脉冲的长期记忆。"""
+    present_ids = list(dict.fromkeys(cid for cid in character_ids if cid))
+    extracted = extract_dialogue_pulse_memories(recent_messages, present_ids)
+
+    for fact in extracted["player_facts"]:
+        for character_id in present_ids:
+            repository.save_long_term_fact(character_id, player_id, fact, importance=7)
+
+    for fact in extracted["shared_facts"]:
+        repository.save_group_memory(
+            session_id=session_id,
+            memory_text=fact,
+            participants=present_ids,
+            context="dialogue_pulse",
+            importance=0.7,
+        )
+        for index, character_id_a in enumerate(present_ids):
+            for character_id_b in present_ids[index + 1:]:
+                repository.save_shared_memory(
+                    owner_user_id=player_id,
+                    character_a_id=character_id_a,
+                    character_b_id=character_id_b,
+                    memory_text=fact,
+                    context=f"session:{session_id}:dialogue_pulse",
+                    importance=0.7,
+                )
+
+    for row in extracted["secret_facts"]:
+        for character_id in row["allowed_character_ids"]:
+            repository.save_long_term_fact(
+                character_id,
+                player_id,
+                row["fact"],
+                importance=8,
+            )
+    return extracted
+
+
 def extract_character_impressions(
     session_id: str,
     recent_messages: list[dict],

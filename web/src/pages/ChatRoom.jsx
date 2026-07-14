@@ -49,6 +49,7 @@ const MOOD_BUBBLE = { happy: 'bg-emerald-950 border-emerald-400/20 text-zinc-200
 
 const IDLE_SESSION_END_MS = 5 * 60 * 1000;
 const HISTORY_PAGE_SIZE = 20;
+const GROUP_POLL_INTERVAL_MS = 3 * 1000;
 
 const CHAT_RAYS_PROPS = {
   speed: 2.1,
@@ -121,31 +122,121 @@ function normalizeDialogueMessage(message, options = {}) {
     showRelationshipDelta: options.showRelationshipDelta === true,
     created_at: message.created_at,
     world_created_at: message.world_created_at,
-    message_id: message.message_id || message.id,
+    message_id: message.message_id ?? message.id,
   };
 }
 
 function normalizeGroupMessage(message, knownParticipants = [], options = {}) {
-  const charId = message.charId || message.character_id || message.speaker_id || '';
+  const charId = message.charId ?? message.character_id ?? message.speaker_id ?? '';
   const participant = charId
     ? knownParticipants.find(p => p.character_id === charId || p.charId === charId)
     : null;
-  const role = message.role || (charId ? 'assistant' : 'user');
-  const charName = message.charName || message.character_name || participant?.name || participant?.display_name || '';
+  const role = message.role ?? (charId ? 'assistant' : 'user');
+  const charName = message.charName ?? message.character_name ?? participant?.name ?? participant?.display_name ?? '';
 
   return {
     role,
-    charId: charId || undefined,
+    charId: charId === '' ? undefined : charId,
     charName: role === 'assistant' ? (charName || charId || '未知') : undefined,
     content: message.content ?? message.dialogue ?? message.message ?? '',
-    action: message.action || '',
+    action: message.action ?? '',
     affinity_delta: toDelta(message.affinity_delta),
     trust_delta: toDelta(message.trust_delta),
     showRelationshipDelta: options.showRelationshipDelta === true,
-    created_at: message.created_at,
+    created_at: message.created_at ?? message.world_created_at,
     world_created_at: message.world_created_at,
-    message_id: message.message_id || message.id,
+    message_id: message.message_id ?? message.id,
+    session_id: message.session_id,
+    reply_to_message_id: message.reply_to_message_id,
+    reply_to_character_id: message.reply_to_character_id,
+    intent: message.intent,
+    topic: message.topic,
+    trigger_source: message.trigger_source,
+    client_id: message.client_id,
+    _pending: message._pending,
   };
+}
+
+function stableGroupMessageKey(message) {
+  return message?.message_id == null ? null : String(message.message_id);
+}
+
+function mergeGroupMessageFields(current, incoming) {
+  const merged = { ...current };
+  Object.entries(incoming).forEach(([key, value]) => {
+    if (value !== undefined) merged[key] = value;
+  });
+  if (current.action && !incoming.action) merged.action = current.action;
+  if (current.showRelationshipDelta === true && incoming.showRelationshipDelta !== true) {
+    merged.affinity_delta = current.affinity_delta;
+    merged.trust_delta = current.trust_delta;
+  }
+  merged.showRelationshipDelta = current.showRelationshipDelta === true || incoming.showRelationshipDelta === true;
+  return merged;
+}
+
+function mergeGroupMessages(currentMessages, incomingMessages, options = {}) {
+  const prepend = options.prepend === true;
+  const replacePending = options.replacePending !== false && !prepend;
+  const combined = prepend
+    ? [...incomingMessages, ...currentMessages]
+    : [...currentMessages, ...incomingMessages];
+  const merged = [];
+  const messageIndexById = new Map();
+
+  combined.forEach(message => {
+    const messageId = stableGroupMessageKey(message);
+    if (messageId != null && messageIndexById.has(messageId)) {
+      const existingIndex = messageIndexById.get(messageId);
+      merged[existingIndex] = mergeGroupMessageFields(merged[existingIndex], message);
+      return;
+    }
+
+    if (replacePending && messageId != null && message.role === 'user') {
+      const pendingIndex = merged.findIndex(candidate => (
+        candidate._pending === true
+        && candidate.role === 'user'
+        && candidate.content === message.content
+      ));
+      if (pendingIndex >= 0) {
+        merged[pendingIndex] = {
+          ...mergeGroupMessageFields(merged[pendingIndex], message),
+          _pending: false,
+        };
+        messageIndexById.set(messageId, pendingIndex);
+        return;
+      }
+    }
+
+    if (messageId != null) messageIndexById.set(messageId, merged.length);
+    merged.push(message);
+  });
+
+  if (merged.some(message => message._pending === true)) return merged;
+
+  return merged
+    .map((message, index) => ({ message, index }))
+    .sort((left, right) => {
+      const leftId = Number(left.message.message_id);
+      const rightId = Number(right.message.message_id);
+      if (Number.isFinite(leftId) && Number.isFinite(rightId) && leftId !== rightId) {
+        return leftId - rightId;
+      }
+      return left.index - right.index;
+    })
+    .map(item => item.message);
+}
+
+function maxGroupMessageId(messages, fallback = 0) {
+  return messages.reduce((latest, message) => {
+    const messageId = Number(message?.message_id);
+    return Number.isFinite(messageId) ? Math.max(latest, messageId) : latest;
+  }, fallback);
+}
+
+function createClientMessageId() {
+  return globalThis.crypto?.randomUUID?.()
+    ?? `group-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function formatChatTime(value) {
@@ -395,6 +486,8 @@ export default function ChatRoom() {
 
   const [multiSessionStatus, setMultiSessionStatus] = useState('active');
 
+  const [groupHistoryReady, setGroupHistoryReady] = useState(false);
+
   const [groupName, setGroupName] = useState('');
   const cleanGroupName = groupName.trim();
   const groupNameExists = cleanGroupName
@@ -431,6 +524,18 @@ export default function ChatRoom() {
 
   const pendingHistoryScrollRef = useRef(null);
 
+  const latestGroupMessageIdRef = useRef(0);
+
+  const loadedGroupMessageIdsRef = useRef(new Set());
+
+  const groupPollInFlightRef = useRef(null);
+
+  const activeGroupThreadIdRef = useRef(null);
+
+  const activeGroupSessionIdRef = useRef(null);
+
+  const groupRequestGenerationRef = useRef(0);
+
 
 
   function isCharacterActive(char) {
@@ -454,6 +559,27 @@ export default function ChatRoom() {
       avatar_url: participant?.avatar_url || card?.avatar_url || null,
       is_active: participantActive && cardActive,
     };
+  }
+
+  function resetGroupSyncState() {
+    groupRequestGenerationRef.current += 1;
+    latestGroupMessageIdRef.current = 0;
+    loadedGroupMessageIdsRef.current = new Set();
+    groupPollInFlightRef.current = null;
+    activeGroupThreadIdRef.current = null;
+    activeGroupSessionIdRef.current = null;
+    setGroupHistoryReady(false);
+  }
+
+  function registerLoadedGroupMessages(groupMessages) {
+    let added = 0;
+    groupMessages.forEach(message => {
+      const messageId = stableGroupMessageKey(message);
+      if (messageId == null || loadedGroupMessageIdsRef.current.has(messageId)) return;
+      loadedGroupMessageIdsRef.current.add(messageId);
+      added += 1;
+    });
+    return added;
   }
 
 
@@ -631,7 +757,6 @@ export default function ChatRoom() {
       const sortedSessions = [...sessions].sort((a, b) => new Date(getActivityTime(b) || 0) - new Date(getActivityTime(a) || 0));
 
       const items = [];
-      const groupItemsByName = new Map();
       const seenSingleChars = new Set();
 
       for (const s of sortedSessions) {
@@ -656,15 +781,13 @@ export default function ChatRoom() {
             group_thread_id: s.group_thread_id || info?.group_thread_id || s.session_id,
             last_message_at: s.last_message_at,
             last_message: s.last_message,
+            latest_message_id: s.latest_message_id,
             message_count: s.message_count,
+            unread_count: Number(s.unread_count || 0),
             participants: groupParticipants,
             group_name: resolvedGroupName,
           };
-          const groupKey = resolvedGroupName.trim().toLowerCase() || String(groupItem.group_thread_id).toLowerCase();
-          const existing = groupItemsByName.get(groupKey);
-          if (!existing || new Date(getActivityTime(groupItem) || 0) > new Date(getActivityTime(existing) || 0)) {
-            groupItemsByName.set(groupKey, groupItem);
-          }
+          items.push(groupItem);
 
         } else {
 
@@ -707,7 +830,7 @@ export default function ChatRoom() {
 
       }
 
-      const nextItems = [...items, ...groupItemsByName.values()];
+      const nextItems = [...items];
       nextItems.sort((a, b) => new Date(getActivityTime(b) || 0) - new Date(getActivityTime(a) || 0));
       setChatItems(nextItems);
 
@@ -776,6 +899,8 @@ export default function ChatRoom() {
   function goToList() {
 
     const sessionToIdle = singleSessionId || multiSessionId || activeSessionRef.current;
+
+    resetGroupSyncState();
 
     setMessages([]); setCharacter(null); setSingleSessionId(null);
 
@@ -901,8 +1026,173 @@ export default function ChatRoom() {
 
   const enterGroupSetup = useCallback(() => {
     if (!PLAYER_ID) { setError('请先登录后使用对话功能'); return; }
+    resetGroupSyncState();
     setMessages([]); setParticipants([]); setGroupName(''); setView('group-setup');
   }, [PLAYER_ID]);
+
+  async function markActiveGroupRead(groupThreadId, generation) {
+    if (!groupThreadId || generation !== groupRequestGenerationRef.current) return;
+    try {
+      await multiDialogue.markThreadRead(groupThreadId);
+      if (generation === groupRequestGenerationRef.current) loadSessions();
+    } catch (err) {
+      console.error('[markActiveGroupRead] failed:', err);
+    }
+  }
+
+  async function enterGroupChat(item, initialParticipants = []) {
+    if (!item?.session_id) return;
+
+    clearIdleSessionEnd(item.session_id);
+    const generation = groupRequestGenerationRef.current + 1;
+    const initialThreadId = item.group_thread_id || item.session_id;
+    groupRequestGenerationRef.current = generation;
+    latestGroupMessageIdRef.current = 0;
+    loadedGroupMessageIdsRef.current = new Set();
+    groupPollInFlightRef.current = null;
+    activeGroupThreadIdRef.current = initialThreadId;
+    activeGroupSessionIdRef.current = item.session_id;
+
+    setGroupHistoryReady(false);
+    setMessages([]);
+    setGroupName(item.group_name || '');
+    setParticipants(initialParticipants);
+    setMultiSessionId(item.session_id);
+    setMultiSessionStatus(item.status || 'active');
+    setHistoryOffset(0);
+    setHasMoreHistory(true);
+    activeSessionRef.current = item.session_id;
+    sessionKindRef.current.set(item.session_id, 'group');
+    setView('group');
+
+    let loadedParticipants = initialParticipants;
+    try {
+      const info = await multiDialogue.getSessionInfo(item.session_id);
+      if (generation !== groupRequestGenerationRef.current) return;
+      const resolvedThreadId = info.group_thread_id || initialThreadId;
+      activeGroupThreadIdRef.current = resolvedThreadId;
+      setMultiSessionStatus(info.status || item.status || 'active');
+      setGroupName(info.group_name || item.group_name || '');
+      loadedParticipants = info.participants?.map(p => normalizeParticipant(p)) || loadedParticipants;
+      setParticipants(loadedParticipants);
+    } catch {
+      if (generation !== groupRequestGenerationRef.current) return;
+      setParticipants(loadedParticipants);
+    }
+
+    try {
+      const hist = await multiDialogue.getHistory(item.session_id, 0, HISTORY_PAGE_SIZE);
+      if (generation !== groupRequestGenerationRef.current) return;
+
+      const sessionInfo = hist?.session_info || {};
+      const currentSessionId = sessionInfo.current_session_id || item.session_id;
+      const groupThreadId = sessionInfo.group_thread_id || activeGroupThreadIdRef.current || initialThreadId;
+      const normalizedMessages = (hist?.messages || []).map(message => (
+        normalizeGroupMessage(message, [...loadedParticipants, ...allChars])
+      ));
+
+      activeGroupSessionIdRef.current = currentSessionId;
+      activeGroupThreadIdRef.current = groupThreadId;
+      setMultiSessionId(currentSessionId);
+      activeSessionRef.current = currentSessionId;
+      sessionKindRef.current.set(currentSessionId, 'group');
+      setMessages(mergeGroupMessages([], normalizedMessages));
+      registerLoadedGroupMessages(normalizedMessages);
+      setHistoryOffset(normalizedMessages.length);
+      setHasMoreHistory(Boolean(hist?.has_more));
+      latestGroupMessageIdRef.current = Math.max(
+        Number(hist?.latest_message_id || 0),
+        maxGroupMessageId(normalizedMessages),
+      );
+      setGroupHistoryReady(true);
+      await markActiveGroupRead(groupThreadId, generation);
+    } catch (err) {
+      if (generation !== groupRequestGenerationRef.current) return;
+      console.error('[enterGroupChat] history failed:', err);
+      setGroupHistoryReady(true);
+    }
+  }
+
+  const syncGroupHistory = useCallback(() => {
+    if (groupPollInFlightRef.current) return groupPollInFlightRef.current;
+
+    const generation = groupRequestGenerationRef.current;
+    const sessionId = activeGroupSessionIdRef.current;
+    const groupThreadId = activeGroupThreadIdRef.current;
+    if (!sessionId || !groupThreadId) return Promise.resolve(false);
+
+    let pollPromise;
+    pollPromise = (async () => {
+      let cursor = latestGroupMessageIdRef.current;
+      let caughtUpWithNewMessages = false;
+
+      while (true) {
+        const hist = await multiDialogue.getHistory(sessionId, 0, HISTORY_PAGE_SIZE, cursor);
+        if (generation !== groupRequestGenerationRef.current) return false;
+
+        const normalizedMessages = (hist?.messages || []).map(message => (
+          normalizeGroupMessage(message, [...participants, ...allChars])
+        ));
+        if (normalizedMessages.length > 0) {
+          const nextCursor = maxGroupMessageId(normalizedMessages, cursor);
+          if (nextCursor <= cursor) break;
+          const addedMessages = registerLoadedGroupMessages(normalizedMessages);
+          setMessages(prev => mergeGroupMessages(prev, normalizedMessages));
+          if (addedMessages > 0) setHistoryOffset(prev => prev + addedMessages);
+          cursor = nextCursor;
+          latestGroupMessageIdRef.current = cursor;
+          caughtUpWithNewMessages = true;
+        }
+
+        if (!hist?.has_more) break;
+        if (normalizedMessages.length === 0) break;
+      }
+
+      if (caughtUpWithNewMessages && generation === groupRequestGenerationRef.current) {
+        await markActiveGroupRead(groupThreadId, generation);
+      }
+      return caughtUpWithNewMessages;
+    })()
+      .catch(err => {
+        if (generation === groupRequestGenerationRef.current) {
+          console.error('[syncGroupHistory] failed:', err);
+        }
+        return false;
+      })
+      .finally(() => {
+        if (groupPollInFlightRef.current === pollPromise) {
+          groupPollInFlightRef.current = null;
+        }
+      });
+
+    groupPollInFlightRef.current = pollPromise;
+    return pollPromise;
+  }, [participants, allChars]);
+
+  useEffect(() => {
+    if (view !== 'group' || !multiSessionId || !groupHistoryReady) return undefined;
+
+    let intervalId = null;
+    const stopPolling = () => {
+      if (intervalId != null) window.clearInterval(intervalId);
+      intervalId = null;
+    };
+    const startPolling = () => {
+      stopPolling();
+      if (document.visibilityState !== 'visible') return;
+      syncGroupHistory();
+      intervalId = window.setInterval(syncGroupHistory, GROUP_POLL_INTERVAL_MS);
+    };
+    const handleVisibilityChange = () => startPolling();
+
+    startPolling();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [view, multiSessionId, groupHistoryReady, syncGroupHistory]);
 
 
 
@@ -948,11 +1238,14 @@ export default function ChatRoom() {
 
     } else if (view === 'group' && multiSessionId) {
 
+      const generation = groupRequestGenerationRef.current;
       setLoadingHistory(true);
 
       try {
 
-        const hist = await multiDialogue.getHistory(multiSessionId, historyOffset, HISTORY_PAGE_SIZE);
+        const sessionId = activeGroupSessionIdRef.current || multiSessionId;
+        const hist = await multiDialogue.getHistory(sessionId, historyOffset, HISTORY_PAGE_SIZE);
+        if (generation !== groupRequestGenerationRef.current) return;
 
         if (hist?.messages && hist.messages.length > 0) {
 
@@ -965,12 +1258,13 @@ export default function ChatRoom() {
             };
           }
 
-          setMessages(prev => [
-            ...sortMessagesChronologically(hist.messages.map(msg => normalizeGroupMessage(msg, [...participants, ...allChars]))),
-            ...prev,
-          ]);
+          const normalizedMessages = hist.messages.map(message => (
+            normalizeGroupMessage(message, [...participants, ...allChars])
+          ));
+          const addedMessages = registerLoadedGroupMessages(normalizedMessages);
+          setMessages(prev => mergeGroupMessages(prev, normalizedMessages, { prepend: true }));
 
-          setHistoryOffset(prev => prev + hist.messages.length);
+          if (addedMessages > 0) setHistoryOffset(prev => prev + addedMessages);
           setHasMoreHistory(hist.has_more);
 
         } else {
@@ -980,8 +1274,12 @@ export default function ChatRoom() {
         }
 
       } catch (err) {
-        console.error('[loadMoreHistory] group failed:', err);
-      } finally { setLoadingHistory(false); }
+        if (generation === groupRequestGenerationRef.current) {
+          console.error('[loadMoreHistory] group failed:', err);
+        }
+      } finally {
+        if (generation === groupRequestGenerationRef.current) setLoadingHistory(false);
+      }
 
     }
 
@@ -1028,18 +1326,30 @@ export default function ChatRoom() {
 
       const res = await multiDialogue.startSession(PLAYER_ID, PLAYER_NAME, selectedParticipants.map(p => p.character_id), cleanGroupName);
 
+      const generation = groupRequestGenerationRef.current + 1;
+      const groupThreadId = res.group_thread_id || res.session_id;
+      groupRequestGenerationRef.current = generation;
+      loadedGroupMessageIdsRef.current = new Set();
+      groupPollInFlightRef.current = null;
+      activeGroupThreadIdRef.current = groupThreadId;
+      activeGroupSessionIdRef.current = res.session_id;
+
       setMultiSessionId(res.session_id);
       setMultiSessionStatus('active');
       activeSessionRef.current = res.session_id;
       sessionKindRef.current.set(res.session_id, 'group');
       clearIdleSessionEnd(res.session_id);
 
-      if (res.opening?.dialogue) {
-        setMessages(sortMessagesChronologically([normalizeGroupMessage(res.opening, [...selectedParticipants, ...allChars])]));
-      }
+      const openingMessages = res.opening?.dialogue
+        ? [normalizeGroupMessage(res.opening, [...selectedParticipants, ...allChars])]
+        : [];
+      setMessages(mergeGroupMessages([], openingMessages));
+      registerLoadedGroupMessages(openingMessages);
+      latestGroupMessageIdRef.current = maxGroupMessageId(openingMessages);
 
-      setHistoryOffset(res.opening?.dialogue ? 1 : 0);
+      setHistoryOffset(openingMessages.length);
       setHasMoreHistory(false);
+      setGroupHistoryReady(true);
 
       setView('group');
 
@@ -1069,11 +1379,23 @@ export default function ChatRoom() {
     setInput(''); setSending(true); setSendingMulti(true);
 
     const optimisticWorldCreatedAt = getWorldNow()?.toISOString();
-    setMessages(prev => [...prev, {
-      role: 'user',
-      content: text,
-      world_created_at: optimisticWorldCreatedAt,
-    }]);
+    const groupGeneration = groupRequestGenerationRef.current;
+    const pendingGroupMessage = view === 'group'
+      ? normalizeGroupMessage({
+          role: 'user',
+          content: text,
+          world_created_at: optimisticWorldCreatedAt,
+          client_id: createClientMessageId(),
+          _pending: true,
+        })
+      : null;
+    setMessages(prev => view === 'group'
+      ? mergeGroupMessages(prev, [pendingGroupMessage])
+      : [...prev, {
+          role: 'user',
+          content: text,
+          world_created_at: optimisticWorldCreatedAt,
+        }]);
 
     try {
 
@@ -1120,6 +1442,7 @@ export default function ChatRoom() {
 
         const continueGroupSession = async () => {
           const continued = await multiDialogue.continueSession(targetSessionId);
+          if (groupGeneration !== groupRequestGenerationRef.current) return null;
           targetSessionId = continued.session_id;
           setMultiSessionId(continued.session_id);
           setMultiSessionStatus('active');
@@ -1128,6 +1451,8 @@ export default function ChatRoom() {
             setParticipants(continued.participants.map(p => normalizeParticipant(p)));
           }
           activeSessionRef.current = continued.session_id;
+          activeGroupSessionIdRef.current = continued.session_id;
+          activeGroupThreadIdRef.current = continued.group_thread_id || activeGroupThreadIdRef.current;
           sessionKindRef.current.set(continued.session_id, 'group');
           clearIdleSessionEnd(continued.session_id);
           return continued.session_id;
@@ -1137,6 +1462,7 @@ export default function ChatRoom() {
 
         if (multiSessionStatus !== 'active') {
           targetSessionId = await continueGroupSession();
+          if (!targetSessionId) return;
         }
 
         try {
@@ -1144,23 +1470,41 @@ export default function ChatRoom() {
         } catch (err) {
           if (!String(err.message || '').includes('会话已结束')) throw err;
           targetSessionId = await continueGroupSession();
+          if (!targetSessionId) return;
           res = await sendGroupTurn(targetSessionId);
         }
 
+        if (groupGeneration !== groupRequestGenerationRef.current) return;
         const groupResponses = Array.isArray(res.responses) ? res.responses : [res];
-        setMessages(prev => [
-          ...prev,
-          ...groupResponses.map(r => normalizeGroupMessage(r, [...participants, ...allChars], { showRelationshipDelta: true })),
-        ]);
-        setHistoryOffset(prev => prev + 1 + groupResponses.length);
+        const normalizedResponses = groupResponses.map(response => (
+          normalizeGroupMessage(response, [...participants, ...allChars], { showRelationshipDelta: true })
+        ));
+        const addedResponses = registerLoadedGroupMessages(normalizedResponses);
+        setMessages(prev => mergeGroupMessages(prev, normalizedResponses));
+        if (addedResponses > 0) setHistoryOffset(prev => prev + addedResponses);
+        syncGroupHistory();
 
       }
 
-    } catch (e) { setError(e.message); }
+    } catch (e) {
+      const isCurrentGroupRequest = view === 'group'
+        && groupGeneration === groupRequestGenerationRef.current;
+      if (isCurrentGroupRequest && pendingGroupMessage?.client_id) {
+        setMessages(prev => mergeGroupMessages(
+          prev.filter(message => message.client_id !== pendingGroupMessage.client_id),
+          [],
+          { replacePending: false },
+        ));
+        setInput(current => current || text);
+      }
+      if (view !== 'group' || isCurrentGroupRequest) {
+        setError(e.message);
+      }
+    }
 
     finally { setSending(false); setSendingMulti(false); }
 
-  }, [input, sending, sendingMulti, view, singleSessionId, multiSessionId, multiSessionStatus, groupName, affinity, trust, character, participants, allChars, PLAYER_ID, PLAYER_NAME, getWorldNow]);
+  }, [input, sending, sendingMulti, view, singleSessionId, multiSessionId, multiSessionStatus, groupName, affinity, trust, character, participants, allChars, PLAYER_ID, PLAYER_NAME, getWorldNow, syncGroupHistory]);
 
 
 
@@ -1344,37 +1688,9 @@ export default function ChatRoom() {
                   const timeStr = formatChatTime(displayTime);
                   if (item.type === 'group') {
                     const groupParts = (item.participants || []).map(p => normalizeParticipant(p));
+                    const unreadCount = Math.max(0, Number(item.unread_count || 0));
                     return (
-                      <div key={`group-${item.group_name || item.session_id || i}`} onClick={async () => {
-                        clearIdleSessionEnd(item.session_id);
-                        setMessages([]);
-                        setGroupName(item.group_name || '');
-                        setMultiSessionId(item.session_id);
-                        setMultiSessionStatus(item.status || 'active');
-                        setHistoryOffset(0);
-                        setHasMoreHistory(true);
-                        activeSessionRef.current = item.session_id;
-                        sessionKindRef.current.set(item.session_id, 'group');
-                        setView('group');
-                        let loadedParticipants = groupParts;
-                        try {
-                          const info = await multiDialogue.getSessionInfo(item.session_id);
-                          setMultiSessionStatus(info.status || item.status || 'active');
-                          setGroupName(info.group_name || item.group_name || '');
-                          loadedParticipants = info.participants?.map(p => normalizeParticipant(p)) || loadedParticipants;
-                          setParticipants(loadedParticipants);
-                        } catch {
-                          setParticipants(loadedParticipants);
-                        }
-                        try {
-                          const hist = await multiDialogue.getHistory(item.session_id, 0, HISTORY_PAGE_SIZE);
-                          if (hist?.messages) {
-                            setMessages(sortMessagesChronologically(hist.messages.map(msg => normalizeGroupMessage(msg, [...loadedParticipants, ...allChars]))));
-                            setHistoryOffset(hist.messages.length);
-                            setHasMoreHistory(hist.has_more);
-                          }
-                        } catch {}
-                      }} className="memoria-glass memoria-card-hover animate-fade-up flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer group relative overflow-hidden" style={{ animationDelay: `${Math.min(i, 12) * 24}ms` }}>
+                      <div key={`group-${item.group_thread_id}`} onClick={() => enterGroupChat(item, groupParts)} className="memoria-glass memoria-card-hover animate-fade-up flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer group relative overflow-hidden" style={{ animationDelay: `${Math.min(i, 12) * 24}ms` }}>
                         <div className="flex -space-x-2 shrink-0">
                           {groupParts.slice(0, 3).map((p, j) => (
                             <div key={p.character_id || j} className="memoria-avatar-ring w-10 h-10 rounded-full overflow-hidden border-2 border-[#0d0d14] bg-[#0b0b0c] ring-1 ring-cyber-green/10 transition-transform duration-200 group-hover:-translate-y-0.5">
@@ -1390,7 +1706,14 @@ export default function ChatRoom() {
                           <div className="flex items-center gap-1.5"><span className="font-character text-lg leading-none text-zinc-200 truncate">{item.group_name || '群聊'}</span></div>
                           <div className="text-[11px] text-cyber-green/20 truncate mt-0.5">{item.last_message || '暂无消息'}</div>
                         </div>
-                        <div className="flex flex-col items-end gap-1 shrink-0"><span className="text-[11px] text-cyber-green/15">{timeStr}</span></div>
+                        <div className="flex min-w-[44px] flex-col items-end gap-1 shrink-0">
+                          <span className="text-[11px] text-cyber-green/15 whitespace-nowrap">{timeStr}</span>
+                          {unreadCount > 0 && (
+                            <span className="min-w-5 h-5 px-1.5 rounded-full bg-cyber-green/15 border border-cyber-green/25 text-[10px] leading-none text-cyber-green/80 tabular-nums flex items-center justify-center" aria-label={`${unreadCount} 条未读消息`}>
+                              {unreadCount > 99 ? '99+' : unreadCount}
+                            </span>
+                          )}
+                        </div>
                         <div className="absolute left-0 top-3 bottom-3 w-px bg-cyber-green/0 group-hover:bg-cyber-green/35 transition-colors pointer-events-none" />
                       </div>
                     );
@@ -1859,6 +2182,7 @@ export default function ChatRoom() {
             <button
               onClick={sendMessage}
               disabled={singleReadOnly || !input.trim() || sending || sendingMulti}
+              aria-label="发送消息"
               className="px-3 py-2 min-w-[44px] min-h-[44px] bg-cyber-green/10 hover:bg-cyber-green/[0.18] active:scale-95 border border-cyber-green/20 rounded-xl text-cyber-green disabled:opacity-20 disabled:cursor-not-allowed disabled:active:scale-100 transition-all shrink-0 flex items-center justify-center"
             >
               <Send size={16} />
@@ -2082,7 +2406,7 @@ export default function ChatRoom() {
 
               return (
 
-              <Fragment key={`${msg.message_id || i}-${bubbleIndex}`}>
+              <Fragment key={`${msg.message_id ?? msg.client_id ?? i}-${bubbleIndex}`}>
 
               {bubbleIndex === 0 && showWorldDate && (
 
@@ -2301,6 +2625,8 @@ export default function ChatRoom() {
               onClick={sendMessage}
 
               disabled={!input.trim() || sending || sendingMulti}
+
+              aria-label="发送消息"
 
               className="px-3 sm:px-4 py-2.5 bg-cyber-green/10 hover:bg-cyber-green/[0.18] active:scale-95 border border-cyber-green/20 rounded-xl text-cyber-green disabled:opacity-20 disabled:cursor-not-allowed disabled:active:scale-100 transition-all shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center"
 

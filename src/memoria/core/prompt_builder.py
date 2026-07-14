@@ -308,6 +308,7 @@ def build_multi_character_system_prompt(
     is_interaction: bool = False,
     time_context: dict | None = None,
     knowledge_context: str = "",
+    dialogue_target: dict | None = None,
 ) -> str:
     """
     构建多角色场景的系统提示
@@ -337,6 +338,17 @@ def build_multi_character_system_prompt(
     trust = _safe_get_runtime(runtime_state, "trust_level", 0)
     current_mood = _safe_get_runtime(runtime_state, "current_mood", card.runtime_state_schema.current_mood.default_mood)
     unlocked_content = _safe_get_runtime(runtime_state, "unlocked_content", [])
+    goals = getattr(card, "goals_and_motivations", None)
+    interaction_rules = getattr(card, "interaction_rules", None)
+    background = getattr(card, "background", None)
+    current_goals = list(getattr(goals, "current_goals", []) or [])
+    long_term_goals = list(getattr(goals, "long_term_goals", []) or [])
+    anger_triggers = list(getattr(goals, "what_triggers_anger", []) or [])
+    joy_triggers = list(getattr(goals, "what_brings_joy", []) or [])
+    loved_topics = list(getattr(interaction_rules, "topics_he_or_she_loves_to_discuss", []) or [])
+    avoid_topics = list(getattr(interaction_rules, "topics_to_avoid_unless_trusted", []) or [])
+    secrets = list(getattr(background, "secrets", []) or [])
+    background_relationships = list(getattr(background, "relationships", []) or [])
     
     # 处理known facts
     if isinstance(known_facts, dict):
@@ -454,6 +466,57 @@ def build_multi_character_system_prompt(
         f"- 已解锁内容：{_join(unlocked_content)}",
         f"",
     ])
+
+    prompt_parts.extend([
+        "# 剧情动机与话题边界",
+        f"- 当前目标：{_join(current_goals) if current_goals else '暂无明确目标'}",
+        f"- 长期目标：{_join(long_term_goals) if long_term_goals else '暂无明确目标'}",
+        f"- 喜欢的话题：{_join(loved_topics) if loved_topics else '无特别偏好'}",
+        f"- 愤怒触发点：{_join(anger_triggers) if anger_triggers else '未定义'}",
+        f"- 愉悦触发点：{_join(joy_triggers) if joy_triggers else '未定义'}",
+        f"- 低信任时回避：{_join(avoid_topics) if avoid_topics else '无'}",
+        "- 低信任时不得主动揭示上述回避话题；只有当前信任与揭示条件足够时才能自然进入。",
+        "- 优先推进当前目标、未解决事件、承诺、秘密线索或关系冲突，避免连续开启无剧情价值的随机闲聊。",
+        "",
+    ])
+
+    if secrets:
+        prompt_parts.extend([
+            "# 私密线索（仅供角色判断，不能无条件公开）",
+            *[
+                "- " + str(getattr(secret, "secret", ""))
+                + "；揭示条件：" + str(getattr(secret, "reveal_conditions", "未定义"))
+                for secret in secrets[:5]
+                if getattr(secret, "secret", None)
+            ],
+            "",
+        ])
+
+    if background_relationships:
+        prompt_parts.extend([
+            "# 角色卡关系冲突线索（仅在不违背当前关系图谱时使用）",
+            *[
+                "- " + str(getattr(relation, "target", ""))
+                + "：" + str(getattr(relation, "relationship_type", ""))
+                + "；" + str(getattr(relation, "description", ""))
+                for relation in background_relationships[:8]
+            ],
+            "",
+        ])
+
+    if dialogue_target:
+        prompt_parts.extend([
+            "# 本条发言的明确目标",
+            f"- 回复消息 ID：{dialogue_target.get('reply_to_message_id')}",
+            f"- 回复目标身份：{dialogue_target.get('reply_to_name') or dialogue_target.get('reply_to_character_id') or player_name}",
+            f"- 目标原话：{dialogue_target.get('message') or ''}",
+            f"- 发言意图：{dialogue_target.get('intent') or 'answer'}",
+            f"- 当前话题：{dialogue_target.get('topic') or '延续当前话题'}",
+            f"- 倾向下一角色：{dialogue_target.get('preferred_next_character_id') or '无'}",
+            f"- 是否期待后续接话：{'是' if dialogue_target.get('follow_up_expected') else '否'}",
+            "必须直接响应这个目标，不要把其他 NPC 的发言误当成玩家发言。",
+            "",
+        ])
 
     if time_context:
         prompt_parts.extend([

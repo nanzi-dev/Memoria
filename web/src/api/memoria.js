@@ -464,7 +464,18 @@ export const multiDialogue = {
     return request(`/multi-dialogue/session/${sessionId}`);
   },
   /** 获取多角色对话历史 */
-  getHistory(sessionId, offset = 0, limit = 20) {
-    return request(`/multi-dialogue/history/${sessionId}?offset=${offset}&limit=${limit}`);
+  getHistory(sessionId, offset = 0, limit = 20, afterMessageId = null) {
+    const params = new URLSearchParams({
+      offset: String(offset),
+      limit: String(limit),
+    });
+    if (afterMessageId != null) params.set('after_message_id', String(afterMessageId));
+    return request(`/multi-dialogue/history/${sessionId}?${params.toString()}`);
+  },
+  /** 清除逻辑群聊线程的聚合未读通知 */
+  markThreadRead(groupThreadId) {
+    return request(`/multi-dialogue/thread/${encodeURIComponent(groupThreadId)}/read`, {
+      method: 'POST',
+    });
   },
 };

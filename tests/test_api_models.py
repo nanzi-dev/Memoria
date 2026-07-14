@@ -127,6 +127,29 @@ class TestMultiDialogueAPI:
         r = MultiTurnRequest(session_id="s",player_message="Hi")
         assert r.player_message == "Hi"
 
+    def test_session_info_preserves_group_thread_fields(self):
+        from memoria.api.dialogue import SessionInfo
+
+        session = SessionInfo(
+            session_id="session-1",
+            character_id="c1",
+            player_id="player-1",
+            player_name="Player",
+            status="active",
+            group_name="小队",
+            group_thread_id="thread-1",
+            is_multi_character=True,
+            last_message="最新剧情",
+            last_message_at="2026-01-01T00:00:00+00:00",
+            latest_message_id=42,
+            message_count=8,
+            unread_count=3,
+        )
+
+        assert session.model_dump()["group_thread_id"] == "thread-1"
+        assert session.model_dump()["latest_message_id"] == 42
+        assert session.model_dump()["unread_count"] == 3
+
 class TestCodeReviewFixesAPI:
     """P0-2/P2-10: 新增 API 模型验证"""
 

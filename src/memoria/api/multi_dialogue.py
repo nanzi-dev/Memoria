@@ -67,6 +67,7 @@ class MultiDialogueTurnRequest(BaseModel):
 
 class MultiDialogueTurnResponse(BaseModel):
     """多角色对话轮次响应"""
+    message_id: Optional[int] = None
     character_id: str
     character_name: str
     dialogue: str
@@ -82,6 +83,12 @@ class MultiDialogueTurnResponse(BaseModel):
     event_notification: Optional[str] = None
     world_created_at: Optional[str] = None
     knowledge_sources: list[KnowledgeSource] = Field(default_factory=list)
+    reply_to_message_id: Optional[int] = None
+    reply_to_character_id: Optional[str] = None
+    intent: Optional[str] = None
+    topic: Optional[str] = None
+    trigger_source: Optional[str] = None
+    world_created_at: Optional[str] = None
 
 
 class MultiDialogueGroupResponse(BaseModel):
@@ -146,7 +153,13 @@ class MultiDialogueHistory(BaseModel):
     """多角色对话历史"""
     messages: list[dict]
     has_more: bool
+    latest_message_id: int = 0
     session_info: dict
+
+
+class MarkGroupThreadReadResponse(BaseModel):
+    group_thread_id: str
+    marked_read: int
 
 
 def _chunk_messages(messages: list[dict], chunk_size: int = SUMMARY_CHUNK_MESSAGE_LIMIT) -> list[list[dict]]:
@@ -659,6 +672,11 @@ async def get_multi_dialogue_history(
     session_id: str,
     offset: int = Query(0, ge=0, description="已加载消息数量"),
     limit: int = Query(50, ge=1, le=200, description="消息数量限制"),
+    after_message_id: Optional[int] = Query(
+        None,
+        ge=0,
+        description="仅返回该稳定消息 ID 之后的新消息",
+    ),
     current_user_id: str = Depends(require_current_user_id),
 ):
     """
@@ -674,12 +692,24 @@ async def get_multi_dialogue_history(
         # 验证会话
         session = _get_owned_multi_session(session_id, current_user_id)
         
-        # 获取同一逻辑群聊下的跨 session 历史
-        messages, has_more = repository.get_multi_character_thread_history_paginated(
-            session_id,
-            offset=offset,
-            limit=limit,
-        )
+        incremental_after = after_message_id if isinstance(after_message_id, int) else None
+        if incremental_after is not None:
+            messages, has_more, latest_message_id = (
+                repository.get_multi_character_thread_history_after(
+                    session_id,
+                    after_message_id=incremental_after,
+                    limit=limit,
+                )
+            )
+        else:
+            messages, has_more = repository.get_multi_character_thread_history_paginated(
+                session_id,
+                offset=offset,
+                limit=limit,
+            )
+            latest_message_id = max(
+                [int(message.get("message_id") or 0) for message in messages] or [0]
+            )
         
         # 获取参与者信息
         participants = repository.get_session_participants(session_id, only_active=False)
@@ -687,6 +717,7 @@ async def get_multi_dialogue_history(
         return MultiDialogueHistory(
             messages=messages,
             has_more=has_more,
+            latest_message_id=latest_message_id,
             session_info={
                 "session_id": session["session_id"],
                 "current_session_id": session["session_id"],
@@ -706,6 +737,29 @@ async def get_multi_dialogue_history(
     except Exception as e:
         logger.error(f"获取对话历史异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="服务器内部错误")
+
+
+@router.post(
+    "/thread/{group_thread_id}/read",
+    response_model=MarkGroupThreadReadResponse,
+)
+async def mark_group_thread_read(
+    group_thread_id: str,
+    current_user_id: str = Depends(require_current_user_id),
+):
+    """玩家同步到逻辑群聊最新消息后，清除该线程聚合未读通知。"""
+    session = repository.get_latest_group_thread_session(group_thread_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="群聊线程不存在")
+    _require_player_access(session["player_id"], current_user_id)
+    marked = repository.mark_group_thread_notifications_read(
+        current_user_id,
+        group_thread_id,
+    )
+    return MarkGroupThreadReadResponse(
+        group_thread_id=group_thread_id,
+        marked_read=marked,
+    )
 
 
 @router.post("/session/end")

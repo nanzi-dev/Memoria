@@ -810,6 +810,25 @@ def _persist_scheduled_event_results(
         world_created_at=world_now.isoformat(),
     )
 
+    if context.active_multi_session_id and messages:
+        try:
+            from memoria.core.group_dialogue_runtime import run_event_group_dialogue_pulse
+
+            run_event_group_dialogue_pulse(
+                context.active_multi_session_id,
+                event_text=content,
+                character_id=context.character_id,
+            )
+        except Exception:
+            logger.error(
+                "Scheduled event group-dialogue pulse failed",
+                extra={
+                    "event_id": event.event_id,
+                    "session_id": context.active_multi_session_id,
+                },
+                exc_info=True,
+            )
+
 
 def run_due_time_events(
     now: datetime | None = None,
@@ -1074,6 +1093,9 @@ async def run_world_clock_scheduler() -> None:
     while True:
         try:
             await asyncio.to_thread(run_due_time_events)
+            from memoria.core.group_dialogue_runtime import run_autonomous_group_dialogues
+
+            await asyncio.to_thread(run_autonomous_group_dialogues)
         except asyncio.CancelledError:
             raise
         except Exception:
