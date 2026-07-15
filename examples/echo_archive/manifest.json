@@ -1,0 +1,373 @@
+{
+  "module_id": "echo_archive",
+  "title": "回声档案",
+  "version": "1.0.0",
+  "locale": "zh-CN",
+  "demo_username": "echo_archive_demo",
+  "player_character": "player_character.json",
+  "player_relationship_token": "@player",
+  "groups": [
+    {
+      "session_id": "echo_v1_session",
+      "thread_id": "echo_v1_thread",
+      "name": "第1卷《失声者》联合调查组",
+      "character_ids": [
+        "echo_ji_heng",
+        "echo_lin_qi",
+        "echo_cheng_shu",
+        "echo_ye_jia",
+        "echo_jiang_zhao"
+      ]
+    },
+    {
+      "session_id": "echo_v2_session",
+      "thread_id": "echo_v2_thread",
+      "name": "第2卷《纸鸟》联合调查组",
+      "character_ids": [
+        "echo_ji_heng",
+        "echo_wen_jing",
+        "echo_shen_man",
+        "echo_mu_qiao",
+        "echo_tang_yan"
+      ]
+    },
+    {
+      "session_id": "echo_v3_session",
+      "thread_id": "echo_v3_thread",
+      "name": "第3卷《无菌室》联合调查组",
+      "character_ids": [
+        "echo_ji_heng",
+        "echo_lin_qi",
+        "echo_bai_song",
+        "echo_jiang_zhao",
+        "echo_liang_shiwen"
+      ]
+    },
+    {
+      "session_id": "echo_v4_session",
+      "thread_id": "echo_v4_thread",
+      "name": "第4卷《拆潮线》联合调查组",
+      "character_ids": [
+        "echo_ji_heng",
+        "echo_tang_yan",
+        "echo_zhong_zhiyuan",
+        "echo_han_xiuyuan",
+        "echo_cheng_shu",
+        "echo_wen_jing"
+      ]
+    },
+    {
+      "session_id": "echo_v5_session",
+      "thread_id": "echo_v5_thread",
+      "name": "第5卷《沉默陪审》联合调查组",
+      "character_ids": [
+        "echo_ji_heng",
+        "echo_wen_jing",
+        "echo_shao_qing",
+        "echo_luo_mian",
+        "echo_shen_man",
+        "echo_cheng_shu"
+      ]
+    },
+    {
+      "session_id": "echo_v6_session",
+      "thread_id": "echo_v6_thread",
+      "name": "第6卷《归航夜》联合调查组",
+      "character_ids": [
+        "echo_ji_heng",
+        "echo_xu_zhiyao",
+        "echo_jiang_zhao",
+        "echo_he_lin",
+        "echo_gao_xu",
+        "echo_lin_qi"
+      ]
+    },
+    {
+      "session_id": "echo_v7_session",
+      "thread_id": "echo_v7_thread",
+      "name": "第7卷《回声档案》联合调查组",
+      "character_ids": [
+        "echo_ji_heng",
+        "echo_lin_qi",
+        "echo_tang_yan",
+        "echo_jiang_zhao",
+        "echo_wen_jing",
+        "echo_cheng_shu",
+        "echo_xu_zhiyao"
+      ]
+    }
+  ],
+  "knowledge_bases": [
+    {
+      "key": "echo_world",
+      "name": "[回声档案] 临岚市与公共机构",
+      "description": "临岚市河海地理、城市历史、公开机构职责与滨环隧道灾后制度背景。",
+      "documents": [
+        "knowledge/city_river_coast.md",
+        "knowledge/public_institutions.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "global",
+          "target_id": ""
+        }
+      ]
+    },
+    {
+      "key": "echo_investigation",
+      "name": "[回声档案] 七卷共同调查卷宗",
+      "description": "跨卷时间线、联络码规律、证据分级与敏感材料复核方法。",
+      "documents": [
+        "knowledge/shared_case_chronology.md",
+        "knowledge/evidence_methodology.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "group_thread",
+          "target_id": "echo_v1_thread"
+        },
+        {
+          "target_type": "group_thread",
+          "target_id": "echo_v2_thread"
+        },
+        {
+          "target_type": "group_thread",
+          "target_id": "echo_v3_thread"
+        },
+        {
+          "target_type": "group_thread",
+          "target_id": "echo_v4_thread"
+        },
+        {
+          "target_type": "group_thread",
+          "target_id": "echo_v5_thread"
+        },
+        {
+          "target_type": "group_thread",
+          "target_id": "echo_v6_thread"
+        },
+        {
+          "target_type": "group_thread",
+          "target_id": "echo_v7_thread"
+        }
+      ]
+    },
+    {
+      "key": "echo_v1",
+      "name": "[回声档案] 第1卷《失声者》",
+      "description": "第1卷《失声者》的单位案件事实、矛盾证据与跨卷桥接线索。",
+      "documents": [
+        "knowledge/v1_muted_editor_case.md",
+        "knowledge/v1_support_audio_trace.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "group_thread",
+          "target_id": "echo_v1_thread"
+        }
+      ]
+    },
+    {
+      "key": "echo_v2",
+      "name": "[回声档案] 第2卷《纸鸟》",
+      "description": "第2卷《纸鸟》的单位案件事实、矛盾证据与跨卷桥接线索。",
+      "documents": [
+        "knowledge/v2_paper_bird_memorial.md",
+        "knowledge/v2_school_settlement_trace.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "group_thread",
+          "target_id": "echo_v2_thread"
+        }
+      ]
+    },
+    {
+      "key": "echo_v3",
+      "name": "[回声档案] 第3卷《无菌室》",
+      "description": "第3卷《无菌室》的单位案件事实、矛盾证据与跨卷桥接线索。",
+      "documents": [
+        "knowledge/v3_sterile_ward_case.md",
+        "knowledge/v3_isolation_log_trace.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "group_thread",
+          "target_id": "echo_v3_thread"
+        }
+      ]
+    },
+    {
+      "key": "echo_v4",
+      "name": "[回声档案] 第4卷《拆潮线》",
+      "description": "第4卷《拆潮线》的单位案件事实、矛盾证据与跨卷桥接线索。",
+      "documents": [
+        "knowledge/v4_tide_line_redevelopment.md",
+        "knowledge/v4_warning_outage_trace.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "group_thread",
+          "target_id": "echo_v4_thread"
+        }
+      ]
+    },
+    {
+      "key": "echo_v5",
+      "name": "[回声档案] 第5卷《沉默陪审》",
+      "description": "第5卷《沉默陪审》的单位案件事实、矛盾证据与跨卷桥接线索。",
+      "documents": [
+        "knowledge/v5_silent_jury_pilot.md",
+        "knowledge/v5_recusal_settlement_trace.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "group_thread",
+          "target_id": "echo_v5_thread"
+        }
+      ]
+    },
+    {
+      "key": "echo_v6",
+      "name": "[回声档案] 第6卷《归航夜》",
+      "description": "第6卷《归航夜》的单位案件事实、矛盾证据与跨卷桥接线索。",
+      "documents": [
+        "knowledge/v6_homebound_gala.md",
+        "knowledge/v6_archive_handoff_trace.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "group_thread",
+          "target_id": "echo_v6_thread"
+        }
+      ]
+    },
+    {
+      "key": "echo_v7",
+      "name": "[回声档案] 第7卷《回声档案》",
+      "description": "第7卷《回声档案》的单位案件事实、矛盾证据与跨卷桥接线索。",
+      "documents": [
+        "knowledge/v7_master_archive.md",
+        "knowledge/v7_disclosure_costs.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "group_thread",
+          "target_id": "echo_v7_thread"
+        }
+      ]
+    },
+    {
+      "key": "echo_restricted_police",
+      "name": "[回声档案] 限制资料：警务与物证",
+      "description": "专案审批、证人保护、物证保管与内部矛盾记录，仅向办案和法证角色开放。",
+      "documents": [
+        "knowledge/restricted_police_chain.md",
+        "knowledge/restricted_police_notes.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "character",
+          "target_id": "echo_ji_heng"
+        },
+        {
+          "target_type": "character",
+          "target_id": "echo_lin_qi"
+        },
+        {
+          "target_type": "character",
+          "target_id": "echo_cheng_shu"
+        },
+        {
+          "target_type": "character",
+          "target_id": "echo_jiang_zhao"
+        }
+      ]
+    },
+    {
+      "key": "echo_restricted_foundation",
+      "name": "[回声档案] 限制资料：归航基金会",
+      "description": "基金会早期授权模板、内部审计版本、撤回争议与归航夜分裂记录。",
+      "documents": [
+        "knowledge/restricted_foundation_protocol.md",
+        "knowledge/restricted_foundation_split.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "character",
+          "target_id": "echo_xu_zhiyao"
+        },
+        {
+          "target_type": "character",
+          "target_id": "echo_he_lin"
+        },
+        {
+          "target_type": "character",
+          "target_id": "echo_song_wenduo"
+        },
+        {
+          "target_type": "character",
+          "target_id": "echo_gao_xu"
+        },
+        {
+          "target_type": "character",
+          "target_id": "echo_shen_man"
+        }
+      ]
+    },
+    {
+      "key": "echo_restricted_medical",
+      "name": "[回声档案] 限制资料：医疗与隔离",
+      "description": "医院感染控制边界、行政隔离接口、复评规则和第三卷日志冲突。",
+      "documents": [
+        "knowledge/restricted_medical_rules.md",
+        "knowledge/restricted_medical_conflicts.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "character",
+          "target_id": "echo_bai_song"
+        },
+        {
+          "target_type": "character",
+          "target_id": "echo_liang_shiwen"
+        },
+        {
+          "target_type": "character",
+          "target_id": "echo_lin_qi"
+        },
+        {
+          "target_type": "character",
+          "target_id": "echo_jiang_zhao"
+        }
+      ]
+    },
+    {
+      "key": "echo_restricted_judicial",
+      "name": "[回声档案] 限制资料：司法调解",
+      "description": "合议调解试点规则、密封支持评估、回避页替换与分级提交救济。",
+      "documents": [
+        "knowledge/restricted_judicial_rules.md",
+        "knowledge/restricted_judicial_assessments.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "character",
+          "target_id": "echo_wen_jing"
+        },
+        {
+          "target_type": "character",
+          "target_id": "echo_shao_qing"
+        },
+        {
+          "target_type": "character",
+          "target_id": "echo_luo_mian"
+        },
+        {
+          "target_type": "character",
+          "target_id": "echo_shen_man"
+        }
+      ]
+    }
+  ]
+}

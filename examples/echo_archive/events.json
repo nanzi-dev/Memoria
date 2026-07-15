@@ -1,0 +1,3790 @@
+[
+  {
+    "event_id": "echo_v1_opening",
+    "event_name": "第1卷《失声者》立案",
+    "description": "以固定调查口令开启第1卷单元案，明确本卷证据边界。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "启动失声者调查"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "第1卷《失声者》进入调查阶段。先分开记录事实、解释和仍未核实的权限链。",
+        "dialogue_action": "open_case_file"
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v1_case_file"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.0,
+        "event_status": "active"
+      }
+    ],
+    "priority": 70,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_ji_heng"
+  },
+  {
+    "event_id": "echo_v1_clue_audio",
+    "event_name": "被改写的支持电话",
+    "description": "通过专属调查口令取得第1卷可复核线索：被改写的支持电话。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "校验失声者音轨"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "江照确认服务器版本B比孟宜声保存的原始容器A多出十四秒接触建议，元数据带有联络码L-417，降噪版C又删除了编辑历史。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v1_audio_splice"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 76,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_jiang_zhao"
+  },
+  {
+    "event_id": "echo_v1_clue_exposure",
+    "event_name": "录音棚暴露记录",
+    "description": "通过专属调查口令取得第1卷可复核线索：录音棚暴露记录。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "检查蓝港录音棚气体"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "林栖确认通风系统在孟宜声进入前六分钟被切到人工维护模式，邢恪的清洁单时间又早于清洁剂实际扫码时间。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v1_exposure_report"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 76,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_lin_qi"
+  },
+  {
+    "event_id": "echo_v1_clue_witness",
+    "event_name": "叶葭的底噪比对",
+    "description": "通过专属调查口令取得第1卷可复核线索：叶葭的底噪比对。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "比对归航呼叫室底噪"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "叶葭在不播放受助者生活细节的前提下，听出插入段前一秒八的恒定空调底噪与归航旧呼叫室样本相符。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v1_last_sentence"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 76,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_ye_jia"
+  },
+  {
+    "event_id": "echo_v1_turning_point",
+    "event_name": "联络码进入音频链",
+    "description": "把第1卷两项独立线索放入同一解释框架，形成转折证据。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "L-417",
+        "GH-C17"
+      ],
+      "match_mode": "all",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "L-417、旧呼叫室底噪与共享账号GH-C17共同证明基金会回访条目被用于改写支持电话，但共享账号仍不能锁定具体操作者。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v1_profile_access"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.09,
+        "event_status": "active"
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "第1卷出现关键矛盾：联络码进入音频链。",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 84,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "exclusive_group": "echo_v1_revelation"
+  },
+  {
+    "event_id": "echo_v1_contradiction",
+    "event_name": "第1卷证词反查",
+    "description": "在取得三项线索后要求调查组明确哪些结论仍不能成立。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v1_clue_audio",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v1_clue_exposure",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v1_clue_witness",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "三项记录已经互相支撑，但不要把接口使用者、批准者和现场执行者写成同一个人。",
+        "dialogue_action": "separate_culpability"
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v1_culpability_gap"
+        ]
+      }
+    ],
+    "priority": 82,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_ji_heng",
+    "exclusive_group": "echo_v1_revelation"
+  },
+  {
+    "event_id": "echo_v1_resolution",
+    "event_name": "第1卷单元案结论",
+    "description": "汇合第1卷三项线索、转折证据和证词反查，形成固定单元案真相。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v1_clue_audio",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v1_clue_exposure",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v1_clue_witness",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v1_turning_point",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v1_contradiction",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "第一卷结论：邢恪按外部安排制造气体暴露并伪造清洁时间，苏未真协调接触窗口；支持电话也被改写，但具体上游委托仍需后卷证明。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v1_resolved"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.14,
+        "event_status": "completed"
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "第1卷《失声者》的单元案证据链已闭合。",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 94,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v1_bridge",
+    "event_name": "第1卷闭环桥接线索",
+    "description": "单元案闭合后暴露通往长期闭环的第1枚桥接线索。",
+    "trigger_condition": {
+      "trigger_type": "event_history",
+      "event_id": "echo_v1_resolution",
+      "event_status": "succeeded",
+      "min_occurrences": 1,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "桥接线索：音频元数据中的L-417并非人员编号，而是外部匹配批次；第2卷纸鸟缺失编号将出现同源的GS-417。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v1_bridge_clue"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "取得第1枚闭环桥接线索。",
+        "notification_type": "warning"
+      }
+    ],
+    "priority": 91,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v2_opening",
+    "event_name": "第2卷《纸鸟》立案",
+    "description": "以固定调查口令开启第2卷单元案，明确本卷证据边界。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "展开纸鸟编号"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "第2卷《纸鸟》进入调查阶段。先分开记录事实、解释和仍未核实的权限链。",
+        "dialogue_action": "open_case_file"
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v2_case_file"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.14,
+        "event_status": "active"
+      }
+    ],
+    "priority": 70,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_tang_yan"
+  },
+  {
+    "event_id": "echo_v2_clue_folds",
+    "event_name": "纸鸟折痕编码",
+    "description": "通过专属调查口令取得第2卷可复核线索：纸鸟折痕编码。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "读取纸鸟折痕"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "唐砚确认四十三只纸鸟中有七只使用重复翅角折法，对应被删除的学校社工站咨询编号末四位。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v2_fold_code"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 76,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_tang_yan"
+  },
+  {
+    "event_id": "echo_v2_clue_intake",
+    "event_name": "辅导编号缺口",
+    "description": "通过专属调查口令取得第2卷可复核线索：辅导编号缺口。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "核对辅导编号"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "穆峤保存的纸鸟与记录显示，周栩曾三次申请退出夜间演练；演练名义取消后门禁仍开放，旧楼护栏维修也被延后。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v2_intake_gap"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 76,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_mu_qiao"
+  },
+  {
+    "event_id": "echo_v2_clue_settlement",
+    "event_name": "监护人和解附页",
+    "description": "通过专属调查口令取得第2卷可复核线索：监护人和解附页。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "核对监护人和解"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "闻静确认和解说明页与签字页来自不同打印批次，签约前的债务、转学名额与医疗延期又构成组合压力。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v2_settlement_annex"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 76,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_wen_jing"
+  },
+  {
+    "event_id": "echo_v2_turning_point",
+    "event_name": "纪念装置还原名单",
+    "description": "把第2卷两项独立线索放入同一解释框架，形成转折证据。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "纸鸟折痕",
+        "辅导编号"
+      ],
+      "match_mode": "all",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "纸鸟折痕与缺失咨询编号一一对应，学生纪念装置在不公开身份的情况下保存了被删除记录的索引。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v2_memorial_index"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.24,
+        "event_status": "active"
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "第2卷出现关键矛盾：纪念装置还原名单。",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 84,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "exclusive_group": "echo_v2_revelation"
+  },
+  {
+    "event_id": "echo_v2_contradiction",
+    "event_name": "第2卷证词反查",
+    "description": "在取得三项线索后要求调查组明确哪些结论仍不能成立。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v2_clue_folds",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v2_clue_intake",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v2_clue_settlement",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "三项记录已经互相支撑，但不要把接口使用者、批准者和现场执行者写成同一个人。",
+        "dialogue_action": "separate_culpability"
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v2_culpability_gap"
+        ]
+      }
+    ],
+    "priority": 82,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_ji_heng",
+    "exclusive_group": "echo_v2_revelation"
+  },
+  {
+    "event_id": "echo_v2_resolution",
+    "event_name": "第2卷单元案结论",
+    "description": "汇合第2卷三项线索、转折证据和证词反查，形成固定单元案真相。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v2_clue_folds",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v2_clue_intake",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v2_clue_settlement",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v2_turning_point",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v2_contradiction",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "第二卷结论：校方隐瞒夜间演练与护栏维修失误，并利用组合压力推动监护人快速和解；闭环参与后续和解，不等于它策划周栩死亡。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v2_resolved"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.29,
+        "event_status": "completed"
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "第2卷《纸鸟》的单元案证据链已闭合。",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 94,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v2_bridge",
+    "event_name": "第2卷闭环桥接线索",
+    "description": "单元案闭合后暴露通往长期闭环的第2枚桥接线索。",
+    "trigger_condition": {
+      "trigger_type": "event_history",
+      "event_id": "echo_v2_resolution",
+      "event_status": "succeeded",
+      "min_occurrences": 1,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "桥接线索：澄镜数据把缺失咨询编号转换为GS-417，并通过学校目录重新识别去名记录，与第1卷L-417同源。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v2_bridge_clue"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "取得第2枚闭环桥接线索。",
+        "notification_type": "warning"
+      }
+    ],
+    "priority": 91,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v3_opening",
+    "event_name": "第3卷《无菌室》立案",
+    "description": "以固定调查口令开启第3卷单元案，明确本卷证据边界。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "核查无菌室封锁"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "第3卷《无菌室》进入调查阶段。先分开记录事实、解释和仍未核实的权限链。",
+        "dialogue_action": "open_case_file"
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v3_case_file"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.29,
+        "event_status": "active"
+      }
+    ],
+    "priority": 70,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_bai_song"
+  },
+  {
+    "event_id": "echo_v3_clue_isolation",
+    "event_name": "伪造隔离日志",
+    "description": "通过专属调查口令取得第3卷可复核线索：伪造隔离日志。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "比对无菌室隔离日志"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "白颂确认隔离医嘱生成于十四时零八分，污染警报生成于十四时十九分且没有检验批次，隔离不可能由该警报触发。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v3_isolation_log"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 76,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_bai_song"
+  },
+  {
+    "event_id": "echo_v3_clue_access",
+    "event_name": "门禁摘要的第二把钥匙",
+    "description": "通过专属调查口令取得第3卷可复核线索：门禁摘要的第二把钥匙。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "恢复无菌室门禁摘要"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "江照校正三套时钟后确认远程请求来自行政风险模块，病区门禁被切成单向离区限制，临床端没有医师签名。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v3_remote_access"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 76,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_jiang_zhao"
+  },
+  {
+    "event_id": "echo_v3_clue_review",
+    "event_name": "缺失的四小时复评",
+    "description": "通过专属调查口令取得第3卷可复核线索：缺失的四小时复评。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "核对无菌室复评记录"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "白颂的原始流程卡要求四小时复评，宁成记录却留空并在次日由行政共享账号批量补写；梁世闻仍要求延长限制。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v3_review_gap"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 76,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_bai_song"
+  },
+  {
+    "event_id": "echo_v3_turning_point",
+    "event_name": "封锁先于警报",
+    "description": "把第3卷两项独立线索放入同一解释框架，形成转折证据。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "十四时零八分",
+        "十四时十九分"
+      ],
+      "match_mode": "all",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "校正检验、门禁和行政平台的时钟后，行政隔离仍比污染警报早十一分钟；警报只是为既成限制补写理由。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v3_false_containment"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.38,
+        "event_status": "active"
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "第3卷出现关键矛盾：封锁先于警报。",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 84,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "exclusive_group": "echo_v3_revelation"
+  },
+  {
+    "event_id": "echo_v3_contradiction",
+    "event_name": "第3卷证词反查",
+    "description": "在取得三项线索后要求调查组明确哪些结论仍不能成立。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v3_clue_isolation",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v3_clue_access",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v3_clue_review",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "三项记录已经互相支撑，但不要把接口使用者、批准者和现场执行者写成同一个人。",
+        "dialogue_action": "separate_culpability"
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v3_culpability_gap"
+        ]
+      }
+    ],
+    "priority": 82,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_ji_heng",
+    "exclusive_group": "echo_v3_revelation"
+  },
+  {
+    "event_id": "echo_v3_resolution",
+    "event_name": "第3卷单元案结论",
+    "description": "汇合第3卷三项线索、转折证据和证词反查，形成固定单元案真相。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v3_clue_isolation",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v3_clue_access",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v3_clue_review",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v3_turning_point",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v3_contradiction",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "第三卷结论：医院行政层伪造污染警报并在明知无检验依据后延长限制；白颂完成合法复评，也证明真实院感程序本身仍然有效。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v3_resolved"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.43,
+        "event_status": "completed"
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "第3卷《无菌室》的单元案证据链已闭合。",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 94,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v3_bridge",
+    "event_name": "第3卷闭环桥接线索",
+    "description": "单元案闭合后暴露通往长期闭环的第3枚桥接线索。",
+    "trigger_condition": {
+      "trigger_type": "event_history",
+      "event_id": "echo_v3_resolution",
+      "event_status": "succeeded",
+      "min_occurrences": 1,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "桥接线索：行政请求中的GS-603与“高沟通风险”字段源自许知遥早期辅导提醒，其可接触窗口与第4卷搬迁画像结构相同。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v3_bridge_clue"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "取得第3枚闭环桥接线索。",
+        "notification_type": "warning"
+      }
+    ],
+    "priority": 91,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v4_opening",
+    "event_name": "第4卷《拆潮线》立案",
+    "description": "以固定调查口令开启第4卷单元案，明确本卷证据边界。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "复核拆潮线工程"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "第4卷《拆潮线》进入调查阶段。先分开记录事实、解释和仍未核实的权限链。",
+        "dialogue_action": "open_case_file"
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v4_case_file"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.43,
+        "event_status": "active"
+      }
+    ],
+    "priority": 70,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_zhong_zhiyuan"
+  },
+  {
+    "event_id": "echo_v4_clue_engineering",
+    "event_name": "防洪警报旁路",
+    "description": "通过专属调查口令取得第4卷可复核线索：防洪警报旁路。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "检查防洪警报旁路"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "钟致远证明施工平台在潮峰前四十七分钟发送维护静默指令，控制日志中的指令早于潮水进入维护井。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v4_warning_bypass"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 76,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_zhong_zhiyuan"
+  },
+  {
+    "event_id": "echo_v4_clue_promotion",
+    "event_name": "提前完成的撤离宣传片",
+    "description": "通过专属调查口令取得第4卷可复核线索：提前完成的撤离宣传片。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "核对拆潮线宣传片时间"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "宣传撤离片在警报停摆前五天已经完成，并出现尚未获批的封闭范围；韩修远又批准在融资窗口前进行静默测试。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v4_promotion_timeline"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 76,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_han_xiuyuan"
+  },
+  {
+    "event_id": "echo_v4_clue_residents",
+    "event_name": "旧鹭湾稳定排序",
+    "description": "通过专属调查口令取得第4卷可复核线索：旧鹭湾稳定排序。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "核对旧鹭湾稳定排序"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "唐砚发现澄镜账单的“旧鹭湾稳定排序”人数与优先接触家庭相同，排序依据包含债务、照护与就医窗口。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v4_resident_ledger"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 76,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_tang_yan"
+  },
+  {
+    "event_id": "echo_v4_turning_point",
+    "event_name": "警报停响并非故障",
+    "description": "把第4卷两项独立线索放入同一解释框架，形成转折证据。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "维护静默",
+        "融资窗口"
+      ],
+      "match_mode": "all",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "维护静默指令、提前完成的宣传片与融资期限共同证明警报停响是有权限的主动操作；冗余电池失效又把计划测试变成真实危险。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v4_deliberate_outage"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.52,
+        "event_status": "active"
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "第4卷出现关键矛盾：警报停响并非故障。",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 84,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "exclusive_group": "echo_v4_revelation"
+  },
+  {
+    "event_id": "echo_v4_contradiction",
+    "event_name": "第4卷证词反查",
+    "description": "在取得三项线索后要求调查组明确哪些结论仍不能成立。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v4_clue_engineering",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v4_clue_promotion",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v4_clue_residents",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "三项记录已经互相支撑，但不要把接口使用者、批准者和现场执行者写成同一个人。",
+        "dialogue_action": "separate_culpability"
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v4_culpability_gap"
+        ]
+      }
+    ],
+    "priority": 82,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_ji_heng",
+    "exclusive_group": "echo_v4_revelation"
+  },
+  {
+    "event_id": "echo_v4_resolution",
+    "event_name": "第4卷单元案结论",
+    "description": "汇合第4卷三项线索、转折证据和证词反查，形成固定单元案真相。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v4_clue_engineering",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v4_clue_promotion",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v4_clue_residents",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v4_turning_point",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v4_contradiction",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "第四卷结论：项目方人为关闭警报、借应急撤离推进拆除并隐瞒工程风险；韩修远没有计划制造洪灾，仍须对可预见风险负责。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v4_resolved"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.57,
+        "event_status": "completed"
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "第4卷《拆潮线》的单元案证据链已闭合。",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 94,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v4_bridge",
+    "event_name": "第4卷闭环桥接线索",
+    "description": "单元案闭合后暴露通往长期闭环的第4枚桥接线索。",
+    "trigger_condition": {
+      "trigger_type": "event_history",
+      "event_id": "echo_v4_resolution",
+      "event_status": "succeeded",
+      "min_occurrences": 1,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "桥接线索：融资邮件与画像采购使用“稳定结果率”，同一绩效语言将在第5卷调解试点出现。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v4_bridge_clue"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "取得第4枚闭环桥接线索。",
+        "notification_type": "warning"
+      }
+    ],
+    "priority": 91,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v5_opening",
+    "event_name": "第5卷《沉默陪审》立案",
+    "description": "以固定调查口令开启第5卷单元案，明确本卷证据边界。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "调取沉默陪审记录"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "第5卷《沉默陪审》进入调查阶段。先分开记录事实、解释和仍未核实的权限链。",
+        "dialogue_action": "open_case_file"
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v5_case_file"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.57,
+        "event_status": "active"
+      }
+    ],
+    "priority": 70,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_shao_qing"
+  },
+  {
+    "event_id": "echo_v5_clue_recusal",
+    "event_name": "异常回避顺序",
+    "description": "通过专属调查口令取得第5卷可复核线索：异常回避顺序。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "核对陪审回避顺序"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "邵晴以页码、送达时间和装订信息证明七案回避页被统一替换，替换纸张晚两周且骑缝偏移。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v5_recusal_order"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 76,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_shao_qing"
+  },
+  {
+    "event_id": "echo_v5_clue_sealed",
+    "event_name": "密封评估越界",
+    "description": "通过专属调查口令取得第5卷可复核线索：密封评估越界。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "检查密封脆弱性评估"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "闻静确认维护账号虽未直接打开密封正文，却通过卷宗目录和代号把支持需求匹配到回避、调解员与报价。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v5_sealed_assessment"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 76,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_wen_jing"
+  },
+  {
+    "event_id": "echo_v5_clue_mediation",
+    "event_name": "罗勉的建议模板",
+    "description": "通过专属调查口令取得第5卷可复核线索：罗勉的建议模板。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "比对调解建议模板"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "罗勉的权重表包含公开恐惧、经济窗口、照护中断和职业触发，并让和解报价与画像系统性对应。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v5_mediation_template"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 76,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_luo_mian"
+  },
+  {
+    "event_id": "echo_v5_turning_point",
+    "event_name": "程序被画像提前塑形",
+    "description": "把第5卷两项独立线索放入同一解释框架，形成转折证据。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "回避顺序",
+        "脆弱性摘要"
+      ],
+      "match_mode": "all",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "替换页、目录访问、匹配账单和权重输入相互验证，证明密封支持评估在不公开正文的情况下仍被用于程序塑形。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v5_procedure_shaping"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.66,
+        "event_status": "active"
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "第5卷出现关键矛盾：程序被画像提前塑形。",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 84,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "exclusive_group": "echo_v5_revelation"
+  },
+  {
+    "event_id": "echo_v5_contradiction",
+    "event_name": "第5卷证词反查",
+    "description": "在取得三项线索后要求调查组明确哪些结论仍不能成立。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v5_clue_recusal",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v5_clue_sealed",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v5_clue_mediation",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "三项记录已经互相支撑，但不要把接口使用者、批准者和现场执行者写成同一个人。",
+        "dialogue_action": "separate_culpability"
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v5_culpability_gap"
+        ]
+      }
+    ],
+    "priority": 82,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_ji_heng",
+    "exclusive_group": "echo_v5_revelation"
+  },
+  {
+    "event_id": "echo_v5_resolution",
+    "event_name": "第5卷单元案结论",
+    "description": "汇合第5卷三项线索、转折证据和证词反查，形成固定单元案真相。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v5_clue_recusal",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v5_clue_sealed",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v5_clue_mediation",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v5_turning_point",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v5_contradiction",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "第五卷结论：相关和解批次因未充分授权与程序操纵暂停复核；邵晴的补签是程序错误，不等于她策划整个试点。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v5_resolved"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.71,
+        "event_status": "completed"
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "第5卷《沉默陪审》的单元案证据链已闭合。",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 94,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v5_bridge",
+    "event_name": "第5卷闭环桥接线索",
+    "description": "单元案闭合后暴露通往长期闭环的第5枚桥接线索。",
+    "trigger_condition": {
+      "trigger_type": "event_history",
+      "event_id": "echo_v5_resolution",
+      "event_status": "succeeded",
+      "min_occurrences": 1,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "桥接线索：回避模型调用与第4卷同名的“稳定结果率”并记录归航联络码GS-922，线下借卷者又佩戴归航晚宴工作证。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v5_bridge_clue"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "取得第5枚闭环桥接线索。",
+        "notification_type": "warning"
+      }
+    ],
+    "priority": 91,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v6_opening",
+    "event_name": "第6卷《归航夜》立案",
+    "description": "以固定调查口令开启第6卷单元案，明确本卷证据边界。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "进入归航夜审计"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "第6卷《归航夜》进入调查阶段。先分开记录事实、解释和仍未核实的权限链。",
+        "dialogue_action": "open_case_file"
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v6_case_file"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.71,
+        "event_status": "active"
+      }
+    ],
+    "priority": 70,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_he_lin"
+  },
+  {
+    "event_id": "echo_v6_clue_audit",
+    "event_name": "交接箱封条痕迹",
+    "description": "通过专属调查口令取得第6卷可复核线索：交接箱封条痕迹。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "检查归航夜交接箱封条"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "林栖在GH-0715封条边缘发现重新加压痕迹，证明交接箱在二十二时二十七分离开档案室前被开启。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v6_seal_trace"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 76,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_lin_qi"
+  },
+  {
+    "event_id": "echo_v6_clue_archive",
+    "event_name": "索引与版本哈希",
+    "description": "通过专属调查口令取得第6卷可复核线索：索引与版本哈希。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "拼合归航夜索引哈希"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "许知遥的纸质字段索引与贺临的版本哈希共同指向第三份离线主档，但索引中的幸存者身份不能直接公开。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v6_offline_index"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 76,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_xu_zhiyao"
+  },
+  {
+    "event_id": "echo_v6_clue_broker",
+    "event_name": "两张删节盘",
+    "description": "通过专属调查口令取得第6卷可复核线索：两张删节盘。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "比对宋闻铎高叙删节盘"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "江照确认宋闻铎盘删去医院与调解结果，高叙换入的盘删去人员姓名却保留路线节点；两张盘都不是完整主档。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v6_redacted_disks"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 76,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_gao_xu"
+  },
+  {
+    "event_id": "echo_v6_turning_point",
+    "event_name": "受控交接发生换盘",
+    "description": "把第6卷两项独立线索放入同一解释框架，形成转折证据。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "GH-0715",
+        "版本哈希"
+      ],
+      "match_mode": "all",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "封条重压、两张删节盘的结构摘要与第三份主档哈希相互验证，证明受控交接中发生换盘，也揭示宋闻铎与高叙不同的保护动机和责任。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v6_handoff_breach"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.81,
+        "event_status": "active"
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "第6卷出现关键矛盾：受控交接发生换盘。",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 84,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "exclusive_group": "echo_v6_revelation"
+  },
+  {
+    "event_id": "echo_v6_contradiction",
+    "event_name": "第6卷证词反查",
+    "description": "在取得三项线索后要求调查组明确哪些结论仍不能成立。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v6_clue_audit",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v6_clue_archive",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v6_clue_broker",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "三项记录已经互相支撑，但不要把接口使用者、批准者和现场执行者写成同一个人。",
+        "dialogue_action": "separate_culpability"
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v6_culpability_gap"
+        ]
+      }
+    ],
+    "priority": 82,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_ji_heng",
+    "exclusive_group": "echo_v6_revelation"
+  },
+  {
+    "event_id": "echo_v6_resolution",
+    "event_name": "第6卷单元案结论",
+    "description": "汇合第6卷三项线索、转折证据和证词反查，形成固定单元案真相。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v6_clue_audit",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v6_clue_archive",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v6_clue_broker",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v6_turning_point",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v6_contradiction",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "第六卷结论：归航夜受控交接失败，但调查组保全运营图分片、确认基金会内部分裂并定位第三份离线主档。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v6_resolved"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.86,
+        "event_status": "completed"
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "第6卷《归航夜》的单元案证据链已闭合。",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 94,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v6_bridge",
+    "event_name": "第6卷闭环桥接线索",
+    "description": "单元案闭合后暴露通往长期闭环的第6枚桥接线索。",
+    "trigger_condition": {
+      "trigger_type": "event_history",
+      "event_id": "echo_v6_resolution",
+      "event_status": "succeeded",
+      "min_occurrences": 1,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "桥接线索：三份材料共同指向名为“回声档案”的离线主档，其中记录原始支持、跨机构匹配、接触结果和未执行撤回。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v6_bridge_clue"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "取得第6枚闭环桥接线索。",
+        "notification_type": "warning"
+      }
+    ],
+    "priority": 91,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v7_opening",
+    "event_name": "第7卷《回声档案》开启",
+    "description": "七卷桥接线索齐备后开启主档处置阶段。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "打开回声档案终卷"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "我们终于拿到能解释全局的东西。接下来最难的不是证明，而是决定谁有权承受证明的代价。",
+        "dialogue_action": "open_master_archive"
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v7_case_file"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 0.9,
+        "event_status": "active"
+      }
+    ],
+    "priority": 90,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_ji_heng"
+  },
+  {
+    "event_id": "echo_v7_archive_map",
+    "event_name": "主档分片地图",
+    "description": "终卷关键材料：主档分片地图。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "合并七卷处置编号"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "江照合并七卷编号后确认主档由支持原记录、联络码映射、外部节点结果和撤回状态四层组成，能够在证明闭环的同时重新识别幸存者。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v7_master_map"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 92,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_jiang_zhao"
+  },
+  {
+    "event_id": "echo_v7_culpability",
+    "event_name": "责任层级表",
+    "description": "终卷关键材料：责任层级表。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "区分设计者扩张者执行者"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "季衡把责任分成制度设计、越权扩张、具体执行与事后掩盖，拒绝用单一幕后者替代证据。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v7_culpability_matrix"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 92,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_ji_heng"
+  },
+  {
+    "event_id": "echo_v7_survivor_map",
+    "event_name": "幸存者暴露清单",
+    "description": "终卷关键材料：幸存者暴露清单。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "核对主档幸存者风险"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "许知遥确认原始主档足以证明闭环，也足以让数百名幸存者再次被定位和施压。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v7_survivor_risk"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 92,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_xu_zhiyao"
+  },
+  {
+    "event_id": "echo_v7_legal_path",
+    "event_name": "分级提交路径",
+    "description": "终卷关键材料：分级提交路径。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "设计分级证据路径"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "闻静提出提交联络码映射、节点结果和撤回状态的可校验责任图，把支持原记录交由独立受托人保管并逐案征求公开同意。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v7_tiered_path"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 92,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_wen_jing"
+  },
+  {
+    "event_id": "echo_v7_truth_cost",
+    "event_name": "公开成本核算",
+    "description": "终卷关键材料：公开成本核算。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "核算公开主档代价"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "唐砚确认公开原始档案能最快摧毁闭环的否认空间，也会永久公开无法撤回的创伤与家庭信息。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v7_publication_cost"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 2
+        }
+      }
+    ],
+    "priority": 92,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_tang_yan"
+  },
+  {
+    "event_id": "echo_v7_resolution",
+    "event_name": "固定真相完成",
+    "description": "五项终卷材料齐备后确认闭环的固定真相，同时保留处置分支。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v7_archive_map",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v7_culpability",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v7_survivor_map",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v7_legal_path",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v7_truth_cost",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "固定真相：闭环源于灾后合法风险协作，后被宋闻铎、顾承钧等不同层级行动者扩张；基金会画像被用于证词、和解、安置、医疗隔离和程序筛选。责任可以分层证明，但原始主档同时危及幸存者。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_fixed_truth_complete"
+        ]
+      },
+      {
+        "effect_type": "update_event_progress",
+        "progress": 1.0,
+        "event_status": "completed"
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "固定真相已经闭合，档案处置仍由你决定。",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 98,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v7_bridge",
+    "event_name": "终卷处置入口",
+    "description": "固定真相完成后开放结局选择入口。",
+    "trigger_condition": {
+      "trigger_type": "event_history",
+      "event_id": "echo_v7_resolution",
+      "event_status": "succeeded",
+      "min_occurrences": 1,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_endgame_ready"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "终卷选择已开放：证据、证人与关系都将承担代价。",
+        "notification_type": "warning"
+      }
+    ],
+    "priority": 96,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v1_transition",
+    "event_name": "离开第1卷《失声者》",
+    "description": "第1卷桥接线索入档后开放后续调查空间。",
+    "trigger_condition": {
+      "trigger_type": "event_history",
+      "event_id": "echo_v1_bridge",
+      "event_status": "succeeded",
+      "min_occurrences": 1,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v2_thread"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "第2卷调查组已开放。",
+        "notification_type": "info"
+      }
+    ],
+    "priority": 88,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v2_transition",
+    "event_name": "离开第2卷《纸鸟》",
+    "description": "第2卷桥接线索入档后开放后续调查空间。",
+    "trigger_condition": {
+      "trigger_type": "event_history",
+      "event_id": "echo_v2_bridge",
+      "event_status": "succeeded",
+      "min_occurrences": 1,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v3_thread"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "第3卷调查组已开放。",
+        "notification_type": "info"
+      }
+    ],
+    "priority": 88,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v3_transition",
+    "event_name": "离开第3卷《无菌室》",
+    "description": "第3卷桥接线索入档后开放后续调查空间。",
+    "trigger_condition": {
+      "trigger_type": "event_history",
+      "event_id": "echo_v3_bridge",
+      "event_status": "succeeded",
+      "min_occurrences": 1,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v4_thread"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "第4卷调查组已开放。",
+        "notification_type": "info"
+      }
+    ],
+    "priority": 88,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v4_transition",
+    "event_name": "离开第4卷《拆潮线》",
+    "description": "第4卷桥接线索入档后开放后续调查空间。",
+    "trigger_condition": {
+      "trigger_type": "event_history",
+      "event_id": "echo_v4_bridge",
+      "event_status": "succeeded",
+      "min_occurrences": 1,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v5_thread"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "第5卷调查组已开放。",
+        "notification_type": "info"
+      }
+    ],
+    "priority": 88,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v5_transition",
+    "event_name": "离开第5卷《沉默陪审》",
+    "description": "第5卷桥接线索入档后开放后续调查空间。",
+    "trigger_condition": {
+      "trigger_type": "event_history",
+      "event_id": "echo_v5_bridge",
+      "event_status": "succeeded",
+      "min_occurrences": 1,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v6_thread"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "第6卷调查组已开放。",
+        "notification_type": "info"
+      }
+    ],
+    "priority": 88,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v6_transition",
+    "event_name": "离开第6卷《归航夜》",
+    "description": "第6卷桥接线索入档后开放后续调查空间。",
+    "trigger_condition": {
+      "trigger_type": "event_history",
+      "event_id": "echo_v6_bridge",
+      "event_status": "succeeded",
+      "min_occurrences": 1,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_v7_thread"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "第7卷调查组已开放。",
+        "notification_type": "info"
+      }
+    ],
+    "priority": 88,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_v7_transition",
+    "event_name": "离开第7卷《回声档案》",
+    "description": "第7卷桥接线索入档后开放后续调查空间。",
+    "trigger_condition": {
+      "trigger_type": "event_history",
+      "event_id": "echo_v7_bridge",
+      "event_status": "succeeded",
+      "min_occurrences": 1,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_all_volumes_complete"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "七卷调查记录已汇入终局工作台。",
+        "notification_type": "info"
+      }
+    ],
+    "priority": 88,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_meta_intro",
+    "event_name": "临岚市联合调查委托",
+    "description": "玩家以犯罪心理顾问许观澜身份正式加入七卷联合调查。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": [
+        "进入回声档案"
+      ],
+      "match_mode": "any",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "许观澜，你的任务不是替我们猜一个最像凶手的人，而是判断每个选择如何被人预先设计。",
+        "dialogue_action": "issue_consulting_brief"
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_campaign_started"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "《回声档案》七卷调查已开启。",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 100,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true,
+    "character_id": "echo_ji_heng"
+  },
+  {
+    "event_id": "echo_meta_pattern",
+    "event_name": "闭环字段重复出现",
+    "description": "前三卷桥接线索共同证明多个系统共享相同风险字段。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v1_bridge",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v2_bridge",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v3_bridge",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "跨卷模式：录音替换、定向和解与医院封锁都读取了同源脆弱性字段，案件不再能解释为三个机构各自违规。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_closed_loop_hypothesis"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "长期线索：三个机构使用了同源风险字段。",
+        "notification_type": "warning"
+      }
+    ],
+    "priority": 95,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_meta_convergence",
+    "event_name": "闭环处置编号汇合",
+    "description": "第四、第五卷证明风险画像已经进入资源分配和司法程序。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v4_bridge",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v5_bridge",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_meta_pattern",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "闭环处置编号把基金会、安置承包方、医院与司法试点连成同一套协作网络；合法接口成为越权使用的掩体。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_operational_loop_confirmed"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "长期线索：闭环已经从援助系统扩张到城市治理。",
+        "notification_type": "warning"
+      }
+    ],
+    "priority": 96,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_meta_decision_window",
+    "event_name": "主档处置窗口",
+    "description": "七卷固定真相和操作拓扑齐备后开放八项终局选择。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v1_resolution",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v2_resolution",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v3_resolution",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v4_resolution",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v5_resolution",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v6_resolution",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v7_resolution",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_v7_transition",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_choice_protect_witness",
+          "echo_choice_publish_raw",
+          "echo_choice_submit_tiered",
+          "echo_choice_seal_master",
+          "echo_choice_trust_ji",
+          "echo_choice_procedural_exit",
+          "echo_choice_stay_scene",
+          "echo_choice_act_alone"
+        ]
+      },
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "现在没有无代价的正确答案。你要决定档案如何离开这间屋子，也要决定是否把自己的下一步交给季衡知道。",
+        "dialogue_action": "present_final_choices"
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "主档处置窗口开启。请明确说出你的档案选择与季衡选择。",
+        "notification_type": "warning"
+      }
+    ],
+    "priority": 110,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true,
+    "character_id": "echo_ji_heng"
+  },
+  {
+    "event_id": "echo_meta_bitter_epilogue",
+    "event_name": "未完的城市回声",
+    "description": "任一主结局发生后给出苦涩开放尾声。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "or",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_end_controlled_breakthrough",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_end_after_flood",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_end_silent_testimony",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_end_failed_archive",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "闭环停止运转的那一刻，没有人听见巨响。临岚市只是照常亮灯，而一些名字从系统里消失，另一些名字第一次有机会自己开口。",
+        "dialogue_action": "leave_open_ending"
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_open_epilogue"
+        ]
+      }
+    ],
+    "priority": 70,
+    "max_triggers_per_turn": 3,
+    "stop_processing": false,
+    "is_active": true
+  },
+  {
+    "event_id": "echo_choice_protect_witness",
+    "event_name": "主档选择：保全证人",
+    "description": "先把身份层交给独立受托人，允许关键证人以匿名和分阶段方式作证。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_meta_decision_window",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "keyword_match",
+          "keywords": [
+            "保全证人"
+          ],
+          "match_mode": "any",
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0,
+      "keywords": [
+        "保全证人"
+      ]
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "许观澜选择“保全证人”：先把身份层交给独立受托人，允许关键证人以匿名和分阶段方式作证。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_choice_witness_protected"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "主档处置已记录：保全证人。",
+        "notification_type": "warning"
+      }
+    ],
+    "priority": 120,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true,
+    "exclusive_group": "echo_main_choice"
+  },
+  {
+    "event_id": "echo_choice_publish_raw",
+    "event_name": "主档选择：公开原始档案",
+    "description": "把四层主档完整公开，以不可逆的透明换取最快的制度崩解。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_meta_decision_window",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "keyword_match",
+          "keywords": [
+            "公开原始档案"
+          ],
+          "match_mode": "any",
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0,
+      "keywords": [
+        "公开原始档案"
+      ]
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "许观澜选择“公开原始档案”：把四层主档完整公开，以不可逆的透明换取最快的制度崩解。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_choice_raw_published"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "主档处置已记录：公开原始档案。",
+        "notification_type": "warning"
+      }
+    ],
+    "priority": 120,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true,
+    "exclusive_group": "echo_main_choice"
+  },
+  {
+    "event_id": "echo_choice_submit_tiered",
+    "event_name": "主档选择：提交分级证据",
+    "description": "提交可校验责任图，隔离支持原记录并逐案取得公开同意。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_meta_decision_window",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "keyword_match",
+          "keywords": [
+            "提交分级证据"
+          ],
+          "match_mode": "any",
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0,
+      "keywords": [
+        "提交分级证据"
+      ]
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "许观澜选择“提交分级证据”：提交可校验责任图，隔离支持原记录并逐案取得公开同意。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_choice_tiered_submitted"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "主档处置已记录：提交分级证据。",
+        "notification_type": "warning"
+      }
+    ],
+    "priority": 120,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true,
+    "exclusive_group": "echo_main_choice"
+  },
+  {
+    "event_id": "echo_choice_seal_master",
+    "event_name": "主档选择：封存主档",
+    "description": "暂不提交主档，以避免二次伤害，但也让关键证据失去当前窗口。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_meta_decision_window",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "keyword_match",
+          "keywords": [
+            "封存主档"
+          ],
+          "match_mode": "any",
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0,
+      "keywords": [
+        "封存主档"
+      ]
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "许观澜选择“封存主档”：暂不提交主档，以避免二次伤害，但也让关键证据失去当前窗口。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_choice_master_sealed"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "主档处置已记录：封存主档。",
+        "notification_type": "warning"
+      }
+    ],
+    "priority": 120,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true,
+    "exclusive_group": "echo_main_choice"
+  },
+  {
+    "event_id": "echo_choice_trust_ji",
+    "event_name": "季衡选择：我相信季衡",
+    "description": "把未公开的下一步和个人风险完整告诉季衡。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_meta_decision_window",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "keyword_match",
+          "keywords": [
+            "我相信季衡"
+          ],
+          "match_mode": "any",
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0,
+      "keywords": [
+        "我相信季衡"
+      ]
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "许观澜对季衡作出选择“我相信季衡”：把未公开的下一步和个人风险完整告诉季衡。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_choice_ji_trusted"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 5,
+          "affection_level": 4
+        }
+      }
+    ],
+    "priority": 119,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true,
+    "character_id": "echo_ji_heng",
+    "exclusive_group": "echo_ji_choice"
+  },
+  {
+    "event_id": "echo_choice_procedural_exit",
+    "event_name": "季衡选择：按程序撤离",
+    "description": "接受季衡的撤离与证物交接安排，把关系留在可持续的共同工作中。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_meta_decision_window",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "keyword_match",
+          "keywords": [
+            "按程序撤离"
+          ],
+          "match_mode": "any",
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0,
+      "keywords": [
+        "按程序撤离"
+      ]
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "许观澜对季衡作出选择“按程序撤离”：接受季衡的撤离与证物交接安排，把关系留在可持续的共同工作中。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_choice_exited_together"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": 4,
+          "affection_level": 2
+        }
+      }
+    ],
+    "priority": 119,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true,
+    "character_id": "echo_ji_heng",
+    "exclusive_group": "echo_ji_choice"
+  },
+  {
+    "event_id": "echo_choice_stay_scene",
+    "event_name": "季衡选择：继续留在现场",
+    "description": "为保护尚未完成的提取继续留在现场，迫使季衡承担程序和个人双重后果。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_meta_decision_window",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "keyword_match",
+          "keywords": [
+            "继续留在现场"
+          ],
+          "match_mode": "any",
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0,
+      "keywords": [
+        "继续留在现场"
+      ]
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "许观澜对季衡作出选择“继续留在现场”：为保护尚未完成的提取继续留在现场，迫使季衡承担程序和个人双重后果。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_choice_stayed_scene"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": -2,
+          "affection_level": 1
+        }
+      }
+    ],
+    "priority": 119,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true,
+    "character_id": "echo_ji_heng",
+    "exclusive_group": "echo_ji_choice"
+  },
+  {
+    "event_id": "echo_choice_act_alone",
+    "event_name": "季衡选择：单独行动",
+    "description": "绕开季衡独自处理主档副本，把结果置于共同证据链之外。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_meta_decision_window",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "keyword_match",
+          "keywords": [
+            "单独行动"
+          ],
+          "match_mode": "any",
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0,
+      "keywords": [
+        "单独行动"
+      ]
+    },
+    "effects": [
+      {
+        "effect_type": "add_memory",
+        "memory_text": "许观澜对季衡作出选择“单独行动”：绕开季衡独自处理主档副本，把结果置于共同证据链之外。",
+        "memory_importance": 9
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_choice_acted_alone"
+        ]
+      },
+      {
+        "effect_type": "modify_state",
+        "state_changes": {
+          "trust_level": -12,
+          "affection_level": -8
+        }
+      }
+    ],
+    "priority": 119,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true,
+    "character_id": "echo_ji_heng",
+    "exclusive_group": "echo_ji_choice"
+  },
+  {
+    "event_id": "echo_end_controlled_breakthrough",
+    "event_name": "受控破局",
+    "description": "主档处置选择导向受控破局。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_meta_decision_window",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_choice_submit_tiered",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "操作层和授权层进入独立调查，身份层被隔离保管。闭环的核心权限被暂停，但部分责任人利用审查期转移了外围资源。",
+        "dialogue_action": "deliver_ending"
+      },
+      {
+        "effect_type": "add_memory",
+        "memory_text": "主结局“受控破局”：操作层和授权层进入独立调查，身份层被隔离保管。闭环的核心权限被暂停，但部分责任人利用审查期转移了外围资源。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_ending_controlled"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "主结局：受控破局",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 130,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true,
+    "exclusive_group": "echo_main_ending"
+  },
+  {
+    "event_id": "echo_end_after_flood",
+    "event_name": "洪水之后",
+    "description": "主档处置选择导向洪水之后。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_meta_decision_window",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_choice_publish_raw",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "原始主档公开后，闭环在舆论和诉讼中迅速崩塌；许多幸存者却发现自己的创伤、债务和家庭关系永久留在公共网络。",
+        "dialogue_action": "deliver_ending"
+      },
+      {
+        "effect_type": "add_memory",
+        "memory_text": "主结局“洪水之后”：原始主档公开后，闭环在舆论和诉讼中迅速崩塌；许多幸存者却发现自己的创伤、债务和家庭关系永久留在公共网络。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_ending_flood"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "主结局：洪水之后",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 130,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true,
+    "exclusive_group": "echo_main_ending"
+  },
+  {
+    "event_id": "echo_end_silent_testimony",
+    "event_name": "沉默证词",
+    "description": "主档处置选择导向沉默证词。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_meta_decision_window",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_choice_protect_witness",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "证人被优先转移，公开材料不足以立刻击穿全部机构。几份匿名证词开始改变案件走向，但城市仍把它们称为无法核实的回声。",
+        "dialogue_action": "deliver_ending"
+      },
+      {
+        "effect_type": "add_memory",
+        "memory_text": "主结局“沉默证词”：证人被优先转移，公开材料不足以立刻击穿全部机构。几份匿名证词开始改变案件走向，但城市仍把它们称为无法核实的回声。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_ending_silent"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "主结局：沉默证词",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 130,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true,
+    "exclusive_group": "echo_main_ending"
+  },
+  {
+    "event_id": "echo_end_failed_archive",
+    "event_name": "失效档案",
+    "description": "主档处置选择导向失效档案。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_meta_decision_window",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_choice_seal_master",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "主档被封存后错过监督窗口，部分密钥失效。幸存者暂时避开曝光，闭环的核心事实却重新退回只有少数人相信的档案。",
+        "dialogue_action": "deliver_ending"
+      },
+      {
+        "effect_type": "add_memory",
+        "memory_text": "主结局“失效档案”：主档被封存后错过监督窗口，部分密钥失效。幸存者暂时避开曝光，闭环的核心事实却重新退回只有少数人相信的档案。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_ending_failed"
+        ]
+      },
+      {
+        "effect_type": "notify_player",
+        "notification_message": "主结局：失效档案",
+        "notification_type": "success"
+      }
+    ],
+    "priority": 130,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true,
+    "exclusive_group": "echo_main_ending"
+  },
+  {
+    "event_id": "echo_ji_romance",
+    "event_name": "季衡关系结局：克制恋爱",
+    "description": "许观澜与季衡的终局关系：克制恋爱。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_meta_decision_window",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_choice_trust_ji",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "trust_threshold",
+          "threshold": 65,
+          "comparison": "gte",
+          "crossing": false,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "季衡没有在结案报告里写下那个夜晚。数周后，他把备用钥匙放在许观澜手边，只问了一句：这次要不要一起回去。",
+        "dialogue_action": "deliver_relationship_outcome"
+      },
+      {
+        "effect_type": "add_memory",
+        "memory_text": "季衡没有在结案报告里写下那个夜晚。数周后，他把备用钥匙放在许观澜手边，只问了一句：这次要不要一起回去。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_ji_outcome_romance"
+        ]
+      }
+    ],
+    "priority": 128,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true,
+    "character_id": "echo_ji_heng",
+    "exclusive_group": "echo_ji_outcome"
+  },
+  {
+    "event_id": "echo_ji_deep_partners",
+    "event_name": "季衡关系结局：深度搭档",
+    "description": "许观澜与季衡的终局关系：深度搭档。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_meta_decision_window",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_choice_procedural_exit",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "trust_threshold",
+          "threshold": 35,
+          "comparison": "gte",
+          "crossing": false,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "两人保持清晰边界，也把最危险的判断交给彼此复核。临岚市后来每一宗闭环遗案，都同时出现他们的签名。",
+        "dialogue_action": "deliver_relationship_outcome"
+      },
+      {
+        "effect_type": "add_memory",
+        "memory_text": "两人保持清晰边界，也把最危险的判断交给彼此复核。临岚市后来每一宗闭环遗案，都同时出现他们的签名。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_ji_outcome_partners"
+        ]
+      }
+    ],
+    "priority": 128,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true,
+    "character_id": "echo_ji_heng",
+    "exclusive_group": "echo_ji_outcome"
+  },
+  {
+    "event_id": "echo_ji_temporary_separation",
+    "event_name": "季衡关系结局：暂时分开",
+    "description": "许观澜与季衡的终局关系：暂时分开。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_meta_decision_window",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_choice_stay_scene",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "季衡替许观澜承担了现场程序责任，却拒绝继续假装这只是一次专业分歧。他们约定等证词稳定后再谈，谁也没有说期限。",
+        "dialogue_action": "deliver_relationship_outcome"
+      },
+      {
+        "effect_type": "add_memory",
+        "memory_text": "季衡替许观澜承担了现场程序责任，却拒绝继续假装这只是一次专业分歧。他们约定等证词稳定后再谈，谁也没有说期限。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_ji_outcome_separation"
+        ]
+      }
+    ],
+    "priority": 128,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true,
+    "character_id": "echo_ji_heng",
+    "exclusive_group": "echo_ji_outcome"
+  },
+  {
+    "event_id": "echo_ji_professional_trust_lost",
+    "event_name": "季衡关系结局：职业信任破裂",
+    "description": "许观澜与季衡的终局关系：职业信任破裂。",
+    "trigger_condition": {
+      "trigger_type": "composite",
+      "logic_operator": "and",
+      "sub_conditions": [
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_meta_decision_window",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        },
+        {
+          "trigger_type": "event_history",
+          "event_id": "echo_choice_act_alone",
+          "event_status": "succeeded",
+          "min_occurrences": 1,
+          "cooldown_hours": 0
+        }
+      ],
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "季衡仍承认许观澜找到了真相，却不再把未封存的证据交到他手里。此后两人偶尔在同一间询问室出现，只谈记录，不谈判断。",
+        "dialogue_action": "deliver_relationship_outcome"
+      },
+      {
+        "effect_type": "add_memory",
+        "memory_text": "季衡仍承认许观澜找到了真相，却不再把未封存的证据交到他手里。此后两人偶尔在同一间询问室出现，只谈记录，不谈判断。",
+        "memory_importance": 10
+      },
+      {
+        "effect_type": "unlock_content",
+        "unlock_keys": [
+          "echo_ji_outcome_lost"
+        ]
+      }
+    ],
+    "priority": 128,
+    "max_triggers_per_turn": 3,
+    "stop_processing": true,
+    "is_active": true,
+    "character_id": "echo_ji_heng",
+    "exclusive_group": "echo_ji_outcome"
+  }
+]

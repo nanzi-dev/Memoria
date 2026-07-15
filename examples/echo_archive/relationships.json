@@ -1,0 +1,506 @@
+[
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_ji_heng",
+    "relationship_type": "专业尊重与克制张力",
+    "affinity": 32,
+    "description": "季衡认可许观澜的风险判断，也警惕顾问角色越过侦查权限；亲密发展完全取决于玩家选择。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_lin_qi",
+    "relationship_type": "分析与物证互校",
+    "affinity": 24,
+    "description": "林栖要求许观澜把心理解释标明事实基础，许观澜尊重她不提前定性的习惯。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_tang_yan",
+    "relationship_type": "互相试探的信息伙伴",
+    "affinity": 18,
+    "description": "唐砚需要专业解释压力机制，许观澜要求她把公开风险写进报道计划。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_jiang_zhao",
+    "relationship_type": "跨专业复核伙伴",
+    "affinity": 27,
+    "description": "江照解释系统边界，许观澜识别字段如何被转化为接触策略。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_wen_jing",
+    "relationship_type": "证人保护同盟",
+    "affinity": 36,
+    "description": "两人都强调授权与退出权，只在紧急披露尺度上存在分歧。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_cheng_shu",
+    "relationship_type": "现场风险搭档",
+    "affinity": 21,
+    "description": "程述希望得到明确行动建议，许观澜提醒他保护不能替证人决定。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_xu_zhiyao",
+    "relationship_type": "疏远的姐弟",
+    "affinity": 12,
+    "description": "彼此关心但长期回避基金会旧档案与许知遥的责任，调查迫使两人重新谈清边界。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_shen_man",
+    "relationship_type": "受观察的专业合作",
+    "affinity": 14,
+    "description": "沈曼只有确认许观澜不会把支持网络当证据仓库后才愿意合作。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_he_lin",
+    "relationship_type": "责任复盘伙伴",
+    "affinity": 9,
+    "description": "贺临愿意提供版本目录，但要求许观澜不要把制度选择简化为个人性格。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_ye_jia",
+    "relationship_type": "沉默证词协作者",
+    "affinity": 30,
+    "description": "叶葭认可许观澜尊重非口语表达，仍会限制他接触孟宜声的训练记录。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_mu_qiao",
+    "relationship_type": "校园支持协作",
+    "affinity": 23,
+    "description": "穆峤相信许观澜能识别胁迫，但担心学生被贴上心理标签。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_bai_song",
+    "relationship_type": "专业边界盟友",
+    "affinity": 25,
+    "description": "白颂欢迎压力分析，却明确心理意见不能替代感染控制判断。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_zhong_zhiyuan",
+    "relationship_type": "压力结构与工程事实互证",
+    "affinity": 17,
+    "description": "钟致远解释警报结构，许观澜帮助他区分家庭杠杆与直接收买。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_shao_qing",
+    "relationship_type": "谨慎的程序证人关系",
+    "affinity": 20,
+    "description": "邵晴担心焦虑被误判为说谎，许观澜承诺只评价压力条件。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_song_wenduo",
+    "relationship_type": "理念对抗与有限理解",
+    "affinity": -24,
+    "description": "宋闻铎试图让许观澜接受受控破局，许观澜承认早期制度价值但拒绝为滥用背书。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_gu_chengjun",
+    "relationship_type": "责任分层谈判",
+    "affinity": -12,
+    "description": "顾承钧希望以分级证据换取有序交接，许观澜质疑其为何长期只修补个案。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_liang_shiwen",
+    "relationship_type": "专业边界冲突",
+    "affinity": -35,
+    "description": "梁世闻试图用风险语言合理化无依据隔离，许观澜拒绝把心理脆弱等同管理许可。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_han_xiuyuan",
+    "relationship_type": "利益对手",
+    "affinity": -48,
+    "description": "韩修远把压力画像视为项目效率工具，许观澜持续追问谁承担所谓效率的代价。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_luo_mian",
+    "relationship_type": "程序伦理对手",
+    "affinity": -28,
+    "description": "罗勉邀请许观澜为画像调解提供伦理包装，双方对自主选择不可调和。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_wei_cen",
+    "relationship_type": "技术责任争论",
+    "affinity": -31,
+    "description": "魏岑把匹配称为中性服务，许观澜指出可接触窗口已编码具体胁迫意图。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_su_weizhen",
+    "relationship_type": "互相读取的谈判关系",
+    "affinity": -22,
+    "description": "苏未真尝试用部分真相换退出，许观澜不把她的个人底线当免责。"
+  },
+  {
+    "character_id_a": "@player",
+    "character_id_b": "echo_gao_xu",
+    "relationship_type": "有限信任的交接关系",
+    "affinity": 8,
+    "description": "高叙相信许观澜会保护路线中的人名，但单独换盘仍损害了专业信任。"
+  },
+  {
+    "character_id_a": "echo_ji_heng",
+    "character_id_b": "echo_lin_qi",
+    "relationship_type": "长期取证搭档",
+    "affinity": 62,
+    "description": "两人能在现场快速分工，也会公开纠正对方对证据边界的误读。"
+  },
+  {
+    "character_id_a": "echo_ji_heng",
+    "character_id_b": "echo_tang_yan",
+    "relationship_type": "互相设限的合作方",
+    "affinity": 12,
+    "description": "季衡需要公开资料，唐砚拒绝让采访对象自动变成警方线人。"
+  },
+  {
+    "character_id_a": "echo_ji_heng",
+    "character_id_b": "echo_jiang_zhao",
+    "relationship_type": "案件与技术协作",
+    "affinity": 46,
+    "description": "季衡给出合法授权范围，江照拒绝任何超范围读取。"
+  },
+  {
+    "character_id_a": "echo_ji_heng",
+    "character_id_b": "echo_wen_jing",
+    "relationship_type": "程序盟友与争论者",
+    "affinity": 39,
+    "description": "共同保护证人，但对紧急行动能否先于法院命令意见不同。"
+  },
+  {
+    "character_id_a": "echo_ji_heng",
+    "character_id_b": "echo_cheng_shu",
+    "relationship_type": "带教与互相校正",
+    "affinity": 58,
+    "description": "季衡信任程述的现场感，程述会质疑过度等待。"
+  },
+  {
+    "character_id_a": "echo_lin_qi",
+    "character_id_b": "echo_tang_yan",
+    "relationship_type": "证据与报道边界",
+    "affinity": 8,
+    "description": "林栖反对报道使用未复核样本，唐砚要求她说明公共风险。"
+  },
+  {
+    "character_id_a": "echo_lin_qi",
+    "character_id_b": "echo_jiang_zhao",
+    "relationship_type": "技术交叉复核",
+    "affinity": 67,
+    "description": "一人负责载体来源，一人负责数字结构，结论必须相互独立成立。"
+  },
+  {
+    "character_id_a": "echo_lin_qi",
+    "character_id_b": "echo_wen_jing",
+    "relationship_type": "保全策略伙伴",
+    "affinity": 41,
+    "description": "闻静设计法律保全，林栖确保材料没有因去身份处理失真。"
+  },
+  {
+    "character_id_a": "echo_lin_qi",
+    "character_id_b": "echo_cheng_shu",
+    "relationship_type": "现场规范冲突",
+    "affinity": 22,
+    "description": "程述重速度，林栖要求每次移动证物都有记录。"
+  },
+  {
+    "character_id_a": "echo_tang_yan",
+    "character_id_b": "echo_jiang_zhao",
+    "relationship_type": "公开与最小披露争论",
+    "affinity": 19,
+    "description": "唐砚追求可读证据，江照担心结构细节导致重新识别。"
+  },
+  {
+    "character_id_a": "echo_tang_yan",
+    "character_id_b": "echo_wen_jing",
+    "relationship_type": "披露策略盟友",
+    "affinity": 61,
+    "description": "两人共同制作可公开版本并保留撤回窗口。"
+  },
+  {
+    "character_id_a": "echo_tang_yan",
+    "character_id_b": "echo_cheng_shu",
+    "relationship_type": "互相嫌麻烦的现场伙伴",
+    "affinity": 3,
+    "description": "程述认为记者增加风险，唐砚认为他过度控制现场。"
+  },
+  {
+    "character_id_a": "echo_jiang_zhao",
+    "character_id_b": "echo_wen_jing",
+    "relationship_type": "数据权利协作",
+    "affinity": 52,
+    "description": "把最小权限和可撤回授权落实为提交步骤。"
+  },
+  {
+    "character_id_a": "echo_jiang_zhao",
+    "character_id_b": "echo_cheng_shu",
+    "relationship_type": "数字与外勤配合",
+    "affinity": 33,
+    "description": "程述保全设备位置，江照避免他把未知介质接入系统。"
+  },
+  {
+    "character_id_a": "echo_wen_jing",
+    "character_id_b": "echo_cheng_shu",
+    "relationship_type": "保护令与撤离协作",
+    "affinity": 44,
+    "description": "闻静给出法律边界，程述把纸面保护变成实际路线。"
+  },
+  {
+    "character_id_a": "echo_xu_zhiyao",
+    "character_id_b": "echo_ji_heng",
+    "relationship_type": "家属关联与调查边界",
+    "affinity": 7,
+    "description": "季衡尊重她的拒绝，也必须调查她参与设计的字段。"
+  },
+  {
+    "character_id_a": "echo_xu_zhiyao",
+    "character_id_b": "echo_lin_qi",
+    "relationship_type": "旧记录复核",
+    "affinity": 28,
+    "description": "林栖只接收去名版本，许知遥提供字段用途变化。"
+  },
+  {
+    "character_id_a": "echo_xu_zhiyao",
+    "character_id_b": "echo_jiang_zhao",
+    "relationship_type": "早期系统共建者",
+    "affinity": 18,
+    "description": "两人都参与合法初版，后来从不同方向发现用途扩张。"
+  },
+  {
+    "character_id_a": "echo_xu_zhiyao",
+    "character_id_b": "echo_song_wenduo",
+    "relationship_type": "旧上级与背叛",
+    "affinity": -72,
+    "description": "宋闻铎要求她把高压风险字段包装成服务标签。"
+  },
+  {
+    "character_id_a": "echo_xu_zhiyao",
+    "character_id_b": "echo_gao_xu",
+    "relationship_type": "互相握有秘密的旧同事",
+    "affinity": 6,
+    "description": "高叙帮她带出撤回申请，她隐瞒他的一次拒绝执行。"
+  },
+  {
+    "character_id_a": "echo_shen_man",
+    "character_id_b": "echo_wen_jing",
+    "relationship_type": "长期权益伙伴",
+    "affinity": 76,
+    "description": "沈曼组织支持网络，闻静把退出权写进可执行程序。"
+  },
+  {
+    "character_id_a": "echo_shen_man",
+    "character_id_b": "echo_mu_qiao",
+    "relationship_type": "社区支持协作",
+    "affinity": 70,
+    "description": "共同保护纸鸟参与者和学生家庭。"
+  },
+  {
+    "character_id_a": "echo_shen_man",
+    "character_id_b": "echo_ye_jia",
+    "relationship_type": "表达自主盟友",
+    "affinity": 63,
+    "description": "都反对把发声或作证当成获得支持的条件。"
+  },
+  {
+    "character_id_a": "echo_shen_man",
+    "character_id_b": "echo_luo_mian",
+    "relationship_type": "被利用的咨询关系",
+    "affinity": -64,
+    "description": "罗勉把支持需求分类改造成调解变量。"
+  },
+  {
+    "character_id_a": "echo_he_lin",
+    "character_id_b": "echo_jiang_zhao",
+    "relationship_type": "审计前辈与证据伙伴",
+    "affinity": 48,
+    "description": "共同从权限例外和日志分片还原制度变化。"
+  },
+  {
+    "character_id_a": "echo_he_lin",
+    "character_id_b": "echo_song_wenduo",
+    "relationship_type": "旧下属与决裂者",
+    "affinity": -81,
+    "description": "宋闻铎指控贺临泄密，贺临认为其主动维持有害系统。"
+  },
+  {
+    "character_id_a": "echo_he_lin",
+    "character_id_b": "echo_gu_chengjun",
+    "relationship_type": "互相推责的制度共建者",
+    "affinity": -38,
+    "description": "两人都参与合法初版，也都曾放任临时例外常态化。"
+  },
+  {
+    "character_id_a": "echo_he_lin",
+    "character_id_b": "echo_wei_cen",
+    "relationship_type": "审计者与被审计者",
+    "affinity": -69,
+    "description": "魏岑用合同切片阻止贺临看到成功匹配账单。"
+  },
+  {
+    "character_id_a": "echo_ye_jia",
+    "character_id_b": "echo_ji_heng",
+    "relationship_type": "谨慎信任的办案关系",
+    "affinity": 51,
+    "description": "季衡接受非口语证词并避免催促孟宜声。"
+  },
+  {
+    "character_id_a": "echo_ye_jia",
+    "character_id_b": "echo_jiang_zhao",
+    "relationship_type": "音频与版本协作",
+    "affinity": 43,
+    "description": "叶葭听辨底噪，江照证明剪辑发生在哪个版本。"
+  },
+  {
+    "character_id_a": "echo_ye_jia",
+    "character_id_b": "echo_su_weizhen",
+    "relationship_type": "施压者与抵抗者",
+    "affinity": -78,
+    "description": "苏未真索取训练记录，叶葭拒绝并保存接触时间。"
+  },
+  {
+    "character_id_a": "echo_mu_qiao",
+    "character_id_b": "echo_wen_jing",
+    "relationship_type": "学校权益协作",
+    "affinity": 55,
+    "description": "闻静帮助穆峤纠正监护签字等于学生同意的误区。"
+  },
+  {
+    "character_id_a": "echo_mu_qiao",
+    "character_id_b": "echo_song_wenduo",
+    "relationship_type": "资助依赖与抵抗",
+    "affinity": -47,
+    "description": "归航以续约要求学校社工记录兼容外部联络码。"
+  },
+  {
+    "character_id_a": "echo_mu_qiao",
+    "character_id_b": "echo_su_weizhen",
+    "relationship_type": "学校危机冲突",
+    "affinity": -73,
+    "description": "苏未真要求交出学生编号并推动监护人和解。"
+  },
+  {
+    "character_id_a": "echo_bai_song",
+    "character_id_b": "echo_lin_qi",
+    "relationship_type": "医学证据协作",
+    "affinity": 57,
+    "description": "共同核对样本批次、门禁和复评时间。"
+  },
+  {
+    "character_id_a": "echo_bai_song",
+    "character_id_b": "echo_jiang_zhao",
+    "relationship_type": "日志复核伙伴",
+    "affinity": 49,
+    "description": "江照证明隔离单来自行政接口，白颂说明其不构成临床依据。"
+  },
+  {
+    "character_id_a": "echo_bai_song",
+    "character_id_b": "echo_liang_shiwen",
+    "relationship_type": "专业上下级冲突",
+    "affinity": -84,
+    "description": "梁世闻要求补录复评，白颂拒绝为行政限制提供医学外观。"
+  },
+  {
+    "character_id_a": "echo_bai_song",
+    "character_id_b": "echo_gao_xu",
+    "relationship_type": "误信与间接伤害",
+    "affinity": -19,
+    "description": "白颂曾把复评表交给高叙，代号随后进入闭环。"
+  },
+  {
+    "character_id_a": "echo_zhong_zhiyuan",
+    "character_id_b": "echo_tang_yan",
+    "relationship_type": "工程线人关系",
+    "affinity": 52,
+    "description": "钟致远提供删节图纸，唐砚保护普通技术员身份。"
+  },
+  {
+    "character_id_a": "echo_zhong_zhiyuan",
+    "character_id_b": "echo_cheng_shu",
+    "relationship_type": "工程现场协作",
+    "affinity": 47,
+    "description": "两人共同确认旧维护道和警报旁路。"
+  },
+  {
+    "character_id_a": "echo_zhong_zhiyuan",
+    "character_id_b": "echo_han_xiuyuan",
+    "relationship_type": "承包压力与背叛",
+    "affinity": -86,
+    "description": "韩修远利用家庭合同迫使钟致远接受删节审查。"
+  },
+  {
+    "character_id_a": "echo_zhong_zhiyuan",
+    "character_id_b": "echo_gu_chengjun",
+    "relationship_type": "技术警告与行政压件",
+    "affinity": -41,
+    "description": "顾承钧收到旁路风险说明后只要求内部留存。"
+  },
+  {
+    "character_id_a": "echo_shao_qing",
+    "character_id_b": "echo_wen_jing",
+    "relationship_type": "证人律师关系",
+    "affinity": 68,
+    "description": "闻静帮助邵晴限定证词，不让焦虑被解读成不诚实。"
+  },
+  {
+    "character_id_a": "echo_shao_qing",
+    "character_id_b": "echo_luo_mian",
+    "relationship_type": "下属与程序施压者",
+    "affinity": -82,
+    "description": "罗勉要求她把回避页替换称作格式补正。"
+  },
+  {
+    "character_id_a": "echo_shao_qing",
+    "character_id_b": "echo_wei_cen",
+    "relationship_type": "隐蔽的数据接触",
+    "affinity": -52,
+    "description": "澄镜数据以系统维护名义访问卷宗目录。"
+  },
+  {
+    "character_id_a": "echo_song_wenduo",
+    "character_id_b": "echo_gu_chengjun",
+    "relationship_type": "制度同盟与责任竞争",
+    "affinity": 9,
+    "description": "共同维护闭环，同时准备在危机时将主责推给对方。"
+  },
+  {
+    "character_id_a": "echo_song_wenduo",
+    "character_id_b": "echo_wei_cen",
+    "relationship_type": "制度赞助者与技术供应商",
+    "affinity": 31,
+    "description": "宋闻铎提供合法外观，魏岑提供责任切片架构。"
+  },
+  {
+    "character_id_a": "echo_song_wenduo",
+    "character_id_b": "echo_gao_xu",
+    "relationship_type": "忠诚破裂的上下级",
+    "affinity": -26,
+    "description": "高叙曾信任宋闻铎，归航夜后不再接受删节交付方案。"
+  },
+  {
+    "character_id_a": "echo_gu_chengjun",
+    "character_id_b": "echo_han_xiuyuan",
+    "relationship_type": "监管者与受益承包商",
+    "affinity": -17,
+    "description": "顾承钧提供接口授权，韩修远将其扩展成搬迁筛选。"
+  },
+  {
+    "character_id_a": "echo_gu_chengjun",
+    "character_id_b": "echo_luo_mian",
+    "relationship_type": "行政支持与司法越界",
+    "affinity": -12,
+    "description": "顾承钧默许试点接收风险字段，罗勉扩大为回避和报价工具。"
+  }
+]

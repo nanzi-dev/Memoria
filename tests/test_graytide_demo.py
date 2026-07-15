@@ -122,6 +122,7 @@ def test_graytide_static_content_is_coherent():
     assert len(manifest["knowledge_bases"]) == 4
     assert sum(len(item["documents"]) for item in manifest["knowledge_bases"]) == 8
     assert set(manifest["group"]["character_ids"]) == character_ids
+    assert manifest["groups"] == [manifest["group"]]
 
     relationship_pairs = set()
     player_relationships = []
@@ -330,6 +331,9 @@ def test_graytide_seed_is_idempotent_replaceable_and_isolated(isolated_graytide)
         reset_module=True,
     )
     assert reset_result["group_thread_id"] == "graytide_investigation_thread"
+    assert reset_result["group_thread_ids"] == [
+        "graytide_investigation_thread"
+    ]
     assert _counts(owner_user_id)["characters"] == 8
     assert _counts(owner_user_id)["relationships"] == 26
     assert _counts(owner_user_id)["events"] == 24

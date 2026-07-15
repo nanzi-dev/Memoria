@@ -1,0 +1,444 @@
+[
+  {
+    "id": "echo_eval_01",
+    "question": "第1卷中，哪些时间与设备记录证明B录音间暴露不是普通清洁事故？",
+    "expected_facts": [
+      "事故前六分钟输入人工维护码",
+      "清洁单写十八时完成但采购扫码在十九时二十九分",
+      "邢恪的停车缴费与采购时间相互印证"
+    ],
+    "expected_documents": [
+      "v1_muted_editor_case.md"
+    ]
+  },
+  {
+    "id": "echo_eval_02",
+    "question": "第1卷的L-417如何把广播中心案件桥接到后续闭环调查？",
+    "expected_facts": [
+      "L-417是外部匹配批次而非人员编号",
+      "第2卷缺失咨询编号出现同源批次",
+      "音频底噪指向归航旧呼叫室"
+    ],
+    "expected_documents": [
+      "v1_support_audio_trace.md"
+    ]
+  },
+  {
+    "id": "echo_eval_03",
+    "question": "孟宜声无法稳定发声时，调查组和许观澜应遵守什么作证边界？",
+    "expected_facts": [
+      "可以使用文字、节拍或代理朗读",
+      "声音恢复过程是否公开由本人决定",
+      "许观澜不能诊断失声原因"
+    ],
+    "expected_documents": [
+      "v1_muted_editor_case.md"
+    ]
+  },
+  {
+    "id": "echo_eval_04",
+    "question": "为什么GH-C17访问日志不能单独证明某一名基金会员工剪接了支持电话？",
+    "expected_facts": [
+      "GH-C17属于共享值班组账号",
+      "账号使用只能证明权限被调用",
+      "实际操作者仍需门禁、版本历史或证言互证"
+    ],
+    "expected_documents": [
+      "v1_support_audio_trace.md",
+      "evidence_methodology.md"
+    ]
+  },
+  {
+    "id": "echo_eval_05",
+    "question": "许观澜在第1卷能提供什么专业帮助，又没有哪些侦查或医疗权限？",
+    "expected_facts": [
+      "分析压力环境并设计非强迫访谈",
+      "心理判断不能替代物证",
+      "不能诊断失声原因或签发搜查调取"
+    ],
+    "expected_documents": [
+      "v1_muted_editor_case.md",
+      "evidence_methodology.md"
+    ]
+  },
+  {
+    "id": "echo_eval_06",
+    "question": "第2卷纸鸟装置怎样证明被删除的学校咨询记录曾经存在？",
+    "expected_facts": [
+      "四十三只纸鸟中七只具有重复折痕编码",
+      "编码对应社工站编号末四位",
+      "预算附件仍列出相应服务次数"
+    ],
+    "expected_documents": [
+      "v2_paper_bird_memorial.md"
+    ]
+  },
+  {
+    "id": "echo_eval_07",
+    "question": "GS-417揭示了闭环怎样重新识别已经去名的学生支持记录？",
+    "expected_facts": [
+      "澄镜数据把七个缺失编号转换为GS-417批次",
+      "批次与第1卷L-417同源",
+      "学校目录可把去名编号重新匹配到家庭"
+    ],
+    "expected_documents": [
+      "v2_paper_bird_memorial.md",
+      "v2_school_settlement_trace.md"
+    ]
+  },
+  {
+    "id": "echo_eval_08",
+    "question": "调查纸鸟纪念装置时，针对学生与纪念物有哪些不可越过的边界？",
+    "expected_facts": [
+      "保护未成年人姓名、班级和家庭情况",
+      "只复制编码规则而不没收纸鸟原件",
+      "不得对参与学生做未经同意的心理评估"
+    ],
+    "expected_documents": [
+      "v2_paper_bird_memorial.md"
+    ]
+  },
+  {
+    "id": "echo_eval_09",
+    "question": "第2卷有哪些矛盾证明校方隐瞒记录，但又不能据此认定闭环造成周栩死亡？",
+    "expected_facts": [
+      "折法说明早于公开报道",
+      "校方否认咨询记录但预算仍有服务次数",
+      "闭环参与后续和解不等于策划最初事故"
+    ],
+    "expected_documents": [
+      "v2_paper_bird_memorial.md"
+    ]
+  },
+  {
+    "id": "echo_eval_10",
+    "question": "许观澜应如何解释监护人的经济压力，而不否定其全部选择能力？",
+    "expected_facts": [
+      "债务与照护压力可说明胁迫环境",
+      "压力不能自动否定全部选择能力",
+      "撤销和解与追查数据滥用是两条程序"
+    ],
+    "expected_documents": [
+      "v2_school_settlement_trace.md"
+    ]
+  },
+  {
+    "id": "echo_eval_11",
+    "question": "第3卷哪些时间事实证明污染警报是为限制宁成而后置生成的？",
+    "expected_facts": [
+      "隔离医嘱生成于十四时零八分",
+      "污染警报生成于十四时十九分",
+      "检验系统没有对应样本批次"
+    ],
+    "expected_documents": [
+      "v3_sterile_ward_case.md",
+      "v3_isolation_log_trace.md"
+    ]
+  },
+  {
+    "id": "echo_eval_12",
+    "question": "GS-603为什么是第3卷通往第4卷的桥接线索？",
+    "expected_facts": [
+      "GS-603携带高沟通风险或可接触窗口字段",
+      "字段源自许知遥早期辅导提醒",
+      "其结构与第4卷搬迁画像相同"
+    ],
+    "expected_documents": [
+      "v3_sterile_ward_case.md",
+      "v3_isolation_log_trace.md"
+    ]
+  },
+  {
+    "id": "echo_eval_13",
+    "question": "真实感染隔离需要哪些依据，行政接口无权做什么？",
+    "expected_facts": [
+      "需要症状或暴露依据、医师签名和检验或流调编号",
+      "必须有明确复评时间",
+      "行政端无权单独锁定离区权限或关闭退出请求"
+    ],
+    "expected_documents": [
+      "restricted_medical_rules.md"
+    ]
+  },
+  {
+    "id": "echo_eval_14",
+    "question": "为什么补写复评栏的共享账号既不能洗清梁世闻，也不能锁定普通文书员工？",
+    "expected_facts": [
+      "共享账号不能单独认定具体录入人",
+      "梁世闻在无检验提醒后仍下达延长指令",
+      "电话、对照日志和时间共同证明其明知"
+    ],
+    "expected_documents": [
+      "v3_isolation_log_trace.md",
+      "restricted_medical_conflicts.md"
+    ]
+  },
+  {
+    "id": "echo_eval_15",
+    "question": "许观澜在第3卷分析宁成的焦虑时必须避开什么越权结论？",
+    "expected_facts": [
+      "不得用焦虑状态判断污染风险",
+      "不得把心理意见替代感染控制判断",
+      "只能分析限制与接触压力"
+    ],
+    "expected_documents": [
+      "v3_sterile_ward_case.md",
+      "restricted_medical_rules.md"
+    ]
+  },
+  {
+    "id": "echo_eval_16",
+    "question": "第4卷如何证明警报停摆是人为安排且造成了超出计划的真实危险？",
+    "expected_facts": [
+      "施工平台在潮峰前发送维护静默指令",
+      "指令早于潮水进入维护井",
+      "冗余电池长期未更换并同时失效"
+    ],
+    "expected_documents": [
+      "v4_tide_line_redevelopment.md",
+      "v4_warning_outage_trace.md"
+    ]
+  },
+  {
+    "id": "echo_eval_17",
+    "question": "“稳定结果率”怎样把旧鹭湾融资项目桥接到第5卷调解试点？",
+    "expected_facts": [
+      "融资尽调邮件使用稳定结果率",
+      "第5卷调解试点采用同名成功指标",
+      "商业与司法节点共享闭环绩效语言"
+    ],
+    "expected_documents": [
+      "v4_warning_outage_trace.md"
+    ]
+  },
+  {
+    "id": "echo_eval_18",
+    "question": "公开拆潮线工程证据时，怎样保护普通技术员和居民选择？",
+    "expected_facts": [
+      "没有明知证据时保护普通维护技术员身份",
+      "居民应急撤离不能被描述为自愿放弃住房",
+      "公开排序字段与付款但不公开家庭敏感详情"
+    ],
+    "expected_documents": [
+      "v4_tide_line_redevelopment.md",
+      "v4_warning_outage_trace.md"
+    ]
+  },
+  {
+    "id": "echo_eval_19",
+    "question": "韩修远没有计划制造洪灾，为什么仍对第4卷危险承担责任？",
+    "expected_facts": [
+      "他批准融资窗口前的静默测试",
+      "承包商说法与提前出现的控制指令矛盾",
+      "冗余失效与居民风险具有可预见性"
+    ],
+    "expected_documents": [
+      "v4_tide_line_redevelopment.md"
+    ]
+  },
+  {
+    "id": "echo_eval_20",
+    "question": "许观澜分析旧鹭湾压力画像时，应如何区分不同责任层？",
+    "expected_facts": [
+      "区分工程事实、商业动机与行政失职",
+      "顾承钧授权接口不等于明确授权谈判画像",
+      "韩修远采购与苏未真具体接触需要分别证明"
+    ],
+    "expected_documents": [
+      "v4_warning_outage_trace.md",
+      "evidence_methodology.md"
+    ]
+  },
+  {
+    "id": "echo_eval_21",
+    "question": "第5卷哪些程序痕迹证明七份回避页被替换并用于定向和解？",
+    "expected_facts": [
+      "替换页纸张批次晚两周且骑缝偏移",
+      "送达时间补签掩盖回避表提前生成",
+      "和解报价与债务、照护和公开恐惧对应"
+    ],
+    "expected_documents": [
+      "v5_silent_jury_pilot.md",
+      "v5_recusal_settlement_trace.md"
+    ]
+  },
+  {
+    "id": "echo_eval_22",
+    "question": "第5卷通过哪些线索桥接到归航夜的实体档案交接？",
+    "expected_facts": [
+      "回避模型记录归航联络码GS-922",
+      "线下借卷者佩戴归航晚宴工作证",
+      "晚宴名册与箱体交接表可补足日志空隙"
+    ],
+    "expected_documents": [
+      "v5_silent_jury_pilot.md",
+      "v5_recusal_settlement_trace.md"
+    ]
+  },
+  {
+    "id": "echo_eval_23",
+    "question": "发现调解画像滥用后，为什么不能直接宣布所有调解结果无效？",
+    "expected_facts": [
+      "撤销范围须按个案授权、替换页和实际影响审查",
+      "部分程序结果可能客观有利但不能弥补未同意用途",
+      "密封评估正文不得进入公开卷"
+    ],
+    "expected_documents": [
+      "v5_silent_jury_pilot.md",
+      "restricted_judicial_rules.md"
+    ]
+  },
+  {
+    "id": "echo_eval_24",
+    "question": "目录访问没有直接打开密封正文，为什么仍能成为滥用证据的一部分？",
+    "expected_facts": [
+      "目录和代号可与归航字段匹配",
+      "需结合权重表输入、匹配账单和替换时间",
+      "邵晴的补签错误不能被夸大为独立策划"
+    ],
+    "expected_documents": [
+      "v5_recusal_settlement_trace.md"
+    ]
+  },
+  {
+    "id": "echo_eval_25",
+    "question": "许观澜在第5卷可以怎样解释压力变量，又不能替当事人作出什么声明？",
+    "expected_facts": [
+      "可以解释压力变量如何影响选择",
+      "不能替当事人声明自己受操纵",
+      "不能用评估分数判断证词真假"
+    ],
+    "expected_documents": [
+      "restricted_judicial_assessments.md"
+    ]
+  },
+  {
+    "id": "echo_eval_26",
+    "question": "第6卷归航夜的受控交接为何失败，调查组实际保全了什么？",
+    "expected_facts": [
+      "高叙未经授权换入另一张删节盘",
+      "宋闻铎的盘预先切割执行责任",
+      "调查组保全运营图分片并确认离线主档位置"
+    ],
+    "expected_documents": [
+      "v6_homebound_gala.md",
+      "v6_archive_handoff_trace.md"
+    ]
+  },
+  {
+    "id": "echo_eval_27",
+    "question": "三份删节材料怎样桥接到第7卷的“回声档案”？",
+    "expected_facts": [
+      "三份材料的校验摘要指向同一个离线主档",
+      "版本哈希与两张删节盘共同字段一致",
+      "主档还保存跨机构匹配、接触结果和撤回未执行标记"
+    ],
+    "expected_documents": [
+      "v6_homebound_gala.md",
+      "v6_archive_handoff_trace.md"
+    ]
+  },
+  {
+    "id": "echo_eval_28",
+    "question": "归航夜抽取档案时有哪些合法访问和隐私边界？",
+    "expected_facts": [
+      "只处理已获合法访问的结构字段",
+      "不得通过现实入侵或强行复制取得主档",
+      "实体路线中的安全住所必须剥离"
+    ],
+    "expected_documents": [
+      "v6_homebound_gala.md",
+      "v6_archive_handoff_trace.md"
+    ]
+  },
+  {
+    "id": "echo_eval_29",
+    "question": "高叙换盘与宋闻铎删节交接分别有哪些保护动机和责任问题？",
+    "expected_facts": [
+      "高叙保护部分受助者但破坏保管链",
+      "宋闻铎删去正文也把责任集中到外包层",
+      "保护叙事都必须用实际字段与后果检验"
+    ],
+    "expected_documents": [
+      "v6_homebound_gala.md",
+      "restricted_foundation_split.md"
+    ]
+  },
+  {
+    "id": "echo_eval_30",
+    "question": "许观澜或程述在归航夜选择单独行动，会怎样影响证据与季衡的信任？",
+    "expected_facts": [
+      "未授权观察只能保持为D级行动线索",
+      "单独行动会损害团队专业信任",
+      "现场选择必须记录下令、留下与撤离人员"
+    ],
+    "expected_documents": [
+      "v6_archive_handoff_trace.md",
+      "restricted_police_chain.md"
+    ]
+  },
+  {
+    "id": "echo_eval_31",
+    "question": "第7卷主档固定证明了闭环的哪四层结构与哪些不同责任层级？",
+    "expected_facts": [
+      "四层是支持原记录、联络码映射、外部节点结果和撤回状态",
+      "宋闻铎、顾承钧、魏岑知道跨用途运行",
+      "具体购买、执行与早期参与者责任需要分层"
+    ],
+    "expected_documents": [
+      "v7_master_archive.md"
+    ]
+  },
+  {
+    "id": "echo_eval_32",
+    "question": "七卷哪些证据在主档中互相验证，从而完成长线桥接？",
+    "expected_facts": [
+      "联络码、版本哈希、付款和实体路线互相验证",
+      "授权层可与二〇一八年后的映射层比较",
+      "撤回未执行记录证明用途持续具有明知性"
+    ],
+    "expected_documents": [
+      "v7_master_archive.md",
+      "restricted_foundation_protocol.md"
+    ]
+  },
+  {
+    "id": "echo_eval_33",
+    "question": "公开原始档案、提交分级证据和封存主档各自承担什么制度与隐私成本？",
+    "expected_facts": [
+      "公开原始档案证明最强但会暴露幸存者",
+      "分级证据保留校验和责任图并限制公众身份信息",
+      "封存主档保护个人但延迟公共追责"
+    ],
+    "expected_documents": [
+      "v7_master_archive.md",
+      "v7_disclosure_costs.md"
+    ]
+  },
+  {
+    "id": "echo_eval_34",
+    "question": "为什么主档足以证明闭环存在，却不能证明每次接触都由最高层直接下令？",
+    "expected_facts": [
+      "主档证明系统能力、结果和部分审批",
+      "节点结果不一定记录具体执行手段",
+      "刑事、制度与职业责任仍需按证据层级分别主张"
+    ],
+    "expected_documents": [
+      "v7_master_archive.md",
+      "evidence_methodology.md"
+    ]
+  },
+  {
+    "id": "echo_eval_35",
+    "question": "许观澜在最终处置主档时承担什么角色，季衡关系选择为什么不能覆盖此前越权？",
+    "expected_facts": [
+      "玩家选择披露层级而不改变固定真相",
+      "我相信季衡表达共同承担而非服从",
+      "连续越权、逼迫证人或隐瞒材料仍会导致信任代价"
+    ],
+    "expected_documents": [
+      "v7_disclosure_costs.md",
+      "restricted_police_notes.md"
+    ]
+  }
+]
