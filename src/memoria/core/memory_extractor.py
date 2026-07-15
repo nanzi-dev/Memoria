@@ -1,7 +1,9 @@
 """Lightweight extraction for isolated player memory and session summaries."""
 import logging
 import re
+from typing import Any
 
+from memoria.core import fact_claims
 from memoria.core.llm_client import call_light_task
 
 logger = logging.getLogger(__name__)
@@ -89,6 +91,30 @@ def extract_player_memory(history: list[dict], max_messages: int = 6) -> str | N
         logger.warning("玩家长期记忆提取失败: %s", exc)
         return None
     return clean_summary_text(result)
+
+
+def record_generated_memory_claim(
+    *,
+    owner_user_id: str,
+    scope_type: str,
+    scope_id: str,
+    fact_text: str | None,
+    source_ids: list[str],
+    provenance: dict[str, Any] | None = None,
+) -> dict | None:
+    """Record model-generated memory as a candidate fact claim."""
+    if not str(fact_text or "").strip():
+        return None
+    return fact_claims.record_claim(
+        owner_user_id=owner_user_id,
+        scope_type=scope_type,
+        scope_id=scope_id,
+        fact_text=str(fact_text),
+        source_kind="model_inference",
+        source_ids=source_ids,
+        provenance=provenance,
+        direct_support=False,
+    )
 
 
 def summarize_session(history: list[dict]) -> str | None:

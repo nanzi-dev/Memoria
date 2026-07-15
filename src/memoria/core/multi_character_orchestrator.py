@@ -29,7 +29,10 @@ from memoria.core import (
 from memoria.core.config import configs
 from memoria.core.knowledge_retriever import retrieve_knowledge
 from memoria.core.locale import DEFAULT_LOCALE, Locale
-from memoria.core.memory_extractor import extract_player_memory
+from memoria.core.memory_extractor import (
+    extract_player_memory,
+    record_generated_memory_claim,
+)
 from memoria.core.speaking_strategy import HybridStrategy
 from memoria.db import repository
 
@@ -567,8 +570,23 @@ class MultiCharacterOrchestrator:
             player_id = self.player_id
             if not fact or not player_id:
                 return
-            for character_id in dict.fromkeys(self.character_ids):
-                repository.save_long_term_fact(character_id, player_id, fact)
+            generated_scope = multi_character_memory.resolve_generated_fact_scope(
+                self.session_id
+            )
+            if not generated_scope:
+                return
+            scope_type, scope_id = generated_scope
+            record_generated_memory_claim(
+                owner_user_id=player_id,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                fact_text=fact,
+                source_ids=[f"session:{self.session_id}"],
+                provenance={
+                    "memory_kind": "player_fact",
+                    "session_id": self.session_id,
+                },
+            )
         except Exception:
             logger.error(
                 "群聊长期记忆保存失败: session=%s",
@@ -1314,6 +1332,7 @@ class MultiCharacterOrchestrator:
             multi_character_memory.load_player_memories_for_relationship_graph(
                 character_id=character_id,
                 player_id=self.player_id,
+                session_id=self.session_id,
                 other_character_ids=other_character_ids,
                 relationship_history_cutoff=relationship_history_cutoff,
                 query_context=query_context,
@@ -2008,6 +2027,7 @@ def start_multi_character_session(
     group_name: str | None = None,
     group_thread_id: str | None = None,
     locale: Locale = DEFAULT_LOCALE,
+    story_id: str | None = None,
 ) -> dict:
     """
     创建并启动多角色会话
@@ -2037,6 +2057,7 @@ def start_multi_character_session(
         group_name=group_name,
         group_thread_id=group_thread_id,
         locale=locale,
+        story_id=story_id,
     )
     
     if not success:
@@ -2052,7 +2073,7 @@ def start_multi_character_session(
         "session_id": session_id,
         "opening": opening_result,
         "group_name": group_name,
-        "group_thread_id": group_thread_id or session_id,
+        "group_thread_id": repository.get_group_thread_id(session_id),
         "locale": locale,
     }
 

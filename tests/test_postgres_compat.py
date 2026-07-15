@@ -31,6 +31,20 @@ def test_postgres_schema_uses_bigserial(monkeypatch):
     assert "AUTOINCREMENT" not in schema
 
 
+def test_postgres_domain_event_sequence_references_use_bigint(monkeypatch):
+    monkeypatch.setattr(
+        repository.configs,
+        "database_url",
+        "postgresql://user:pass@localhost/memoria",
+    )
+
+    schema = repository._schema_for_current_db()
+
+    assert "aggregate_version BIGINT NOT NULL" in schema
+    assert "source_message_id BIGINT" in schema
+    assert "last_sequence    BIGINT NOT NULL DEFAULT 0" in schema
+
+
 def test_postgres_insert_or_ignore_becomes_on_conflict_do_nothing():
     sql = """
         INSERT OR IGNORE INTO session

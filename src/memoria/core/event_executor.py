@@ -45,6 +45,8 @@ class EventExecutor:
         )
         operations: dict[str, Any] = {
             "memories": [],
+            "fact_claims": [],
+            "story_updates": [],
             "unlock_keys": [],
             "inbox_items": [],
             "proactive_messages": [],
@@ -95,6 +97,8 @@ class EventExecutor:
                 result.proactive_dialogues = []
                 operations = {
                     "memories": [],
+                    "fact_claims": [],
+                    "story_updates": [],
                     "unlock_keys": [],
                     "inbox_items": [],
                     "proactive_messages": [],
@@ -215,6 +219,21 @@ class EventExecutor:
                 "fact_text": text,
                 "importance": effect.memory_importance or 5,
             })
+            operations["fact_claims"].append({
+                "scope_type": "story" if event.story_id else "character",
+                "scope_id": event.story_id or context.character_id,
+                "fact_text": text,
+                "source_kind": "authored_event",
+                "source_ids": [event.event_id],
+                "provenance": {
+                    "event_id": event.event_id,
+                    "event_name": event.event_name,
+                    "execution_id": result.execution_id,
+                },
+                "direct_support": True,
+                "session_id": context.session_id,
+                "world_occurred_at": context.world_time,
+            })
             return "记忆已加入原子提交", {"memory_text": text}
 
         if effect_type == EffectType.CHANGE_MOOD:
@@ -293,6 +312,18 @@ class EventExecutor:
             if not progress_update:
                 raise ValueError("更新事件进度效果缺少 progress/progress_delta/event_status")
             result.state_changes["event_progress"] = progress_update
+            if event.story_id:
+                operations["story_updates"].append({
+                    "story_id": event.story_id,
+                    "progress": progress_update.get("progress"),
+                    "progress_delta": progress_update.get("progress_delta"),
+                    "status": progress_update.get("status"),
+                    "source_event_id": event.event_id,
+                    "source_event_name": event.event_name,
+                    "execution_id": result.execution_id,
+                    "session_id": context.session_id,
+                    "world_occurred_at": context.world_time,
+                })
             return "事件进度已规划", progress_update
 
         raise ValueError(f"不支持的效果类型: {effect_type.value}")

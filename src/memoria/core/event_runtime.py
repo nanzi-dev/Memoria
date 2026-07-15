@@ -63,6 +63,7 @@ def _event_definition_from_row(row: dict[str, Any]) -> EventDefinition:
         event_name=row["event_name"],
         description=row.get("description"),
         character_id=row.get("character_id"),
+        story_id=row.get("story_id"),
         trigger_condition=json.loads(row["trigger_config"]),
         effects=json.loads(row["effects_config"]),
         priority=row.get("priority", 0),

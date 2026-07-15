@@ -19,6 +19,16 @@ from urllib.parse import urlsplit
 
 from memoria.core.config import configs
 from memoria.core import performance, tracing
+from memoria.core.domain_events import NewDomainEvent, StoredDomainEvent
+from memoria.core.fact_claim_policy import (
+    ADMIN_VERIFICATION_SOURCE_KIND,
+    CLAIM_SOURCE_KINDS,
+    clean_source_ids,
+    derive_fact_claim_identity,
+    evaluate_verification,
+    normalize_evidence_entry,
+    normalize_fact_text,
+)
 import re
 from difflib import SequenceMatcher
 
@@ -145,7 +155,27 @@ def _prepare_postgres_sql(sql: str) -> str:
 def _schema_for_current_db() -> str:
     if not _is_postgres_enabled():
         return SCHEMA
-    return SCHEMA.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
+    schema = SCHEMA.replace(
+        "INTEGER PRIMARY KEY AUTOINCREMENT",
+        "BIGSERIAL PRIMARY KEY",
+    )
+    for sqlite_type, postgres_type in (
+        (
+            "aggregate_version INTEGER NOT NULL",
+            "aggregate_version BIGINT NOT NULL",
+        ),
+        ("source_message_id INTEGER", "source_message_id BIGINT"),
+        (
+            "last_sequence    INTEGER NOT NULL DEFAULT 0",
+            "last_sequence    BIGINT NOT NULL DEFAULT 0",
+        ),
+        (
+            "ledger_version          INTEGER NOT NULL",
+            "ledger_version BIGINT NOT NULL",
+        ),
+    ):
+        schema = schema.replace(sqlite_type, postgres_type)
+    return schema
 
 
 class _PostgresConnection:
@@ -360,6 +390,7 @@ CREATE TABLE IF NOT EXISTS event_definition (
     description     TEXT,
     
     character_id    TEXT,               -- 角色专属事件，NULL 表示全局
+    story_id        TEXT,               -- 所属剧情聚合，NULL 表示无剧情状态
     
     -- 事件配置（JSON 格式）
     trigger_config  TEXT NOT NULL,      -- TriggerCondition JSON
@@ -610,6 +641,7 @@ CREATE TABLE IF NOT EXISTS session (
     status          TEXT DEFAULT 'active',  -- active / ended
     group_name      TEXT,           -- 多角色群聊名称
     group_thread_id TEXT,           -- 逻辑群聊线程 ID，同一群聊多段 session 共享
+    story_id        TEXT,           -- 可选的逻辑故事范围；没有故事时保持 NULL
     locale          TEXT NOT NULL DEFAULT 'zh-CN',
     
     -- 多角色会话标识
@@ -834,6 +866,103 @@ CREATE TABLE IF NOT EXISTS session_summary (
     FOREIGN KEY (session_id) REFERENCES session(session_id)
 );
 
+-- =========================
+-- 权威领域事件账本
+-- =========================
+CREATE TABLE IF NOT EXISTS domain_event (
+    sequence          INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id          TEXT NOT NULL UNIQUE,
+    owner_user_id     TEXT NOT NULL,
+    aggregate_type    TEXT NOT NULL,
+    aggregate_id      TEXT NOT NULL,
+    aggregate_version INTEGER NOT NULL,
+    event_type        TEXT NOT NULL,
+    payload           TEXT NOT NULL,
+    metadata          TEXT NOT NULL,
+    correlation_id    TEXT,
+    causation_id      TEXT,
+    session_id        TEXT,
+    group_thread_id   TEXT,
+    source_turn_id    TEXT,
+    source_message_id INTEGER,
+    world_occurred_at TEXT,
+    recorded_at       TEXT NOT NULL,
+    UNIQUE(
+        owner_user_id,
+        aggregate_type,
+        aggregate_id,
+        aggregate_version
+    )
+);
+
+CREATE TABLE IF NOT EXISTS projection_checkpoint (
+    projector_name   TEXT NOT NULL,
+    owner_user_id    TEXT NOT NULL,
+    last_sequence    INTEGER NOT NULL DEFAULT 0,
+    updated_at       TEXT NOT NULL,
+    PRIMARY KEY (projector_name, owner_user_id)
+);
+
+CREATE TABLE IF NOT EXISTS data_migration (
+    migration_key    TEXT PRIMARY KEY,
+    metadata         TEXT NOT NULL DEFAULT '{}',
+    applied_at       TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS fact_claim (
+    claim_id                TEXT PRIMARY KEY,
+    owner_user_id           TEXT NOT NULL,
+    scope_type              TEXT NOT NULL
+                            CHECK (scope_type IN ('character', 'group_thread', 'story')),
+    scope_id                TEXT NOT NULL,
+    fact_text               TEXT NOT NULL,
+    normalized_fact_text    TEXT NOT NULL,
+    content_hash            TEXT NOT NULL,
+    normalized_content_hash TEXT NOT NULL,
+    status                  TEXT NOT NULL
+                            CHECK (status IN ('candidate', 'verified', 'retracted', 'superseded')),
+    source_kind             TEXT NOT NULL
+                            CHECK (source_kind IN (
+                                'player_message',
+                                'knowledge_chunk',
+                                'authored_event',
+                                'model_inference',
+                                'legacy'
+                            )),
+    provenance              TEXT NOT NULL DEFAULT '{}',
+    source_ids              TEXT NOT NULL DEFAULT '[]',
+    supersedes_claim_id     TEXT,
+    superseded_by_claim_id  TEXT,
+    ledger_version          INTEGER NOT NULL,
+    created_at              TEXT NOT NULL,
+    updated_at              TEXT NOT NULL,
+    verified_at             TEXT,
+    retracted_at            TEXT,
+    UNIQUE (
+        owner_user_id,
+        scope_type,
+        scope_id,
+        normalized_content_hash
+    ),
+    FOREIGN KEY (supersedes_claim_id) REFERENCES fact_claim(claim_id),
+    FOREIGN KEY (superseded_by_claim_id) REFERENCES fact_claim(claim_id)
+);
+
+CREATE TABLE IF NOT EXISTS story_state (
+    owner_user_id  TEXT NOT NULL,
+    story_id       TEXT NOT NULL,
+    status         TEXT NOT NULL
+                   CHECK (status IN ('active', 'completed', 'failed')),
+    progress       REAL NOT NULL DEFAULT 0,
+    terminal_reason TEXT,
+    ledger_version INTEGER NOT NULL,
+    started_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL,
+    completed_at   TEXT,
+    failed_at      TEXT,
+    PRIMARY KEY (owner_user_id, story_id)
+);
+
 
 -- =========================
 -- 索引优化
@@ -865,6 +994,39 @@ ON session_summary(session_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_summary_player
 ON session_summary(character_id, player_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_domain_event_aggregate
+ON domain_event(
+    owner_user_id,
+    aggregate_type,
+    aggregate_id,
+    aggregate_version
+);
+
+CREATE INDEX IF NOT EXISTS idx_domain_event_correlation
+ON domain_event(owner_user_id, correlation_id, sequence);
+
+CREATE INDEX IF NOT EXISTS idx_domain_event_source_turn
+ON domain_event(owner_user_id, source_turn_id, sequence);
+
+CREATE INDEX IF NOT EXISTS idx_domain_event_group_thread
+ON domain_event(owner_user_id, group_thread_id, sequence);
+
+CREATE INDEX IF NOT EXISTS idx_fact_claim_scope
+ON fact_claim(owner_user_id, scope_type, scope_id, created_at, claim_id);
+
+CREATE INDEX IF NOT EXISTS idx_fact_claim_verified
+ON fact_claim(
+    owner_user_id,
+    scope_type,
+    scope_id,
+    status,
+    created_at,
+    claim_id
+);
+
+CREATE INDEX IF NOT EXISTS idx_story_state_status
+ON story_state(owner_user_id, status, updated_at, story_id);
 
 CREATE INDEX IF NOT EXISTS idx_character_active
 ON character_card(owner_user_id, is_active, created_at DESC);
@@ -978,6 +1140,1967 @@ def init_db():
     """初始化数据库结构"""
     with get_conn() as conn:
         conn.executescript(_schema_for_current_db())
+        if _is_postgres_enabled():
+            conn.execute(
+                "ALTER TABLE session ADD COLUMN IF NOT EXISTS story_id TEXT"
+            )
+            conn.execute(
+                "ALTER TABLE event_definition "
+                "ADD COLUMN IF NOT EXISTS story_id TEXT"
+            )
+        else:
+            session_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(session)").fetchall()
+            }
+            if "story_id" not in session_columns:
+                conn.execute("ALTER TABLE session ADD COLUMN story_id TEXT")
+            event_columns = {
+                row["name"]
+                for row in conn.execute(
+                    "PRAGMA table_info(event_definition)"
+                ).fetchall()
+            }
+            if "story_id" not in event_columns:
+                conn.execute(
+                    "ALTER TABLE event_definition ADD COLUMN story_id TEXT"
+                )
+
+
+# =========================
+# 权威领域事件账本
+# =========================
+class DomainEventConcurrencyError(RuntimeError):
+    """聚合版本与调用方预期不一致。"""
+
+
+class DomainEventIdempotencyConflictError(DomainEventConcurrencyError):
+    """同一 event_id 被用于不同的不可变事件内容。"""
+
+
+class UnsupportedDomainEventVersionError(ValueError):
+    """投影器无法安全处理事件的主版本。"""
+
+
+FACT_CLAIM_PROJECTOR = "fact_claim.v1"
+STORY_STATE_PROJECTOR = "story_state.v1"
+
+
+_DOMAIN_EVENT_IMMUTABLE_FIELDS = (
+    "owner_user_id",
+    "aggregate_type",
+    "aggregate_id",
+    "event_type",
+    "payload",
+    "metadata",
+    "correlation_id",
+    "causation_id",
+    "session_id",
+    "group_thread_id",
+    "source_turn_id",
+    "source_message_id",
+    "world_occurred_at",
+)
+
+
+def _domain_event_from_row(row) -> StoredDomainEvent | None:
+    if row is None:
+        return None
+    values = dict(row)
+    values["payload"] = json.loads(values["payload"])
+    values["metadata"] = json.loads(values["metadata"])
+    return StoredDomainEvent(**values)
+
+
+def _get_domain_event_by_id_in_transaction(
+    conn,
+    event_id: str,
+) -> StoredDomainEvent | None:
+    row = conn.execute(
+        """
+        SELECT *
+        FROM domain_event
+        WHERE event_id = ?
+        """,
+        (event_id,),
+    ).fetchone()
+    return _domain_event_from_row(row)
+
+
+def _get_domain_event_in_transaction(
+    conn,
+    event_id: str,
+    owner_user_id: str,
+) -> StoredDomainEvent | None:
+    row = conn.execute(
+        """
+        SELECT *
+        FROM domain_event
+        WHERE event_id = ? AND owner_user_id = ?
+        """,
+        (event_id, owner_user_id),
+    ).fetchone()
+    return _domain_event_from_row(row)
+
+
+def _canonical_domain_event_json(value: Any) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _validate_domain_event_retry(
+    event: NewDomainEvent,
+    existing: StoredDomainEvent,
+) -> StoredDomainEvent:
+    submitted = event.model_dump()
+    stored = existing.model_dump()
+    mismatched_fields = []
+    for field_name in _DOMAIN_EVENT_IMMUTABLE_FIELDS:
+        submitted_value = submitted[field_name]
+        stored_value = stored[field_name]
+        if field_name in {"payload", "metadata"}:
+            matches = (
+                _canonical_domain_event_json(submitted_value)
+                == _canonical_domain_event_json(stored_value)
+            )
+        else:
+            matches = submitted_value == stored_value
+        if not matches:
+            mismatched_fields.append(field_name)
+    if mismatched_fields:
+        raise DomainEventIdempotencyConflictError(
+            "domain event idempotency conflict for "
+            f"event_id {event.event_id!r}: immutable fields differ: "
+            + ", ".join(mismatched_fields)
+        )
+    return existing
+
+
+def _current_domain_event_version(
+    conn,
+    aggregate_key: tuple[str, str, str],
+) -> int:
+    row = conn.execute(
+        """
+        SELECT COALESCE(MAX(aggregate_version), 0) AS aggregate_version
+        FROM domain_event
+        WHERE owner_user_id = ?
+          AND aggregate_type = ?
+          AND aggregate_id = ?
+        """,
+        aggregate_key,
+    ).fetchone()
+    return int(row["aggregate_version"] or 0)
+
+
+def _is_unique_constraint_error(exc: Exception) -> bool:
+    if isinstance(exc, sqlite3.IntegrityError):
+        return True
+    return getattr(exc, "sqlstate", None) == "23505"
+
+
+def _append_domain_events_in_transaction(
+    conn,
+    events: list[NewDomainEvent],
+    *,
+    expected_versions: dict[tuple[str, str, str], int] | None = None,
+) -> list[StoredDomainEvent]:
+    expected_versions = expected_versions or {}
+    current_versions: dict[tuple[str, str, str], int] = {}
+    stored_events: list[StoredDomainEvent] = []
+
+    for event_index, event in enumerate(events):
+        existing = _get_domain_event_by_id_in_transaction(
+            conn,
+            event.event_id,
+        )
+        if existing is not None:
+            stored_events.append(
+                _validate_domain_event_retry(event, existing)
+            )
+            continue
+
+        aggregate_key = (
+            event.owner_user_id,
+            event.aggregate_type,
+            event.aggregate_id,
+        )
+        if aggregate_key not in current_versions:
+            current_version = _current_domain_event_version(
+                conn,
+                aggregate_key,
+            )
+            expected_version = expected_versions.get(aggregate_key)
+            if (
+                expected_version is not None
+                and current_version != expected_version
+            ):
+                raise DomainEventConcurrencyError(
+                    "domain event aggregate version conflict: "
+                    f"expected {expected_version}, found {current_version}"
+                )
+            current_versions[aggregate_key] = current_version
+
+        aggregate_version = current_versions[aggregate_key] + 1
+        recorded_at = _now()
+        values = event.model_dump()
+        insert_sql = """
+            INSERT INTO domain_event (
+                event_id,
+                owner_user_id,
+                aggregate_type,
+                aggregate_id,
+                aggregate_version,
+                event_type,
+                payload,
+                metadata,
+                correlation_id,
+                causation_id,
+                session_id,
+                group_thread_id,
+                source_turn_id,
+                source_message_id,
+                world_occurred_at,
+                recorded_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        if _is_postgres_enabled():
+            insert_sql += " RETURNING sequence"
+        savepoint_name = f"domain_event_append_{event_index}"
+        use_savepoint = _is_postgres_enabled()
+        if use_savepoint:
+            conn.execute(f"SAVEPOINT {savepoint_name}")
+        try:
+            cursor = conn.execute(
+                insert_sql,
+                (
+                    values["event_id"],
+                    values["owner_user_id"],
+                    values["aggregate_type"],
+                    values["aggregate_id"],
+                    aggregate_version,
+                    values["event_type"],
+                    json.dumps(
+                        values["payload"],
+                        ensure_ascii=False,
+                        allow_nan=False,
+                    ),
+                    json.dumps(
+                        values["metadata"],
+                        ensure_ascii=False,
+                        allow_nan=False,
+                    ),
+                    values["correlation_id"],
+                    values["causation_id"],
+                    values["session_id"],
+                    values["group_thread_id"],
+                    values["source_turn_id"],
+                    values["source_message_id"],
+                    values["world_occurred_at"],
+                    recorded_at,
+                ),
+            )
+            sequence = (
+                cursor.fetchone()["sequence"]
+                if _is_postgres_enabled()
+                else cursor.lastrowid
+            )
+        except Exception as exc:
+            if use_savepoint:
+                conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
+                conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+            existing = _get_domain_event_by_id_in_transaction(
+                conn,
+                event.event_id,
+            )
+            if existing is not None:
+                recovered = _validate_domain_event_retry(
+                    event,
+                    existing,
+                )
+                stored_events.append(recovered)
+                current_versions[aggregate_key] = max(
+                    current_versions[aggregate_key],
+                    recovered.aggregate_version,
+                )
+                continue
+            if _is_unique_constraint_error(exc):
+                raise DomainEventConcurrencyError(
+                    "domain event aggregate version conflict"
+                ) from exc
+            raise
+        if use_savepoint:
+            conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+        stored = StoredDomainEvent(
+            **values,
+            sequence=sequence,
+            aggregate_version=aggregate_version,
+            recorded_at=recorded_at,
+        )
+        stored_events.append(stored)
+        current_versions[aggregate_key] = aggregate_version
+
+    return stored_events
+
+
+def _append_domain_event_batch(
+    conn,
+    events: list[NewDomainEvent],
+    *,
+    expected_versions: dict[tuple[str, str, str], int] | None = None,
+) -> list[StoredDomainEvent]:
+    if not events:
+        return []
+
+    if isinstance(conn, sqlite3.Connection) and not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+
+    savepoint_name = "domain_event_append_batch"
+    conn.execute(f"SAVEPOINT {savepoint_name}")
+    try:
+        stored_events = _append_domain_events_in_transaction(
+            conn,
+            events,
+            expected_versions=expected_versions,
+        )
+    except Exception:
+        conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
+        conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+        raise
+    conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+    return stored_events
+
+
+def append_domain_events(
+    events: list[NewDomainEvent],
+    *,
+    expected_versions: dict[tuple[str, str, str], int] | None = None,
+    conn=None,
+) -> list[StoredDomainEvent]:
+    """原子追加一批领域事件；已有事务可通过 conn 复用。"""
+    if conn is not None:
+        return _append_domain_event_batch(
+            conn,
+            events,
+            expected_versions=expected_versions,
+        )
+    with get_conn() as transaction:
+        return _append_domain_event_batch(
+            transaction,
+            events,
+            expected_versions=expected_versions,
+        )
+
+
+def append_domain_event(
+    event: NewDomainEvent,
+    *,
+    expected_version: int | None = None,
+    conn=None,
+) -> StoredDomainEvent:
+    """追加单个领域事件。"""
+    aggregate_key = (
+        event.owner_user_id,
+        event.aggregate_type,
+        event.aggregate_id,
+    )
+    expected_versions = (
+        {aggregate_key: expected_version}
+        if expected_version is not None
+        else None
+    )
+    return append_domain_events(
+        [event],
+        expected_versions=expected_versions,
+        conn=conn,
+    )[0]
+
+
+def get_domain_event(
+    event_id: str,
+    *,
+    owner_user_id: str,
+) -> StoredDomainEvent | None:
+    """在租户边界内按全局 event_id 获取事件。"""
+    with get_conn() as conn:
+        return _get_domain_event_in_transaction(
+            conn,
+            event_id,
+            owner_user_id,
+        )
+
+
+def list_domain_events(
+    owner_user_id: str,
+    aggregate_type: str | None = None,
+    aggregate_id: str | None = None,
+    *,
+    after_sequence: int = 0,
+    limit: int | None = None,
+) -> list[StoredDomainEvent]:
+    """按全局序列读取租户领域事件。"""
+    if limit is not None and (
+        isinstance(limit, bool)
+        or limit < 0
+    ):
+        raise ValueError("limit must be a non-negative integer")
+
+    clauses = ["owner_user_id = ?", "sequence > ?"]
+    params: list[Any] = [owner_user_id, after_sequence]
+    if aggregate_type is not None:
+        clauses.append("aggregate_type = ?")
+        params.append(aggregate_type)
+    if aggregate_id is not None:
+        clauses.append("aggregate_id = ?")
+        params.append(aggregate_id)
+    sql = (
+        "SELECT * FROM domain_event WHERE "
+        + " AND ".join(clauses)
+        + " ORDER BY sequence ASC"
+    )
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+    with get_conn() as conn:
+        rows = conn.execute(sql, tuple(params)).fetchall()
+    return [_domain_event_from_row(row) for row in rows]
+
+
+# =========================
+# story state projection
+# =========================
+class StoryStateTransitionError(ValueError):
+    """剧情事件违反聚合状态转换规则。"""
+
+
+_STORY_EVENT_TYPES = {
+    "story.started.v1",
+    "story.progressed.v1",
+    "story.completed.v1",
+    "story.failed.v1",
+}
+_TERMINAL_STORY_STATUSES = {"completed", "failed"}
+
+
+def _decode_story_state_row(row) -> dict | None:
+    if row is None:
+        return None
+    state = dict(row)
+    state["progress"] = float(state["progress"])
+    state["ledger_version"] = int(state["ledger_version"])
+    return state
+
+
+def _get_story_state_in_transaction(
+    conn,
+    owner_user_id: str,
+    story_id: str,
+) -> dict | None:
+    row = conn.execute(
+        """
+        SELECT *
+        FROM story_state
+        WHERE owner_user_id = ? AND story_id = ?
+        """,
+        (owner_user_id, story_id),
+    ).fetchone()
+    return _decode_story_state_row(row)
+
+
+def _clamp_story_progress(value: Any) -> float:
+    try:
+        progress = float(value)
+    except (TypeError, ValueError) as exc:
+        raise StoryStateTransitionError(
+            "story progress must be numeric"
+        ) from exc
+    return max(0.0, min(1.0, progress))
+
+
+def _project_story_event_in_transaction(
+    conn,
+    event: StoredDomainEvent,
+) -> dict:
+    if event.aggregate_type != "story":
+        raise ValueError("story projector received another aggregate type")
+    if event.event_type not in _STORY_EVENT_TYPES:
+        raise ValueError(f"unsupported story event type: {event.event_type}")
+
+    state = _get_story_state_in_transaction(
+        conn,
+        event.owner_user_id,
+        event.aggregate_id,
+    )
+    if state is not None and event.aggregate_version == state["ledger_version"]:
+        return state
+
+    expected_version = 1 if state is None else state["ledger_version"] + 1
+    if event.aggregate_version != expected_version:
+        raise DomainEventConcurrencyError(
+            "story projection version conflict: "
+            f"expected {expected_version}, found {event.aggregate_version}"
+        )
+
+    payload = event.model_dump()["payload"]
+    if event.event_type == "story.started.v1":
+        if state is not None:
+            raise StoryStateTransitionError("story has already started")
+        progress = _clamp_story_progress(payload.get("progress", 0.0))
+        conn.execute(
+            """
+            INSERT INTO story_state (
+                owner_user_id,
+                story_id,
+                status,
+                progress,
+                terminal_reason,
+                ledger_version,
+                started_at,
+                updated_at,
+                completed_at,
+                failed_at
+            )
+            VALUES (?, ?, 'active', ?, NULL, ?, ?, ?, NULL, NULL)
+            """,
+            (
+                event.owner_user_id,
+                event.aggregate_id,
+                progress,
+                event.aggregate_version,
+                event.recorded_at,
+                event.recorded_at,
+            ),
+        )
+    elif event.event_type == "story.progressed.v1":
+        if state is None:
+            raise StoryStateTransitionError("story must be started before progress")
+        if state["status"] in _TERMINAL_STORY_STATUSES:
+            raise StoryStateTransitionError(
+                "story progress cannot change after terminal state"
+            )
+        if "progress" in payload:
+            progress = _clamp_story_progress(payload["progress"])
+        else:
+            progress = _clamp_story_progress(
+                state["progress"] + float(payload.get("progress_delta", 0.0))
+            )
+        conn.execute(
+            """
+            UPDATE story_state
+            SET progress = ?,
+                ledger_version = ?,
+                updated_at = ?
+            WHERE owner_user_id = ?
+              AND story_id = ?
+              AND ledger_version = ?
+            """,
+            (
+                progress,
+                event.aggregate_version,
+                event.recorded_at,
+                event.owner_user_id,
+                event.aggregate_id,
+                state["ledger_version"],
+            ),
+        )
+    else:
+        if state is None:
+            raise StoryStateTransitionError(
+                "story must be started before reaching a terminal state"
+            )
+        if state["status"] in _TERMINAL_STORY_STATUSES:
+            raise StoryStateTransitionError("story is already terminal")
+        status = (
+            "completed"
+            if event.event_type == "story.completed.v1"
+            else "failed"
+        )
+        progress = (
+            1.0
+            if status == "completed"
+            else _clamp_story_progress(payload.get("progress", state["progress"]))
+        )
+        reason = str(payload.get("reason") or "").strip() or None
+        conn.execute(
+            """
+            UPDATE story_state
+            SET status = ?,
+                progress = ?,
+                terminal_reason = ?,
+                ledger_version = ?,
+                updated_at = ?,
+                completed_at = ?,
+                failed_at = ?
+            WHERE owner_user_id = ?
+              AND story_id = ?
+              AND ledger_version = ?
+            """,
+            (
+                status,
+                progress,
+                reason,
+                event.aggregate_version,
+                event.recorded_at,
+                event.recorded_at if status == "completed" else None,
+                event.recorded_at if status == "failed" else None,
+                event.owner_user_id,
+                event.aggregate_id,
+                state["ledger_version"],
+            ),
+        )
+
+    projected = _get_story_state_in_transaction(
+        conn,
+        event.owner_user_id,
+        event.aggregate_id,
+    )
+    if projected is None or projected["ledger_version"] != event.aggregate_version:
+        raise DomainEventConcurrencyError(
+            "story projection changed concurrently"
+        )
+    return projected
+
+
+def append_story_event(
+    owner_user_id: str,
+    story_id: str,
+    event_type: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    event_id: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    correlation_id: str | None = None,
+    causation_id: str | None = None,
+    session_id: str | None = None,
+    group_thread_id: str | None = None,
+    source_turn_id: str | None = None,
+    source_message_id: int | None = None,
+    world_occurred_at: str | None = None,
+) -> dict:
+    """追加剧情事件并在同一事务内更新规范化剧情状态。"""
+    event_values = {
+        "owner_user_id": owner_user_id,
+        "aggregate_type": "story",
+        "aggregate_id": story_id,
+        "event_type": event_type,
+        "payload": payload or {},
+        "metadata": metadata or {},
+        "correlation_id": correlation_id,
+        "causation_id": causation_id,
+        "session_id": session_id,
+        "group_thread_id": group_thread_id,
+        "source_turn_id": source_turn_id,
+        "source_message_id": source_message_id,
+        "world_occurred_at": world_occurred_at,
+    }
+    if event_id is not None:
+        event_values["event_id"] = event_id
+    event = NewDomainEvent(**event_values)
+    with get_conn() as conn:
+        return _append_and_project_story_event_in_transaction(conn, event)
+
+
+def _append_and_project_story_event_in_transaction(
+    conn,
+    event: NewDomainEvent,
+) -> dict:
+    stored = append_domain_event(event, conn=conn)
+    return _project_story_event_in_transaction(conn, stored)
+
+
+def _event_execution_domain_event_id(
+    execution_id: str,
+    aggregate_type: str,
+    aggregate_id: str,
+    event_type: str,
+) -> str:
+    identity = "\0".join(
+        (
+            "event_execution",
+            execution_id,
+            aggregate_type,
+            aggregate_id,
+            event_type,
+        )
+    )
+    return uuid.uuid5(uuid.NAMESPACE_URL, identity).hex
+
+
+def _apply_story_update_in_transaction(
+    conn,
+    owner_user_id: str,
+    update: dict[str, Any],
+) -> dict:
+    story_id = str(update.get("story_id") or "").strip()
+    execution_id = str(update.get("execution_id") or "").strip()
+    source_event_id = str(update.get("source_event_id") or "").strip()
+    if not story_id or not execution_id or not source_event_id:
+        raise ValueError("story update requires story_id, execution_id, and source_event_id")
+
+    event_context = {
+        "correlation_id": execution_id,
+        "causation_id": source_event_id,
+        "session_id": update.get("session_id"),
+        "world_occurred_at": update.get("world_occurred_at"),
+        "metadata": {
+            "producer": "memoria.core.event_executor",
+            "source_event_id": source_event_id,
+            "source_event_name": update.get("source_event_name"),
+        },
+    }
+    state = _get_story_state_in_transaction(conn, owner_user_id, story_id)
+    if state is None:
+        started = NewDomainEvent(
+            event_id=_event_execution_domain_event_id(
+                execution_id,
+                "story",
+                story_id,
+                "story.started.v1",
+            ),
+            owner_user_id=owner_user_id,
+            aggregate_type="story",
+            aggregate_id=story_id,
+            event_type="story.started.v1",
+            payload={"progress": 0.0},
+            **event_context,
+        )
+        state = _append_and_project_story_event_in_transaction(conn, started)
+
+    requested_status = update.get("status")
+    if requested_status == "completed":
+        event_type = "story.completed.v1"
+        payload = {
+            "reason": f"event:{source_event_id}",
+            "progress": 1.0,
+        }
+    elif requested_status == "failed":
+        event_type = "story.failed.v1"
+        payload = {
+            "reason": f"event:{source_event_id}",
+        }
+        if update.get("progress") is not None:
+            payload["progress"] = update["progress"]
+    else:
+        has_progress = (
+            update.get("progress") is not None
+            or update.get("progress_delta") is not None
+        )
+        if not has_progress and requested_status not in {"active", "pending"}:
+            return state
+        event_type = "story.progressed.v1"
+        payload = {}
+        if update.get("progress") is not None:
+            payload["progress"] = update["progress"]
+        if update.get("progress_delta") is not None:
+            payload["progress_delta"] = update["progress_delta"]
+
+    domain_event = NewDomainEvent(
+        event_id=_event_execution_domain_event_id(
+            execution_id,
+            "story",
+            story_id,
+            event_type,
+        ),
+        owner_user_id=owner_user_id,
+        aggregate_type="story",
+        aggregate_id=story_id,
+        event_type=event_type,
+        payload=payload,
+        **event_context,
+    )
+    return _append_and_project_story_event_in_transaction(conn, domain_event)
+
+
+def get_story_state(
+    owner_user_id: str,
+    story_id: str,
+) -> dict | None:
+    """在租户边界内读取规范化剧情状态。"""
+    with get_conn() as conn:
+        return _get_story_state_in_transaction(
+            conn,
+            owner_user_id,
+            story_id,
+        )
+
+
+# =========================
+# fact claim projection
+# =========================
+class FactClaimConcurrencyError(RuntimeError):
+    """Fact claim projection version or status changed concurrently."""
+
+
+def _decode_fact_claim_row(row) -> dict | None:
+    if row is None:
+        return None
+    claim = dict(row)
+    for field_name, default in (
+        ("provenance", {}),
+        ("source_ids", []),
+    ):
+        raw_value = claim.get(field_name)
+        if isinstance(raw_value, str):
+            try:
+                claim[field_name] = json.loads(raw_value)
+            except (TypeError, ValueError):
+                claim[field_name] = default
+        elif raw_value is None:
+            claim[field_name] = default
+    return claim
+
+
+def _get_fact_claim_in_transaction(
+    conn,
+    owner_user_id: str,
+    claim_id: str,
+) -> dict | None:
+    row = conn.execute(
+        """
+        SELECT *
+        FROM fact_claim
+        WHERE owner_user_id = ? AND claim_id = ?
+        """,
+        (owner_user_id, claim_id),
+    ).fetchone()
+    return _decode_fact_claim_row(row)
+
+
+def _begin_fact_claim_write(conn) -> None:
+    if isinstance(conn, sqlite3.Connection) and not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
+
+
+def _lock_fact_claim_for_write(conn, claim_id: str) -> None:
+    if _is_postgres_enabled():
+        conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))",
+            (claim_id,),
+        )
+
+
+def _fact_claim_event_id(event_type: str, *identity_parts: str) -> str:
+    identity = "\0".join((event_type, *identity_parts))
+    return uuid.uuid5(uuid.NAMESPACE_URL, identity).hex
+
+
+def _new_fact_claim_event(
+    *,
+    owner_user_id: str,
+    claim_id: str,
+    event_type: str,
+    payload: dict[str, Any],
+    identity_parts: tuple[str, ...] = (),
+    event_context: dict[str, Any] | None = None,
+) -> NewDomainEvent:
+    event_context = event_context or {}
+    return NewDomainEvent(
+        event_id=_fact_claim_event_id(
+            event_type,
+            owner_user_id,
+            claim_id,
+            *identity_parts,
+        ),
+        owner_user_id=owner_user_id,
+        aggregate_type="fact_claim",
+        aggregate_id=claim_id,
+        event_type=event_type,
+        payload=payload,
+        metadata={
+            "producer": "memoria.core.fact_claims",
+            **dict(event_context.get("metadata") or {}),
+        },
+        correlation_id=event_context.get("correlation_id"),
+        causation_id=event_context.get("causation_id"),
+        session_id=event_context.get("session_id"),
+        group_thread_id=event_context.get("group_thread_id"),
+        source_turn_id=event_context.get("source_turn_id"),
+        source_message_id=event_context.get("source_message_id"),
+        world_occurred_at=event_context.get("world_occurred_at"),
+    )
+
+
+def _canonical_fact_claim_json(value: Any) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _fact_claim_evidence(payload: dict[str, Any]) -> dict[str, Any]:
+    return normalize_evidence_entry({
+        "source_kind": payload["source_kind"],
+        "source_ids": payload["source_ids"],
+        "direct_support": payload["direct_support"],
+        "details": dict(payload.get("provenance") or {}),
+    })
+
+
+def _guard_fact_claim_update(cursor, message: str) -> None:
+    if cursor.rowcount != 1:
+        raise FactClaimConcurrencyError(message)
+
+
+def _insert_fact_claim_from_event(
+    conn,
+    event: StoredDomainEvent,
+    payload: dict[str, Any],
+) -> dict:
+    evidence = _fact_claim_evidence(payload)
+    encoded_provenance = json.dumps(
+        {"evidence": [evidence]},
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    encoded_source_ids = json.dumps(
+        evidence["source_ids"],
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+    cursor = conn.execute(
+        """
+        INSERT INTO fact_claim (
+            claim_id,
+            owner_user_id,
+            scope_type,
+            scope_id,
+            fact_text,
+            normalized_fact_text,
+            content_hash,
+            normalized_content_hash,
+            status,
+            source_kind,
+            provenance,
+            source_ids,
+            supersedes_claim_id,
+            superseded_by_claim_id,
+            ledger_version,
+            created_at,
+            updated_at,
+            verified_at,
+            retracted_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'candidate', ?, ?, ?, NULL, NULL, ?, ?, ?, NULL, NULL)
+        ON CONFLICT DO NOTHING
+        """,
+        (
+            payload["claim_id"],
+            payload["owner_user_id"],
+            payload["scope_type"],
+            payload["scope_id"],
+            payload["fact_text"],
+            payload["normalized_fact_text"],
+            payload["content_hash"],
+            payload["normalized_content_hash"],
+            payload["source_kind"],
+            encoded_provenance,
+            encoded_source_ids,
+            event.aggregate_version,
+            event.recorded_at,
+            event.recorded_at,
+        ),
+    )
+    if cursor.rowcount == 1:
+        return _get_fact_claim_in_transaction(
+            conn,
+            event.owner_user_id,
+            event.aggregate_id,
+        )
+    concurrent = _get_fact_claim_in_transaction(
+        conn,
+        event.owner_user_id,
+        event.aggregate_id,
+    )
+    if (
+        concurrent is not None
+        and concurrent["ledger_version"] >= event.aggregate_version
+    ):
+        return concurrent
+    raise FactClaimConcurrencyError(
+        "fact claim initial projection conflict"
+    )
+
+
+def _validate_fact_claim_event(event: StoredDomainEvent) -> dict[str, Any]:
+    if not isinstance(event, StoredDomainEvent):
+        raise TypeError("fact claim projector requires StoredDomainEvent")
+    if event.aggregate_type != "fact_claim":
+        raise ValueError("fact claim projector received another aggregate type")
+    payload = event.model_dump()["payload"]
+    if payload.get("claim_id") != event.aggregate_id:
+        raise ValueError("fact claim event payload identity mismatch")
+    if payload.get("owner_user_id", event.owner_user_id) != event.owner_user_id:
+        raise ValueError("fact claim event tenant identity mismatch")
+    if event.event_type == "fact.claimed.v1":
+        source_kind = payload.get("source_kind")
+        if source_kind not in (
+            CLAIM_SOURCE_KINDS | {ADMIN_VERIFICATION_SOURCE_KIND}
+        ):
+            raise ValueError(
+                f"unsupported fact claim source_kind: {source_kind}"
+            )
+        clean_source_ids(payload.get("source_ids"))
+        if not isinstance(payload.get("direct_support"), bool):
+            raise ValueError("direct_support must be a boolean")
+        if type(payload.get("provenance", {})) is not dict:
+            raise ValueError("fact claim provenance must be an object")
+        expected_identity = derive_fact_claim_identity(
+            event.owner_user_id,
+            payload["scope_type"],
+            payload["scope_id"],
+            payload["fact_text"],
+        )
+        for field_name in (
+            "normalized_fact_text",
+            "content_hash",
+            "normalized_content_hash",
+            "claim_id",
+        ):
+            if payload[field_name] != expected_identity[field_name]:
+                raise ValueError(
+                    f"fact claim {field_name} identity mismatch"
+                )
+    return payload
+
+
+def _project_fact_claim_event_in_transaction(
+    conn,
+    event: StoredDomainEvent,
+) -> dict:
+    payload = _validate_fact_claim_event(event)
+    claim = _get_fact_claim_in_transaction(
+        conn,
+        event.owner_user_id,
+        event.aggregate_id,
+    )
+    if claim is not None and event.aggregate_version <= claim["ledger_version"]:
+        return claim
+    if claim is None:
+        if (
+            event.event_type != "fact.claimed.v1"
+            or event.aggregate_version != 1
+        ):
+            raise FactClaimConcurrencyError(
+                "fact claim projection version gap before initial event"
+            )
+        if payload["source_kind"] == ADMIN_VERIFICATION_SOURCE_KIND:
+            raise ValueError(
+                "admin verification requires an existing fact claim"
+            )
+        return _insert_fact_claim_from_event(conn, event, payload)
+    if event.aggregate_version != claim["ledger_version"] + 1:
+        raise FactClaimConcurrencyError(
+            "fact claim projection version conflict: "
+            f"expected {claim['ledger_version'] + 1}, "
+            f"found {event.aggregate_version}"
+        )
+
+    if event.event_type == "fact.claimed.v1":
+        if claim["status"] in {"retracted", "superseded"}:
+            raise FactClaimConcurrencyError(
+                "fact claim terminal status rejects evidence"
+            )
+        identity_fields = (
+            "owner_user_id",
+            "claim_id",
+            "scope_type",
+            "scope_id",
+            "fact_text",
+            "normalized_fact_text",
+            "content_hash",
+            "normalized_content_hash",
+        )
+        if any(
+            payload[field_name] != claim[field_name]
+            for field_name in identity_fields
+        ):
+            raise ValueError("fact claim evidence identity mismatch")
+        evidence_entries = list(
+            (claim.get("provenance") or {}).get("evidence") or []
+        )
+        evidence = _fact_claim_evidence(payload)
+        if evidence not in evidence_entries:
+            evidence_entries.append(evidence)
+        source_ids = sorted({
+            source_id
+            for item in evidence_entries
+            for source_id in item.get("source_ids") or []
+        })
+        cursor = conn.execute(
+            """
+            UPDATE fact_claim
+            SET provenance = ?,
+                source_ids = ?,
+                ledger_version = ?,
+                updated_at = ?
+            WHERE owner_user_id = ?
+              AND claim_id = ?
+              AND ledger_version = ?
+              AND status IN ('candidate', 'verified')
+            """,
+            (
+                json.dumps(
+                    {"evidence": evidence_entries},
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ),
+                json.dumps(
+                    source_ids,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ),
+                event.aggregate_version,
+                event.recorded_at,
+                event.owner_user_id,
+                event.aggregate_id,
+                claim["ledger_version"],
+            ),
+        )
+        _guard_fact_claim_update(
+            cursor,
+            "fact claim evidence projection changed concurrently",
+        )
+    elif event.event_type == "fact.verified.v1":
+        if claim["status"] != "candidate":
+            raise FactClaimConcurrencyError(
+                "fact claim verification status changed concurrently"
+            )
+        raw_snapshot = payload["verification_snapshot"]
+        if not isinstance(raw_snapshot, dict):
+            raise ValueError(
+                "fact claim verification_snapshot must be an object"
+            )
+        snapshot = dict(raw_snapshot)
+        evidence_entries = [
+            normalize_evidence_entry(item)
+            for item in snapshot.get("evidence") or []
+        ]
+        current_evidence = [
+            normalize_evidence_entry(item)
+            for item in (
+                (claim.get("provenance") or {}).get("evidence") or []
+            )
+        ]
+        if (
+            _canonical_fact_claim_json(evidence_entries)
+            != _canonical_fact_claim_json(current_evidence)
+        ):
+            raise ValueError(
+                "fact claim verification evidence does not match claimed events"
+            )
+        decision = evaluate_verification(
+            claim["normalized_fact_text"],
+            evidence_entries,
+        )
+        for field_name, expected_value in decision.items():
+            if field_name == "source_ids":
+                continue
+            if (
+                _canonical_fact_claim_json(snapshot.get(field_name))
+                != _canonical_fact_claim_json(expected_value)
+            ):
+                raise ValueError(
+                    "fact claim verification decision mismatch: "
+                    f"{field_name}"
+                )
+        if not decision["verified"]:
+            raise ValueError(
+                "fact claim verification policy is not satisfied"
+            )
+        source_ids = clean_source_ids(snapshot.get("source_ids"))
+        if source_ids != decision["source_ids"]:
+            raise ValueError(
+                "fact claim verification source_ids do not match evidence"
+            )
+        cursor = conn.execute(
+            """
+            UPDATE fact_claim
+            SET status = 'verified',
+                provenance = ?,
+                source_ids = ?,
+                ledger_version = ?,
+                updated_at = ?,
+                verified_at = ?
+            WHERE owner_user_id = ?
+              AND claim_id = ?
+              AND ledger_version = ?
+              AND status = 'candidate'
+            """,
+            (
+                json.dumps(
+                    {"evidence": evidence_entries},
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ),
+                json.dumps(
+                    source_ids,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ),
+                event.aggregate_version,
+                event.recorded_at,
+                event.recorded_at,
+                event.owner_user_id,
+                event.aggregate_id,
+                claim["ledger_version"],
+            ),
+        )
+        _guard_fact_claim_update(
+            cursor,
+            "fact claim verification projection changed concurrently",
+        )
+    elif event.event_type == "fact.retracted.v1":
+        if claim["status"] not in {"candidate", "verified"}:
+            raise FactClaimConcurrencyError(
+                "fact claim retraction status changed concurrently"
+            )
+        if claim["supersedes_claim_id"] is not None:
+            raise FactClaimConcurrencyError(
+                "fact claim replacement cannot be retracted"
+            )
+        cursor = conn.execute(
+            """
+            UPDATE fact_claim
+            SET status = 'retracted',
+                ledger_version = ?,
+                updated_at = ?,
+                retracted_at = ?
+            WHERE owner_user_id = ?
+              AND claim_id = ?
+              AND ledger_version = ?
+              AND status IN ('candidate', 'verified')
+              AND supersedes_claim_id IS NULL
+            """,
+            (
+                event.aggregate_version,
+                event.recorded_at,
+                event.recorded_at,
+                event.owner_user_id,
+                event.aggregate_id,
+                claim["ledger_version"],
+            ),
+        )
+        _guard_fact_claim_update(
+            cursor,
+            "fact claim retraction projection changed concurrently",
+        )
+    elif event.event_type == "fact.superseded.v1":
+        if claim["status"] not in {"candidate", "verified"}:
+            raise FactClaimConcurrencyError(
+                "fact claim supersede status changed concurrently"
+            )
+        replacement_id = payload["superseded_by_claim_id"]
+        replacement = _get_fact_claim_in_transaction(
+            conn,
+            event.owner_user_id,
+            replacement_id,
+        )
+        if replacement is None:
+            raise FactClaimConcurrencyError(
+                "fact claim replacement projection is missing"
+            )
+        if (
+            claim["scope_type"] != replacement["scope_type"]
+            or claim["scope_id"] != replacement["scope_id"]
+        ):
+            raise ValueError("superseding claims must share a scope")
+        if replacement["status"] in {"retracted", "superseded"}:
+            raise FactClaimConcurrencyError(
+                "fact claim replacement is terminal"
+            )
+        if (
+            replacement["ledger_version"]
+            != payload["replacement_ledger_version"]
+        ):
+            raise FactClaimConcurrencyError(
+                "fact claim replacement version conflict"
+            )
+        if replacement["supersedes_claim_id"] not in {
+            None,
+            event.aggregate_id,
+        }:
+            raise FactClaimConcurrencyError(
+                "fact claim replacement already supersedes another claim"
+            )
+        cursor = conn.execute(
+            """
+            UPDATE fact_claim
+            SET status = 'superseded',
+                superseded_by_claim_id = ?,
+                ledger_version = ?,
+                updated_at = ?
+            WHERE owner_user_id = ?
+              AND claim_id = ?
+              AND ledger_version = ?
+              AND status IN ('candidate', 'verified')
+              AND superseded_by_claim_id IS NULL
+            """,
+            (
+                replacement_id,
+                event.aggregate_version,
+                event.recorded_at,
+                event.owner_user_id,
+                event.aggregate_id,
+                claim["ledger_version"],
+            ),
+        )
+        _guard_fact_claim_update(
+            cursor,
+            "fact claim supersede projection changed concurrently",
+        )
+        cursor = conn.execute(
+            """
+            UPDATE fact_claim
+            SET supersedes_claim_id = ?,
+                updated_at = ?
+            WHERE owner_user_id = ?
+              AND claim_id = ?
+              AND ledger_version = ?
+              AND status IN ('candidate', 'verified')
+              AND (
+                    supersedes_claim_id IS NULL
+                    OR supersedes_claim_id = ?
+              )
+            """,
+            (
+                event.aggregate_id,
+                event.recorded_at,
+                event.owner_user_id,
+                replacement_id,
+                replacement["ledger_version"],
+                event.aggregate_id,
+            ),
+        )
+        _guard_fact_claim_update(
+            cursor,
+            "fact claim replacement projection changed concurrently",
+        )
+    else:
+        raise ValueError(
+            f"unsupported fact claim event type: {event.event_type}"
+        )
+    return _get_fact_claim_in_transaction(
+        conn,
+        event.owner_user_id,
+        event.aggregate_id,
+    )
+
+
+def _project_fact_claim_event(
+    event: StoredDomainEvent,
+    *,
+    conn=None,
+) -> dict:
+    if conn is not None:
+        return _project_fact_claim_event_in_transaction(conn, event)
+    with get_conn() as transaction:
+        _begin_fact_claim_write(transaction)
+        _lock_fact_claim_for_write(transaction, event.aggregate_id)
+        return _project_fact_claim_event_in_transaction(transaction, event)
+
+
+def _domain_event_major_version(event_type: str) -> int:
+    match = re.fullmatch(r".+\.v([1-9][0-9]*)", event_type)
+    if match is None:
+        raise UnsupportedDomainEventVersionError(
+            f"domain event type has no supported major version: {event_type}"
+        )
+    return int(match.group(1))
+
+
+def _validate_projector_event_version(event: StoredDomainEvent) -> None:
+    major_version = _domain_event_major_version(event.event_type)
+    if major_version != 1:
+        raise UnsupportedDomainEventVersionError(
+            f"unsupported domain event {event.event_type}: "
+            f"major version {major_version}"
+        )
+
+
+def _get_projection_checkpoint_in_transaction(
+    conn,
+    projector_name: str,
+    owner_user_id: str,
+) -> dict | None:
+    row = conn.execute(
+        """
+        SELECT projector_name, owner_user_id, last_sequence, updated_at
+        FROM projection_checkpoint
+        WHERE projector_name = ? AND owner_user_id = ?
+        """,
+        (projector_name, owner_user_id),
+    ).fetchone()
+    if row is None:
+        return None
+    checkpoint = dict(row)
+    checkpoint["last_sequence"] = int(checkpoint["last_sequence"])
+    return checkpoint
+
+
+def get_projection_checkpoint(
+    projector_name: str,
+    owner_user_id: str,
+) -> dict | None:
+    """读取租户内单个投影器的全局序列检查点。"""
+    projector_name = str(projector_name or "").strip()
+    owner_user_id = str(owner_user_id or "").strip()
+    if not projector_name or not owner_user_id:
+        raise ValueError("projector_name and owner_user_id must not be blank")
+    with get_conn() as conn:
+        return _get_projection_checkpoint_in_transaction(
+            conn,
+            projector_name,
+            owner_user_id,
+        )
+
+
+def _save_projection_checkpoint_in_transaction(
+    conn,
+    projector_name: str,
+    owner_user_id: str,
+    last_sequence: int,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO projection_checkpoint (
+            projector_name,
+            owner_user_id,
+            last_sequence,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(projector_name, owner_user_id)
+        DO UPDATE SET
+            last_sequence=excluded.last_sequence,
+            updated_at=excluded.updated_at
+        """,
+        (
+            projector_name,
+            owner_user_id,
+            int(last_sequence),
+            _now(),
+        ),
+    )
+
+
+def rebuild_domain_projections(owner_user_id: str) -> dict:
+    """从不可变账本原子重建指定租户的事实与剧情投影。"""
+    owner_user_id = str(owner_user_id or "").strip()
+    if not owner_user_id:
+        raise ValueError("owner_user_id must not be blank")
+
+    projectors = {
+        "fact_claim": (
+            FACT_CLAIM_PROJECTOR,
+            _project_fact_claim_event_in_transaction,
+        ),
+        "story": (
+            STORY_STATE_PROJECTOR,
+            _project_story_event_in_transaction,
+        ),
+    }
+    progress = {
+        projector_name: {
+            "processed_events": 0,
+            "last_sequence": 0,
+        }
+        for projector_name, _project in projectors.values()
+    }
+
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM fact_claim WHERE owner_user_id = ?",
+            (owner_user_id,),
+        )
+        conn.execute(
+            "DELETE FROM story_state WHERE owner_user_id = ?",
+            (owner_user_id,),
+        )
+        conn.execute(
+            """
+            DELETE FROM projection_checkpoint
+            WHERE owner_user_id = ?
+              AND projector_name IN (?, ?)
+            """,
+            (
+                owner_user_id,
+                FACT_CLAIM_PROJECTOR,
+                STORY_STATE_PROJECTOR,
+            ),
+        )
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM domain_event
+            WHERE owner_user_id = ?
+            ORDER BY sequence ASC
+            """,
+            (owner_user_id,),
+        ).fetchall()
+
+        for row in rows:
+            event = _domain_event_from_row(row)
+            projector_spec = projectors.get(event.aggregate_type)
+            if projector_spec is None:
+                continue
+            projector_name, projector = projector_spec
+            _validate_projector_event_version(event)
+            projector(conn, event)
+            progress[projector_name]["processed_events"] += 1
+            progress[projector_name]["last_sequence"] = event.sequence
+
+        for projector_name, projector_progress in progress.items():
+            _save_projection_checkpoint_in_transaction(
+                conn,
+                projector_name,
+                owner_user_id,
+                projector_progress["last_sequence"],
+            )
+
+    return {
+        "owner_user_id": owner_user_id,
+        "projectors": progress,
+    }
+
+
+def _record_fact_claim_in_transaction(
+    conn,
+    *,
+    claim_id: str,
+    owner_user_id: str,
+    scope_type: str,
+    scope_id: str,
+    fact_text: str,
+    normalized_fact_text: str,
+    content_hash: str,
+    normalized_content_hash: str,
+    source_kind: str,
+    source_ids: list[str],
+    provenance: dict[str, Any],
+    direct_support: bool,
+    verification_policy: Callable[[list[dict[str, Any]]], dict[str, Any]],
+    event_context: dict[str, Any] | None = None,
+) -> dict:
+    _begin_fact_claim_write(conn)
+    _lock_fact_claim_for_write(conn, claim_id)
+    existing = _get_fact_claim_in_transaction(
+        conn,
+        owner_user_id,
+        claim_id,
+    )
+    if (
+        existing is not None
+        and existing["status"] in {"retracted", "superseded"}
+    ):
+        raise ValueError("terminal fact claim cannot accept evidence")
+
+    identity = existing or {
+        "owner_user_id": owner_user_id,
+        "claim_id": claim_id,
+        "scope_type": scope_type,
+        "scope_id": scope_id,
+        "fact_text": fact_text,
+        "normalized_fact_text": normalized_fact_text,
+        "content_hash": content_hash,
+        "normalized_content_hash": normalized_content_hash,
+    }
+    evidence_payload = {
+        "source_kind": source_kind,
+        "source_ids": sorted(set(source_ids)),
+        "direct_support": bool(direct_support),
+        "provenance": provenance,
+    }
+    claimed_payload = {
+        field_name: identity[field_name]
+        for field_name in (
+            "owner_user_id",
+            "claim_id",
+            "scope_type",
+            "scope_id",
+            "fact_text",
+            "normalized_fact_text",
+            "content_hash",
+            "normalized_content_hash",
+        )
+    }
+    claimed_payload.update(evidence_payload)
+    evidence_identity = _canonical_fact_claim_json(evidence_payload)
+    claimed_event = append_domain_event(
+        _new_fact_claim_event(
+            owner_user_id=owner_user_id,
+            claim_id=claim_id,
+            event_type="fact.claimed.v1",
+            payload=claimed_payload,
+            identity_parts=(evidence_identity,),
+            event_context=event_context,
+        ),
+        expected_version=(
+            existing["ledger_version"] if existing is not None else 0
+        ),
+        conn=conn,
+    )
+    projected = _project_fact_claim_event_in_transaction(
+        conn,
+        claimed_event,
+    )
+    evidence_entries = list(
+        (projected.get("provenance") or {}).get("evidence") or []
+    )
+    decision = verification_policy(evidence_entries)
+    if projected["status"] == "candidate" and decision["verified"]:
+        snapshot = {
+            **decision,
+            "evidence": evidence_entries,
+            "source_ids": projected["source_ids"],
+        }
+        verified_event = append_domain_event(
+            _new_fact_claim_event(
+                owner_user_id=owner_user_id,
+                claim_id=claim_id,
+                event_type="fact.verified.v1",
+                payload={
+                    "owner_user_id": owner_user_id,
+                    "claim_id": claim_id,
+                    "reason": "deterministic_policy",
+                    "verification_snapshot": snapshot,
+                },
+                event_context=event_context,
+            ),
+            expected_version=projected["ledger_version"],
+            conn=conn,
+        )
+        projected = _project_fact_claim_event_in_transaction(
+            conn,
+            verified_event,
+        )
+    return projected
+
+
+def _record_fact_claim(
+    *,
+    claim_id: str,
+    owner_user_id: str,
+    scope_type: str,
+    scope_id: str,
+    fact_text: str,
+    normalized_fact_text: str,
+    content_hash: str,
+    normalized_content_hash: str,
+    source_kind: str,
+    source_ids: list[str],
+    provenance: dict[str, Any],
+    direct_support: bool,
+    verification_policy: Callable[[list[dict[str, Any]]], dict[str, Any]],
+) -> dict:
+    """Append claim lifecycle events and update the projection atomically."""
+    with get_conn() as conn:
+        return _record_fact_claim_in_transaction(
+            conn,
+            claim_id=claim_id,
+            owner_user_id=owner_user_id,
+            scope_type=scope_type,
+            scope_id=scope_id,
+            fact_text=fact_text,
+            normalized_fact_text=normalized_fact_text,
+            content_hash=content_hash,
+            normalized_content_hash=normalized_content_hash,
+            source_kind=source_kind,
+            source_ids=source_ids,
+            provenance=provenance,
+            direct_support=direct_support,
+            verification_policy=verification_policy,
+        )
+
+
+def get_fact_claim(
+    owner_user_id: str,
+    claim_id: str,
+) -> dict | None:
+    with get_conn() as conn:
+        return _get_fact_claim_in_transaction(
+            conn,
+            owner_user_id,
+            claim_id,
+        )
+
+
+def _retract_fact_claim(
+    owner_user_id: str,
+    claim_id: str,
+    *,
+    reason: str | None = None,
+) -> dict:
+    with get_conn() as conn:
+        _begin_fact_claim_write(conn)
+        _lock_fact_claim_for_write(conn, claim_id)
+        claim = _get_fact_claim_in_transaction(
+            conn,
+            owner_user_id,
+            claim_id,
+        )
+        if claim is None:
+            raise KeyError(f"fact claim not found: {claim_id}")
+        if claim["supersedes_claim_id"] is not None:
+            raise ValueError("fact claim replacement cannot be retracted")
+        if claim["status"] == "retracted":
+            return claim
+        if claim["status"] == "superseded":
+            raise ValueError("terminal fact claim cannot be retracted")
+
+        event = append_domain_event(
+            _new_fact_claim_event(
+                owner_user_id=owner_user_id,
+                claim_id=claim_id,
+                event_type="fact.retracted.v1",
+                payload={
+                    "owner_user_id": owner_user_id,
+                    "claim_id": claim_id,
+                    "reason": reason,
+                },
+            ),
+            expected_version=claim["ledger_version"],
+            conn=conn,
+        )
+        return _project_fact_claim_event_in_transaction(conn, event)
+
+
+def _supersede_fact_claim(
+    owner_user_id: str,
+    claim_id: str,
+    superseded_by_claim_id: str,
+    *,
+    reason: str | None = None,
+) -> dict:
+    with get_conn() as conn:
+        _begin_fact_claim_write(conn)
+        for locked_claim_id in sorted((claim_id, superseded_by_claim_id)):
+            _lock_fact_claim_for_write(conn, locked_claim_id)
+        claim = _get_fact_claim_in_transaction(
+            conn,
+            owner_user_id,
+            claim_id,
+        )
+        replacement = _get_fact_claim_in_transaction(
+            conn,
+            owner_user_id,
+            superseded_by_claim_id,
+        )
+        if claim is None or replacement is None:
+            raise KeyError("fact claim or replacement not found")
+        if claim["scope_type"] != replacement["scope_type"] or (
+            claim["scope_id"] != replacement["scope_id"]
+        ):
+            raise ValueError("superseding claims must share a scope")
+        if (
+            claim["status"] == "superseded"
+            and claim["superseded_by_claim_id"] == superseded_by_claim_id
+        ):
+            return claim
+        if claim["status"] == "superseded":
+            raise ValueError("fact claim replacement cannot be changed")
+        if claim["status"] == "retracted":
+            raise ValueError("terminal fact claim cannot be superseded")
+        if replacement["status"] in {"retracted", "superseded"}:
+            raise ValueError("replacement fact claim is terminal")
+
+        event = append_domain_event(
+            _new_fact_claim_event(
+                owner_user_id=owner_user_id,
+                claim_id=claim_id,
+                event_type="fact.superseded.v1",
+                identity_parts=(superseded_by_claim_id,),
+                payload={
+                    "owner_user_id": owner_user_id,
+                    "claim_id": claim_id,
+                    "superseded_by_claim_id": superseded_by_claim_id,
+                    "replacement_ledger_version": (
+                        replacement["ledger_version"]
+                    ),
+                    "reason": reason,
+                },
+            ),
+            expected_version=claim["ledger_version"],
+            conn=conn,
+        )
+        return _project_fact_claim_event_in_transaction(conn, event)
+
+
+def list_fact_claims(
+    owner_user_id: str,
+    scope_type: str,
+    scope_id: str,
+) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM fact_claim
+            WHERE owner_user_id = ?
+              AND scope_type = ?
+              AND scope_id = ?
+            ORDER BY created_at ASC, claim_id ASC
+            """,
+            (owner_user_id, scope_type, scope_id),
+        ).fetchall()
+    return [_decode_fact_claim_row(row) for row in rows]
+
+
+def list_verified_fact_claims(
+    owner_user_id: str,
+    scope_type: str,
+    scope_id: str,
+) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM fact_claim
+            WHERE owner_user_id = ?
+              AND scope_type = ?
+              AND scope_id = ?
+              AND status = 'verified'
+            ORDER BY created_at ASC, claim_id ASC
+            """,
+            (owner_user_id, scope_type, scope_id),
+        ).fetchall()
+    return [_decode_fact_claim_row(row) for row in rows]
+
+
+LONG_TERM_FACT_BACKFILL_MIGRATION = (
+    "2026-07-15-long-term-fact-event-backfill"
+)
+
+
+def has_data_migration(migration_key: str) -> bool:
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM data_migration
+            WHERE migration_key = ?
+            """,
+            (migration_key,),
+        ).fetchone()
+    return row is not None
+
+
+def _legacy_long_term_fact_claim_event(row: dict) -> NewDomainEvent:
+    legacy_fact_id = int(row["id"])
+    owner_user_id = str(row["player_id"]).strip()
+    scope_id = str(row["character_id"]).strip()
+    fact_text = str(row["fact_text"])
+    identity = derive_fact_claim_identity(
+        owner_user_id,
+        "character",
+        scope_id,
+        fact_text,
+    )
+    source_id = f"long_term_fact:{legacy_fact_id}"
+    return NewDomainEvent(
+        event_id=f"legacy-long-term-fact-{legacy_fact_id}",
+        owner_user_id=owner_user_id,
+        aggregate_type="fact_claim",
+        aggregate_id=identity["claim_id"],
+        event_type="fact.claimed.v1",
+        payload={
+            "owner_user_id": owner_user_id,
+            "claim_id": identity["claim_id"],
+            "scope_type": "character",
+            "scope_id": scope_id,
+            "fact_text": fact_text,
+            "normalized_fact_text": identity["normalized_fact_text"],
+            "content_hash": identity["content_hash"],
+            "normalized_content_hash": identity["normalized_content_hash"],
+            "source_kind": "legacy",
+            "source_ids": [source_id],
+            "provenance": {
+                "legacy_backfill": True,
+                "legacy_fact_id": legacy_fact_id,
+                "importance": row.get("importance"),
+                "created_at": row.get("created_at"),
+                "last_referenced": row.get("last_referenced"),
+            },
+            "direct_support": False,
+        },
+        metadata={
+            "producer": "memoria.db.repository",
+            "legacy_backfill": True,
+            "legacy_fact_id": legacy_fact_id,
+        },
+    )
+
+
+def backfill_legacy_long_term_fact_events() -> dict:
+    """Backfill legacy facts into candidate claim events without deleting sources."""
+    with get_conn() as conn:
+        _begin_fact_claim_write(conn)
+        existing = conn.execute(
+            """
+            SELECT metadata, applied_at
+            FROM data_migration
+            WHERE migration_key = ?
+            """,
+            (LONG_TERM_FACT_BACKFILL_MIGRATION,),
+        ).fetchone()
+        if existing is not None:
+            metadata = json.loads(existing["metadata"])
+            return {
+                **metadata,
+                "applied_at": existing["applied_at"],
+                "already_applied": True,
+            }
+
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT id, character_id, player_id, fact_text, importance,
+                       created_at, last_referenced
+                FROM long_term_fact
+                ORDER BY id ASC
+                """
+            ).fetchall()
+        ]
+        for row in rows:
+            stored_event = append_domain_event(
+                _legacy_long_term_fact_claim_event(row),
+                conn=conn,
+            )
+            _project_fact_claim_event_in_transaction(
+                conn,
+                stored_event,
+            )
+
+        applied_at = _now()
+        metadata = {
+            "legacy_fact_count": len(rows),
+            "event_count": len(rows),
+        }
+        conn.execute(
+            """
+            INSERT INTO data_migration (migration_key, metadata, applied_at)
+            VALUES (?, ?, ?)
+            """,
+            (
+                LONG_TERM_FACT_BACKFILL_MIGRATION,
+                json.dumps(metadata, ensure_ascii=False, allow_nan=False),
+                applied_at,
+            ),
+        )
+        return {
+            **metadata,
+            "applied_at": applied_at,
+            "already_applied": False,
+        }
 
 
 # =========================
@@ -1161,13 +3284,16 @@ def get_runtime_state(
                 ),
              )
              
-         # 绑定长期记忆（支持向量检索）
-         state["known_player_facts"] = get_long_term_facts(
-             character_id, 
-             player_id,
-             query_context=query_context,
-             created_after=memory_created_after
-         )
+         # Task 5 完成迁移后，prompt 路径不得再读取 legacy 长期记忆。
+         if has_data_migration(LONG_TERM_FACT_BACKFILL_MIGRATION):
+             state["known_player_facts"] = []
+         else:
+             state["known_player_facts"] = get_long_term_facts(
+                 character_id,
+                 player_id,
+                 query_context=query_context,
+                 created_after=memory_created_after
+             )
          unlock_rows = conn.execute(
              """
              SELECT unlock_key FROM event_unlock
@@ -1316,6 +3442,132 @@ def get_long_term_fact_records(
         
     return [dict(r) for r in rows]
 
+
+def _prompt_memory_claim_scopes(
+    character_id: str,
+    player_id: str,
+    session_id: str | None,
+) -> list[tuple[str, str]]:
+    scopes = [("character", character_id)]
+    if not session_id:
+        return scopes
+
+    session = get_session(session_id)
+    if not session or session.get("player_id") != player_id:
+        return scopes
+
+    if session.get("is_multi_character"):
+        group_thread_id = get_group_thread_id(session_id)
+        if group_thread_id:
+            scopes.append(("group_thread", group_thread_id))
+
+    story_id = str(session.get("story_id") or "").strip()
+    if story_id:
+        scopes.append(("story", story_id))
+    return scopes
+
+
+def _fact_claim_visible_to_character(
+    claim: dict,
+    character_id: str,
+) -> bool:
+    provenance = claim.get("provenance") or {}
+    evidence = provenance.get("evidence") or []
+    provenance_entries = [provenance]
+    provenance_entries.extend(
+        item.get("details") or {}
+        for item in evidence
+        if isinstance(item, dict)
+    )
+
+    has_restriction = False
+    allowed_character_ids = set()
+    for entry in provenance_entries:
+        if not isinstance(entry, dict) or "allowed_character_ids" not in entry:
+            continue
+        has_restriction = True
+        allowed_character_ids.update(
+            str(value).strip()
+            for value in (entry.get("allowed_character_ids") or [])
+            if str(value).strip()
+        )
+    return not has_restriction or character_id in allowed_character_ids
+
+
+def get_prompt_memory_fact_records(
+    character_id: str,
+    player_id: str,
+    session_id: str | None,
+    limit: int = 20,
+    query_context: str | None = None,
+) -> list[dict]:
+    """Merge verified ledger claims with pre-backfill legacy memories."""
+    effective_limit = max(0, int(limit))
+    records = []
+    seen_fact_texts = set()
+
+    def append_record(record: dict) -> bool:
+        fact_text = str(record.get("fact_text") or "").strip()
+        if not fact_text:
+            return False
+        normalized = normalize_fact_text(fact_text)
+        if normalized in seen_fact_texts:
+            return False
+        seen_fact_texts.add(normalized)
+        records.append(record)
+        return True
+
+    claim_iterators = []
+    for scope_type, scope_id in _prompt_memory_claim_scopes(
+        character_id,
+        player_id,
+        session_id,
+    ):
+        visible_claims = []
+        for claim in reversed(
+            list_verified_fact_claims(
+                player_id,
+                scope_type,
+                scope_id,
+            )
+        ):
+            if not _fact_claim_visible_to_character(claim, character_id):
+                continue
+            visible_claims.append(claim)
+        claim_iterators.append(iter(visible_claims))
+
+    while len(records) < effective_limit:
+        advanced = False
+        for claims in claim_iterators:
+            try:
+                claim = next(claims)
+            except StopIteration:
+                continue
+            advanced = True
+            append_record(claim)
+            if len(records) >= effective_limit:
+                break
+        if not advanced:
+            break
+
+    if (
+        len(records) < effective_limit
+        and not has_data_migration(LONG_TERM_FACT_BACKFILL_MIGRATION)
+    ):
+        legacy_records = get_long_term_fact_records(
+            character_id=character_id,
+            player_id=player_id,
+            limit=effective_limit,
+            query_context=query_context,
+        )
+        for record in legacy_records:
+            append_record(record)
+            if len(records) >= effective_limit:
+                break
+
+    return records[:effective_limit]
+
+
 _EMPTY_LONG_TERM_FACT_VALUES = {
     "",
     "无",
@@ -1433,15 +3685,25 @@ def create_session(
     player_id: str,
     player_name: str,
     locale: str = "zh-CN",
+    story_id: str | None = None,
 ):
     with get_conn() as conn:
         conn.execute(
             """
             INSERT OR IGNORE INTO session
-            (session_id, character_id, player_id, player_name, created_at, status, locale)
-            VALUES (?, ?, ?, ?, ?, 'active', ?)
+            (session_id, character_id, player_id, player_name, created_at, status,
+             locale, story_id)
+            VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
             """,
-            (session_id, character_id, player_id, player_name, _now(), locale),
+            (
+                session_id,
+                character_id,
+                player_id,
+                player_name,
+                _now(),
+                locale,
+                (story_id or "").strip() or None,
+            ),
         )
         
 def get_session(session_id: str) -> dict | None:
@@ -2727,20 +4989,22 @@ def _save_event_definition_in_transaction(
     is_active: bool = True,
     schedule: str = None,
     template_id: str = None,
+    story_id: str = None,
 ) -> None:
     now = _now()
     conn.execute(
         """
         INSERT INTO event_definition
-        (owner_user_id, event_id, event_name, description, character_id, trigger_config,
+        (owner_user_id, event_id, event_name, description, character_id, story_id, trigger_config,
          effects_config, priority, exclusive_group, max_triggers_per_turn,
          stop_processing, is_active, created_at, updated_at, schedule, template_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(owner_user_id, event_id)
         DO UPDATE SET
             event_name=excluded.event_name,
             description=excluded.description,
             character_id=excluded.character_id,
+            story_id=excluded.story_id,
             trigger_config=excluded.trigger_config,
             effects_config=excluded.effects_config,
             priority=excluded.priority,
@@ -2758,6 +5022,7 @@ def _save_event_definition_in_transaction(
             event_name,
             description,
             character_id,
+            story_id,
             trigger_config,
             effects_config,
             priority,
@@ -2788,6 +5053,7 @@ def save_event_definition(
     is_active: bool = True,
     schedule: str = None,
     template_id: str = None,
+    story_id: str = None,
 ) -> bool:
     """保存事件定义"""
     try:
@@ -2808,6 +5074,7 @@ def save_event_definition(
                 is_active=is_active,
                 schedule=schedule,
                 template_id=template_id,
+                story_id=story_id,
             )
         return True
     except Exception as e:
@@ -3860,6 +6127,48 @@ def commit_event_execution_batch(
                 if inserted:
                     inserted_memories.append(inserted)
 
+            for claim in execution.get("fact_claims") or []:
+                identity = derive_fact_claim_identity(
+                    player_id,
+                    claim["scope_type"],
+                    claim["scope_id"],
+                    claim["fact_text"],
+                )
+                _record_fact_claim_in_transaction(
+                    conn,
+                    claim_id=identity["claim_id"],
+                    owner_user_id=player_id,
+                    scope_type=claim["scope_type"],
+                    scope_id=claim["scope_id"],
+                    fact_text=claim["fact_text"],
+                    normalized_fact_text=identity["normalized_fact_text"],
+                    content_hash=identity["content_hash"],
+                    normalized_content_hash=identity["normalized_content_hash"],
+                    source_kind=claim["source_kind"],
+                    source_ids=clean_source_ids(claim.get("source_ids") or []),
+                    provenance=dict(claim.get("provenance") or {}),
+                    direct_support=bool(claim.get("direct_support")),
+                    verification_policy=lambda evidence, normalized=identity[
+                        "normalized_fact_text"
+                    ]: evaluate_verification(normalized, evidence),
+                    event_context={
+                        "correlation_id": execution["execution_id"],
+                        "causation_id": execution["event_id"],
+                        "session_id": claim.get("session_id"),
+                        "world_occurred_at": claim.get("world_occurred_at"),
+                        "metadata": {
+                            "producer": "memoria.core.event_executor",
+                        },
+                    },
+                )
+
+            for story_update in execution.get("story_updates") or []:
+                _apply_story_update_in_transaction(
+                    conn,
+                    player_id,
+                    story_update,
+                )
+
             for inbox_item in execution.get("inbox_items") or []:
                 conn.execute(
                     """
@@ -4228,6 +6537,7 @@ def save_event_definition_with_schedule(
     is_active: bool = True,
     schedule: str = None,
     template_id: str = None,
+    story_id: str = None,
 ) -> bool:
     """Atomically save an event definition and its single schedule state."""
     try:
@@ -4248,6 +6558,7 @@ def save_event_definition_with_schedule(
                 is_active=is_active,
                 schedule=schedule,
                 template_id=template_id,
+                story_id=story_id,
             )
             if schedule_state is not None:
                 if schedule_state.get("event_id") != event_id:
@@ -5228,6 +7539,10 @@ def update_relationship_affinity(
 # 多角色会话管理
 # =========================
 
+def _new_group_thread_id() -> str:
+    return f"group-thread-{uuid.uuid4().hex}"
+
+
 def create_multi_character_session(
     session_id: str,
     player_id: str,
@@ -5236,6 +7551,7 @@ def create_multi_character_session(
     group_name: str | None = None,
     group_thread_id: str | None = None,
     locale: str = "zh-CN",
+    story_id: str | None = None,
 ) -> bool:
     """
     创建多角色群聊会话
@@ -5257,13 +7573,30 @@ def create_multi_character_session(
         with get_conn() as conn:
             # 创建会话（使用第一个角色作为主角色）
             clean_group_name = (group_name or "").strip() or None
-            thread_id = (group_thread_id or "").strip() or session_id
+            clean_story_id = (story_id or "").strip() or None
+            requested_thread_id = (group_thread_id or "").strip() or None
+            thread_id = requested_thread_id or _new_group_thread_id()
+            if clean_story_id is None and requested_thread_id:
+                story_row = conn.execute(
+                    """
+                    SELECT story_id
+                    FROM session
+                    WHERE player_id = ?
+                      AND group_thread_id = ?
+                      AND COALESCE(story_id, '') <> ''
+                    ORDER BY created_at DESC, session_id DESC
+                    LIMIT 1
+                    """,
+                    (player_id, thread_id),
+                ).fetchone()
+                if story_row:
+                    clean_story_id = str(story_row["story_id"]).strip() or None
             conn.execute(
                 """
                 INSERT INTO session
                 (session_id, character_id, player_id, player_name, created_at, status,
-                 group_name, group_thread_id, is_multi_character, locale)
-                VALUES (?, ?, ?, ?, ?, 'active', ?, ?, 1, ?)
+                 group_name, group_thread_id, story_id, is_multi_character, locale)
+                VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, 1, ?)
                 """,
                 (
                     session_id,
@@ -5273,6 +7606,7 @@ def create_multi_character_session(
                     _now(),
                     clean_group_name,
                     thread_id,
+                    clean_story_id,
                     locale,
                 ),
             )
@@ -5356,11 +7690,48 @@ def get_session_participants(session_id: str, only_active: bool = True) -> list[
 
 
 def get_group_thread_id(session_id: str) -> str | None:
-    """返回群聊逻辑线程 ID；旧数据没有该列值时使用自身 session_id。"""
+    """返回群聊逻辑线程 ID，并为旧群聊补建独立逻辑线程。"""
     session = get_session(session_id)
-    if not session:
+    if not session or not session.get("is_multi_character"):
         return None
-    return session.get("group_thread_id") or session["session_id"]
+    thread_id = str(session.get("group_thread_id") or "").strip()
+    if thread_id:
+        return thread_id
+
+    generated_thread_id = _new_group_thread_id()
+    now = _now()
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE session
+            SET group_thread_id = ?
+            WHERE session_id = ?
+              AND COALESCE(group_thread_id, '') = ''
+            """,
+            (generated_thread_id, session_id),
+        )
+        row = conn.execute(
+            """
+            SELECT group_thread_id
+            FROM session
+            WHERE session_id = ?
+            """,
+            (session_id,),
+        ).fetchone()
+        thread_id = str(row["group_thread_id"] or "").strip() if row else ""
+        if thread_id:
+            conn.execute(
+                """
+                INSERT INTO group_dialogue_state
+                (group_thread_id, player_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(group_thread_id) DO UPDATE SET
+                    player_id = excluded.player_id,
+                    updated_at = excluded.updated_at
+                """,
+                (thread_id, session["player_id"], now, now),
+            )
+    return thread_id or None
 
 
 def get_multi_character_thread_sessions(session_id: str) -> list[dict]:

@@ -26,7 +26,10 @@ from memoria.core.config import configs
 from memoria.core import event_runtime, relationship_context
 from memoria.core.knowledge_retriever import retrieve_knowledge
 from memoria.core.locale import DEFAULT_LOCALE, Locale
-from memoria.core.memory_extractor import extract_player_memory
+from memoria.core.memory_extractor import (
+    extract_player_memory,
+    record_generated_memory_claim,
+)
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
@@ -483,6 +486,7 @@ def _load_single_character_prompt_context(
     character_id: str,
     player_id: str,
     card,
+    session_id: str | None = None,
     query_context: str | None = None,
     fallback_known_player_facts=None,
     player_character: dict | None = None,
@@ -573,15 +577,21 @@ def _load_single_character_prompt_context(
     )
 
     try:
-        fact_records = repository.get_long_term_fact_records(
+        fact_records = repository.get_prompt_memory_fact_records(
             character_id=character_id,
             player_id=player_id,
+            session_id=session_id,
             limit=20,
             query_context=memory_query_context,
         )
     except Exception as e:
         logger.warning("加载长期记忆记录失败，使用 runtime_state 默认记忆: %s", e)
-        if isinstance(fallback_known_player_facts, dict):
+        legacy_fallback_allowed = not repository.has_data_migration(
+            repository.LONG_TERM_FACT_BACKFILL_MIGRATION
+        )
+        if not legacy_fallback_allowed:
+            fallback_facts = []
+        elif isinstance(fallback_known_player_facts, dict):
             fallback_facts = [
                 f"{key}:{value}" for key, value in fallback_known_player_facts.items()
             ]
@@ -668,6 +678,7 @@ def start_session(
         character_id,
         player_id,
         card,
+        session_id=session_id,
         fallback_known_player_facts=runtime_state.get("known_player_facts"),
         player_character=player_character,
     )
@@ -786,6 +797,7 @@ def run_dialogue_turn(
             character_id,
             player_id,
             card,
+            session_id=session_id,
             query_context=player_message,
             fallback_known_player_facts=runtime_state.get("known_player_facts"),
             player_character=player_character,
@@ -967,10 +979,16 @@ def run_dialogue_turn(
                     session_id,
                     limit_turns=configs.long_term_memory_interval_turns,
                 )
-                repository.save_long_term_fact(
-                    character_id,
-                    player_id,
-                    extract_player_memory(player_history),
+                record_generated_memory_claim(
+                    owner_user_id=player_id,
+                    scope_type="character",
+                    scope_id=character_id,
+                    fact_text=extract_player_memory(player_history),
+                    source_ids=[f"session:{session_id}"],
+                    provenance={
+                        "memory_kind": "player_fact",
+                        "session_id": session_id,
+                    },
                 )
         except Exception:
             logger.exception("长期记忆检查点保存失败")

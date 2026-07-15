@@ -11,7 +11,7 @@
 import json
 import logging
 
-from memoria.core import llm_client, relationship_context
+from memoria.core import llm_client, memory_extractor, relationship_context
 from memoria.core.memory_extractor import clean_summary_text
 from memoria.db import repository
 
@@ -67,6 +67,7 @@ def load_player_memories_for_relationship_graph(
     character_id: str,
     player_id: str,
     other_character_ids: list[str],
+    session_id: str | None = None,
     relationship_history_cutoff: str | None = None,
     query_context: str | None = None,
     relationship_aliases: list[str] | None = None,
@@ -81,9 +82,10 @@ def load_player_memories_for_relationship_graph(
     participant_aliases = relationship_context.normalize_aliases(
         [character_id, *other_character_ids, *(relationship_aliases or [])]
     )
-    records = repository.get_long_term_fact_records(
+    records = repository.get_prompt_memory_fact_records(
         character_id=character_id,
         player_id=player_id,
+        session_id=session_id,
         limit=max(limit * 3, 20),
         query_context=query_context,
     )
@@ -350,29 +352,62 @@ def process_dialogue_pulse_memories(
     """提取一次并按在场/知情范围持久化整个对话脉冲的长期记忆。"""
     present_ids = list(dict.fromkeys(cid for cid in character_ids if cid))
     extracted = extract_dialogue_pulse_memories(recent_messages, present_ids)
+    generated_scope = resolve_generated_fact_scope(session_id)
+    source_ids = [f"session:{session_id}"]
 
-    for fact in extracted["player_facts"]:
-        for character_id in present_ids:
-            repository.save_long_term_fact(character_id, player_id, fact, importance=7)
+    if generated_scope:
+        scope_type, scope_id = generated_scope
+        for memory_kind, facts in (
+            ("player_fact", extracted["player_facts"]),
+            ("shared_fact", extracted["shared_facts"]),
+        ):
+            for fact in facts:
+                memory_extractor.record_generated_memory_claim(
+                    owner_user_id=player_id,
+                    scope_type=scope_type,
+                    scope_id=scope_id,
+                    fact_text=fact,
+                    source_ids=source_ids,
+                    provenance={
+                        "memory_kind": memory_kind,
+                        "session_id": session_id,
+                    },
+                )
 
-    for fact in extracted["shared_facts"]:
-        repository.save_group_memory(
-            session_id=session_id,
-            memory_text=fact,
-            participants=present_ids,
-            context="dialogue_pulse",
-            importance=0.7,
-        )
-
-    for row in extracted["secret_facts"]:
-        for character_id in row["allowed_character_ids"]:
-            repository.save_long_term_fact(
-                character_id,
-                player_id,
-                row["fact"],
-                importance=8,
+        for row in extracted["secret_facts"]:
+            memory_extractor.record_generated_memory_claim(
+                owner_user_id=player_id,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                fact_text=row["fact"],
+                source_ids=source_ids,
+                provenance={
+                    "memory_kind": "secret_fact",
+                    "session_id": session_id,
+                    "allowed_character_ids": row["allowed_character_ids"],
+                },
             )
+
     return extracted
+
+
+def resolve_generated_fact_scope(
+    session_id: str,
+) -> tuple[str, str] | None:
+    """Resolve a real logical group/story scope without inventing an ID."""
+    session = repository.get_session(session_id)
+    if not session:
+        return None
+
+    if session.get("is_multi_character"):
+        group_thread_id = repository.get_group_thread_id(session_id)
+        if group_thread_id:
+            return "group_thread", group_thread_id
+
+    story_id = str(session.get("story_id") or "").strip()
+    if story_id:
+        return "story", story_id
+    return None
 
 
 def extract_character_impressions(
@@ -428,7 +463,27 @@ JSON 格式：
         logger.error(f"角色间印象提取失败: {e}")
         return []
 
-    allowed = set(clean_character_ids)
+    return _normalize_character_impression_rows(rows, clean_character_ids)
+
+
+def _looks_like_character_impression(text: str) -> bool:
+    normalized = str(text or "").strip()
+    if not normalized:
+        return False
+    subjective_markers = (
+        "认为", "觉得", "印象", "信任", "不信任", "可靠", "谨慎", "冲动",
+        "友善", "危险", "可疑", "值得", "态度", "期待", "担心", "欣赏",
+        "警惕", "尊重", "依赖", "厌恶", "怀疑", "认可", "佩服", "戒备",
+    )
+    return any(marker in normalized for marker in subjective_markers)
+
+
+def _normalize_character_impression_rows(
+    rows: list,
+    character_ids: list[str],
+) -> list[dict]:
+    """校验并规范化角色间印象提取结果。"""
+    allowed = set(character_ids)
     impressions = []
     for row in rows:
         if not isinstance(row, dict):
@@ -446,27 +501,13 @@ JSON 格式：
             importance = float(row.get("importance", 0.6))
         except (TypeError, ValueError):
             importance = 0.6
-        importance = max(0.0, min(1.0, importance))
         impressions.append({
             "observer_id": observer_id,
             "target_id": target_id,
             "impression": impression,
-            "importance": importance,
+            "importance": max(0.0, min(1.0, importance)),
         })
-
     return impressions
-
-
-def _looks_like_character_impression(text: str) -> bool:
-    normalized = str(text or "").strip()
-    if not normalized:
-        return False
-    subjective_markers = (
-        "认为", "觉得", "印象", "信任", "不信任", "可靠", "谨慎", "冲动",
-        "友善", "危险", "可疑", "值得", "态度", "期待", "担心", "欣赏",
-        "警惕", "尊重", "依赖", "厌恶", "怀疑", "认可", "佩服", "戒备",
-    )
-    return any(marker in normalized for marker in subjective_markers)
 
 
 # =========================
@@ -804,6 +845,7 @@ def integrate_multi_character_context(
     player_memories = load_player_memories_for_relationship_graph(
         character_id=character_id,
         player_id=player_id,
+        session_id=session_id,
         other_character_ids=other_character_ids,
         relationship_history_cutoff=relationship_context_updated_at,
         query_context=query_context,
@@ -908,11 +950,16 @@ def auto_process_multi_character_memories(
     
     for char_id, memories in character_memories.items():
         for memory in memories:
-            repository.save_long_term_fact(
-                character_id=char_id,
-                player_id=player_id,
+            memory_extractor.record_generated_memory_claim(
+                owner_user_id=player_id,
+                scope_type="character",
+                scope_id=char_id,
                 fact_text=memory,
-                importance=7
+                source_ids=[f"session:{session_id}"],
+                provenance={
+                    "memory_kind": "character_memory",
+                    "session_id": session_id,
+                },
             )
 
     impression_count = process_character_impressions(

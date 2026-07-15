@@ -94,6 +94,7 @@ class EventCreateRequest(BaseModel):
     event_name: str
     description: Optional[str] = None
     character_id: Optional[str] = None          # None 表示全局事件
+    story_id: Optional[str] = None
     trigger_condition: TriggerConditionDTO
     effects: list[EventEffectDTO] = Field(default_factory=list)
     priority: int = 0
@@ -109,6 +110,7 @@ class EventUpdateRequest(BaseModel):
     event_name: Optional[str] = None
     description: Optional[str] = None
     character_id: Optional[str] = None
+    story_id: Optional[str] = None
     trigger_condition: Optional[TriggerConditionDTO] = None
     effects: Optional[list[EventEffectDTO]] = None
     priority: Optional[int] = None
@@ -125,6 +127,7 @@ class EventListItem(BaseModel):
     event_name: str
     description: Optional[str] = None
     character_id: Optional[str] = None
+    story_id: Optional[str] = None
     priority: int
     exclusive_group: Optional[str] = None
     max_triggers_per_turn: int = 3
@@ -524,6 +527,7 @@ def list_events(
                 event_name=r["event_name"],
                 description=r.get("description"),
                 character_id=r.get("character_id"),
+                story_id=r.get("story_id"),
                 priority=r.get("priority", 0),
                 exclusive_group=r.get("exclusive_group"),
                 max_triggers_per_turn=r.get("max_triggers_per_turn") or 3,
@@ -575,6 +579,7 @@ def get_event(
         event_name=row["event_name"],
         description=row.get("description"),
         character_id=row.get("character_id"),
+        story_id=row.get("story_id"),
         priority=row.get("priority", 0),
         exclusive_group=row.get("exclusive_group"),
         max_triggers_per_turn=row.get("max_triggers_per_turn") or 3,
@@ -650,6 +655,7 @@ def create_event(
         effects_config=effects_json,
         schedule_state=schedule_state,
         character_id=character_id,
+        story_id=req.story_id,
         description=req.description,
         priority=req.priority,
         exclusive_group=req.exclusive_group,
@@ -723,6 +729,11 @@ def update_event(
     character_id = existing.get("character_id")
     if "character_id" in req.model_fields_set:
         character_id = _require_owned_character(current_user_id, req.character_id)
+    story_id = (
+        req.story_id
+        if "story_id" in req.model_fields_set
+        else existing.get("story_id")
+    )
 
     condition_dto = req.trigger_condition or TriggerConditionDTO.model_validate_json(
         existing["trigger_config"]
@@ -759,6 +770,7 @@ def update_event(
         effects_config=effects_json,
         schedule_state=schedule_state,
         character_id=character_id,
+        story_id=story_id,
         description=description,
         priority=priority,
         exclusive_group=exclusive_group,

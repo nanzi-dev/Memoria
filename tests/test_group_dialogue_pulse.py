@@ -495,8 +495,9 @@ def test_pulse_suppresses_duplicate_from_recent_history(monkeypatch):
 
 
 def test_dialogue_pulse_memory_secret_is_not_broadcast(monkeypatch):
-    from memoria.core import multi_character_memory
+    from memoria.core import memory_extractor, multi_character_memory
 
+    claims = []
     long_term = []
     group_memories = []
     shared_memories = []
@@ -510,6 +511,27 @@ def test_dialogue_pulse_memory_secret_is_not_broadcast(monkeypatch):
                 {"fact": "甲持有密钥", "allowed_character_ids": ["c1", "c2"]}
             ],
         },
+    )
+    monkeypatch.setattr(
+        multi_character_memory.repository,
+        "get_session",
+        lambda session_id: {
+            "session_id": session_id,
+            "player_id": "player-1",
+            "group_thread_id": "thread-1",
+            "story_id": "story-1",
+            "is_multi_character": 1,
+        },
+    )
+    monkeypatch.setattr(
+        memory_extractor,
+        "record_generated_memory_claim",
+        lambda **kwargs: claims.append(kwargs) or {
+            **kwargs,
+            "status": "candidate",
+            "source_kind": "model_inference",
+        },
+        raising=False,
     )
     monkeypatch.setattr(
         multi_character_memory.repository,
@@ -528,7 +550,6 @@ def test_dialogue_pulse_memory_secret_is_not_broadcast(monkeypatch):
         "save_shared_memory",
         lambda **kwargs: shared_memories.append(kwargs),
     )
-
     multi_character_memory.process_dialogue_pulse_memories(
         session_id="session-1",
         recent_messages=[{"role": "assistant", "content": "密谈"}],
@@ -536,17 +557,78 @@ def test_dialogue_pulse_memory_secret_is_not_broadcast(monkeypatch):
         player_id="player-1",
     )
 
-    secret_recipients = {
-        character_id
-        for character_id, fact, _ in long_term
-        if fact == "甲持有密钥"
-    }
-    player_fact_recipients = {
-        character_id
-        for character_id, fact, _ in long_term
-        if fact == "玩家来自北境"
-    }
-    assert secret_recipients == {"c1", "c2"}
-    assert player_fact_recipients == {"c1", "c2", "c3"}
-    assert group_memories[0]["participants"] == ["c1", "c2", "c3"]
+    assert long_term == []
+    assert group_memories == []
     assert shared_memories == []
+    assert claims == [
+        {
+            "owner_user_id": "player-1",
+            "scope_type": "group_thread",
+            "scope_id": "thread-1",
+            "fact_text": "玩家来自北境",
+            "source_ids": ["session:session-1"],
+            "provenance": {
+                "memory_kind": "player_fact",
+                "session_id": "session-1",
+            },
+        },
+        {
+            "owner_user_id": "player-1",
+            "scope_type": "group_thread",
+            "scope_id": "thread-1",
+            "fact_text": "众人决定夜间出发",
+            "source_ids": ["session:session-1"],
+            "provenance": {
+                "memory_kind": "shared_fact",
+                "session_id": "session-1",
+            },
+        },
+        {
+            "owner_user_id": "player-1",
+            "scope_type": "group_thread",
+            "scope_id": "thread-1",
+            "fact_text": "甲持有密钥",
+            "source_ids": ["session:session-1"],
+            "provenance": {
+                "memory_kind": "secret_fact",
+                "session_id": "session-1",
+                "allowed_character_ids": ["c1", "c2"],
+            },
+        },
+    ]
+def test_dialogue_pulse_does_not_duplicate_character_impression_writes(monkeypatch):
+    from memoria.core import multi_character_memory
+    from memoria.db import repository
+
+    player_id = f"pulse-player-{uuid.uuid4().hex}"
+    monkeypatch.setattr(
+        multi_character_memory.llm_client,
+        "call_light_task",
+        lambda *args, **kwargs: (
+            '{"player_facts":[],"shared_facts":[],"secret_facts":[],'
+            '"character_impressions":[{"observer_id":"c1","target_id":"c2",'
+            '"impression":"c1认为c2值得信任","importance":0.9}]}'
+        ),
+    )
+
+    extracted = multi_character_memory.process_dialogue_pulse_memories(
+        session_id=f"pulse-impression-{uuid.uuid4().hex}",
+        recent_messages=[
+            {
+                "role": "assistant",
+                "character_id": "c1",
+                "character_name": "甲",
+                "content": "我现在相信乙的判断。",
+            }
+        ],
+        character_ids=["c1", "c2"],
+        player_id=player_id,
+    )
+
+    assert set(extracted) == {"player_facts", "shared_facts", "secret_facts"}
+    assert repository.get_shared_memories(
+        player_id,
+        "c1",
+        "c2",
+        limit=5,
+    ) == []

@@ -288,11 +288,13 @@ class TestMultiCharacterGroupMemory:
             multi_character_orchestrator.MultiCharacterOrchestrator
         )
         orch.player_id = "player-1"
+        orch.session_id = "group-session-1"
         orch.character_ids = ["c1", "c2"]
         orch.character_cards = {
             "c1": SimpleNamespace(meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])),
             "c2": SimpleNamespace(meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])),
         }
+        captured = {}
 
         monkeypatch.setattr(
             multi_character_orchestrator.repository,
@@ -306,7 +308,8 @@ class TestMultiCharacterGroupMemory:
         monkeypatch.setattr(
             multi_character_orchestrator.multi_character_memory,
             "load_player_memories_for_relationship_graph",
-            lambda **kwargs: ["甲和乙是师徒", "玩家喜欢猫", "大家一起调查旧仓库"],
+            lambda **kwargs: captured.update(kwargs)
+            or ["甲和乙是师徒", "玩家喜欢猫", "大家一起调查旧仓库"],
         )
 
         state = orch._load_runtime_state_for_prompt(
@@ -323,6 +326,7 @@ class TestMultiCharacterGroupMemory:
         assert "甲和乙是师徒" not in state["known_player_facts"]
         assert "玩家喜欢猫" in state["known_player_facts"]
         assert "大家一起调查旧仓库" in state["known_player_facts"]
+        assert captured["session_id"] == "group-session-1"
 
     def test_process_player_message_does_not_save_group_memory(self, monkeypatch):
         from memoria.core import multi_character_orchestrator
@@ -428,6 +432,116 @@ class TestMultiCharacterGroupMemory:
 
         assert orch._load_memory_context("c1", "旧仓库") == []
 
+
+def test_start_session_marker_blocks_legacy_when_claim_retrieval_fails(monkeypatch):
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from memoria.core import orchestrator
+    from memoria.db import repository
+
+    player_id = f"marker-player-{uuid.uuid4().hex}"
+    character_id = f"marker-character-{uuid.uuid4().hex}"
+    legacy_fact = "旧系统记录：玩家知道北闸门口令。"
+    marker = repository.LONG_TERM_FACT_BACKFILL_MIGRATION
+    captured = {}
+    card = SimpleNamespace(
+        meta=SimpleNamespace(
+            name="Marker Character",
+            display_name="Marker Character",
+            aliases=[],
+        ),
+        runtime_state_schema=SimpleNamespace(
+            affection_level=0,
+            trust_level=10,
+            current_mood=SimpleNamespace(default_mood="neutral"),
+        ),
+        action_vocabulary=SimpleNamespace(default_action="idle"),
+    )
+    clock_snapshot = SimpleNamespace(
+        world_now=datetime.now(timezone.utc),
+        prompt_context=lambda *args, **kwargs: "time context",
+    )
+
+    repository.save_long_term_fact(character_id, player_id, legacy_fact)
+    with repository.get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO data_migration (migration_key, metadata, applied_at)
+            VALUES (?, '{}', ?)
+            ON CONFLICT(migration_key) DO UPDATE SET applied_at = excluded.applied_at
+            """,
+            (marker, datetime.now(timezone.utc).isoformat()),
+        )
+
+    monkeypatch.setattr(
+        repository,
+        "get_prompt_memory_fact_records",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("ledger unavailable")),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_load_player_character",
+        lambda *args, **kwargs: {
+            "display_name": "Marker Player",
+            "node_id": repository.player_node_id(player_id),
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_load_character_card",
+        lambda *args, **kwargs: card,
+    )
+    monkeypatch.setattr(
+        orchestrator.world_clock,
+        "get_clock_snapshot",
+        lambda *args, **kwargs: clock_snapshot,
+    )
+    monkeypatch.setattr(
+        repository,
+        "get_last_character_interaction_world_at",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(repository, "get_recent_summaries", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        orchestrator,
+        "_build_system_prompt",
+        lambda card, runtime_state, *args, **kwargs: (
+            captured.update(runtime_state=runtime_state) or "system prompt"
+        ),
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_build_opening_line_prompt",
+        lambda *args, **kwargs: "\nopening",
+    )
+    monkeypatch.setattr(
+        orchestrator.llm_client,
+        "call_role_turn",
+        lambda **kwargs: {"dialogue": "你好", "action": "idle"},
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_append_short_term_message",
+        lambda *args, **kwargs: 1,
+    )
+
+    try:
+        orchestrator.start_session(
+            character_id,
+            player_id,
+            "Marker Player",
+        )
+    finally:
+        with repository.get_conn() as conn:
+            conn.execute(
+                "DELETE FROM data_migration WHERE migration_key = ?",
+                (marker,),
+            )
+
+    assert legacy_fact not in captured["runtime_state"]["known_player_facts"]
+
+
 class TestSessionLifecycle:
     """P0-1: Session 状态检查 — 结束后不能继续对话"""
 
@@ -455,7 +569,8 @@ class TestDialogueTurn:
 
         saved_state = {}
         saved_messages = []
-        saved_facts = []
+        saved_claims = []
+        legacy_writes = []
 
         card = SimpleNamespace(
             action_vocabulary=SimpleNamespace(
@@ -540,11 +655,14 @@ class TestDialogueTurn:
             lambda history: extracted_histories.append(history) or "玩家喜欢茉莉花茶",
         )
         monkeypatch.setattr(
+            orchestrator,
+            "record_generated_memory_claim",
+            lambda **kwargs: saved_claims.append(kwargs),
+        )
+        monkeypatch.setattr(
             orchestrator.repository,
             "save_long_term_fact",
-            lambda character_id, player_id, fact_text: saved_facts.append(
-                (character_id, player_id, fact_text)
-            ) or 1,
+            lambda *args, **kwargs: legacy_writes.append((args, kwargs)),
         )
 
         def fail_list_event_definitions(*args, **kwargs):
@@ -570,7 +688,18 @@ class TestDialogueTurn:
             {"role": "user", "content": "你好"},
             {"role": "assistant", "content": "你好"},
         ]]
-        assert saved_facts == [("char", "player", "玩家喜欢茉莉花茶")]
+        assert saved_claims == [{
+            "owner_user_id": "player",
+            "scope_type": "character",
+            "scope_id": "char",
+            "fact_text": "玩家喜欢茉莉花茶",
+            "source_ids": ["session:sid"],
+            "provenance": {
+                "memory_kind": "player_fact",
+                "session_id": "sid",
+            },
+        }]
+        assert legacy_writes == []
 
     def test_single_dialogue_prompt_uses_graph_and_cross_mode_memories(self, monkeypatch):
         """单聊 prompt 应读取当前关系图谱，并共享同角色的群聊/共享记忆。"""
@@ -672,8 +801,9 @@ class TestDialogueTurn:
 
         monkeypatch.setattr(orchestrator.repository, "get_character_group_memories", fake_group_memories)
 
-        def fake_get_long_term_fact_records(*args, **kwargs):
+        def fake_get_prompt_memory_fact_records(*args, **kwargs):
             captured["memory_query_context"] = kwargs.get("query_context")
+            captured["prompt_session_id"] = kwargs.get("session_id")
             return [
                 {
                     "fact_text": "甲和乙是师徒。",
@@ -689,7 +819,11 @@ class TestDialogueTurn:
                 },
             ]
 
-        monkeypatch.setattr(orchestrator.repository, "get_long_term_fact_records", fake_get_long_term_fact_records)
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_prompt_memory_fact_records",
+            fake_get_prompt_memory_fact_records,
+        )
 
         def fake_build_system_prompt(card_arg, runtime_state, player_name, past_summaries=None, relationship_graph_lines=None):
             captured["runtime_state"] = runtime_state
@@ -727,6 +861,7 @@ class TestDialogueTurn:
         assert "当前关系类型 = 血盟契约" in graph_text
         assert "关系强度 = 80/100" in graph_text
         assert "你还记得群聊的事吗？" in captured["memory_query_context"]
+        assert captured["prompt_session_id"] == "sid"
         assert "当前关系类型 = 血盟契约" in captured["memory_query_context"]
         assert not any("甲和乙是师徒" in fact for fact in captured["runtime_state"]["known_player_facts"])
         assert "玩家喜欢猫。" in captured["runtime_state"]["known_player_facts"]
@@ -884,7 +1019,7 @@ class TestDialogueTurn:
             orchestrator.run_dialogue_turn("sid", "你好")
 
 
-def test_group_dialogue_saves_player_memory_for_all_participants(monkeypatch):
+def test_group_dialogue_saves_one_logical_thread_player_memory(monkeypatch):
     from types import SimpleNamespace
     from memoria.core import multi_character_orchestrator as module
 
@@ -900,7 +1035,8 @@ def test_group_dialogue_saves_player_memory_for_all_participants(monkeypatch):
         world_now=SimpleNamespace(isoformat=lambda: "2026-07-12T12:00:00+08:00")
     )
     extracted_histories = []
-    saved_facts = []
+    saved_claims = []
+    legacy_writes = []
     operation_order = []
 
     monkeypatch.setattr(module, "_clock_snapshot_for_player", lambda player_id: clock_snapshot)
@@ -935,12 +1071,22 @@ def test_group_dialogue_saves_player_memory_for_all_participants(monkeypatch):
 
     monkeypatch.setattr(module, "extract_player_memory", extract_player_memory)
     monkeypatch.setattr(
+        module.multi_character_memory,
+        "resolve_generated_fact_scope",
+        lambda session_id: ("group_thread", "thread-1"),
+    )
+    monkeypatch.setattr(
+        module,
+        "record_generated_memory_claim",
+        lambda **kwargs: (
+            operation_order.append("memory:group_thread:thread-1"),
+            saved_claims.append(kwargs),
+        ),
+    )
+    monkeypatch.setattr(
         module.repository,
         "save_long_term_fact",
-        lambda character_id, player_id, fact: (
-            operation_order.append(f"memory:{character_id}"),
-            saved_facts.append((character_id, player_id, fact)),
-        ),
+        lambda *args, **kwargs: legacy_writes.append((args, kwargs)),
     )
     monkeypatch.setattr(orchestrator, "_ensure_has_active_participants", lambda: None)
     monkeypatch.setattr(orchestrator, "_decide_group_response_count", lambda *args: 2)
@@ -953,14 +1099,22 @@ def test_group_dialogue_saves_player_memory_for_all_participants(monkeypatch):
 
     assert result == [{"dialogue": "记住了"}]
     assert len(extracted_histories) == 1
-    assert saved_facts == [
-        ("char-a", "player", "玩家喜欢茉莉花茶"),
-        ("char-b", "player", "玩家喜欢茉莉花茶"),
-    ]
-    assert operation_order == ["commit", "memory:char-a", "memory:char-b"]
+    assert saved_claims == [{
+        "owner_user_id": "player",
+        "scope_type": "group_thread",
+        "scope_id": "thread-1",
+        "fact_text": "玩家喜欢茉莉花茶",
+        "source_ids": ["session:group-session"],
+        "provenance": {
+            "memory_kind": "player_fact",
+            "session_id": "group-session",
+        },
+    }]
+    assert legacy_writes == []
+    assert operation_order == ["commit", "memory:group_thread:thread-1"]
 
 
-def test_group_dialogue_single_response_saves_memory_for_non_speakers(monkeypatch):
+def test_group_dialogue_single_response_saves_one_logical_thread_claim(monkeypatch):
     from types import SimpleNamespace
     from memoria.core import multi_character_orchestrator as module
 
@@ -979,7 +1133,8 @@ def test_group_dialogue_single_response_saves_memory_for_non_speakers(monkeypatc
     clock_snapshot = SimpleNamespace(
         world_now=SimpleNamespace(isoformat=lambda: "2026-07-12T12:00:00+08:00")
     )
-    saved_character_ids = []
+    saved_claims = []
+    legacy_writes = []
 
     monkeypatch.setattr(module, "_clock_snapshot_for_player", lambda player_id: clock_snapshot)
     monkeypatch.setattr(
@@ -1003,9 +1158,19 @@ def test_group_dialogue_single_response_saves_memory_for_non_speakers(monkeypatc
         lambda *args, **kwargs: [{"role": "user", "content": "我周末会带蛋糕来"}],
     )
     monkeypatch.setattr(
+        module.multi_character_memory,
+        "resolve_generated_fact_scope",
+        lambda session_id: ("group_thread", "thread-1"),
+    )
+    monkeypatch.setattr(
+        module,
+        "record_generated_memory_claim",
+        lambda **kwargs: saved_claims.append(kwargs),
+    )
+    monkeypatch.setattr(
         module.repository,
         "save_long_term_fact",
-        lambda character_id, player_id, fact: saved_character_ids.append(character_id),
+        lambda *args, **kwargs: legacy_writes.append((args, kwargs)),
     )
     monkeypatch.setattr(module, "extract_player_memory", lambda history: "玩家周末会带蛋糕来")
     monkeypatch.setattr(orchestrator, "_ensure_has_active_participants", lambda: None)
@@ -1023,4 +1188,15 @@ def test_group_dialogue_single_response_saves_memory_for_non_speakers(monkeypatc
     result = orchestrator.process_player_message("我周末会带蛋糕来")
 
     assert result["character_id"] == "speaker"
-    assert saved_character_ids == ["speaker", "listener-a", "listener-b"]
+    assert saved_claims == [{
+        "owner_user_id": "player",
+        "scope_type": "group_thread",
+        "scope_id": "thread-1",
+        "fact_text": "玩家周末会带蛋糕来",
+        "source_ids": ["session:group-session"],
+        "provenance": {
+            "memory_kind": "player_fact",
+            "session_id": "group-session",
+        },
+    }]
+    assert legacy_writes == []

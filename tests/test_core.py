@@ -835,6 +835,34 @@ class TestEventDetector:
 class TestMultiCharacterMemory:
     """测试多角色记忆系统"""
 
+    def test_player_memory_loader_uses_session_scoped_claim_retrieval(
+        self,
+        monkeypatch,
+    ):
+        from memoria.core import multi_character_memory
+
+        captured = {}
+        monkeypatch.setattr(
+            multi_character_memory.repository,
+            "get_prompt_memory_fact_records",
+            lambda **kwargs: captured.update(kwargs)
+            or [{"fact_text": "已验证的群聊事实", "created_at": None}],
+        )
+
+        memories = (
+            multi_character_memory.load_player_memories_for_relationship_graph(
+                character_id="char-a",
+                player_id="player-1",
+                session_id="group-session-1",
+                other_character_ids=["char-b"],
+            )
+        )
+
+        assert memories == ["已验证的群聊事实"]
+        assert captured["character_id"] == "char-a"
+        assert captured["player_id"] == "player-1"
+        assert captured["session_id"] == "group-session-1"
+
     def test_save_and_get_shared_memory(self):
         """测试保存和查询共享记忆"""
         from memoria.db import repository
@@ -1147,6 +1175,51 @@ class TestMultiCharacterMemory:
         assert count == 1
         assert any("侦查中很可靠" in item["memory_text"] for item in memories)
 
+    def test_dialogue_pulse_does_not_write_character_impressions(self, monkeypatch):
+        """群聊脉冲不重复独立 impression 提取路径的写入。"""
+        from memoria.core import multi_character_memory
+        from memoria.db import repository
+
+        monkeypatch.setattr(
+            multi_character_memory.llm_client,
+            "call_light_task",
+            lambda *args, **kwargs: (
+                '{"player_facts":[],"shared_facts":[],"secret_facts":[],'
+                '"character_impressions":[{"observer_id":"npc_a",'
+                '"target_id":"npc_b","impression":"npc_a认为npc_b在危机中很可靠",'
+                '"importance":0.85}]}'
+            ),
+        )
+
+        extracted = multi_character_memory.process_dialogue_pulse_memories(
+            session_id="shared_pulse_session",
+            recent_messages=[
+                {
+                    "role": "assistant",
+                    "character_id": "npc_a",
+                    "character_name": "A",
+                    "content": "B刚才挡住了攻击，我相信他的判断。",
+                },
+                {
+                    "role": "assistant",
+                    "character_id": "npc_b",
+                    "character_name": "B",
+                    "content": "我会继续保护侧翼。",
+                },
+            ],
+            character_ids=["npc_a", "npc_b"],
+            player_id="user_shared_pulse",
+        )
+
+        memories = repository.get_shared_memories(
+            "user_shared_pulse",
+            "npc_a",
+            "npc_b",
+            limit=5,
+        )
+        assert "character_impressions" not in extracted
+        assert memories == []
+
     def test_process_character_impressions_skips_invalid_output(self, monkeypatch):
         """测试无效或越界印象不会写入共享记忆"""
         from memoria.core import multi_character_memory
@@ -1202,9 +1275,10 @@ class TestMultiCharacterMemory:
 
     def test_auto_process_multi_character_memories_saves_impressions(self, monkeypatch):
         """测试自动多角色记忆处理会写入角色间印象"""
-        from memoria.core import multi_character_memory
+        from memoria.core import memory_extractor, multi_character_memory
 
-        saved_facts = []
+        saved_claims = []
+        legacy_facts = []
         processed = []
         monkeypatch.setattr(
             multi_character_memory.repository,
@@ -1222,7 +1296,13 @@ class TestMultiCharacterMemory:
         monkeypatch.setattr(
             multi_character_memory.repository,
             "save_long_term_fact",
-            lambda **kwargs: saved_facts.append(kwargs),
+            lambda **kwargs: legacy_facts.append(kwargs),
+        )
+        monkeypatch.setattr(
+            memory_extractor,
+            "record_generated_memory_claim",
+            lambda **kwargs: saved_claims.append(kwargs),
+            raising=False,
         )
         monkeypatch.setattr(
             multi_character_memory,
@@ -1237,7 +1317,20 @@ class TestMultiCharacterMemory:
             trigger_threshold=2,
         )
 
-        assert saved_facts
+        assert legacy_facts == []
+        assert saved_claims == [
+            {
+                "owner_user_id": "user_auto_shared",
+                "scope_type": "character",
+                "scope_id": "npc_a",
+                "fact_text": "我记得这次行动开始了",
+                "source_ids": ["session:auto_shared_session"],
+                "provenance": {
+                    "memory_kind": "character_memory",
+                    "session_id": "auto_shared_session",
+                },
+            }
+        ]
         assert processed
         assert processed[0]["session_id"] == "auto_shared_session"
         assert processed[0]["character_ids"] == ["npc_a", "npc_b"]

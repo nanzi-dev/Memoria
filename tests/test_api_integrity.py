@@ -15,6 +15,7 @@ def _event_row(character_id="c1"):
         "event_name": "Test event",
         "description": None,
         "character_id": character_id,
+        "story_id": None,
         "trigger_config": '{"trigger_type":"keyword_match","keywords":["test"]}',
         "effects_config": "[]",
         "priority": 0,
@@ -96,6 +97,34 @@ def test_create_event_uses_condition_schedule_when_top_level_is_blank(monkeypatc
     assert saved["schedule_state"]["status"] == "active"
 
 
+def test_create_event_persists_story_id(monkeypatch):
+    from memoria.api import event_admin
+
+    saved = {}
+    monkeypatch.setattr(event_admin.repository, "get_event_definition", lambda *args: None)
+    monkeypatch.setattr(
+        event_admin.repository,
+        "save_event_definition_with_schedule",
+        lambda **kwargs: saved.update(kwargs) or True,
+    )
+
+    response = event_admin.create_event(
+        event_admin.EventCreateRequest(
+            event_id="evt_story",
+            event_name="Story event",
+            story_id="graytide",
+            trigger_condition=event_admin.TriggerConditionDTO(
+                trigger_type="keyword_match",
+                keywords=["story"],
+            ),
+        ),
+        current_user_id="user-1",
+    )
+
+    assert response.success is True
+    assert saved["story_id"] == "graytide"
+
+
 def test_update_event_persists_changed_character(monkeypatch):
     from memoria.api import event_admin
 
@@ -126,6 +155,38 @@ def test_update_event_persists_changed_character(monkeypatch):
 
     assert response.success is True
     assert saved["character_id"] == "c2"
+
+
+def test_update_event_preserves_and_can_clear_story_id(monkeypatch):
+    from memoria.api import event_admin
+
+    saved = {}
+    existing = _event_row()
+    existing["story_id"] = "graytide"
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_event_definition",
+        lambda *args: existing,
+    )
+    monkeypatch.setattr(
+        event_admin.repository,
+        "save_event_definition_with_schedule",
+        lambda **kwargs: saved.update(kwargs) or True,
+    )
+
+    event_admin.update_event(
+        "evt_test",
+        event_admin.EventUpdateRequest(event_name="Renamed"),
+        current_user_id="user-1",
+    )
+    assert saved["story_id"] == "graytide"
+
+    event_admin.update_event(
+        "evt_test",
+        event_admin.EventUpdateRequest(story_id=None),
+        current_user_id="user-1",
+    )
+    assert saved["story_id"] is None
 
 
 def test_update_event_uses_condition_schedule_when_top_level_is_blank(monkeypatch):

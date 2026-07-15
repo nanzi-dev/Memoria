@@ -159,6 +159,7 @@ class EventDefinition(BaseModel):
     
     # 作用域
     character_id: Optional[str] = None             # 角色专属事件（None 表示全局事件）
+    story_id: Optional[str] = None                 # 所属剧情聚合（None 表示不更新剧情状态）
     
     # 触发条件
     trigger_condition: TriggerCondition

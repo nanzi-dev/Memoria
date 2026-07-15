@@ -321,6 +321,33 @@ class TestEventDefinition:
         assert schedule["schedule"] == "0 9 * * *"
         assert schedule["next_run_at"] == old_next_run
 
+    def test_event_definition_story_id_survives_save_and_update(self):
+        owner = f"user_story_{uuid.uuid4().hex[:8]}"
+        event_id = f"ev_story_{uuid.uuid4().hex[:8]}"
+
+        assert repository.save_event_definition(
+            owner,
+            event_id,
+            "Story event",
+            "{}",
+            "[]",
+            story_id="graytide",
+        )
+        assert repository.get_event_definition(owner, event_id)["story_id"] == "graytide"
+
+        assert repository.save_event_definition_with_schedule(
+            owner_user_id=owner,
+            event_id=event_id,
+            event_name="Story event updated",
+            trigger_config="{}",
+            effects_config="[]",
+            schedule_state=None,
+            story_id="graytide-finale",
+        )
+        definition = repository.get_event_definition(owner, event_id)
+        assert definition["event_name"] == "Story event updated"
+        assert definition["story_id"] == "graytide-finale"
+
 
 class TestEventDeepIntegrationRepository:
     def test_context_schedule_template_crud(self):
@@ -486,7 +513,10 @@ class TestSpeechSettings:
         sessions = repository.get_all_player_sessions(player_id)
         group = next(s for s in sessions if s["session_id"] == sid)
         assert group["group_name"] == "旅团作战室"
-        assert group["group_thread_id"] == sid
+        assert group["group_thread_id"]
+        assert group["group_thread_id"] != sid
+        assert group["group_thread_id"].startswith("group-thread-")
+        assert group["group_thread_id"] == repository.get_group_thread_id(sid)
         assert group["is_multi_character"]
 
     def test_character_group_memories_are_isolated_by_owner(self):
@@ -532,7 +562,7 @@ class TestSpeechSettings:
         assert "A 用户的群体记忆" in memory_text
         assert "B 用户的群体记忆" not in memory_text
 
-    def test_multi_character_session_defaults_group_thread_id_to_session_id(self):
+    def test_multi_character_session_defaults_to_distinct_logical_thread_id(self):
         sid = str(uuid.uuid4())
         player_id = f"gtd_{uuid.uuid4().hex[:8]}"
 
@@ -545,8 +575,11 @@ class TestSpeechSettings:
         )
 
         session = repository.get_session(sid)
-        assert session["group_thread_id"] == sid
-        assert repository.get_group_thread_id(sid) == sid
+        thread_id = session["group_thread_id"]
+        assert thread_id
+        assert thread_id != sid
+        assert thread_id.startswith("group-thread-")
+        assert repository.get_group_thread_id(sid) == thread_id
 
     def test_multi_character_thread_history_spans_sessions(self):
         thread_id = str(uuid.uuid4())

@@ -23,6 +23,7 @@ from memoria.api.developer import router as developer_router
 from memoria.api.multi_dialogue import router as multi_dialogue_router
 from memoria.api.knowledge import router as knowledge_router
 from memoria.api.speech import router as speech_router
+from memoria.api.story import router as story_router
 from memoria.api.user import (
     AUTH_COOKIE_NAME,
     get_current_user_id,
@@ -280,3 +281,4 @@ app.include_router(developer_router, prefix="/api/v1")
 app.include_router(user_router, prefix="/api/v1")
 app.include_router(knowledge_router, prefix="/api/v1")
 app.include_router(speech_router, prefix="/api/v1")
+app.include_router(story_router, prefix="/api/v1")
