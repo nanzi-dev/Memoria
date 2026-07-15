@@ -7,16 +7,15 @@
 3. 角色卡的启用/禁用管理
 """
 
-import base64
 import json
 import logging
-import mimetypes
-import threading
 from pathlib import Path
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from starlette.concurrency import run_in_threadpool
 
 from memoria.api.avatar_fetcher import download_remote_image
+from memoria.api.avatar_image import avatar_data_url
 from memoria.api.upload_utils import read_upload_limited
 from memoria.api.user import require_current_user_id
 from memoria.core import character_loader
@@ -145,6 +144,7 @@ def get_character_detail(
 @router.post("/admin/characters", response_model=OperationResponse)
 def create_character(
     req: CharacterCardCreateRequest,
+    background_tasks: BackgroundTasks,
     current_user_id: str = Depends(require_current_user_id),
 ):
     """
@@ -168,7 +168,7 @@ def create_character(
         # 保存到数据库
         card_json = json.dumps(req.character_data, ensure_ascii=False, indent=2)
         # 先保存原始 URL，头像异步下载
-        success = repository.save_character_card_to_db(
+        avatar_revision = repository.save_character_card_to_db(
             owner_user_id=current_user_id,
             character_id=card.character_id,
             card_data_json=card_json,
@@ -178,10 +178,15 @@ def create_character(
             source="db",
             avatar_url=card.avatar_url
         )
-        _process_avatar_async(current_user_id, card.character_id, card.avatar_url)
-        
-        if not success:
+        if not avatar_revision:
             raise HTTPException(status_code=500, detail="保存角色卡到数据库失败")
+        _schedule_avatar_download(
+            background_tasks,
+            current_user_id,
+            card.character_id,
+            card.avatar_url,
+            avatar_revision,
+        )
         
         # 清除缓存
         character_loader.reload_character_card(card.character_id, current_user_id)
@@ -206,6 +211,7 @@ def create_character(
 def update_character(
     character_id: str,
     req: CharacterCardUpdateRequest,
+    background_tasks: BackgroundTasks,
     current_user_id: str = Depends(require_current_user_id),
 ):
     """
@@ -237,7 +243,7 @@ def update_character(
         # 更新到数据库
         card_json = json.dumps(req.character_data, ensure_ascii=False, indent=2)
         # 先保存原始 URL，头像异步下载
-        success = repository.save_character_card_to_db(
+        avatar_revision = repository.save_character_card_to_db(
             owner_user_id=current_user_id,
             character_id=card.character_id,
             card_data_json=card_json,
@@ -247,10 +253,15 @@ def update_character(
             source=existing.get("source", "db"),
             avatar_url=card.avatar_url
         )
-        _process_avatar_async(current_user_id, card.character_id, card.avatar_url)
-        
-        if not success:
+        if not avatar_revision:
             raise HTTPException(status_code=500, detail="更新角色卡到数据库失败")
+        _schedule_avatar_download(
+            background_tasks,
+            current_user_id,
+            card.character_id,
+            card.avatar_url,
+            avatar_revision,
+        )
         
         # 清除缓存
         character_loader.reload_character_card(character_id, current_user_id)
@@ -418,42 +429,9 @@ def import_character_from_file(
 # =========================
 # 头像管理
 # =========================
-MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2MB
 MAX_AVATAR_UPLOAD_SIZE = 8 * 1024 * 1024  # 输入上限；较大图片再压缩到 2MB
-MAX_AVATAR_DIMENSION = 512  # 最大宽/高，超出等比缩放
-ALLOWED_MIME_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 
 AVATAR_DOWNLOAD_TIMEOUT = 5  # seconds — shorter so saves don't stall
-
-def _resize_image(data: bytes, max_dim: int) -> bytes | None:
-    """用 PIL 等比压缩图片到 max_dim 以内，返回 JPEG bytes"""
-    try:
-        from PIL import Image
-        import io
-        img = Image.open(io.BytesIO(data))
-        w, h = img.size
-        ratio = min(1.0, max_dim / max(w, h))
-        new_size = (int(w * ratio), int(h * ratio))
-        if ratio < 1.0:
-            img = img.resize(new_size, Image.LANCZOS)
-        # 统一转 JPEG 以压缩体积
-        if img.mode in ("RGBA", "P"):
-            img = img.convert("RGB")
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=80, optimize=True)
-        result = buf.getvalue()
-        if len(result) > MAX_AVATAR_SIZE:
-            # 还是太大，降到 quality=50 再试
-            buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=50, optimize=True)
-            result = buf.getvalue()
-        if len(result) > MAX_AVATAR_SIZE:
-            logger.warning(f"压缩后仍超过 2MB: {len(result)}")
-            return None
-        return result
-    except Exception as e:
-        logger.warning(f"PIL 压缩图片失败: {e}")
-        return None
 
 def _download_avatar_sync(avatar_url: str) -> str | None:
     """尝试下载远程头像 URL 并返回 base64 data URL，失败返回 None"""
@@ -461,30 +439,46 @@ def _download_avatar_sync(avatar_url: str) -> str | None:
         return None
     try:
         image = download_remote_image(avatar_url, timeout=AVATAR_DOWNLOAD_TIMEOUT)
-        data = image.data
-        content_type = image.content_type
-        # 超过尺寸限制时用 PIL 等比压缩
-        if len(data) > MAX_AVATAR_SIZE:
-            data = _resize_image(data, MAX_AVATAR_DIMENSION)
-            if data is None:
-                logger.warning("图片过大且压缩失败")
-                return None
-            content_type = "image/jpeg"
-        return f"data:{content_type};base64,{base64.b64encode(data).decode('ascii')}"
+        return avatar_data_url(image.data)
     except Exception as e:
         logger.warning(f"下载头像 URL 失败，保留原始 URL: {e}")
         return None
 
-def _process_avatar_async(owner_user_id: str, character_id: str, avatar_url: str | None):
-    """后台线程下载头像并更新数据库，不阻塞当前请求"""
+def _download_and_store_avatar(
+    owner_user_id: str,
+    character_id: str,
+    avatar_url: str,
+    avatar_revision: str,
+) -> None:
+    downloaded = _download_avatar_sync(avatar_url)
+    if downloaded is not None:
+        repository.update_character_avatar_if_current(
+            owner_user_id,
+            character_id,
+            avatar_url,
+            avatar_revision,
+            downloaded,
+        )
+
+
+def _schedule_avatar_download(
+    background_tasks: BackgroundTasks,
+    owner_user_id: str,
+    character_id: str,
+    avatar_url: str | None,
+    avatar_revision: str,
+) -> None:
+    """Schedule a bounded post-response download for remote avatar URLs."""
     if not avatar_url or avatar_url.startswith("data:"):
         return
     if avatar_url.startswith("http://") or avatar_url.startswith("https://"):
-        def _bg_download():
-            downloaded = _download_avatar_sync(avatar_url)
-            if downloaded is not None:
-                repository.update_character_avatar(owner_user_id, character_id, downloaded)
-        threading.Thread(target=_bg_download, daemon=True).start()
+        background_tasks.add_task(
+            _download_and_store_avatar,
+            owner_user_id,
+            character_id,
+            avatar_url,
+            avatar_revision,
+        )
 
 
 
@@ -542,33 +536,16 @@ async def upload_character_avatar(
             detail="头像文件超过 8 MB 上传限制",
         )
         
-        # 校验 MIME 类型
-        mime_type = file.content_type or mimetypes.guess_type(file.filename)[0]
-        if mime_type not in ALLOWED_MIME_TYPES:
-            raise HTTPException(status_code=400,
-                detail=f"不支持的图片格式: {mime_type}，支持: {', '.join(sorted(ALLOWED_MIME_TYPES))}")
-        
-        # 超过 2MB 自动压缩到 512px
-        data = contents
-        if len(data) > MAX_AVATAR_SIZE:
-            data = _resize_image(data, MAX_AVATAR_DIMENSION)
-            if data is None:
-                raise HTTPException(status_code=400,
-                    detail=f"文件过大且压缩失败，最大允许 {MAX_AVATAR_SIZE // (1024*1024)} MB")
-            mime_type = "image/jpeg"  # 压缩后都是 JPEG
-        
-        # 转换为 base64 data URL
-        b64 = base64.b64encode(data).decode("ascii")
-        data_url = f"data:{mime_type};base64,{b64}"
+        data_url = await run_in_threadpool(avatar_data_url, contents)
         
         # 更新数据库
         repository.update_character_avatar(current_user_id, character_id, data_url)
         
-        logger.info(f"头像已上传: character_id={character_id}, mime={mime_type}, size={len(data)}")
+        logger.info("头像已上传: character_id=%s, input_size=%s", character_id, len(contents))
         
         return OperationResponse(
             success=True,
-            message=f"头像上传成功 ({len(data)} bytes)",
+            message="头像上传成功",
             character_id=character_id
         )
     
@@ -601,20 +578,14 @@ def set_character_avatar_url(
             )
         
         image = download_remote_image(url, timeout=10)
-        data = image.data
-        content_type = image.content_type
-        if len(data) > MAX_AVATAR_SIZE:
-            data = _resize_image(data, MAX_AVATAR_DIMENSION)
-            if data is None:
-                raise HTTPException(status_code=400,
-                    detail=f"图片过大且压缩失败，最大允许 {MAX_AVATAR_SIZE // (1024*1024)} MB")
-            content_type = "image/jpeg"
-        
-        b64 = base64.b64encode(data).decode("ascii")
-        data_url = f"data:{content_type};base64,{b64}"
+        data_url = avatar_data_url(image.data)
         
         repository.update_character_avatar(current_user_id, character_id, data_url)
-        logger.info(f"头像 URL 已下载并存储: character_id={character_id}, size={len(data)}")
+        logger.info(
+            "头像 URL 已下载并存储: character_id=%s, input_size=%s",
+            character_id,
+            len(image.data),
+        )
         
         return OperationResponse(
             success=True, message="头像已下载并存储", character_id=character_id

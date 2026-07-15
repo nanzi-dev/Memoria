@@ -31,12 +31,17 @@ def test_session_start_creates_session_without_llm_opening(monkeypatch):
     )
     monkeypatch.setattr(
         dialogue.repository,
-        "create_session",
-        lambda session_id, character_id, player_id, player_name: created.update(
-            session_id=session_id,
-            character_id=character_id,
-            player_id=player_id,
-            player_name=player_name,
+        "get_or_create_active_session",
+        lambda **kwargs: (
+            {
+                "session_id": kwargs["session_id"],
+                "character_id": kwargs["character_id"],
+                "player_id": kwargs["player_id"],
+                "player_name": kwargs["player_name"],
+                "status": "active",
+                "locale": kwargs["locale"],
+            },
+            not created.update(**kwargs),
         ),
     )
     monkeypatch.setattr(
@@ -57,6 +62,67 @@ def test_session_start_creates_session_without_llm_opening(monkeypatch):
     assert res.world_created_at == world_now.isoformat()
     assert res.recovered is False
     assert res.messages == []
+
+
+def test_session_start_recovers_session_created_after_initial_lookup(monkeypatch):
+    from memoria.api import dialogue
+
+    active = {
+        "session_id": "concurrent-session",
+        "character_id": "char-1",
+        "player_id": "player-1",
+        "player_name": "Tester",
+        "status": "active",
+        "locale": "en-US",
+    }
+    monkeypatch.setattr(dialogue.repository, "get_all_player_sessions", lambda player_id: [])
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_latest_active_session",
+        lambda player_id, character_id=None: None,
+    )
+    monkeypatch.setattr(dialogue.repository, "is_character_card_active", lambda *args: True)
+    monkeypatch.setattr(
+        dialogue.character_loader,
+        "load_character_card",
+        lambda *args, **kwargs: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_runtime_state",
+        lambda *args, **kwargs: {"affection_level": 12, "trust_level": 8},
+    )
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_or_create_active_session",
+        lambda **kwargs: (active, False),
+    )
+    monkeypatch.setattr(
+        dialogue,
+        "_messages_for_session",
+        lambda session_id: [
+            dialogue.HistoryMessage(
+                role="assistant",
+                content="Already here",
+                world_created_at="2026-07-14T08:30:00+00:00",
+            )
+        ],
+    )
+
+    response = dialogue.session_start(
+        dialogue.SessionStartRequest(
+            character_id="char-1",
+            player_id="player-1",
+            player_name="Tester",
+        ),
+        BackgroundTasks(),
+        current_user_id="player-1",
+    )
+
+    assert response.session_id == "concurrent-session"
+    assert response.recovered is True
+    assert response.locale == "en-US"
+    assert [message.content for message in response.messages] == ["Already here"]
 
 
 def test_session_start_recovery_keeps_persisted_locale(monkeypatch):

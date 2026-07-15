@@ -1455,7 +1455,14 @@ def test_single_session_opening_returns_saved_world_timestamp(monkeypatch):
         "get_last_character_interaction_world_at",
         lambda *args: None,
     )
-    monkeypatch.setattr(orchestrator.repository, "create_session", lambda *args: None)
+    monkeypatch.setattr(
+        orchestrator.repository,
+        "create_session",
+        lambda session_id, *args, **kwargs: {
+            "session_id": session_id,
+            "locale": "zh-CN",
+        },
+    )
     monkeypatch.setattr(orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         orchestrator,

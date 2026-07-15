@@ -668,8 +668,26 @@ def start_session(
         locale=getattr(getattr(card, "speech_style", None), "language", "zh-CN"),
     )
     
-    session_id = str(uuid.uuid4())
-    repository.create_session(session_id, character_id, player_id, player_name, locale)
+    candidate_session_id = str(uuid.uuid4())
+    session = repository.create_session(
+        candidate_session_id,
+        character_id,
+        player_id,
+        player_name,
+        locale,
+    )
+    session_id = session["session_id"]
+    if session_id != candidate_session_id:
+        return {
+            "session_id": session_id,
+            "opening_line": "",
+            "action": card.action_vocabulary.default_action,
+            "current_affinity": runtime_state.get("affection_level", 0),
+            "current_trust": runtime_state.get("trust_level", 0),
+            "world_created_at": clock_snapshot.world_now.isoformat(),
+            "assistant_message_id": None,
+            "locale": session.get("locale") or locale,
+        }
     
     # 获取历史会话摘要（最近3次）
     past_summaries_raw = repository.get_recent_summaries(character_id, player_id, limit=3)

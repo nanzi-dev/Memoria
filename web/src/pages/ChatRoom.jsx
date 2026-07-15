@@ -11,6 +11,14 @@ import { EventInboxBanner, WorldClockDisplay } from '../components/WorldClock';
 import UserSettingsModal from '../components/UserSettingsModal';
 
 import { splitAssistantReply } from '../utils/chatMessages';
+import { beginOwnedRequest, createRequestEpoch } from '../utils/asyncRequestState';
+import {
+  canApplySingleHistory,
+  createPendingUserMessage,
+  removePendingMessage,
+  restoreFailedDraft,
+  settlePendingMessage,
+} from './chatOptimisticState';
 import useBrowserSpeech from '../hooks/useBrowserSpeech';
 
 import {
@@ -623,12 +631,17 @@ export default function ChatRoom() {
   const groupRequestGenerationRef = useRef(0);
 
   const singleRequestGenerationRef = useRef(0);
+  const activeSingleCharacterIdRef = useRef(null);
 
   const activeSendRequestRef = useRef(null);
 
   const sendMessageRef = useRef(null);
 
   const directCharacterHandledRef = useRef(null);
+  const playerIdRef = useRef(PLAYER_ID);
+  const sessionListEpochRef = useRef(null);
+  playerIdRef.current = PLAYER_ID;
+  if (!sessionListEpochRef.current) sessionListEpochRef.current = createRequestEpoch();
 
   const handleTranscription = useCallback((text) => {
     const cleanText = String(text || '').trim();
@@ -701,6 +714,7 @@ export default function ChatRoom() {
 
   function nextSingleRequestGeneration() {
     singleRequestGenerationRef.current += 1;
+    activeSingleCharacterIdRef.current = null;
     invalidatePendingSend();
     return singleRequestGenerationRef.current;
   }
@@ -830,6 +844,11 @@ export default function ChatRoom() {
     }
 
     let cancelled = false;
+    const requestScope = sessionListEpochRef.current.advance(PLAYER_ID);
+    const isCurrentRequest = () => (
+      !cancelled
+      && sessionListEpochRef.current.isCurrent(requestScope, playerIdRef.current)
+    );
     setSessionsLoaded(false);
 
     (async () => {
@@ -859,19 +878,22 @@ export default function ChatRoom() {
 
         chars = enriched;
 
-        if (!cancelled) setAllChars(enriched);
+        if (isCurrentRequest()) setAllChars(enriched);
 
-      } catch (e) { if (!cancelled) setError(e.message); }
+      } catch (e) { if (isCurrentRequest()) setError(e.message); }
 
       // Load sessions after characters are loaded (so we can resolve names/avatars from cache)
 
-      if (!cancelled) await loadSessions(chars);
+      if (isCurrentRequest()) await loadSessions(chars, requestScope);
 
-      if (!cancelled) setSessionsLoaded(true);
+      if (isCurrentRequest()) setSessionsLoaded(true);
 
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      sessionListEpochRef.current.invalidate();
+    };
 
   }, [userLoading, PLAYER_ID]);
 
@@ -879,25 +901,34 @@ export default function ChatRoom() {
 
   // ── Load player sessions for chat list ──
 
-  async function loadSessions(charsOverride) {
+  async function loadSessions(charsOverride, existingScope = null) {
 
-    if (!PLAYER_ID) {
-      setChatItems([]);
-      return;
-    }
+    const playerId = existingScope?.ownerId ?? PLAYER_ID;
+    if (!playerId || playerIdRef.current !== playerId) return;
+    const requestScope = existingScope || beginOwnedRequest(
+      sessionListEpochRef.current,
+      playerId,
+      playerIdRef.current,
+    );
+    if (!requestScope) return;
+    const isCurrentRequest = () => (
+      sessionListEpochRef.current.isCurrent(requestScope, playerIdRef.current)
+    );
 
     const chars = charsOverride || allChars;
     const getActivityTime = (item) => item.last_message_at || item.ended_at || item.created_at || '';
 
     try {
 
-      const sessions = await dialogue.listPlayerSessions(PLAYER_ID);
+      const sessions = await dialogue.listPlayerSessions(playerId);
+      if (!isCurrentRequest()) return;
       const sortedSessions = [...sessions].sort((a, b) => new Date(getActivityTime(b) || 0) - new Date(getActivityTime(a) || 0));
 
       const items = [];
       const seenSingleChars = new Set();
 
       for (const s of sortedSessions) {
+        if (!isCurrentRequest()) return;
 
         if (s.is_multi_character) {
 
@@ -906,6 +937,7 @@ export default function ChatRoom() {
           let info = null;
           try {
             info = await multiDialogue.getSessionInfo(s.session_id);
+            if (!isCurrentRequest()) return;
             groupParticipants = (info.participants || []).map(p => normalizeParticipant(p, chars));
           } catch {}
 
@@ -972,7 +1004,7 @@ export default function ChatRoom() {
 
       const nextItems = [...items];
       nextItems.sort((a, b) => new Date(getActivityTime(b) || 0) - new Date(getActivityTime(a) || 0));
-      setChatItems(nextItems);
+      if (isCurrentRequest()) setChatItems(nextItems);
 
     } catch {}
 
@@ -1060,6 +1092,7 @@ export default function ChatRoom() {
     }
 
     const generation = nextSingleRequestGeneration();
+    activeSingleCharacterIdRef.current = char.character_id;
     resetGroupSyncState();
 
     cancelRecording();
@@ -1401,11 +1434,25 @@ export default function ChatRoom() {
 
     if (view === 'single' && character) {
 
+      const historyRequest = {
+        generation: singleRequestGenerationRef.current,
+        playerId: PLAYER_ID,
+        characterId: character.character_id,
+      };
+      const isCurrentHistoryRequest = () => canApplySingleHistory(
+        historyRequest,
+        {
+          generation: singleRequestGenerationRef.current,
+          playerId: playerIdRef.current,
+          characterId: activeSingleCharacterIdRef.current,
+        },
+      );
       setLoadingHistory(true);
 
       try {
 
         const hist = await dialogue.getHistory(character.character_id, PLAYER_ID, historyOffset, HISTORY_PAGE_SIZE);
+        if (!isCurrentHistoryRequest()) return;
         if (hist?.messages && hist.messages.length > 0) {
 
           skipAutoScrollRef.current = true;
@@ -1430,8 +1477,12 @@ export default function ChatRoom() {
         }
 
       } catch (err) {
-        console.error('[loadMoreHistory] single failed:', err);
-      } finally { setLoadingHistory(false); }
+        if (isCurrentHistoryRequest()) {
+          console.error('[loadMoreHistory] single failed:', err);
+        }
+      } finally {
+        if (isCurrentHistoryRequest()) setLoadingHistory(false);
+      }
 
     } else if (view === 'group' && multiSessionId) {
 
@@ -1599,13 +1650,16 @@ export default function ChatRoom() {
           _pending: true,
         })
       : null;
+    const pendingSingleMessage = view === 'single'
+      ? createPendingUserMessage(
+          text,
+          optimisticWorldCreatedAt,
+          createClientMessageId(),
+        )
+      : null;
     setMessages(prev => view === 'group'
       ? mergeGroupMessages(prev, [pendingGroupMessage])
-      : [...prev, {
-          role: 'user',
-          content: text,
-          world_created_at: optimisticWorldCreatedAt,
-        }]);
+      : [...prev, pendingSingleMessage]);
 
     try {
 
@@ -1619,16 +1673,19 @@ export default function ChatRoom() {
 
         const affinityDelta = currentDelta(res.current_affinity, affinity, res.affinity_delta);
         const trustDelta = currentDelta(res.current_trust, trust, res.trust_delta);
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          content: res.dialogue,
-          action: res.action || '',
-          affinity_delta: affinityDelta,
-          trust_delta: trustDelta,
-          showRelationshipDelta: true,
-          world_created_at: res.world_created_at,
-          message_id: res.assistant_message_id,
-        }]);
+        setMessages(prev => [
+          ...settlePendingMessage(prev, pendingSingleMessage.client_id),
+          {
+            role: 'assistant',
+            content: res.dialogue,
+            action: res.action || '',
+            affinity_delta: affinityDelta,
+            trust_delta: trustDelta,
+            showRelationshipDelta: true,
+            world_created_at: res.world_created_at,
+            message_id: res.assistant_message_id,
+          },
+        ]);
 
         if (user?.tts_auto_play && res.assistant_message_id != null) {
           enqueueAutoplay(res.assistant_message_id, singleSessionId, 'single');
@@ -1723,11 +1780,18 @@ export default function ChatRoom() {
           [],
           { replacePending: false },
         ));
-        setInput(current => current || text);
+        setInput(current => restoreFailedDraft(current, text));
       }
       const isCurrentSingleRequest = view === 'single'
         && singleGeneration === singleRequestGenerationRef.current
         && activeSessionRef.current === singleSessionAtSend;
+      if (isCurrentSingleRequest && pendingSingleMessage?.client_id) {
+        setMessages(prev => removePendingMessage(
+          prev,
+          pendingSingleMessage.client_id,
+        ));
+        setInput(current => restoreFailedDraft(current, text));
+      }
       if (isCurrentSingleRequest || isCurrentGroupRequest) {
         setError(e.message);
       }

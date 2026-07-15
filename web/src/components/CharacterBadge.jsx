@@ -1,6 +1,10 @@
 import { useNavigate } from 'react-router-dom';
 import { memo, useMemo } from 'react';
 import Lanyard from './Lanyard';
+import {
+  characterEditorPath,
+  isActivationKey,
+} from '../utils/navigationState';
 
 function CharacterBadge({ character, onClick, isActive = true }) {
   const navigate = useNavigate();
@@ -13,7 +17,13 @@ function CharacterBadge({ character, onClick, isActive = true }) {
 
   const handleClick = () => {
     if (onClick) onClick(character);
-    else navigate(`/editor/${character.character_id}`);
+    else navigate(characterEditorPath(character.character_id));
+  };
+
+  const handleKeyDown = (event) => {
+    if (!isActivationKey(event.key)) return;
+    event.preventDefault();
+    handleClick();
   };
 
   return (
@@ -33,6 +43,10 @@ function CharacterBadge({ character, onClick, isActive = true }) {
         }`}
         style={{ width: 320, height: 460, pointerEvents: 'auto' }}
         onDoubleClick={handleClick}
+        onKeyDown={handleKeyDown}
+        role="button"
+        tabIndex={0}
+        aria-label={`编辑角色 ${characterInfo.name}`}
       >
         <Lanyard
           characterInfo={characterInfo}
@@ -55,10 +69,12 @@ export function AddCharacterBadge({ onClick }) {
   };
 
   return (
-    <div
+    <button
+      type="button"
       className="group relative cursor-pointer transition-all duration-300 hover:scale-[1.03] hover:-translate-y-1 border-2 border-dashed border-cyber-green/20 hover:border-cyber-green/50 flex items-center justify-center bg-[#0d0d14] animate-fade-up"
       style={{ width: 320, height: 460, pointerEvents: 'auto' }}
       onClick={handleClick}
+      aria-label="添加角色"
     >
       <div
         className="absolute inset-0 opacity-[0.04]"
@@ -76,6 +92,6 @@ export function AddCharacterBadge({ onClick }) {
           添加角色
         </p>
       </div>
-    </div>
+    </button>
   );
 }

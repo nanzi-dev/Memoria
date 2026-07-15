@@ -405,7 +405,7 @@
   {
     "event_id": "graytide_group_proactive",
     "event_name": "调查组主动复盘",
-    "description": "玩家提出复盘请求时由艾琳在固定群聊中主动总结矛盾点。",
+    "description": "玩家在调查群聊中提出复盘请求时，由艾琳主动总结矛盾点。",
     "trigger_condition": {
       "trigger_type": "keyword_match",
       "keywords": ["复盘证据", "重新梳理"],
@@ -415,7 +415,6 @@
     "effects": [
       {
         "effect_type": "npc_proactive_dialogue",
-        "target_session_id": "graytide_investigation_session",
         "proactive_character_id": "graytide_erin_voss",
         "proactive_prompt": "按时间顺序总结已确认事实，只指出证词矛盾，不替玩家宣布凶手。"
       }

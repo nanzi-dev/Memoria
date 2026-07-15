@@ -56,6 +56,53 @@ def test_create_event_rejects_character_not_owned_by_user(monkeypatch):
     assert exc_info.value.status_code == 404
 
 
+def test_create_event_rejects_proactive_dialogue_targeting_foreign_session(monkeypatch):
+    from memoria.api import event_admin
+
+    monkeypatch.setattr(event_admin.repository, "get_event_definition", lambda *args: None)
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_character_card_from_db",
+        lambda *args, **kwargs: {"character_id": "npc-1"},
+    )
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_session",
+        lambda session_id: {
+            "session_id": session_id,
+            "player_id": "user-2",
+            "is_multi_character": 1,
+            "status": "active",
+        },
+    )
+    monkeypatch.setattr(
+        event_admin.repository,
+        "save_event_definition_with_schedule",
+        lambda **kwargs: pytest.fail("foreign-session event must not be saved"),
+    )
+
+    request = event_admin.EventCreateRequest(
+        event_id="evt_foreign_session",
+        event_name="Foreign session",
+        trigger_condition=event_admin.TriggerConditionDTO(
+            trigger_type="keyword_match",
+            keywords=["test"],
+        ),
+        effects=[
+            event_admin.EventEffectDTO(
+                effect_type="npc_proactive_dialogue",
+                target_session_id="foreign-session",
+                proactive_character_id="npc-1",
+            )
+        ],
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        event_admin.create_event(request, current_user_id="user-1")
+
+    assert exc_info.value.status_code == 404
+
+
 def test_create_event_uses_condition_schedule_when_top_level_is_blank(monkeypatch):
     from memoria.api import event_admin
 

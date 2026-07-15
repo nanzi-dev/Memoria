@@ -122,18 +122,20 @@ def test_ended_thread_creates_carrier_session_and_persists_notification(monkeypa
 
     def create_session(**kwargs):
         created.update(kwargs)
-        return True
+        return (
+            {
+                **latest_session,
+                "session_id": kwargs["session_id"],
+                "status": "active",
+                "group_thread_id": kwargs["group_thread_id"],
+            },
+            True,
+        )
 
-    monkeypatch.setattr(group_dialogue_runtime.repository, "create_multi_character_session", create_session)
     monkeypatch.setattr(
         group_dialogue_runtime.repository,
-        "get_session",
-        lambda session_id: {
-            **latest_session,
-            "session_id": session_id,
-            "status": "active",
-            "group_thread_id": "thread-1",
-        },
+        "get_or_create_active_multi_character_session",
+        create_session,
     )
     monkeypatch.setattr(
         group_dialogue_runtime.repository,

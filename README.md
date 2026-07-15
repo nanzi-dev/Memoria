@@ -179,7 +179,7 @@ Memoria/
 │   └── package.json            # 前端脚本与依赖
 ├── config/                     # 配置文件
 │   ├── .env.example            # 环境变量模板
-│   └── settings.yaml           # 应用配置参考
+│   └── settings.yaml           # 兼容性/参考标记，不参与运行时加载
 ├── pyproject.toml              # 项目配置
 ├── requirements.txt            # Python 依赖
 └── README.md
@@ -304,7 +304,7 @@ npm run dev
 | 文档 | 内容 |
 |------|------|
 | [API 文档](docs/API.md) | 完整 REST API 参考（对话/角色卡/事件/关系/多角色/知识库/语音/用户/系统管理），含请求/响应示例 |
-| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（32 张表）、记忆、知识检索与语音架构、角色卡开发规范 |
+| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（37 张表）、记忆、知识检索与语音架构、角色卡开发规范 |
 | [开发路线图](docs/ROADMAP.md) | 已完成功能和未来规划 |
 | [故障排查](docs/FAQ.md) | 常见问题解决方案、调试技巧、性能优化建议 |
 | [贡献指南](docs/CONTRIBUTING.md) | 如何贡献代码、Commit 规范、代码审查标准 |
@@ -337,7 +337,7 @@ SPEECH_STORAGE_PATH=./data/speech
 # ====== 应用配置 ======
 DATABASE_PATH=./data/sqlite_db/memoria.db      # SQLite 数据库文件路径（默认开发模式）
 DATABASE_URL=                                  # PostgreSQL 连接串；留空时使用 SQLite
-AUTH_COOKIE_SECURE=false                       # HTTPS 部署时可设为 true
+AUTH_COOKIE_SECURE=false                       # 本地 HTTP 为 false；HTTPS 部署必须设为 true
 SHORT_TERM_MEMORY_TURNS=8                      # 短期记忆轮数
 LONG_TERM_MEMORY_INTERVAL_TURNS=5              # 每隔多少个玩家回合保存一次长期记忆
 MAX_OUTPUT_TOKENS=600                          # 单轮最大输出 token 数
@@ -348,9 +348,9 @@ EMBEDDING_MODEL=./models/sentence-transformers/all-MiniLM-L6-v2  # 嵌入模型
 VECTOR_SEARCH_TOP_K=10                         # 向量检索返回数量
 ```
 
-知识库配置统一由 `src/memoria/core/config.py` 的 `Configs` 定义，并通过环境变量或仓库根目录 `.env` 覆盖。默认上传限制为 10 MiB、Top-K 为 6、相似度阈值为 0.60；分块目标为 200 token、重叠 36 token、硬上限 240 token。
+运行时配置统一由 `src/memoria/core/config.py` 的 `Configs` 定义，并通过环境变量或仓库根目录 `.env` 注入；`config/settings.yaml` 仅是兼容性/参考标记。默认知识上传限制为 10 MiB、Top-K 为 6、相似度阈值为 0.60；分块目标为 200 token、重叠 36 token、硬上限 240 token。
 
-Docker 部署文件统一存放在 `deploy/docker/`。运行时 `deploy/docker/docker-compose.yml` 会自动生成容器内 PostgreSQL 连接串；通常只需要通过 `deploy/docker/.env` 配置 `POSTGRES_*`、`LLM_*`、端口和模型参数。
+Docker 部署文件统一存放在 `deploy/docker/`。运行时 `deploy/docker/docker-compose.yml` 会自动生成容器内 PostgreSQL 连接串；通常只需要通过 `deploy/docker/.env` 配置 `POSTGRES_*`、`LLM_*`、语音、端口和模型参数。后端直连端口默认绑定 `127.0.0.1`，显式设置 `API_BIND_HOST=0.0.0.0` 才会对所有网络接口开放。
 
 ---
 
@@ -371,7 +371,7 @@ PYTHONPATH=src pytest tests/test_multi_dialogue_api.py -v # 多角色 API
 PYTHONPATH=src pytest tests/test_system.py -v            # 系统端点与限流
 ```
 
-当前测试集合以 `pytest --collect-only -q` 为准；当前项目收集到 464 个测试，覆盖核心编排、持久化、事件、单聊/群聊 API、安全、知识库、语音、向量存储、世界时钟和系统端点。前端还包含 API 客户端与世界时钟状态、格式化测试。
+当前测试集合以 `pytest --collect-only -q` 为准，覆盖核心编排、持久化、事件、单聊/群聊 API、安全、知识库、语音、向量存储、世界时钟和系统端点。前端测试由 `npm test` 收集。
 
 ---
 

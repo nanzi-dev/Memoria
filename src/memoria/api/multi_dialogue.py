@@ -677,7 +677,7 @@ async def continue_multi_session(
             (player_character or {}).get("display_name")
             or source_session["player_name"]
         )
-        ok = repository.create_multi_character_session(
+        target_session, _ = repository.get_or_create_active_multi_character_session(
             session_id=new_session_id,
             player_id=source_session["player_id"],
             player_name=player_name,
@@ -686,17 +686,19 @@ async def continue_multi_session(
             group_thread_id=group_thread_id,
             locale=source_session.get("locale") or DEFAULT_LOCALE,
         )
-        if not ok:
-            raise HTTPException(status_code=500, detail="继续群聊失败")
 
-        new_participants = repository.get_session_participants(new_session_id, only_active=False)
+        target_session_id = target_session["session_id"]
+        new_participants = repository.get_session_participants(
+            target_session_id,
+            only_active=False,
+        )
         return ContinueMultiSessionResponse(
-            session_id=new_session_id,
-            group_name=source_session.get("group_name"),
-            group_thread_id=group_thread_id,
+            session_id=target_session_id,
+            group_name=target_session.get("group_name") or source_session.get("group_name"),
+            group_thread_id=target_session.get("group_thread_id") or group_thread_id,
             status="active",
             participants=[SessionParticipant(**p) for p in new_participants],
-            locale=source_session.get("locale") or DEFAULT_LOCALE,
+            locale=target_session.get("locale") or source_session.get("locale") or DEFAULT_LOCALE,
         )
 
     except HTTPException:

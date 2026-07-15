@@ -6,6 +6,8 @@ import { relationshipAdmin } from '../api/memoria';
 import { useDialog } from '../context/DialogContext';
 import { useUser } from '../context/UserContext';
 import SideRays from '../components/SideRays';
+import { characterEditorPath } from '../utils/navigationState';
+import { createTimeoutController } from '../utils/timeoutController';
 import {
   ArrowLeft, Loader2, RefreshCw, ZoomIn, ZoomOut, Maximize2,
   Users, Plus, Trash2, X, Link2
@@ -395,6 +397,10 @@ export default function RelationshipGraph() {
   const simulationRef = useRef(null);
   const zoomRef = useRef(null);
   const loadRequestRef = useRef(0);
+  const centerTimeoutRef = useRef(null);
+  const toastTimeoutRef = useRef(null);
+  if (!centerTimeoutRef.current) centerTimeoutRef.current = createTimeoutController();
+  if (!toastTimeoutRef.current) toastTimeoutRef.current = createTimeoutController();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -412,6 +418,11 @@ export default function RelationshipGraph() {
   useEffect(() => {
     localStorage.setItem(RELATION_TYPE_STORAGE_KEY, JSON.stringify(relationTypes));
   }, [relationTypes]);
+
+  useEffect(() => () => {
+    centerTimeoutRef.current.cancel();
+    toastTimeoutRef.current.cancel();
+  }, []);
 
   const loadData = useCallback(async () => {
     const requestId = ++loadRequestRef.current;
@@ -625,7 +636,7 @@ export default function RelationshipGraph() {
         .on('end', (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }))
       .on('dblclick', (event, d) => {
         event.stopPropagation();
-        navigate(d.node_type === 'player' ? '/persona' : `/editor/${d.character_id}`);
+        navigate(d.node_type === 'player' ? '/persona' : characterEditorPath(d.character_id));
       });
 
     node.transition().delay((d, i) => Math.min(i, 16) * 45).duration(360).ease(d3.easeCubicOut).attr('opacity', 1);
@@ -730,7 +741,7 @@ export default function RelationshipGraph() {
     });
 
     // 初始居中
-    setTimeout(() => {
+    centerTimeoutRef.current.schedule(() => {
       const bounds = g.node()?.getBBox();
       if (bounds && bounds.width > 0) {
         const scale = Math.min(W * 0.8 / bounds.width, H * 0.8 / bounds.height, 1.2);
@@ -745,11 +756,15 @@ export default function RelationshipGraph() {
       linkFlow.interrupt();
       setActiveRelationType(null);
       simulation.stop();
+      centerTimeoutRef.current.cancel();
     };
   }, [graphSize.height, graphSize.width, network, navigate, relationTypes]);
 
   // ── 操作 ──
-  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 2500); };
+  const showToast = (msg) => {
+    setToast(msg);
+    toastTimeoutRef.current.schedule(() => setToast(null), 2500);
+  };
 
   const handleAdd = async (data) => {
     setSaving(true);

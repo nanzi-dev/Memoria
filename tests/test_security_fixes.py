@@ -3,13 +3,15 @@ Security and reliability regression tests for admin auth, avatars, and auth stor
 """
 
 import hashlib
+import io
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
 import pytest
-from fastapi import HTTPException, Response
+from fastapi import BackgroundTasks, HTTPException, Response
+from PIL import Image
 from pydantic import SecretStr
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -197,6 +199,215 @@ def test_user_avatar_url_rejects_url_when_remote_fetch_is_blocked(monkeypatch):
     assert exc_info.value.status_code == 400
     assert "内网" in exc_info.value.detail
     assert saved == {}
+
+
+def test_user_avatar_rejects_bytes_that_do_not_match_declared_image_mime():
+    from memoria.api import user
+
+    with pytest.raises(HTTPException) as exc_info:
+        user._avatar_data_url(b"not an image", "image/png")
+
+    assert exc_info.value.status_code == 400
+    assert "无效" in exc_info.value.detail
+
+
+def test_user_avatar_rejects_image_over_pixel_limit():
+    from memoria.api import user
+
+    source = io.BytesIO()
+    Image.new("1", (4001, 4001)).save(source, format="PNG")
+
+    with pytest.raises(HTTPException) as exc_info:
+        user._avatar_data_url(source.getvalue(), "image/png")
+
+    assert exc_info.value.status_code == 400
+    assert "像素" in exc_info.value.detail
+
+
+def test_avatar_decompression_bomb_is_reported_as_validation_error(monkeypatch):
+    from memoria.api import avatar_image
+
+    monkeypatch.setattr(
+        avatar_image.Image,
+        "open",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            Image.DecompressionBombError("declared dimensions are unsafe")
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        avatar_image.avatar_data_url(b"image bytes")
+
+    assert exc_info.value.status_code == 400
+    assert "像素" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_character_avatar_upload_rejects_invalid_image_bytes(monkeypatch):
+    from memoria.api import character_admin
+
+    saved = {}
+    monkeypatch.setattr(
+        character_admin.repository,
+        "get_character_card_from_db",
+        lambda *args, **kwargs: {"character_id": "npc-1"},
+    )
+    monkeypatch.setattr(
+        character_admin.repository,
+        "update_character_avatar",
+        lambda *args, **kwargs: saved.update(called=True),
+    )
+    upload = SimpleNamespace(
+        filename="avatar.png",
+        content_type="image/png",
+        read=lambda size: None,
+    )
+
+    async def read(size):
+        return b"not an image"
+
+    upload.read = read
+
+    with pytest.raises(HTTPException) as exc_info:
+        await character_admin.upload_character_avatar(
+            "npc-1",
+            upload,
+            current_user_id="user-1",
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "无效" in exc_info.value.detail
+    assert saved == {}
+
+
+@pytest.mark.asyncio
+async def test_character_avatar_upload_normalization_runs_in_threadpool(monkeypatch):
+    from memoria.api import character_admin
+
+    source = io.BytesIO()
+    Image.new("RGB", (2, 2), (255, 0, 0)).save(source, format="PNG")
+    calls = []
+    saved = {}
+
+    async def run_in_threadpool(func, *args):
+        calls.append(func)
+        return func(*args)
+
+    monkeypatch.setattr(character_admin, "run_in_threadpool", run_in_threadpool)
+    monkeypatch.setattr(
+        character_admin.repository,
+        "get_character_card_from_db",
+        lambda *args, **kwargs: {"character_id": "npc-1"},
+    )
+    monkeypatch.setattr(
+        character_admin.repository,
+        "update_character_avatar",
+        lambda owner, character_id, avatar_url: saved.update(avatar_url=avatar_url),
+    )
+    upload = SimpleNamespace(content_type="image/png")
+
+    async def read(size):
+        if size == -1:
+            return b""
+        data, source_bytes[:] = bytes(source_bytes), b""
+        return data
+
+    source_bytes = bytearray(source.getvalue())
+    upload.read = read
+
+    await character_admin.upload_character_avatar(
+        "npc-1",
+        upload,
+        current_user_id="user-1",
+    )
+
+    assert calls == [character_admin.avatar_data_url]
+    assert saved["avatar_url"].startswith("data:image/png;base64,")
+
+
+@pytest.mark.asyncio
+async def test_user_avatar_upload_normalization_runs_in_threadpool(monkeypatch):
+    from memoria.api import user
+
+    source = io.BytesIO()
+    Image.new("RGB", (2, 2), (0, 255, 0)).save(source, format="PNG")
+    calls = []
+    saved = {}
+
+    async def run_in_threadpool(func, *args):
+        calls.append(func)
+        return func(*args)
+
+    monkeypatch.setattr(user, "run_in_threadpool", run_in_threadpool)
+    monkeypatch.setattr(
+        user.repository,
+        "update_user_profile",
+        lambda uid, avatar_url=None, **kwargs: saved.update(avatar_url=avatar_url),
+    )
+    upload = SimpleNamespace(content_type="image/png")
+
+    async def read(size):
+        if size == -1:
+            return b""
+        data, source_bytes[:] = bytes(source_bytes), b""
+        return data
+
+    source_bytes = bytearray(source.getvalue())
+    upload.read = read
+
+    await user.upload_avatar(upload, uid="user-1")
+
+    assert calls == [user._avatar_data_url]
+    assert saved["avatar_url"].startswith("data:image/png;base64,")
+
+
+def test_character_avatar_download_is_scheduled_and_only_replaces_source_url(monkeypatch):
+    from memoria.api import character_admin
+
+    writes = []
+    monkeypatch.setattr(
+        character_admin,
+        "_download_avatar_sync",
+        lambda url: "data:image/png;base64,downloaded",
+    )
+    monkeypatch.setattr(
+        character_admin.repository,
+        "update_character_avatar_if_current",
+        lambda owner_user_id, character_id, expected_avatar_url, expected_revision, avatar_url: writes.append(
+            (
+                owner_user_id,
+                character_id,
+                expected_avatar_url,
+                expected_revision,
+                avatar_url,
+            )
+        ),
+    )
+    background_tasks = BackgroundTasks()
+
+    character_admin._schedule_avatar_download(
+        background_tasks,
+        "user-1",
+        "npc-1",
+        "https://example.test/avatar.png",
+        "revision-1",
+    )
+
+    assert writes == []
+    assert len(background_tasks.tasks) == 1
+
+    task = background_tasks.tasks[0]
+    task.func(*task.args, **task.kwargs)
+
+    assert writes == [
+        (
+            "user-1",
+            "npc-1",
+            "https://example.test/avatar.png",
+            "revision-1",
+            "data:image/png;base64,downloaded",
+        )
+    ]
 
 
 def test_legacy_password_login_upgrades_hash_and_persists_token(monkeypatch):

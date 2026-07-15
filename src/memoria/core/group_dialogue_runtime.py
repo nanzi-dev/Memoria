@@ -121,7 +121,7 @@ def _ensure_carrier_session(
         or latest_session.get("player_name")
         or "玩家"
     )
-    created = repository.create_multi_character_session(
+    carrier, _ = repository.get_or_create_active_multi_character_session(
         session_id=session_id,
         player_id=state["player_id"],
         player_name=player_name,
@@ -129,13 +129,7 @@ def _ensure_carrier_session(
         group_name=latest_session.get("group_name"),
         group_thread_id=state["group_thread_id"],
     )
-    if not created:
-        raise RuntimeError("无法创建自主群聊承载会话")
-    return repository.get_session(session_id) or {
-        **latest_session,
-        "session_id": session_id,
-        "status": "active",
-    }
+    return carrier
 
 
 def run_group_dialogue_pulse(

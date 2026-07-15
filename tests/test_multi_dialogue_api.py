@@ -675,14 +675,26 @@ async def test_continue_multi_session_creates_new_active_session_without_reactiv
         ],
     )
 
-    def fake_create_multi_character_session(**kwargs):
+    def fake_get_or_create_active_multi_character_session(**kwargs):
         created.update(kwargs)
-        return True
+        return (
+            {
+                "session_id": kwargs["session_id"],
+                "player_id": kwargs["player_id"],
+                "player_name": kwargs["player_name"],
+                "group_name": kwargs["group_name"],
+                "group_thread_id": kwargs["group_thread_id"],
+                "status": "active",
+                "locale": kwargs["locale"],
+                "is_multi_character": 1,
+            },
+            True,
+        )
 
     monkeypatch.setattr(
         multi_dialogue.repository,
-        "create_multi_character_session",
-        fake_create_multi_character_session,
+        "get_or_create_active_multi_character_session",
+        fake_get_or_create_active_multi_character_session,
     )
 
     response = await multi_dialogue.continue_multi_session(
@@ -700,6 +712,61 @@ async def test_continue_multi_session_creates_new_active_session_without_reactiv
     assert created["locale"] == "en-US"
     assert response.locale == "en-US"
     assert ended_source["status"] == "ended"
+
+
+@pytest.mark.asyncio
+async def test_continue_multi_session_reuses_session_created_after_initial_lookup(monkeypatch):
+    from memoria.api import multi_dialogue
+
+    ended_source = {**_multi_session("old-session", status="ended"), "locale": "en-US"}
+    concurrent_session = {
+        **ended_source,
+        "session_id": "concurrent-session",
+        "status": "active",
+        "group_thread_id": "thread-1",
+    }
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session",
+        lambda session_id: ended_source,
+    )
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_multi_character_thread_sessions",
+        lambda session_id: [
+            {
+                "session_id": "old-session",
+                "status": "ended",
+                "group_name": "小队",
+                "group_thread_id": "thread-1",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "ended_at": "2026-01-01T00:10:00+00:00",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session_participants",
+        lambda session_id, only_active=False: [
+            _participant("c1", "角色一", 1),
+            _participant("c2", "角色二", 2),
+        ],
+    )
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_or_create_active_multi_character_session",
+        lambda **kwargs: (concurrent_session, False),
+    )
+
+    response = await multi_dialogue.continue_multi_session(
+        "old-session",
+        current_user_id="player-1",
+    )
+
+    assert response.session_id == "concurrent-session"
+    assert response.status == "active"
+    assert response.group_thread_id == "thread-1"
+    assert response.locale == "en-US"
 
 
 @pytest.mark.asyncio
@@ -737,14 +804,14 @@ async def test_continue_multi_session_rejects_disabled_participants(monkeypatch)
         ],
     )
 
-    def fake_create_multi_character_session(**kwargs):
+    def fake_get_or_create_active_multi_character_session(**kwargs):
         created.update(kwargs)
-        return True
+        return ({}, True)
 
     monkeypatch.setattr(
         multi_dialogue.repository,
-        "create_multi_character_session",
-        fake_create_multi_character_session,
+        "get_or_create_active_multi_character_session",
+        fake_get_or_create_active_multi_character_session,
     )
 
     with pytest.raises(HTTPException) as exc:
@@ -795,15 +862,15 @@ async def test_continue_multi_session_reuses_existing_active_thread_session(monk
         ],
     )
 
-    def fake_create_multi_character_session(**kwargs):
+    def fake_get_or_create_active_multi_character_session(**kwargs):
         nonlocal create_called
         create_called = True
-        return True
+        return ({}, True)
 
     monkeypatch.setattr(
         multi_dialogue.repository,
-        "create_multi_character_session",
-        fake_create_multi_character_session,
+        "get_or_create_active_multi_character_session",
+        fake_get_or_create_active_multi_character_session,
     )
 
     response = await multi_dialogue.continue_multi_session(

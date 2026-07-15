@@ -104,11 +104,25 @@ curl -X POST "https://api.deepseek.com/v1/chat/completions" \
 仓库内 Web 前端只使用服务端写入的 `memoria-token` HttpOnly Cookie，不从响应 token 构造 Bearer 头，也不把 token 保存到 `localStorage`。排查时确认：
 
 1. 前端请求使用 `credentials: include`，API 与 Web 的域名、端口和反向代理 Cookie 转发配置正确。
-2. 本地 HTTP 开发使用 `AUTH_COOKIE_SECURE=false`；只有 HTTPS 部署才设置为 `true`。
+2. 本地 HTTP 开发使用 `AUTH_COOKIE_SECURE=false`；HTTPS 部署必须设置为 `true`。
 3. 浏览器未阻止当前站点 Cookie，登录响应中存在 `Set-Cookie`。
 4. 旧版前端保存过的 `localStorage` token 会在启动时清理，不应再依赖该值恢复登录。
 
-脚本或第三方 API 客户端仍可使用 `Authorization: Bearer <token>`、查询参数 token 或 Cookie；Cookie-only 约束只针对仓库内浏览器客户端。
+脚本或第三方 API 客户端仍可使用 `Authorization: Bearer <token>` 或 Cookie；Cookie-only 约束只针对仓库内浏览器客户端。
+
+---
+
+### Q: 为什么第一个注册用户是管理员
+
+当数据库中还没有管理员时，首个成功注册的用户会自动获得管理员权限，后续注册用户默认为普通用户。这用于初始化全新实例，但公开部署时也意味着抢先注册风险。
+
+首次启动应保持服务只监听回环地址或位于受控内网，先由部署者私下创建初始账户，再开放反向代理或公网入口。默认 Docker 后端直连端口绑定到 `127.0.0.1`；只有明确需要远程直连时才设置 `API_BIND_HOST`。
+
+---
+
+### Q: 运行时配置从哪里读取
+
+运行时配置由 `src/memoria/core/config.py` 的 Pydantic Settings 从环境变量和仓库根目录 `.env` 读取。`config/settings.yaml` 仅保留为兼容性/参考标记，当前服务不会从该文件加载运行时配置。
 
 ---
 
@@ -234,6 +248,8 @@ docker compose up
 - API 文档：http://127.0.0.1:8080/docs
 - 后端直连：http://127.0.0.1:8001
 
+后端直连端口默认只绑定 `127.0.0.1`。需要从其他主机访问时，可在 `deploy/docker/.env` 中显式设置 `API_BIND_HOST=0.0.0.0`，并同时配置防火墙、HTTPS 反向代理和安全 Cookie。直接运行 Uvicorn 时也建议默认使用 `--host 127.0.0.1`。
+
 如果首次向量检索较慢，通常是容器正在下载嵌入模型。已有本地模型时可在 `.env` 中设置：
 
 ```bash
@@ -291,7 +307,7 @@ sqlite3 data/sqlite_db/memoria.db \
 
 启动时设置环境变量：`LOG_LEVEL=DEBUG PYTHONPATH=src uvicorn memoria.main:app --host 127.0.0.1 --port 8001`
 
-运行时动态调整：`curl -X POST http://127.0.0.1:8001/admin/log-level?level=DEBUG -H "Authorization: Bearer <token>"`
+系统管理员可运行时动态调整：`curl -X POST http://127.0.0.1:8001/admin/log-level?level=DEBUG -H "Authorization: Bearer <token>"`。普通登录用户会收到 403。
 
 可选级别：DEBUG / INFO / WARNING / ERROR
 

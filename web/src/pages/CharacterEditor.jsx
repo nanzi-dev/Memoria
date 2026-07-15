@@ -8,6 +8,8 @@ import StepSpeechStyle from '../components/editor/StepSpeechStyle';
 import StepBackground from '../components/editor/StepBackground';
 import StepInteraction from '../components/editor/StepInteraction';
 import { useDialog } from '../context/DialogContext';
+import { characterEditorPath } from '../utils/navigationState';
+import { createTimeoutController } from '../utils/timeoutController';
 
 const STEPS = [
   { id: 'identity', label: '身份 Identity', Icon: null },
@@ -125,6 +127,10 @@ export default function CharacterEditor() {
   const navigate = useNavigate();
   const dialog = useDialog();
   const fileInputRef = useRef(null);
+  const navigationTimeoutRef = useRef(null);
+  if (!navigationTimeoutRef.current) {
+    navigationTimeoutRef.current = createTimeoutController();
+  }
   const [currentStep, setCurrentStep] = useState(0);
   const [formData, setFormData] = useState(() => mergeCharacterData({}));
   const [saving, setSaving] = useState(false);
@@ -140,7 +146,10 @@ export default function CharacterEditor() {
     const previousRestoration = window.history.scrollRestoration;
     window.history.scrollRestoration = 'manual';
     window.scrollTo(0, 0);
-    return () => { window.history.scrollRestoration = previousRestoration; };
+    return () => {
+      navigationTimeoutRef.current.cancel();
+      window.history.scrollRestoration = previousRestoration;
+    };
   }, []);
 
   // Load existing character data
@@ -236,8 +245,8 @@ export default function CharacterEditor() {
       }
 
       setSaveMessage('Saved successfully!');
-      setTimeout(() => {
-        navigate(characterId ? '/' : `/editor/${encodeURIComponent(data.character_id)}`);
+      navigationTimeoutRef.current.schedule(() => {
+        navigate(characterId ? '/' : characterEditorPath(data.character_id));
       }, 800);
     } catch (e) {
       setSaveMessage(`Error: ${e.message}`);

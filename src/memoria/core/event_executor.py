@@ -361,14 +361,43 @@ class EventExecutor:
         effect: EventEffect,
         context: EventContext,
     ) -> dict[str, Any]:
-        target_session_id = (
-            effect.target_session_id
-            or context.active_multi_session_id
-            or context.session_id
-        )
+        target_session_id = effect.target_session_id
         session = repository.get_session(target_session_id) if target_session_id else None
+        if not target_session_id:
+            current_session = (
+                repository.get_session(context.session_id)
+                if context.session_id
+                else None
+            )
+            if (
+                current_session
+                and current_session.get("is_multi_character")
+                and current_session.get("status") != "ended"
+                and current_session.get("player_id") == context.player_id
+            ):
+                target_session_id = context.session_id
+                session = current_session
+            else:
+                target_session_id = context.active_multi_session_id
+                session = (
+                    repository.get_session(target_session_id)
+                    if target_session_id
+                    else None
+                )
         if not session or not session.get("is_multi_character") or session.get("status") == "ended":
             raise ValueError("NPC 主动对白目标不是可用群聊")
+        if session.get("player_id") != context.player_id:
+            raise ValueError("NPC 主动对白目标群聊不属于当前玩家")
+        if effect.proactive_character_id:
+            participant_ids = {
+                item["character_id"]
+                for item in repository.get_session_participants(
+                    target_session_id,
+                    only_active=True,
+                )
+            }
+            if effect.proactive_character_id not in participant_ids:
+                raise ValueError("主动发言角色不是目标群聊的活跃参与者")
 
         from memoria.core.multi_character_orchestrator import MultiCharacterOrchestrator
 

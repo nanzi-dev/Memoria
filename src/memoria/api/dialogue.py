@@ -228,14 +228,21 @@ def _start_empty_session(
     runtime_state = repository.get_runtime_state(character_id, player_id, card)
     world_created_at = world_clock.get_clock_snapshot(player_id).world_now.isoformat()
     session_id = str(uuid.uuid4())
-    try:
-        repository.create_session(session_id, character_id, player_id, player_name, locale)
-    except TypeError as exc:
-        if "positional" not in str(exc) and "unexpected keyword argument" not in str(exc):
-            raise
-        repository.create_session(session_id, character_id, player_id, player_name)
-    return SessionStartResponse(
+    active_session, created = repository.get_or_create_active_session(
         session_id=session_id,
+        character_id=character_id,
+        player_id=player_id,
+        player_name=player_name,
+        locale=locale,
+    )
+    if not created:
+        return _recovered_session_response(
+            active_session,
+            character_id=character_id,
+            player_id=player_id,
+        )
+    return SessionStartResponse(
+        session_id=active_session["session_id"],
         opening_line="",
         action="",
         current_affinity=runtime_state.get("affection_level", 0),
@@ -244,6 +251,43 @@ def _start_empty_session(
         assistant_message_id=None,
         recovered=False,
         messages=[],
+        locale=locale,
+    )
+
+
+def _recovered_session_response(
+    active_session: dict,
+    *,
+    character_id: str,
+    player_id: str,
+) -> SessionStartResponse:
+    locale = active_session.get("locale") or DEFAULT_LOCALE
+    current_affinity, current_trust, _ = _current_character_state(
+        character_id,
+        player_id,
+        locale,
+    )
+    messages = _messages_for_session(active_session["session_id"])
+    world_created_at = next(
+        (
+            message.world_created_at
+            for message in reversed(messages)
+            if message.world_created_at
+        ),
+        None,
+    )
+    if world_created_at is None:
+        world_created_at = world_clock.get_clock_snapshot(player_id).world_now.isoformat()
+    return SessionStartResponse(
+        session_id=active_session["session_id"],
+        opening_line="",
+        action="",
+        current_affinity=current_affinity,
+        current_trust=current_trust,
+        world_created_at=world_created_at,
+        assistant_message_id=None,
+        recovered=True,
+        messages=messages,
         locale=locale,
     )
 
@@ -387,32 +431,10 @@ def session_start(
         _close_idle_sessions(req.player_id, background_tasks)
         active_session = repository.get_latest_active_session(req.player_id, req.character_id)
         if active_session:
-            locale = active_session.get("locale") or DEFAULT_LOCALE
-            current_affinity, current_trust, _ = _current_character_state(
-                req.character_id, req.player_id, locale
-            )
-            messages = _messages_for_session(active_session["session_id"])
-            world_created_at = next(
-                (
-                    message.world_created_at
-                    for message in reversed(messages)
-                    if message.world_created_at
-                ),
-                None,
-            )
-            if world_created_at is None:
-                world_created_at = world_clock.get_clock_snapshot(req.player_id).world_now.isoformat()
-            return SessionStartResponse(
-                session_id=active_session["session_id"],
-                opening_line="",
-                action="",
-                current_affinity=current_affinity,
-                current_trust=current_trust,
-                world_created_at=world_created_at,
-                assistant_message_id=None,
-                recovered=True,
-                messages=messages,
-                locale=locale,
+            return _recovered_session_response(
+                active_session,
+                character_id=req.character_id,
+                player_id=req.player_id,
             )
 
         return _start_empty_session(

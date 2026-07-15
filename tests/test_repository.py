@@ -1,6 +1,9 @@
 """
 数据库持久化层完整单元测试
 """
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
 import pytest, sys, json, uuid
 from pathlib import Path
 from datetime import datetime, timezone
@@ -55,7 +58,9 @@ class TestSession:
 
     def test_end_session(self):
         sid = str(uuid.uuid4())
-        repository.create_session(sid,"tc","tp","T")
+        character_id = f"tc-{uuid.uuid4().hex}"
+        player_id = f"tp-{uuid.uuid4().hex}"
+        repository.create_session(sid, character_id, player_id, "T")
         repository.end_session(sid)
         s = repository.get_session(sid)
         assert s["status"] == "ended"
@@ -66,6 +71,135 @@ class TestSession:
         repository.create_session(sid,"tc3","tp3","T3")
         sessions = repository.get_sessions_by_player_and_character("tc3","tp3")
         assert any(s["session_id"]==sid for s in sessions)
+
+    def test_get_or_create_active_session_is_atomic_under_concurrency(self):
+        player_id = f"atomic-player-{uuid.uuid4().hex}"
+        character_id = f"atomic-character-{uuid.uuid4().hex}"
+        start = Barrier(2)
+
+        def create(candidate_session_id):
+            start.wait()
+            return repository.get_or_create_active_session(
+                session_id=candidate_session_id,
+                character_id=character_id,
+                player_id=player_id,
+                player_name="Tester",
+                locale="en-US",
+            )
+
+        candidates = [str(uuid.uuid4()), str(uuid.uuid4())]
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(create, candidates))
+
+        sessions = [result[0] for result in results]
+        created = [result[1] for result in results]
+        assert {session["session_id"] for session in sessions} <= set(candidates)
+        assert len({session["session_id"] for session in sessions}) == 1
+        assert sorted(created) == [False, True]
+        with repository.get_conn() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM session
+                WHERE player_id = ?
+                  AND character_id = ?
+                  AND status = 'active'
+                  AND is_multi_character = 0
+                """,
+                (player_id, character_id),
+            ).fetchone()
+        assert row["count"] == 1
+
+    def test_create_session_reuses_existing_active_single_session(self):
+        player_id = f"legacy-player-{uuid.uuid4().hex}"
+        character_id = f"legacy-character-{uuid.uuid4().hex}"
+        first_id = str(uuid.uuid4())
+        second_id = str(uuid.uuid4())
+
+        first = repository.create_session(
+            first_id,
+            character_id,
+            player_id,
+            "Tester",
+        )
+        second = repository.create_session(
+            second_id,
+            character_id,
+            player_id,
+            "Tester",
+        )
+
+        assert first["session_id"] == first_id
+        assert second["session_id"] == first_id
+        with repository.get_conn() as conn:
+            count = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM session
+                WHERE player_id = ?
+                  AND character_id = ?
+                  AND status = 'active'
+                  AND is_multi_character = 0
+                """,
+                (player_id, character_id),
+            ).fetchone()["count"]
+        assert count == 1
+
+
+class TestMultiSessionCreation:
+    def test_get_or_create_active_thread_session_is_atomic_under_concurrency(self):
+        player_id = f"atomic-group-player-{uuid.uuid4().hex}"
+        group_thread_id = f"atomic-thread-{uuid.uuid4().hex}"
+        character_ids = ["atomic-character-a", "atomic-character-b"]
+        start = Barrier(2)
+
+        def create(candidate_session_id):
+            start.wait()
+            return repository.get_or_create_active_multi_character_session(
+                session_id=candidate_session_id,
+                player_id=player_id,
+                player_name="Tester",
+                character_ids=character_ids,
+                group_name="Atomic Group",
+                group_thread_id=group_thread_id,
+                locale="en-US",
+            )
+
+        candidates = [str(uuid.uuid4()), str(uuid.uuid4())]
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(create, candidates))
+
+        sessions = [result[0] for result in results]
+        created = [result[1] for result in results]
+        session_ids = {session["session_id"] for session in sessions}
+        assert session_ids <= set(candidates)
+        assert len(session_ids) == 1
+        assert sorted(created) == [False, True]
+
+        session_id = next(iter(session_ids))
+        with repository.get_conn() as conn:
+            session_count = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM session
+                WHERE player_id = ?
+                  AND group_thread_id = ?
+                  AND status = 'active'
+                  AND is_multi_character = 1
+                """,
+                (player_id, group_thread_id),
+            ).fetchone()["count"]
+            participant_count = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM multi_session_participant
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()["count"]
+
+        assert session_count == 1
+        assert participant_count == len(character_ids)
 
 class TestShortTerm:
     def test_append_and_get(self):
@@ -200,6 +334,93 @@ class TestCharacterCard:
         assert repository.delete_character_card_from_db(owner_a, cid)
         assert not repository.is_character_card_active(owner_a, cid)
         assert repository.is_character_card_active(owner_b, cid)
+
+    def test_avatar_conditional_update_does_not_overwrite_newer_value(self):
+        owner = f"user_{uuid.uuid4().hex[:8]}"
+        character_id = f"tc_{uuid.uuid4().hex[:8]}"
+        source_url = "https://example.test/avatar.png"
+        card = json.dumps(
+            {
+                "character_id": character_id,
+                "meta": {"name": "T", "display_name": "T"},
+            }
+        )
+        revision = repository.save_character_card_to_db(
+            owner,
+            character_id,
+            card,
+            name="T",
+            display_name="T",
+            avatar_url=source_url,
+        )
+        assert revision
+
+        newer_avatar = "data:image/png;base64,newer"
+        assert repository.update_character_avatar(owner, character_id, newer_avatar)
+        assert not repository.update_character_avatar_if_current(
+            owner,
+            character_id,
+            source_url,
+            revision,
+            "data:image/png;base64,stale",
+        )
+
+        saved = repository.get_character_card_from_db(owner, character_id)
+        assert saved["avatar_url"] == newer_avatar
+
+    def test_avatar_conditional_update_rejects_aba_source_url(self):
+        owner = f"user_{uuid.uuid4().hex[:8]}"
+        character_id = f"tc_{uuid.uuid4().hex[:8]}"
+        card = json.dumps(
+            {
+                "character_id": character_id,
+                "meta": {"name": "T", "display_name": "T"},
+            }
+        )
+        source_a = "https://example.test/a.png"
+        source_b = "https://example.test/b.png"
+
+        first_a_revision = repository.save_character_card_to_db(
+            owner,
+            character_id,
+            card,
+            name="T",
+            display_name="T",
+            avatar_url=source_a,
+        )
+        assert repository.save_character_card_to_db(
+            owner,
+            character_id,
+            card,
+            name="T",
+            display_name="T",
+            avatar_url=source_b,
+        )
+        latest_a_revision = repository.save_character_card_to_db(
+            owner,
+            character_id,
+            card,
+            name="T",
+            display_name="T",
+            avatar_url=source_a,
+        )
+
+        assert not repository.update_character_avatar_if_current(
+            owner,
+            character_id,
+            source_a,
+            first_a_revision,
+            "data:image/png;base64,stale-a",
+        )
+        assert repository.update_character_avatar_if_current(
+            owner,
+            character_id,
+            source_a,
+            latest_a_revision,
+            "data:image/png;base64,current-a",
+        )
+        saved = repository.get_character_card_from_db(owner, character_id)
+        assert saved["avatar_url"] == "data:image/png;base64,current-a"
 
     def test_soft_delete_preserves_relationship_and_hard_delete_removes_it(self):
         owner = f"user_{uuid.uuid4().hex[:8]}"
@@ -1374,6 +1595,7 @@ class TestSessionListFields:
         repository.create_session(old_sid, cid, player_id, "Tester")
         repository.append_short_term_message(old_sid, "user", "旧会话用户消息")
         repository.append_short_term_message(old_sid, "assistant", "旧会话最后一句")
+        repository.end_session(old_sid)
         repository.create_session(empty_sid, cid, player_id, "Tester")
 
         sessions = repository.get_all_player_sessions(player_id)
@@ -1476,6 +1698,7 @@ class TestSessionListFields:
         repository.create_session(sid1, cid, player_id, "Tester")
         repository.append_short_term_message(sid1, "user", "old-1")
         repository.append_short_term_message(sid1, "assistant", "old-2")
+        repository.end_session(sid1)
         repository.create_session(sid2, cid, player_id, "Tester")
         repository.append_short_term_message(sid2, "user", "new-1")
         repository.append_short_term_message(sid2, "assistant", "new-2")

@@ -71,7 +71,7 @@ Memoria/
 │   └── package.json            # npm 脚本与依赖声明
 ├── config/                     # 配置模板
 │   ├── .env.example
-│   └── settings.yaml
+│   └── settings.yaml           # 兼容性/参考标记，不参与运行时加载
 ├── pyproject.toml              # 项目配置 (src layout)
 └── requirements.txt
 ```
@@ -82,9 +82,13 @@ Memoria/
 
 - `GET /health` — 存活检查，返回 `{"status": "ok", "version": "0.5.0"}`
 - `GET /ready` — 数据库就绪检查，失败返回 503 和 `{"status": "not_ready", "database": "unavailable"}`；具体异常只写入服务端日志
-- `POST /admin/log-level?level=DEBUG` — 动态调整日志级别，需要登录态
+- `POST /admin/log-level?level=DEBUG` — 动态调整日志级别，仅限系统管理员
 
-通用 API 客户端可以通过 Bearer token、查询参数 token 或 `memoria-token` HttpOnly Cookie 认证；仓库内 Web 前端只发送 HttpOnly Cookie，不把 token 持久化到 `localStorage`。
+通用 API 客户端可以通过 Bearer token 或 `memoria-token` HttpOnly Cookie 认证；仓库内 Web 前端只发送 HttpOnly Cookie，不把 token 持久化到 `localStorage`。
+
+全新数据库中不存在管理员时，首个成功注册的用户会自动成为管理员，后续注册用户默认为普通用户。因此初次部署应先保持服务只监听回环地址或受控内网，由部署者私下创建初始账户后再开放入口。
+
+运行时配置由 `src/memoria/core/config.py` 的 Pydantic Settings 从环境变量和仓库根目录 `.env` 读取。`config/settings.yaml` 仅是兼容性/参考标记，当前服务不从该文件加载配置。
 
 API 写操作通过速率限制中间件保护（60 请求 / 60 秒窗口）。限流 key 优先使用认证 token 解析出的用户 ID，未登录或 token 无效时退回客户端 IP，不信任客户端传入的 `X-Player-ID`。计数器使用单调时钟和线程锁，并周期清理过期 key。限流状态保存在单个应用进程内，多 worker 或多实例部署需要外部集中式限流器才能共享额度。
 
@@ -216,7 +220,7 @@ Web 端的角色编辑器只编辑基础角色卡，不提供 `Default` / `zh-CN
 
 ## 数据库设计
 
-Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=postgresql://...` 切换 PostgreSQL。当前 schema 初始化后共有 32 张表和 32 个显式索引。
+Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=postgresql://...` 切换 PostgreSQL。当前 schema 初始化后共有 37 张应用表和 39 个显式索引（不计 SQLite 内部表和自动索引）。
 
 ### 1. users（用户表）
 
@@ -291,6 +295,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 | name | TEXT | 角色名称（冗余，便于查询）|
 | display_name | TEXT | 显示名称（冗余）|
 | avatar_url | TEXT | 角色头像，data URL 或网络 URL |
+| avatar_revision | TEXT | 当前异步网络头像请求的 revision，用于拒绝过期回写 |
 | is_active | INTEGER DEFAULT 1 | 是否启用（1=启用，0=禁用）|
 | source | TEXT DEFAULT 'db' | 来源：db=数据库创建，file=文件导入 |
 | created_at | TEXT | 创建时间 |
@@ -940,9 +945,122 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
+### 33. domain_event（权威领域事件账本）
+
+按用户和聚合记录不可变领域事件。`aggregate_version` 保证同一聚合的版本唯一，关联 ID、会话、群聊线程和来源轮次字段用于追踪因果链与重放投影。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| sequence | INTEGER | 自增主键和全局处理顺序 |
+| event_id | TEXT NOT NULL UNIQUE | 领域事件 ID |
+| owner_user_id | TEXT NOT NULL | 用户 ID |
+| aggregate_type | TEXT NOT NULL | 聚合类型 |
+| aggregate_id | TEXT NOT NULL | 聚合 ID |
+| aggregate_version | INTEGER NOT NULL | 聚合内版本 |
+| event_type | TEXT NOT NULL | 带主版本号的事件类型 |
+| payload | TEXT NOT NULL | 事件负载（JSON） |
+| metadata | TEXT NOT NULL | 事件元数据（JSON） |
+| correlation_id | TEXT | 关联链 ID |
+| causation_id | TEXT | 直接原因事件 ID |
+| session_id | TEXT | 来源会话 ID |
+| group_thread_id | TEXT | 来源逻辑群聊线程 ID |
+| source_turn_id | TEXT | 来源对话轮次 ID |
+| source_message_id | INTEGER | 来源消息 ID |
+| world_occurred_at | TEXT | 剧情世界发生时间 |
+| recorded_at | TEXT NOT NULL | 服务端记录时间 |
+
+**主键：** `sequence` 自增序列；`event_id` 全局唯一
+**唯一约束：** `UNIQUE(owner_user_id, aggregate_type, aggregate_id, aggregate_version)`
+**索引：** `idx_domain_event_aggregate`、`idx_domain_event_correlation`、`idx_domain_event_source_turn`、`idx_domain_event_group_thread`
+
+---
+
+### 34. projection_checkpoint（投影检查点表）
+
+保存每个投影器按用户处理到的领域事件序列，用于增量重放和故障恢复。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| projector_name | TEXT NOT NULL | 投影器名称（联合主键） |
+| owner_user_id | TEXT NOT NULL | 用户 ID（联合主键） |
+| last_sequence | INTEGER NOT NULL DEFAULT 0 | 已处理的最后事件序列 |
+| updated_at | TEXT NOT NULL | 更新时间 |
+
+**主键：** `PRIMARY KEY (projector_name, owner_user_id)`
+
+---
+
+### 35. data_migration（数据迁移记录表）
+
+记录一次性数据回填或迁移是否已执行，避免重复应用。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| migration_key | TEXT PRIMARY KEY | 稳定迁移键 |
+| metadata | TEXT NOT NULL DEFAULT '{}' | 迁移结果元数据（JSON） |
+| applied_at | TEXT NOT NULL | 应用时间 |
+
+---
+
+### 36. fact_claim（事实声明表）
+
+保存角色、逻辑群聊线程或剧情范围内的候选/已验证事实及来源证据。声明可撤回或被新声明取代，并通过账本版本维持投影顺序。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| claim_id | TEXT PRIMARY KEY | 事实声明 ID |
+| owner_user_id | TEXT NOT NULL | 用户 ID |
+| scope_type | TEXT NOT NULL | `character` / `group_thread` / `story` |
+| scope_id | TEXT NOT NULL | 范围 ID |
+| fact_text | TEXT NOT NULL | 原始事实文本 |
+| normalized_fact_text | TEXT NOT NULL | 规范化事实文本 |
+| content_hash | TEXT NOT NULL | 原始内容哈希 |
+| normalized_content_hash | TEXT NOT NULL | 规范化内容哈希 |
+| status | TEXT NOT NULL | 声明状态 |
+| source_kind | TEXT NOT NULL | 来源类型 |
+| provenance | TEXT NOT NULL DEFAULT '{}' | 来源证据元数据（JSON） |
+| source_ids | TEXT NOT NULL DEFAULT '[]' | 来源对象 ID（JSON） |
+| supersedes_claim_id | TEXT | 被本声明取代的声明 ID |
+| superseded_by_claim_id | TEXT | 取代本声明的声明 ID |
+| ledger_version | INTEGER NOT NULL | 已投影账本版本 |
+| created_at | TEXT NOT NULL | 创建时间 |
+| updated_at | TEXT NOT NULL | 更新时间 |
+| verified_at | TEXT | 验证时间 |
+| retracted_at | TEXT | 撤回时间 |
+
+**状态：** `candidate` / `verified` / `retracted` / `superseded`
+**来源：** `player_message` / `knowledge_chunk` / `authored_event` / `model_inference` / `legacy`
+**唯一约束：** `UNIQUE(owner_user_id, scope_type, scope_id, normalized_content_hash)`
+**外键：** `supersedes_claim_id` 和 `superseded_by_claim_id` 均引用 `fact_claim(claim_id)`
+**索引：** `idx_fact_claim_scope`、`idx_fact_claim_verified`
+
+---
+
+### 37. story_state（剧情状态投影表）
+
+保存剧情领域事件投影出的当前状态。API 通过 `GET /api/v1/stories/{story_id}/state` 按当前用户读取。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| owner_user_id | TEXT NOT NULL | 用户 ID（联合主键） |
+| story_id | TEXT NOT NULL | 剧情 ID（联合主键） |
+| status | TEXT NOT NULL | `active` / `completed` / `failed` |
+| progress | REAL NOT NULL DEFAULT 0 | 0 到 1 的进度 |
+| terminal_reason | TEXT | 完成或失败原因 |
+| ledger_version | INTEGER NOT NULL | 已投影账本版本 |
+| started_at | TEXT NOT NULL | 开始时间 |
+| updated_at | TEXT NOT NULL | 更新时间 |
+| completed_at | TEXT | 完成时间 |
+| failed_at | TEXT | 失败时间 |
+
+**主键：** `PRIMARY KEY (owner_user_id, story_id)`
+**索引：** `idx_story_state_status ON story_state(owner_user_id, status, updated_at, story_id)`
+
+---
+
 ### 完整索引汇总
 
-共 32 个显式索引，覆盖高频查询、任务恢复、调度租约与未读通知路径：
+共 39 个显式索引，覆盖高频查询、账本投影、任务恢复、调度租约与未读通知路径：
 
 | 索引名 | 表 | 列 |
 |--------|-----|-----|
@@ -956,6 +1074,13 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 | `idx_fact_lookup` | long_term_fact | (character_id, player_id, importance DESC, last_referenced DESC) |
 | `idx_summary_lookup` | session_summary | (session_id, created_at DESC) |
 | `idx_summary_player` | session_summary | (character_id, player_id, created_at DESC) |
+| `idx_domain_event_aggregate` | domain_event | (owner_user_id, aggregate_type, aggregate_id, aggregate_version) |
+| `idx_domain_event_correlation` | domain_event | (owner_user_id, correlation_id, sequence) |
+| `idx_domain_event_source_turn` | domain_event | (owner_user_id, source_turn_id, sequence) |
+| `idx_domain_event_group_thread` | domain_event | (owner_user_id, group_thread_id, sequence) |
+| `idx_fact_claim_scope` | fact_claim | (owner_user_id, scope_type, scope_id, created_at, claim_id) |
+| `idx_fact_claim_verified` | fact_claim | (owner_user_id, scope_type, scope_id, status, created_at, claim_id) |
+| `idx_story_state_status` | story_state | (owner_user_id, status, updated_at, story_id) |
 | `idx_character_active` | character_card | (owner_user_id, is_active, created_at DESC) |
 | `idx_event_character` | event_definition | (owner_user_id, character_id, is_active) |
 | `idx_event_trigger_log` | event_trigger_log | (event_id, character_id, player_id, triggered_at DESC) |
@@ -993,7 +1118,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 8. **世界时间与通知持久化** — `player_world_clock` 保存带修订号的用户世界时间锚点，Web 单调应用时钟修订；调度表保存真实到期时间和租约，`player_event_inbox` 保存单聊或群聊聚合通知
 9. **事务一致性、幂等与恢复** — `dialogue_turn` 为单聊和群聊轮次保存请求幂等结果与租约；群聊脉冲消息/状态/通知、事件定义/调度分别原子提交；`event_trigger_guard` 串行化 once/cooldown 副作用，`knowledge_vector_cleanup`、`group_dialogue_state` 和事件执行表保存可恢复任务状态、幂等结果与租约
 10. **轻量迁移** — 启动时为旧库补齐角色、会话、事件、认证、世界时钟、通知收件箱、关系修订和知识库相关结构；`owner_user_id` 相关主键重建不做旧数据迁移，升级前需要删除旧 SQLite 数据库或手动重建表
-11. **完整索引覆盖** — 32 个显式索引覆盖常用查询、对话幂等、调度和恢复路径
+11. **完整索引覆盖** — 39 个显式索引覆盖常用查询、领域事件投影、对话幂等、调度和恢复路径
 12. **可迁移性** — Repository 层适配 SQLite/PostgreSQL 占位符、自增主键和少量 UPSERT 差异
 
 ## 角色卡规范

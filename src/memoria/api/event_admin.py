@@ -431,6 +431,34 @@ def _validate_effect_semantics(
     for character_id in (effect.target_character_id, effect.proactive_character_id):
         if character_id:
             _require_owned_character(current_user_id, character_id)
+    if (
+        effect.effect_type == EffectType.NPC_PROACTIVE_DIALOGUE
+        and effect.target_session_id
+    ):
+        target_session = repository.get_session(effect.target_session_id)
+        if (
+            not target_session
+            or target_session.get("player_id") != current_user_id
+            or not target_session.get("is_multi_character")
+            or target_session.get("status") == "ended"
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail="NPC 主动对白目标群聊不存在或不属于当前用户",
+            )
+        if effect.proactive_character_id:
+            participant_ids = {
+                item["character_id"]
+                for item in repository.get_session_participants(
+                    effect.target_session_id,
+                    only_active=True,
+                )
+            }
+            if effect.proactive_character_id not in participant_ids:
+                raise HTTPException(
+                    status_code=400,
+                    detail="主动发言角色不是目标群聊的活跃参与者",
+                )
     if effect.effect_type == EffectType.UPDATE_EVENT_PROGRESS:
         if effect.event_status and effect.event_status not in {"pending", "active", "completed", "failed"}:
             raise HTTPException(status_code=400, detail="事件进度状态无效")

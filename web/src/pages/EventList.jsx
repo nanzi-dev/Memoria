@@ -32,6 +32,7 @@ import { eventAdmin } from '../api/memoria';
 import { useDialog } from '../context/DialogContext';
 import { useUser } from '../context/UserContext';
 import FadeContent from '../components/FadeContent';
+import { eventEditorPath } from '../utils/navigationState';
 
 const TRIGGER_TYPES = [
   { value: 'affinity_threshold', label: '好感度阈值', Icon: Heart },
@@ -589,7 +590,7 @@ export default function EventList() {
                   busy={busyEventId === selectedEventId}
                   worldClock={worldClock}
                   onRefresh={() => loadEventDetail(selectedEventId)}
-                  onEdit={() => navigate(`/events/${selectedEventId}`)}
+                  onEdit={() => navigate(eventEditorPath(selectedEventId))}
                   onToggle={() => handleToggle(eventDetail || selectedSummary)}
                   onDelete={() => handleDelete(eventDetail || selectedSummary)}
                 />

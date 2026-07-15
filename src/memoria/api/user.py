@@ -2,10 +2,8 @@
 用户注册、登录、资料管理 API
 """
 
-import base64
 import hashlib
 import hmac
-import mimetypes
 import secrets
 import re
 from datetime import datetime, timedelta, timezone
@@ -13,8 +11,10 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Header, Response, Cookie, Depends, Query
 from pydantic import BaseModel, Field, StrictInt
+from starlette.concurrency import run_in_threadpool
 
 from memoria.api.avatar_fetcher import download_remote_image
+from memoria.api.avatar_image import avatar_data_url, normalize_avatar_image
 from memoria.api.upload_utils import read_upload_limited
 from memoria.core.config import configs
 from memoria.core import world_clock
@@ -25,8 +25,6 @@ router = APIRouter()
 # 兼容旧测试/开发进程中的临时 token；新登录态持久化到数据库。
 _tokens: dict[str, str] = {}  # token -> user_id
 
-ALLOWED_MIME_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
-MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2MB
 MAX_AVATAR_UPLOAD_SIZE = 8 * 1024 * 1024
 AUTH_COOKIE_NAME = "memoria-token"
 AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 天
@@ -124,18 +122,23 @@ def _validate_password(password: str) -> str:
     return password
 
 def _resize_image(data: bytes, max_dim: int = 512) -> bytes | None:
-    """压缩图片到指定尺寸"""
+    """兼容旧调用：将图片压缩为 JPEG。"""
     try:
+        normalized = normalize_avatar_image(data)
+        if normalized.content_type == "image/jpeg":
+            return normalized.data
+
         from PIL import Image
         import io
-        img = Image.open(io.BytesIO(data))
-        img.thumbnail((max_dim, max_dim), Image.LANCZOS)
-        if img.mode != "RGB":
-            img = img.convert("RGB")
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=85)
-        return buf.getvalue()
-    except Exception:
+
+        with Image.open(io.BytesIO(data)) as image:
+            image.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+            output = io.BytesIO()
+            image.save(output, format="JPEG", quality=85)
+            return output.getvalue()
+    except (HTTPException, OSError, ValueError):
         return None
 
 
@@ -347,15 +350,9 @@ def _build_character_card_response(card: dict) -> UserCharacterCardResponse:
 
 
 def _avatar_data_url(data: bytes, mime_type: str | None) -> str:
-    if mime_type not in ALLOWED_MIME_TYPES:
-        raise HTTPException(400, f"不支持的图片格式: {mime_type}")
-    if len(data) > MAX_AVATAR_SIZE:
-        data = _resize_image(data)
-        if data is None:
-            raise HTTPException(400, "图片过大且压缩失败")
-        mime_type = "image/jpeg"
-    b64 = base64.b64encode(data).decode("ascii")
-    return f"data:{mime_type};base64,{b64}"
+    # Declared MIME types are attacker-controlled; use the decoded format.
+    del mime_type
+    return avatar_data_url(data)
 
 
 def _build_world_clock_response(
@@ -537,8 +534,11 @@ async def upload_character_card_avatar(
         MAX_AVATAR_UPLOAD_SIZE,
         detail="头像文件超过 8 MB 上传限制",
     )
-    mime_type = file.content_type or mimetypes.guess_type(file.filename)[0]
-    avatar_url = _avatar_data_url(contents, mime_type)
+    avatar_url = await run_in_threadpool(
+        _avatar_data_url,
+        contents,
+        file.content_type,
+    )
     card = repository.update_user_character_card(
         user_id,
         {"avatar_url": avatar_url},
@@ -682,8 +682,11 @@ async def upload_avatar(
         MAX_AVATAR_UPLOAD_SIZE,
         detail="头像文件超过 8 MB 上传限制",
     )
-    mime_type = file.content_type or mimetypes.guess_type(file.filename)[0]
-    data_url = _avatar_data_url(contents, mime_type)
+    data_url = await run_in_threadpool(
+        _avatar_data_url,
+        contents,
+        file.content_type,
+    )
     repository.update_user_profile(uid, avatar_url=data_url)
     return OperationResponse(success=True, message="头像上传成功")
 

@@ -44,8 +44,11 @@
 从仓库根目录运行：
 
 ```bash
-python scripts/seed_story_module.py examples/echo_archive
+python scripts/seed_story_module.py examples/echo_archive \
+  --password '<choose-a-strong-password>'
 ```
+
+首次创建演示账户时必须提供 `--password`，也可以设置 `MEMORIA_DEMO_PASSWORD` 后省略该参数。账户已经存在时不会修改密码。
 
 播种脚本会读取清单、角色卡、玩家卡、关系、知识库和独立维护的事件资产。模块内容不包含现实机构数据或现实违法操作说明。
 

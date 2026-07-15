@@ -22,6 +22,7 @@ import {
 import { characterAdmin, eventAdmin } from '../api/memoria';
 import { useDialog } from '../context/DialogContext';
 import EventOperationsPanel from '../components/EventOperationsPanel';
+import { createTimeoutController } from '../utils/timeoutController';
 
 const TRIGGER_TYPES = [
   { value: 'affinity_threshold', label: '好感度阈值' },
@@ -1170,6 +1171,10 @@ export default function EventEditor() {
   const dialog = useDialog();
   const isExistingEvent = !!eventId && eventId !== 'new';
   const eventRequestRef = useRef(0);
+  const navigationTimeoutRef = useRef(null);
+  if (!navigationTimeoutRef.current) {
+    navigationTimeoutRef.current = createTimeoutController();
+  }
   const [loading, setLoading] = useState(isExistingEvent);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -1194,6 +1199,8 @@ export default function EventEditor() {
   const [characters, setCharacters] = useState([]);
   const [charactersLoading, setCharactersLoading] = useState(true);
   const [charactersError, setCharactersError] = useState('');
+
+  useEffect(() => () => navigationTimeoutRef.current.cancel(), []);
 
   const selectedTemplate = useMemo(
     () => templates.find(t => t.template_id === selectedTemplateId),
@@ -1359,7 +1366,7 @@ export default function EventEditor() {
       }
       setSaveMsg(warnings.length ? `保存成功；${warnings.join('；')}` : '保存成功');
       setSaveMsgKind('success');
-      setTimeout(() => navigate('/events'), 600);
+      navigationTimeoutRef.current.schedule(() => navigate('/events'), 600);
     } catch (e) {
       setSaveMsg(`保存失败: ${e.message}`);
       setSaveMsgKind('error');

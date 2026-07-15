@@ -67,23 +67,25 @@ async function requestBlob(url, options = {}) {
 // User API
 // ═══════════════════════════════════════════════
 export const userApi = {
-  register(username, password, gender = 'unknown') {
+  register(username, password, gender = 'unknown', options = {}) {
     return request('/user/register', {
+      ...options,
       method: 'POST',
       body: JSON.stringify({ username, password, gender }),
     });
   },
-  login(username, password) {
+  login(username, password, options = {}) {
     return request('/user/login', {
+      ...options,
       method: 'POST',
       body: JSON.stringify({ username, password }),
     });
   },
-  getMe() {
-    return request('/user/me');
+  getMe(options = {}) {
+    return request('/user/me', options);
   },
-  logout() {
-    return request('/user/logout', { method: 'POST' });
+  logout(options = {}) {
+    return request('/user/logout', { ...options, method: 'POST' });
   },
   updateProfile(username, gender) {
     return request('/user/profile', {

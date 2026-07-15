@@ -4,12 +4,13 @@
 
 访问 http://127.0.0.1:8001/docs 可查看 Swagger 交互式文档，http://127.0.0.1:8001/redoc 可查看 ReDoc 文档。
 
-除用户注册/登录外，业务接口通常需要登录态。API 客户端可使用 `Authorization: Bearer <token>`、`?token=<token>` 或登录后写入的 `memoria-token` HttpOnly Cookie。仓库内 Web 前端只使用 HttpOnly Cookie，并在启动时清理旧版 `localStorage` token。带 `player_id` 的接口会校验 `player_id` 必须等于当前登录用户 ID。角色卡、事件定义和角色关系都按当前登录用户隔离；不同用户可以拥有相同的 `character_id` / `event_id`。
+除用户注册/登录外，业务接口通常需要登录态。API 客户端可使用 `Authorization: Bearer <token>` 或登录后写入的 `memoria-token` HttpOnly Cookie。仓库内 Web 前端只使用 HttpOnly Cookie，并在启动时清理旧版 `localStorage` token。带 `player_id` 的接口会校验 `player_id` 必须等于当前登录用户 ID。角色卡、事件定义和角色关系都按当前登录用户隔离；不同用户可以拥有相同的 `character_id` / `event_id`。
 
 ---
   - [对话系统 API](#对话系统-api)
   - [角色卡管理 API](#角色卡管理-api)
   - [事件管理 API](#事件管理-api)
+  - [剧情状态 API](#剧情状态-api)
   - [角色关系 API](#角色关系-api)
   - [多角色对话 API](#多角色对话-api)
   - [知识库 API](#知识库-api)
@@ -735,7 +736,7 @@ GET /api/v1/admin/event-templates?category=relationship
 POST /api/v1/admin/event-templates
 ```
 
-该接口需要登录态，用于开发维护共享的系统模板库，不在普通用户前端暴露。
+该接口仅限系统管理员，用于开发维护共享的系统模板库，不在普通用户前端暴露。
 
 **请求体：**
 ```json
@@ -776,7 +777,7 @@ POST /api/v1/admin/event-templates
 DELETE /api/v1/admin/event-templates/{template_id}
 ```
 
-该接口需要登录态。删除指定共享模板记录；内置默认模板在服务启动或模板列表自动初始化时可能被重新写入。
+该接口仅限系统管理员。删除指定共享模板记录；内置默认模板在服务启动或模板列表自动初始化时可能被重新写入。
 
 **响应：**
 ```json
@@ -893,6 +894,37 @@ GET /api/v1/admin/events/{event_id}/executions?limit=100
 ```
 
 指标接口可按事件过滤，返回执行总数、成功/失败/跳过数量、去重数量和耗时统计。执行历史包含 `execution_id`、幂等键、触发来源、状态、效果、结果、错误、耗时和完成时间。
+
+---
+
+## 剧情状态 API
+
+### 1. 获取剧情投影状态
+
+```http
+GET /api/v1/stories/{story_id}/state
+```
+
+返回当前登录用户指定剧情的事件账本投影。剧情不存在时返回 404。
+
+**响应示例：**
+
+```json
+{
+  "owner_user_id": "player_001",
+  "story_id": "story_main",
+  "status": "active",
+  "progress": 0.4,
+  "terminal_reason": null,
+  "ledger_version": 3,
+  "started_at": "2026-07-15T08:00:00+00:00",
+  "updated_at": "2026-07-15T08:30:00+00:00",
+  "completed_at": null,
+  "failed_at": null
+}
+```
+
+`status` 为 `active`、`completed` 或 `failed`；`progress` 的范围为 0 到 1。
 
 ---
 
@@ -1180,8 +1212,18 @@ GET /api/v1/multi-dialogue/session/{session_id}
 
 ### 5. 获取对话历史
 ```http
-GET /api/v1/multi-dialogue/history/{session_id}?limit=50
+GET /api/v1/multi-dialogue/history/{session_id}?offset=0&limit=50
 ```
+
+该接口以 `session_id` 定位群聊，但读取的是其 `group_thread_id` 对应的完整逻辑线程，因此续聊产生的新 session 仍能读取前序消息。
+
+**查询参数：**
+
+| 参数 | 必需 | 说明 |
+|------|------|------|
+| `offset` | 否 | 已加载消息数，默认 0；用于向前分页 |
+| `limit` | 否 | 返回数量，默认 50，范围 1-200 |
+| `after_message_id` | 否 | 只返回该稳定消息 ID 之后的新消息；提供时忽略 `offset` |
 
 **响应示例：**
 ```json
@@ -1190,6 +1232,7 @@ GET /api/v1/multi-dialogue/history/{session_id}?limit=50
     {
       "role": "assistant",
       "content": "[好奇地看着周围]哇，这里好多人呀！",
+      "message_id": 101,
       "character_id": "npc_luo_xiaohei",
       "character_name": "小黑",
       "created_at": "2026-07-02T10:00:00Z"
@@ -1197,6 +1240,7 @@ GET /api/v1/multi-dialogue/history/{session_id}?limit=50
     {
       "role": "user",
       "content": "大家好！",
+      "message_id": 102,
       "character_id": null,
       "character_name": null,
       "created_at": "2026-07-02T10:01:00Z"
@@ -1204,13 +1248,18 @@ GET /api/v1/multi-dialogue/history/{session_id}?limit=50
     {
       "role": "assistant",
       "content": "[微笑]你好，欢迎。",
+      "message_id": 103,
       "character_id": "npc_wuxian",
       "character_name": "无限",
       "created_at": "2026-07-02T10:02:00Z"
     }
   ],
+  "has_more": false,
+  "latest_message_id": 103,
   "session_info": {
     "session_id": "multi-session-uuid",
+    "current_session_id": "multi-session-uuid",
+    "group_thread_id": "group-thread-uuid",
     "player_name": "旅行者",
     "created_at": "2026-07-02T10:00:00Z",
     "status": "active",
@@ -1739,7 +1788,7 @@ GET /ready
 
 ### 3. 动态调整日志级别
 
-无需重启服务即可动态修改全局日志级别。
+系统管理员无需重启服务即可动态修改全局日志级别。普通登录用户会收到 403。
 
 ```http
 POST /admin/log-level?level=DEBUG

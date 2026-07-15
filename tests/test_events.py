@@ -130,6 +130,198 @@ class TestEventExecutorEffects:
         triggered = det.check_events(ctx,[event])
         assert len(triggered) == 0
 
+    def test_proactive_dialogue_rejects_foreign_group_before_orchestrator(
+        self,
+        monkeypatch,
+    ):
+        from memoria.core import event_executor
+        from memoria.core.event_schema import EffectType, EventEffect
+        from memoria.core.multi_character_orchestrator import MultiCharacterOrchestrator
+
+        monkeypatch.setattr(
+            event_executor.repository,
+            "get_session",
+            lambda session_id: {
+                "session_id": session_id,
+                "player_id": "other-player",
+                "is_multi_character": 1,
+                "status": "active",
+            },
+        )
+        monkeypatch.setattr(
+            MultiCharacterOrchestrator,
+            "__init__",
+            lambda *args, **kwargs: pytest.fail("foreign session must not be loaded"),
+        )
+
+        with pytest.raises(ValueError, match="不属于当前玩家"):
+            event_executor.EventExecutor()._plan_npc_proactive_dialogue(
+                EventEffect(
+                    effect_type=EffectType.NPC_PROACTIVE_DIALOGUE,
+                    target_session_id="foreign-session",
+                    proactive_character_id="npc-1",
+                ),
+                self._make_context(player_id="player-1"),
+            )
+
+    def test_proactive_dialogue_rejects_character_outside_group(
+        self,
+        monkeypatch,
+    ):
+        from memoria.core import event_executor
+        from memoria.core.event_schema import EffectType, EventEffect
+        from memoria.core.multi_character_orchestrator import MultiCharacterOrchestrator
+
+        monkeypatch.setattr(
+            event_executor.repository,
+            "get_session",
+            lambda session_id: {
+                "session_id": session_id,
+                "player_id": "player-1",
+                "is_multi_character": 1,
+                "status": "active",
+            },
+        )
+        monkeypatch.setattr(
+            event_executor.repository,
+            "get_session_participants",
+            lambda session_id, only_active=True: [{"character_id": "npc-2"}],
+        )
+        monkeypatch.setattr(
+            MultiCharacterOrchestrator,
+            "__init__",
+            lambda *args, **kwargs: pytest.fail("invalid participant must not be loaded"),
+        )
+
+        with pytest.raises(ValueError, match="不是目标群聊的活跃参与者"):
+            event_executor.EventExecutor()._plan_npc_proactive_dialogue(
+                EventEffect(
+                    effect_type=EffectType.NPC_PROACTIVE_DIALOGUE,
+                    target_session_id="owned-session",
+                    proactive_character_id="npc-1",
+                ),
+                self._make_context(player_id="player-1"),
+            )
+
+    def test_proactive_dialogue_without_target_prefers_current_group(
+        self,
+        monkeypatch,
+    ):
+        from memoria.core import event_executor
+        from memoria.core.event_schema import EffectType, EventEffect
+        from memoria.core.multi_character_orchestrator import MultiCharacterOrchestrator
+
+        sessions = {
+            "current-group": {
+                "session_id": "current-group",
+                "player_id": "player-1",
+                "is_multi_character": 1,
+                "status": "active",
+            },
+            "latest-group": {
+                "session_id": "latest-group",
+                "player_id": "player-1",
+                "is_multi_character": 1,
+                "status": "active",
+            },
+        }
+        loaded_session_ids = []
+
+        monkeypatch.setattr(
+            event_executor.repository,
+            "get_session",
+            lambda session_id: sessions.get(session_id),
+        )
+        monkeypatch.setattr(
+            MultiCharacterOrchestrator,
+            "__init__",
+            lambda self, session_id: loaded_session_ids.append(session_id),
+        )
+        monkeypatch.setattr(
+            MultiCharacterOrchestrator,
+            "trigger_character_interaction",
+            lambda *args, **kwargs: {
+                "dialogue": "复盘完成",
+                "character_id": "npc-1",
+            },
+        )
+
+        context = self._make_context(player_id="player-1")
+        context.session_id = "current-group"
+        context.active_multi_session_id = "latest-group"
+        result = event_executor.EventExecutor()._plan_npc_proactive_dialogue(
+            EventEffect(effect_type=EffectType.NPC_PROACTIVE_DIALOGUE),
+            context,
+        )
+
+        assert result["session_id"] == "current-group"
+        assert loaded_session_ids == ["current-group"]
+
+
+def test_event_commit_rejects_proactive_message_for_foreign_session():
+    from memoria.core.event_schema import TriggerCondition, TriggerType
+    from memoria.db import repository
+
+    suffix = uuid.uuid4().hex[:8]
+    attacker_id = f"attacker_{suffix}"
+    victim_id = f"victim_{suffix}"
+    event_id = f"event_{suffix}"
+    victim_session_id = f"victim_session_{suffix}"
+    character_id = f"npc_{suffix}"
+
+    repository.create_user(attacker_id, f"attacker_{suffix}", "test-hash")
+    repository.create_user(victim_id, f"victim_{suffix}", "test-hash")
+    assert repository.create_multi_character_session(
+        session_id=victim_session_id,
+        player_id=victim_id,
+        player_name="Victim",
+        character_ids=[character_id],
+    )
+    assert repository.save_event_definition(
+        owner_user_id=attacker_id,
+        event_id=event_id,
+        event_name="Foreign proactive message",
+        trigger_config=TriggerCondition(
+            trigger_type=TriggerType.KEYWORD_MATCH,
+            keywords=["test"],
+        ).model_dump_json(),
+        effects_config="[]",
+    )
+    execution = {
+        "execution_id": uuid.uuid4().hex,
+        "event_id": event_id,
+        "character_id": character_id,
+        "session_id": f"schedule:{event_id}",
+        "status": "succeeded",
+        "effects_data": "[]",
+        "result_data": "{}",
+        "error": None,
+        "duration_ms": 1,
+        "context_snapshot": "{}",
+        "effects_applied": "[]",
+        "proactive_messages": [{
+            "session_id": victim_session_id,
+            "content": "must not be inserted",
+            "character_id": character_id,
+        }],
+    }
+
+    with pytest.raises(RuntimeError, match="proactive dialogue target"):
+        repository.commit_event_execution_batch(
+            player_id=attacker_id,
+            execution_key=f"foreign:{suffix}",
+            trigger_source="schedule",
+            results_data="[]",
+            executions=[execution],
+        )
+
+    messages, _ = repository.get_messages_paginated(
+        victim_session_id,
+        offset=0,
+        limit=20,
+    )
+    assert messages == []
+
 
 class TestEventDetectorMore:
     def test_keyword_case_insensitive(self):
@@ -763,6 +955,7 @@ class TestEventReliability:
         repository.append_short_term_message(first_session_id, "user", "one")
         repository.append_short_term_message(first_session_id, "assistant", "reply")
         repository.append_short_term_message(first_session_id, "user", "two")
+        repository.end_session(first_session_id)
         repository.create_session(second_session_id, character_id, player_id, "Player")
         repository.append_short_term_message(second_session_id, "user", "three")
         assert repository.create_multi_character_session(

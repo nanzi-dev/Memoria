@@ -368,6 +368,7 @@ CREATE TABLE IF NOT EXISTS character_card (
     name            TEXT,
     display_name    TEXT,
     avatar_url      TEXT,               -- 头像（base64 data URL 或网络 URL）
+    avatar_revision TEXT,               -- 远程头像下载请求代次
     
     created_at      TEXT,
     updated_at      TEXT,
@@ -1148,6 +1149,10 @@ def init_db():
                 "ALTER TABLE event_definition "
                 "ADD COLUMN IF NOT EXISTS story_id TEXT"
             )
+            conn.execute(
+                "ALTER TABLE character_card "
+                "ADD COLUMN IF NOT EXISTS avatar_revision TEXT"
+            )
         else:
             session_columns = {
                 row["name"]
@@ -1164,6 +1169,16 @@ def init_db():
             if "story_id" not in event_columns:
                 conn.execute(
                     "ALTER TABLE event_definition ADD COLUMN story_id TEXT"
+                )
+            character_columns = {
+                row["name"]
+                for row in conn.execute(
+                    "PRAGMA table_info(character_card)"
+                ).fetchall()
+            }
+            if "avatar_revision" not in character_columns:
+                conn.execute(
+                    "ALTER TABLE character_card ADD COLUMN avatar_revision TEXT"
                 )
 
 
@@ -3679,6 +3694,18 @@ def save_long_term_fact_if_checkpoint(
 # =========================
 # session 管理
 # =========================
+def _lock_session_creation(conn, lock_key: str) -> None:
+    if isinstance(conn, sqlite3.Connection):
+        if not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+        return
+    if _is_postgres_enabled():
+        conn.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))",
+            (lock_key,),
+        )
+
+
 def create_session(
     session_id: str,
     character_id: str,
@@ -3686,11 +3713,52 @@ def create_session(
     player_name: str,
     locale: str = "zh-CN",
     story_id: str | None = None,
-):
+) -> dict:
+    session, _ = get_or_create_active_session(
+        session_id=session_id,
+        character_id=character_id,
+        player_id=player_id,
+        player_name=player_name,
+        locale=locale,
+        story_id=story_id,
+    )
+    return session
+
+
+def get_or_create_active_session(
+    *,
+    session_id: str,
+    character_id: str,
+    player_id: str,
+    player_name: str,
+    locale: str = "zh-CN",
+    story_id: str | None = None,
+) -> tuple[dict, bool]:
+    """Atomically reuse or create one active single-character session."""
     with get_conn() as conn:
+        _lock_session_creation(
+            conn,
+            f"active-single-session:{player_id}:{character_id}",
+        )
+        row = conn.execute(
+            """
+            SELECT *
+            FROM session
+            WHERE player_id = ?
+              AND character_id = ?
+              AND status = 'active'
+              AND is_multi_character = 0
+            ORDER BY created_at DESC, session_id DESC
+            LIMIT 1
+            """,
+            (player_id, character_id),
+        ).fetchone()
+        if row is not None:
+            return dict(row), False
+
         conn.execute(
             """
-            INSERT OR IGNORE INTO session
+            INSERT INTO session
             (session_id, character_id, player_id, player_name, created_at, status,
              locale, story_id)
             VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
@@ -3705,7 +3773,13 @@ def create_session(
                 (story_id or "").strip() or None,
             ),
         )
-        
+        row = conn.execute(
+            "SELECT * FROM session WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        return dict(row), True
+
+
 def get_session(session_id: str) -> dict | None:
     with get_conn() as conn:
         row = conn.execute(
@@ -4687,7 +4761,7 @@ def save_character_card_to_db(
     display_name: str = None,
     source: str = "db",
     avatar_url: str = None
-) -> bool:
+) -> str | None:
     """
     保存或更新角色卡到数据库
     
@@ -4699,17 +4773,21 @@ def save_character_card_to_db(
         name: 角色名称（用于快速查询）
         display_name: 显示名称
         source: 来源标记（'db'=数据库创建, 'file'=从文件导入）
+        avatar_url: 角色头像 data URL 或待异步抓取的网络 URL
     
     Returns:
-        bool: 是否保存成功
+        str | None: 本次头像更新的 revision；保存失败时返回 None
     """
     try:
+        avatar_revision = uuid.uuid4().hex
+        now = _now()
         with get_conn() as conn:
             conn.execute(
                 """
                 INSERT INTO character_card
-                (owner_user_id, character_id, card_data, version, name, display_name, avatar_url, created_at, updated_at, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (owner_user_id, character_id, card_data, version, name, display_name,
+                 avatar_url, avatar_revision, created_at, updated_at, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(owner_user_id, character_id)
                 DO UPDATE SET
                     card_data=excluded.card_data,
@@ -4717,15 +4795,28 @@ def save_character_card_to_db(
                     name=excluded.name,
                     display_name=excluded.display_name,
                     avatar_url=excluded.avatar_url,
+                    avatar_revision=excluded.avatar_revision,
                     updated_at=excluded.updated_at
                 """,
-                (owner_user_id, character_id, card_data_json, version, name, display_name, avatar_url, _now(), _now(), source),
+                (
+                    owner_user_id,
+                    character_id,
+                    card_data_json,
+                    version,
+                    name,
+                    display_name,
+                    avatar_url,
+                    avatar_revision,
+                    now,
+                    now,
+                    source,
+                ),
             )
         logger.info(f"角色卡已保存到数据库: owner={owner_user_id}, character_id={character_id}")
-        return True
+        return avatar_revision
     except Exception as e:
         logger.error(f"保存角色卡失败: {e}")
-        return False
+        return None
 
 
 def patch_character_card_voice(
@@ -4841,7 +4932,7 @@ def update_character_avatar(owner_user_id: str, character_id: str, avatar_url: s
             conn.execute(
                 """
                 UPDATE character_card
-                SET avatar_url = ?, updated_at = ?
+                SET avatar_url = ?, avatar_revision = NULL, updated_at = ?
                 WHERE owner_user_id = ? AND character_id = ?
                 """,
                 (avatar_url, _now(), owner_user_id, character_id),
@@ -4851,6 +4942,48 @@ def update_character_avatar(owner_user_id: str, character_id: str, avatar_url: s
     except Exception as e:
         logger.error(f"更新头像失败: {e}")
         return False
+
+
+def update_character_avatar_if_current(
+    owner_user_id: str,
+    character_id: str,
+    expected_avatar_url: str,
+    expected_revision: str,
+    avatar_url: str,
+) -> bool:
+    """Update an avatar only while the originating download request is current."""
+    try:
+        with get_conn() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE character_card
+                SET avatar_url = ?, avatar_revision = NULL, updated_at = ?
+                WHERE owner_user_id = ?
+                  AND character_id = ?
+                  AND avatar_url = ?
+                  AND avatar_revision = ?
+                """,
+                (
+                    avatar_url,
+                    _now(),
+                    owner_user_id,
+                    character_id,
+                    expected_avatar_url,
+                    expected_revision,
+                ),
+            )
+            updated = cursor.rowcount > 0
+        if updated:
+            logger.info(
+                "头像下载结果已更新: owner=%s, character_id=%s",
+                owner_user_id,
+                character_id,
+            )
+        return updated
+    except Exception as e:
+        logger.error(f"条件更新头像失败: {e}")
+        return False
+
 
 def list_character_cards_from_db(owner_user_id: str, only_active: bool = True) -> list[dict]:
     """
@@ -6192,6 +6325,29 @@ def commit_event_execution_batch(
                 )
 
             for message in execution.get("proactive_messages") or []:
+                target = conn.execute(
+                    """
+                    SELECT 1
+                    FROM session s
+                    INNER JOIN multi_session_participant p
+                      ON p.session_id = s.session_id
+                     AND p.character_id = ?
+                     AND p.is_active = 1
+                    WHERE s.session_id = ?
+                      AND s.player_id = ?
+                      AND s.is_multi_character = 1
+                      AND s.status <> 'ended'
+                    """,
+                    (
+                        message["character_id"],
+                        message["session_id"],
+                        player_id,
+                    ),
+                ).fetchone()
+                if target is None:
+                    raise RuntimeError(
+                        "proactive dialogue target is not an owned active group participant"
+                    )
                 conn.execute(
                     """
                     INSERT INTO short_term_message
@@ -7543,6 +7699,83 @@ def _new_group_thread_id() -> str:
     return f"group-thread-{uuid.uuid4().hex}"
 
 
+def _insert_multi_character_session_in_transaction(
+    conn,
+    *,
+    session_id: str,
+    player_id: str,
+    player_name: str,
+    character_ids: list[str],
+    group_name: str | None,
+    group_thread_id: str | None,
+    locale: str,
+    story_id: str | None,
+) -> str:
+    clean_group_name = (group_name or "").strip() or None
+    clean_story_id = (story_id or "").strip() or None
+    requested_thread_id = (group_thread_id or "").strip() or None
+    thread_id = requested_thread_id or _new_group_thread_id()
+    if clean_story_id is None and requested_thread_id:
+        story_row = conn.execute(
+            """
+            SELECT story_id
+            FROM session
+            WHERE player_id = ?
+              AND group_thread_id = ?
+              AND COALESCE(story_id, '') <> ''
+            ORDER BY created_at DESC, session_id DESC
+            LIMIT 1
+            """,
+            (player_id, thread_id),
+        ).fetchone()
+        if story_row:
+            clean_story_id = str(story_row["story_id"]).strip() or None
+
+    created_at = _now()
+    conn.execute(
+        """
+        INSERT INTO session
+        (session_id, character_id, player_id, player_name, created_at, status,
+         group_name, group_thread_id, story_id, is_multi_character, locale)
+        VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, 1, ?)
+        """,
+        (
+            session_id,
+            character_ids[0],
+            player_id,
+            player_name,
+            created_at,
+            clean_group_name,
+            thread_id,
+            clean_story_id,
+            locale,
+        ),
+    )
+
+    for idx, char_id in enumerate(character_ids):
+        conn.execute(
+            """
+            INSERT INTO multi_session_participant
+            (session_id, character_id, join_order, speak_frequency, is_active, created_at)
+            VALUES (?, ?, ?, ?, 1, ?)
+            """,
+            (session_id, char_id, idx, 1.0, created_at),
+        )
+
+    conn.execute(
+        """
+        INSERT INTO group_dialogue_state
+        (group_thread_id, player_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(group_thread_id) DO UPDATE SET
+            player_id = excluded.player_id,
+            updated_at = excluded.updated_at
+        """,
+        (thread_id, player_id, created_at, created_at),
+    )
+    return thread_id
+
+
 def create_multi_character_session(
     session_id: str,
     player_id: str,
@@ -7571,68 +7804,16 @@ def create_multi_character_session(
     
     try:
         with get_conn() as conn:
-            # 创建会话（使用第一个角色作为主角色）
-            clean_group_name = (group_name or "").strip() or None
-            clean_story_id = (story_id or "").strip() or None
-            requested_thread_id = (group_thread_id or "").strip() or None
-            thread_id = requested_thread_id or _new_group_thread_id()
-            if clean_story_id is None and requested_thread_id:
-                story_row = conn.execute(
-                    """
-                    SELECT story_id
-                    FROM session
-                    WHERE player_id = ?
-                      AND group_thread_id = ?
-                      AND COALESCE(story_id, '') <> ''
-                    ORDER BY created_at DESC, session_id DESC
-                    LIMIT 1
-                    """,
-                    (player_id, thread_id),
-                ).fetchone()
-                if story_row:
-                    clean_story_id = str(story_row["story_id"]).strip() or None
-            conn.execute(
-                """
-                INSERT INTO session
-                (session_id, character_id, player_id, player_name, created_at, status,
-                 group_name, group_thread_id, story_id, is_multi_character, locale)
-                VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, 1, ?)
-                """,
-                (
-                    session_id,
-                    character_ids[0],
-                    player_id,
-                    player_name,
-                    _now(),
-                    clean_group_name,
-                    thread_id,
-                    clean_story_id,
-                    locale,
-                ),
-            )
-            
-            # 添加参与者
-            for idx, char_id in enumerate(character_ids):
-                conn.execute(
-                    """
-                    INSERT INTO multi_session_participant
-                    (session_id, character_id, join_order, speak_frequency, is_active, created_at)
-                    VALUES (?, ?, ?, ?, 1, ?)
-                    """,
-                    (session_id, char_id, idx, 1.0, _now()),
-                )
-
-            now = _now()
-            conn.execute(
-                """
-                INSERT INTO group_dialogue_state
-                (group_thread_id, player_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(group_thread_id) DO UPDATE SET
-                    player_id = excluded.player_id,
-                    updated_at = excluded.updated_at
-                """,
-                (thread_id, player_id, now, now),
+            _insert_multi_character_session_in_transaction(
+                conn,
+                session_id=session_id,
+                player_id=player_id,
+                player_name=player_name,
+                character_ids=character_ids,
+                group_name=group_name,
+                group_thread_id=group_thread_id,
+                locale=locale,
+                story_id=story_id,
             )
         
         logger.info(f"多角色会话已创建: {session_id}, 参与角色: {character_ids}")
@@ -7641,6 +7822,63 @@ def create_multi_character_session(
     except Exception as e:
         logger.error(f"创建多角色会话失败: {e}")
         return False
+
+
+def get_or_create_active_multi_character_session(
+    *,
+    session_id: str,
+    player_id: str,
+    player_name: str,
+    character_ids: list[str],
+    group_name: str | None,
+    group_thread_id: str,
+    locale: str = "zh-CN",
+    story_id: str | None = None,
+) -> tuple[dict, bool]:
+    """Atomically reuse or create an active segment for one group thread."""
+    if not character_ids:
+        raise ValueError("多角色会话必须至少包含一个角色")
+    clean_thread_id = (group_thread_id or "").strip()
+    if not clean_thread_id:
+        raise ValueError("继续群聊必须提供 group_thread_id")
+
+    with get_conn() as conn:
+        _lock_session_creation(
+            conn,
+            f"active-multi-session:{clean_thread_id}",
+        )
+        row = conn.execute(
+            """
+            SELECT *
+            FROM session
+            WHERE player_id = ?
+              AND group_thread_id = ?
+              AND status = 'active'
+              AND is_multi_character = 1
+            ORDER BY created_at DESC, session_id DESC
+            LIMIT 1
+            """,
+            (player_id, clean_thread_id),
+        ).fetchone()
+        if row is not None:
+            return dict(row), False
+
+        _insert_multi_character_session_in_transaction(
+            conn,
+            session_id=session_id,
+            player_id=player_id,
+            player_name=player_name,
+            character_ids=character_ids,
+            group_name=group_name,
+            group_thread_id=clean_thread_id,
+            locale=locale,
+            story_id=story_id,
+        )
+        row = conn.execute(
+            "SELECT * FROM session WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        return dict(row), True
 
 
 def get_session_participants(session_id: str, only_active: bool = True) -> list[dict]:
