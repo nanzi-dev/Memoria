@@ -21,19 +21,20 @@ export default function TagInput({ tags = [], onChange, placeholder = 'Add item.
   }
 
   return (
-    <div className="flex flex-wrap gap-1.5 items-center p-1.5 min-h-[36px] bg-amber-50/50 rounded border border-amber-300/30 focus-within:border-amber-500 transition-colors">
+    <div className="flex min-h-11 min-w-0 flex-wrap items-center gap-1.5 rounded-md border border-input bg-background p-1.5 transition-colors focus-within:ring-2 focus-within:ring-ring">
       {tags.map((tag, idx) => (
         <span
           key={idx}
-          className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-mono bg-amber-200/60 text-amber-900 rounded-full"
+          className="inline-flex min-w-0 items-center gap-1 rounded-md border border-primary/20 bg-primary/10 py-0.5 pl-2 font-archive-serif text-sm text-foreground"
         >
-          {tag}
+          <span className="max-w-full break-words">{tag}</span>
           <button
             type="button"
             onClick={() => removeTag(idx)}
-            className="hover:text-red-600 transition-colors"
+            className="-my-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/5 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={`移除 ${tag}`}
           >
-            <X size={10} />
+            <X className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
         </span>
       ))}
@@ -43,7 +44,7 @@ export default function TagInput({ tags = [], onChange, placeholder = 'Add item.
         value={inputValue}
         onChange={(e) => setInputValue(e.target.value)}
         onKeyDown={handleKeyDown}
-        className="flex-1 min-w-[120px] px-1 py-0.5 text-sm font-mono text-cyber-ink bg-transparent border-none focus:outline-none"
+        className="min-h-9 min-w-[120px] flex-1 border-none bg-transparent px-2 font-archive-serif text-base text-foreground outline-none placeholder:text-muted-foreground"
         placeholder={tags.length === 0 ? placeholder : ''}
       />
     </div>

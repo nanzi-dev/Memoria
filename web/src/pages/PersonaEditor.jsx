@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
-  ArrowLeft,
   BadgeCheck,
   Check,
   Contact,
@@ -16,6 +15,11 @@ import {
 } from 'lucide-react';
 import { userApi } from '../api/memoria';
 import { useUser } from '../context/UserContext';
+import { useArchiveShell } from '@/archive/ArchiveShell';
+import ArchiveEditorWorkspace from '@/archive/ArchiveEditorWorkspace';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 
 const EMPTY_CARD = {
   display_name: '',
@@ -43,8 +47,18 @@ const TEXT_LIMITS = {
   goals: 4000,
 };
 
-const inputClass = 'min-h-[44px] w-full rounded-lg border border-cyber-green/15 bg-[#0b0b0c] px-3 text-sm text-zinc-200 outline-none transition-colors placeholder:text-zinc-700 focus:border-cyber-green/45 focus:ring-2 focus:ring-cyber-green/10 disabled:opacity-45';
-const textareaClass = `${inputClass} min-h-[132px] resize-y py-3 font-character leading-6`;
+const PROFILE_FIELDS = [
+  'display_name',
+  'gender',
+  'pronouns',
+  'age',
+  'species',
+  'occupation',
+  'appearance',
+  'personality',
+  'background',
+  'goals',
+];
 
 function normalizeCard(card) {
   return {
@@ -75,21 +89,25 @@ function validateCard(card) {
 
 function Field({ id, label, error, limit, value, children }) {
   return (
-    <div>
+    <div className="min-w-0">
       <div className="mb-1.5 flex items-center justify-between gap-3">
-        <label htmlFor={id} className="text-[11px] font-medium text-cyber-green/65">
+        <label htmlFor={id} className="text-xs font-medium text-foreground">
           {label}
         </label>
         {limit && (
-          <span className={`text-[9px] tabular-nums ${String(value || '').length > limit ? 'text-red-300' : 'text-zinc-700'}`}>
+          <span
+            className={`font-archive-mono text-[10px] tabular-nums ${
+              String(value || '').length > limit ? 'text-destructive' : 'text-muted-foreground'
+            }`}
+          >
             {String(value || '').length}/{limit}
           </span>
         )}
       </div>
       {children}
       {error && (
-        <p className="mt-1.5 flex items-center gap-1 text-[10px] text-red-300/85" role="alert">
-          <AlertCircle size={11} />
+        <p className="mt-1.5 flex items-center gap-1 text-xs text-destructive" role="alert">
+          <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />
           {error}
         </p>
       )}
@@ -97,17 +115,34 @@ function Field({ id, label, error, limit, value, children }) {
   );
 }
 
-function SectionTitle({ icon: Icon, title }) {
+function SectionTitle({ icon: Icon, title, detail }) {
   return (
-    <div className="memoria-section-heading">
-      <Icon size={15} />
-      <h2 className="text-xs font-bold tracking-wider text-zinc-200">{title}</h2>
+    <div className="flex items-start gap-3 border-b border-border pb-3">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted/35 text-primary">
+        <Icon className="h-4 w-4" aria-hidden="true" />
+      </span>
+      <div className="min-w-0">
+        <h2 className="font-archive-serif text-base font-semibold text-foreground">{title}</h2>
+        {detail && <p className="mt-0.5 text-xs text-muted-foreground">{detail}</p>}
+      </div>
+    </div>
+  );
+}
+
+function SummaryRow({ label, value, mono = false }) {
+  return (
+    <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-3 border-b border-border py-3 last:border-b-0">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className={`min-w-0 break-words text-right text-xs text-foreground ${mono ? 'font-archive-mono tabular-nums' : ''}`}>
+        {value || '未填写'}
+      </dd>
     </div>
   );
 }
 
 export default function PersonaEditor() {
   const navigate = useNavigate();
+  const { setPrimaryAction } = useArchiveShell();
   const { user, loading: userLoading, refresh } = useUser();
   const fileRef = useRef(null);
   const [card, setCard] = useState(EMPTY_CARD);
@@ -156,7 +191,7 @@ export default function PersonaEditor() {
   };
 
   const handleSave = async (event) => {
-    event.preventDefault();
+    event?.preventDefault();
     setSubmitted(true);
     setError('');
     setSuccess('');
@@ -233,10 +268,27 @@ export default function PersonaEditor() {
     }
   };
 
+  const saveAction = useMemo(() => (
+    <Button
+      type="submit"
+      form="persona-form"
+      size="lg"
+      disabled={saving || avatarSaving || loading || userLoading}
+    >
+      {saving ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
+      {saving ? '保存中' : '保存角色卡'}
+    </Button>
+  ), [avatarSaving, loading, saving, userLoading]);
+
+  useEffect(() => {
+    setPrimaryAction(saveAction);
+    return () => setPrimaryAction(null);
+  }, [saveAction, setPrimaryAction]);
+
   if (userLoading || loading) {
     return (
-      <div className="min-h-dvh character-editor-page memoria-app-page flex items-center justify-center" role="status">
-        <Loader2 className="animate-spin text-cyber-green" size={32} />
+      <div className="flex min-h-[55vh] items-center justify-center text-muted-foreground" role="status">
+        <Loader2 className="h-7 w-7 animate-spin" aria-hidden="true" />
         <span className="sr-only">正在加载角色卡</span>
       </div>
     );
@@ -244,230 +296,254 @@ export default function PersonaEditor() {
 
   if (error && !card.display_name) {
     return (
-      <div className="min-h-dvh character-editor-page memoria-app-page flex items-center justify-center px-4">
-        <div className="memoria-panel w-full max-w-md p-6 text-center">
-          <AlertCircle className="mx-auto text-red-300/70" size={28} />
-          <p className="mt-3 break-words text-sm text-red-200/80">{error}</p>
+      <div className="flex min-h-[55vh] items-center justify-center px-4">
+        <div className="w-full max-w-md border border-destructive/30 bg-card p-6 text-center" role="alert">
+          <AlertCircle className="mx-auto h-7 w-7 text-destructive" aria-hidden="true" />
+          <p className="mt-3 break-words text-sm text-destructive">{error}</p>
           <div className="mt-5 flex justify-center gap-2">
-            <button type="button" onClick={() => navigate('/')} className="min-h-[44px] rounded-lg border border-white/10 px-4 text-xs text-zinc-400">
-              返回
-            </button>
-            <button type="button" onClick={() => setReloadVersion(value => value + 1)} className="flex min-h-[44px] items-center gap-2 rounded-lg border border-cyber-green/25 bg-cyber-green/10 px-4 text-xs text-cyber-green">
-              <RefreshCw size={14} /> 重试
-            </button>
+            <Button type="button" variant="outline" onClick={() => navigate('/')}>返回</Button>
+            <Button type="button" onClick={() => setReloadVersion(value => value + 1)}>
+              <RefreshCw aria-hidden="true" /> 重试
+            </Button>
           </div>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="min-h-dvh character-editor-page memoria-app-page font-mono">
-      <header className="memoria-app-header sticky top-0 z-20 border-b">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-3 py-3 sm:px-5">
-          <button
-            type="button"
-            onClick={() => navigate(-1)}
-            className="flex min-h-[44px] items-center gap-2 rounded-lg px-2 text-sm text-cyber-green/60 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green"
-          >
-            <ArrowLeft size={17} /> 返回
-          </button>
-          <div className="order-first basis-full text-center sm:order-none sm:basis-auto sm:text-left">
-            <h1 className="font-display text-base tracking-widest text-cyber-green">PLAYER PERSONA</h1>
-            <p className="mt-1 text-[10px] text-cyber-green/35">{card.node_id || user?.role_summary?.node_id}</p>
-          </div>
-          <button
-            type="submit"
-            form="persona-form"
-            disabled={saving || avatarSaving}
-            className="flex min-h-[44px] items-center gap-2 rounded-lg border border-cyber-green/30 bg-cyber-green/10 px-4 text-sm font-bold text-cyber-green transition-colors hover:bg-cyber-green/20 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-            {saving ? '保存中' : '保存角色卡'}
-          </button>
-        </div>
-      </header>
+  const completedFields = PROFILE_FIELDS.filter(field => String(card[field] ?? '').trim()).length;
+  const completion = Math.round((completedFields / PROFILE_FIELDS.length) * 100);
+  const nodeId = card.node_id || user?.role_summary?.node_id || '';
+  const notice = (error || success) ? (
+    <div
+      className={`mb-4 flex items-start gap-2 border px-3 py-3 text-sm ${
+        error
+          ? 'border-destructive/30 bg-destructive/5 text-destructive'
+          : 'border-primary/30 bg-primary/5 text-foreground'
+      }`}
+      role={error ? 'alert' : 'status'}
+      aria-live={error ? 'assertive' : 'polite'}
+    >
+      {error
+        ? <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        : <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />}
+      <span>{error || success}</span>
+    </div>
+  ) : null;
 
-      <main className="relative z-[1] mx-auto grid max-w-6xl gap-5 px-3 py-5 sm:px-5 lg:grid-cols-[280px_minmax(0,1fr)] lg:items-start">
-        <aside className="space-y-4 lg:sticky lg:top-[86px]">
-          <section className="memoria-panel p-4">
-            <SectionTitle icon={ImagePlus} title="扮演头像" />
-            <div className="mt-5 flex flex-col items-center">
-              <div className="memoria-avatar-ring relative h-32 w-32 overflow-hidden rounded-full border-2 border-cyber-green/35 bg-[#08090b]">
-                {card.avatar_url ? (
-                  <img src={card.avatar_url} alt={`${card.display_name || '角色'}的扮演头像`} className="h-full w-full object-cover" />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-cyber-green/25">
-                    <Contact size={52} />
-                  </div>
-                )}
-                {avatarSaving && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black/70">
-                    <Loader2 size={24} className="animate-spin text-cyber-green" />
-                  </div>
-                )}
-              </div>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp"
-                onChange={handleAvatarUpload}
-                className="hidden"
-              />
-              <button
-                type="button"
-                onClick={() => fileRef.current?.click()}
-                disabled={avatarSaving}
-                className="memoria-button memoria-button-primary mt-4 w-full disabled:opacity-40"
-              >
-                <Upload size={15} /> 上传扮演头像
-              </button>
-              <div className="mt-2 flex w-full gap-2">
-                <label htmlFor="persona-avatar-url" className="sr-only">扮演头像网络地址</label>
-                <input
-                  id="persona-avatar-url"
-                  type="url"
-                  value={avatarUrl}
-                  onChange={event => setAvatarUrl(event.target.value)}
-                  onKeyDown={event => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault();
-                      handleAvatarUrl();
-                    }
-                  }}
-                  placeholder="图片 URL"
-                  className={`${inputClass} min-w-0 flex-1 text-xs`}
-                />
-                <button
-                  type="button"
-                  onClick={handleAvatarUrl}
-                  disabled={avatarSaving || (!avatarUrl.trim() && !card.avatar_url)}
-                  className="memoria-icon-button shrink-0 border border-cyber-green/20 text-cyber-green/70 hover:bg-cyber-green/[0.08] disabled:opacity-30"
-                  aria-label={avatarUrl.trim() ? '从链接设置扮演头像' : '清除扮演头像'}
-                  title={avatarUrl.trim() ? '设置头像链接' : '清除头像'}
-                >
-                  <Link size={16} />
-                </button>
-              </div>
-            </div>
-          </section>
-
-          <section className="memoria-panel-muted p-4">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-[10px] tracking-wider text-zinc-600">账户身份</span>
-              <BadgeCheck size={14} className="text-cyber-green/45" />
-            </div>
-            <div className="mt-3 flex items-center gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full border border-cyber-green/20 bg-[#0b0b0c]">
-                {user?.avatar_url ? (
-                  <img src={user.avatar_url} alt={`${user.username}的账户头像`} className="h-full w-full object-cover" />
-                ) : (
-                  <User size={18} className="text-cyber-green/25" />
-                )}
-              </div>
-              <div className="min-w-0">
-                <div className="truncate text-xs text-zinc-300">{user?.username}</div>
-                <div className="mt-1 truncate text-[9px] text-zinc-700">{user?.user_id}</div>
-              </div>
-            </div>
-          </section>
-        </aside>
-
-        <form id="persona-form" onSubmit={handleSave} className="space-y-5">
-          {(error || success) && (
-            <div
-              className={`flex items-start gap-2 rounded-lg border px-3 py-3 text-xs ${
-                error
-                  ? 'border-red-400/20 bg-red-400/[0.055] text-red-200/85'
-                  : 'border-emerald-300/20 bg-emerald-300/[0.05] text-emerald-200/85'
-              }`}
-              role={error ? 'alert' : 'status'}
-            >
-              {error ? <AlertCircle size={15} className="mt-0.5 shrink-0" /> : <Check size={15} className="shrink-0" />}
-              <span>{error || success}</span>
+  const directory = (
+    <div className="p-4">
+      <SectionTitle icon={ImagePlus} title="头像与身份" detail="聊天窗口中的角色名片" />
+      <div className="mt-5 flex flex-col items-center">
+        <div className="relative h-28 w-28 overflow-hidden rounded-md border border-border bg-muted/35">
+          {card.avatar_url ? (
+            <img src={card.avatar_url} alt={`${card.display_name || '角色'}的扮演头像`} className="h-full w-full object-cover" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+              <Contact className="h-11 w-11" aria-hidden="true" />
             </div>
           )}
+          {avatarSaving && (
+            <div className="absolute inset-0 flex items-center justify-center bg-background/80" role="status">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" aria-hidden="true" />
+              <span className="sr-only">正在更新头像</span>
+            </div>
+          )}
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          onChange={handleAvatarUpload}
+          className="hidden"
+        />
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => fileRef.current?.click()}
+          disabled={avatarSaving}
+          className="mt-4 w-full"
+        >
+          <Upload aria-hidden="true" /> 上传头像
+        </Button>
+        <div className="mt-2 flex w-full gap-2">
+          <label htmlFor="persona-avatar-url" className="sr-only">扮演头像网络地址</label>
+          <Input
+            id="persona-avatar-url"
+            type="url"
+            value={avatarUrl}
+            onChange={event => setAvatarUrl(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                handleAvatarUrl();
+              }
+            }}
+            placeholder="图片 URL"
+            className="min-w-0 flex-1 font-archive-mono text-xs"
+          />
+          <Button
+            type="button"
+            size="icon"
+            variant="outline"
+            onClick={handleAvatarUrl}
+            disabled={avatarSaving || (!avatarUrl.trim() && !card.avatar_url)}
+            aria-label={avatarUrl.trim() ? '从链接设置扮演头像' : '清除扮演头像'}
+            title={avatarUrl.trim() ? '设置头像链接' : '清除头像'}
+          >
+            <Link aria-hidden="true" />
+          </Button>
+        </div>
+      </div>
 
-          <section className="memoria-glass rounded-lg p-4 sm:p-5">
-            <SectionTitle icon={Contact} title="身份信息" />
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <Field id="persona-display_name" label="角色名称 *" error={submitted && errors.display_name} limit={TEXT_LIMITS.display_name} value={card.display_name}>
-                <input
-                  id="persona-display_name"
-                  value={card.display_name}
-                  maxLength={TEXT_LIMITS.display_name}
-                  onChange={event => updateField('display_name', event.target.value)}
-                  className={`${inputClass} ${submitted && errors.display_name ? 'border-red-400/35' : ''}`}
-                  autoComplete="nickname"
+      <div className="mt-5 border-t border-border pt-4">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-muted-foreground">账户身份</span>
+          <BadgeCheck className="h-4 w-4 text-primary" aria-hidden="true" />
+        </div>
+        <div className="mt-3 flex items-center gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted/35">
+            {user?.avatar_url ? (
+              <img src={user.avatar_url} alt={`${user.username}的账户头像`} className="h-full w-full object-cover" />
+            ) : (
+              <User className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+            )}
+          </div>
+          <div className="min-w-0">
+            <div className="truncate text-sm text-foreground">{user?.username}</div>
+            <div className="mt-1 truncate font-archive-mono text-[10px] text-muted-foreground">{user?.user_id}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const editor = (
+    <form id="persona-form" onSubmit={handleSave} className="min-w-0">
+      <div className="border-b border-border bg-muted/20 px-4 py-4 sm:px-6">
+        <p className="font-archive-mono text-[10px] uppercase text-muted-foreground">Persona manuscript</p>
+        <h2 className="mt-1 font-archive-serif text-lg font-semibold text-foreground">身份与人物小传</h2>
+      </div>
+
+      <div className="space-y-7 p-4 font-archive-serif sm:p-6">
+        <section>
+          <SectionTitle icon={Contact} title="身份信息" detail="用于聊天署名与角色识别" />
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <Field id="persona-display_name" label="角色名称 *" error={submitted && errors.display_name} limit={TEXT_LIMITS.display_name} value={card.display_name}>
+              <Input
+                id="persona-display_name"
+                value={card.display_name}
+                maxLength={TEXT_LIMITS.display_name}
+                onChange={event => updateField('display_name', event.target.value)}
+                aria-invalid={Boolean(submitted && errors.display_name)}
+                autoComplete="nickname"
+              />
+            </Field>
+            <Field id="persona-age" label="年龄" error={submitted && errors.age}>
+              <Input
+                id="persona-age"
+                type="number"
+                min="0"
+                max="10000"
+                step="1"
+                value={card.age}
+                onChange={event => updateField('age', event.target.value)}
+                aria-invalid={Boolean(submitted && errors.age)}
+                className="font-archive-mono tabular-nums"
+              />
+            </Field>
+            <Field id="persona-gender" label="性别" error={submitted && errors.gender} limit={TEXT_LIMITS.gender} value={card.gender}>
+              <Input id="persona-gender" value={card.gender} maxLength={TEXT_LIMITS.gender} onChange={event => updateField('gender', event.target.value)} />
+            </Field>
+            <Field id="persona-pronouns" label="称谓 / 代词" error={submitted && errors.pronouns} limit={TEXT_LIMITS.pronouns} value={card.pronouns}>
+              <Input id="persona-pronouns" value={card.pronouns} maxLength={TEXT_LIMITS.pronouns} onChange={event => updateField('pronouns', event.target.value)} />
+            </Field>
+            <Field id="persona-species" label="种族 / 物种" error={submitted && errors.species} limit={TEXT_LIMITS.species} value={card.species}>
+              <Input id="persona-species" value={card.species} maxLength={TEXT_LIMITS.species} onChange={event => updateField('species', event.target.value)} />
+            </Field>
+            <Field id="persona-occupation" label="职业 / 身份" error={submitted && errors.occupation} limit={TEXT_LIMITS.occupation} value={card.occupation}>
+              <Input id="persona-occupation" value={card.occupation} maxLength={TEXT_LIMITS.occupation} onChange={event => updateField('occupation', event.target.value)} />
+            </Field>
+          </div>
+        </section>
+
+        {[
+          ['appearance', '外貌', User, '镜头初次看见这个角色时的细节'],
+          ['personality', '性格', BadgeCheck, '对话节奏、习惯与情绪反应'],
+          ['background', '背景经历', Contact, '塑造角色立场的关键往事'],
+          ['goals', '当前目标', Check, '推动当下剧情的愿望与行动'],
+        ].map(([field, label, Icon, detail]) => (
+          <section key={field}>
+            <SectionTitle icon={Icon} title={label} detail={detail} />
+            <div className="mt-4">
+              <Field
+                id={`persona-${field}`}
+                label={label}
+                error={submitted && errors[field]}
+                limit={TEXT_LIMITS[field]}
+                value={card[field]}
+              >
+                <Textarea
+                  id={`persona-${field}`}
+                  value={card[field]}
+                  maxLength={TEXT_LIMITS[field]}
+                  onChange={event => updateField(field, event.target.value)}
+                  className="min-h-36 font-archive-serif text-base leading-7"
                 />
-              </Field>
-              <Field id="persona-age" label="年龄" error={submitted && errors.age}>
-                <input
-                  id="persona-age"
-                  type="number"
-                  min="0"
-                  max="10000"
-                  step="1"
-                  value={card.age}
-                  onChange={event => updateField('age', event.target.value)}
-                  className={`${inputClass} ${submitted && errors.age ? 'border-red-400/35' : ''}`}
-                />
-              </Field>
-              <Field id="persona-gender" label="性别" error={submitted && errors.gender} limit={TEXT_LIMITS.gender} value={card.gender}>
-                <input id="persona-gender" value={card.gender} maxLength={TEXT_LIMITS.gender} onChange={event => updateField('gender', event.target.value)} className={inputClass} />
-              </Field>
-              <Field id="persona-pronouns" label="称谓 / 代词" error={submitted && errors.pronouns} limit={TEXT_LIMITS.pronouns} value={card.pronouns}>
-                <input id="persona-pronouns" value={card.pronouns} maxLength={TEXT_LIMITS.pronouns} onChange={event => updateField('pronouns', event.target.value)} className={inputClass} />
-              </Field>
-              <Field id="persona-species" label="种族 / 物种" error={submitted && errors.species} limit={TEXT_LIMITS.species} value={card.species}>
-                <input id="persona-species" value={card.species} maxLength={TEXT_LIMITS.species} onChange={event => updateField('species', event.target.value)} className={inputClass} />
-              </Field>
-              <Field id="persona-occupation" label="职业 / 身份" error={submitted && errors.occupation} limit={TEXT_LIMITS.occupation} value={card.occupation}>
-                <input id="persona-occupation" value={card.occupation} maxLength={TEXT_LIMITS.occupation} onChange={event => updateField('occupation', event.target.value)} className={inputClass} />
               </Field>
             </div>
           </section>
+        ))}
+      </div>
+    </form>
+  );
 
-          {[
-            ['appearance', '外貌', User],
-            ['personality', '性格', BadgeCheck],
-            ['background', '背景经历', Contact],
-            ['goals', '当前目标', Check],
-          ].map(([field, label, Icon]) => (
-            <section key={field} className="memoria-glass rounded-lg p-4 sm:p-5">
-              <SectionTitle icon={Icon} title={label} />
-              <div className="mt-4">
-                <Field
-                  id={`persona-${field}`}
-                  label={label}
-                  error={submitted && errors[field]}
-                  limit={TEXT_LIMITS[field]}
-                  value={card[field]}
-                >
-                  <textarea
-                    id={`persona-${field}`}
-                    value={card[field]}
-                    maxLength={TEXT_LIMITS[field]}
-                    onChange={event => updateField(field, event.target.value)}
-                    className={textareaClass}
-                  />
-                </Field>
-              </div>
-            </section>
-          ))}
-
-          <div className="flex justify-end pb-8">
-            <button
-              type="submit"
-              disabled={saving || avatarSaving}
-              className="flex min-h-[48px] w-full items-center justify-center gap-2 rounded-lg border border-cyber-green/30 bg-cyber-green/10 px-5 text-sm font-bold text-cyber-green transition-colors hover:bg-cyber-green/20 disabled:opacity-40 sm:w-auto"
-            >
-              {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-              {saving ? '保存中' : '保存角色卡'}
-            </button>
+  const summary = (
+    <div className="p-4">
+      <SectionTitle icon={Contact} title="角色侧写" detail="随稿件实时更新" />
+      <dl className="mt-3">
+        <SummaryRow label="姓名" value={card.display_name} />
+        <SummaryRow label="职业" value={card.occupation} />
+        <SummaryRow label="代词" value={card.pronouns} />
+        <SummaryRow label="完成度" value={`${completion}% (${completedFields}/${PROFILE_FIELDS.length})`} mono />
+        <SummaryRow label="Node ID" value={nodeId} mono />
+      </dl>
+      <div className="mt-4 border border-border bg-muted/25 p-3">
+        <p className="text-xs font-medium text-foreground">聊天署名预览</p>
+        <div className="mt-3 flex items-end gap-2">
+          <div className="h-8 w-8 shrink-0 overflow-hidden rounded-md border border-border bg-background">
+            {card.avatar_url ? (
+              <img src={card.avatar_url} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <User className="m-1.5 h-5 w-5 text-muted-foreground" aria-hidden="true" />
+            )}
           </div>
-        </form>
-      </main>
+          <div className="min-w-0 rounded-md border border-border bg-background px-3 py-2">
+            <p className="truncate text-[10px] text-muted-foreground">{card.display_name || '未命名角色'}</p>
+            <p className="mt-1 font-archive-serif text-sm leading-5 text-foreground">人物小传将在对话中塑造我的回应。</p>
+          </div>
+        </div>
+      </div>
     </div>
+  );
+
+  const mobileAction = (
+    <Button type="submit" form="persona-form" size="lg" disabled={saving || avatarSaving} className="w-full">
+      {saving ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
+      {saving ? '保存中' : '保存角色卡'}
+    </Button>
+  );
+
+  return (
+    <ArchiveEditorWorkspace
+      indexLabel="Player persona / editable archive"
+      title="玩家角色档案"
+      description="将聊天身份与剧本文稿集中在同一份角色侧写中。"
+      directory={directory}
+      editor={editor}
+      summary={summary}
+      mobileAction={mobileAction}
+      notice={notice}
+    />
   );
 }

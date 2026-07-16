@@ -1,35 +1,48 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { createPortal } from 'react-dom';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as d3 from 'd3';
+import { useArchiveShell } from '@/archive/ArchiveShell';
+import { useArchiveTheme } from '@/archive/ArchiveThemeProvider';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { relationshipAdmin } from '../api/memoria';
 import { useDialog } from '../context/DialogContext';
 import { useUser } from '../context/UserContext';
-import SideRays from '../components/SideRays';
 import { characterEditorPath } from '../utils/navigationState';
 import { createTimeoutController } from '../utils/timeoutController';
 import {
-  ArrowLeft, Loader2, RefreshCw, ZoomIn, ZoomOut, Maximize2,
-  Users, Plus, Trash2, X, Link2
+  Link2,
+  Loader2,
+  Maximize2,
+  Plus,
+  RefreshCw,
+  Trash2,
+  Users,
+  X,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
-
-const CYBER_GREEN = '#A7EF9E';
-const PLAYER_CYAN = '#67E8F9';
-const CYBER_SURFACE = '#120F17';
-
-const GRAPH_RAYS_PROPS = {
-  speed: 2.2,
-  rayColor1: '#FFD166',
-  rayColor2: '#9AD7FF',
-  intensity: 4.2,
-  spread: 2.65,
-  origin: 'top-right',
-  tilt: -12,
-  saturation: 1.55,
-  blend: 0.58,
-  falloff: 1.08,
-  opacity: 1,
-};
 
 const RELATION_TYPE_STORAGE_KEY = 'memoria.relationshipTypes';
 const RELATION_TYPE_COLORS = [
@@ -98,6 +111,23 @@ function getRelationColor(type, relationTypes) {
   return relationTypes.find(t => t.value === type)?.color || relationTypeColor(type);
 }
 
+function readArchiveGraphColors(element) {
+  const scope = element?.closest('.archive-scope') || document.documentElement;
+  const styles = window.getComputedStyle(scope);
+  const destructive = styles.getPropertyValue('--destructive').trim();
+  const fallback = styles.color || 'currentColor';
+  return {
+    character: styles.getPropertyValue('--archive-graph-character').trim() || fallback,
+    player: styles.getPropertyValue('--archive-graph-player').trim() || fallback,
+    surface: styles.getPropertyValue('--archive-graph-surface').trim() || 'transparent',
+    inactive: destructive ? `hsl(${destructive})` : fallback,
+  };
+}
+
+function prefersReducedMotion() {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+}
+
 const NODE_R = 36;
 
 function getAffinityMagnitude(affinity = 0) {
@@ -114,6 +144,7 @@ function getLinkHoverWidth(edge) {
 }
 
 function RelationTypePicker({
+  idPrefix,
   value,
   onChange,
   relationTypes,
@@ -132,29 +163,33 @@ function RelationTypePicker({
   };
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap gap-1.5">
+    <div className="min-w-0 space-y-3">
+      <div className="flex flex-wrap gap-2">
         {relationTypes.map(rt => {
           const isUsed = usedTypeValues.has(rt.value);
+          const selected = value === rt.value;
           return (
             <div
               key={rt.value}
-              className="group inline-flex min-h-11 overflow-hidden rounded-lg border font-mono transition-all"
-              style={{
-                backgroundColor: value === rt.value ? rt.color + '22' : 'transparent',
-                borderColor: rt.color,
-                color: value === rt.value ? rt.color : 'rgba(255,255,255,0.4)',
-              }}
+              className="group inline-flex min-h-11 max-w-full overflow-hidden rounded-md border bg-background/70 transition-colors duration-200"
+              style={{ borderColor: rt.color }}
             >
-              <button
+              <Button
                 type="button"
                 onClick={() => onChange(rt.value)}
-                aria-pressed={value === rt.value}
-                className="min-h-11 px-2.5 text-[10px] transition-colors hover:bg-white/[0.04]"
+                aria-pressed={selected}
+                variant="ghost"
+                className="h-11 min-h-11 min-w-0 rounded-none px-3 font-archive-mono text-xs"
+                style={selected ? { color: rt.color } : undefined}
               >
-                {rt.label}
-              </button>
-              <button
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                  style={{ backgroundColor: rt.color }}
+                  aria-hidden="true"
+                />
+                <span className="truncate">{rt.label}</span>
+              </Button>
+              <Button
                 type="button"
                 disabled={isUsed}
                 aria-label={`删除关系类型 ${rt.label}`}
@@ -164,16 +199,20 @@ function RelationTypePicker({
                   if (value === rt.value) onChange(next);
                   onRemoveType(rt.value);
                 }}
-                className="flex min-h-11 w-9 items-center justify-center border-l border-white/10 opacity-40 transition-colors hover:bg-white/10 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-20"
+                variant="ghost"
+                size="icon"
+                className="h-11 min-h-11 rounded-none border-l border-border text-muted-foreground hover:text-destructive"
               >
-                <X size={12} />
-              </button>
+                <X aria-hidden="true" />
+              </Button>
             </div>
           );
         })}
       </div>
-      <div className="flex gap-2">
-        <input
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+        <label htmlFor={`${idPrefix}-new-type`} className="sr-only">新增关系类型</label>
+        <Input
+          id={`${idPrefix}-new-type`}
           type="text"
           value={newType}
           onChange={e => setNewType(e.target.value)}
@@ -184,21 +223,22 @@ function RelationTypePicker({
             }
           }}
           placeholder="新增类型，如：同门、债主、守护者"
-          className="min-h-11 min-w-0 flex-1 rounded-lg border border-cyber-green/20 bg-cyber-bg px-3 py-2 text-xs font-mono text-cyber-green placeholder:text-cyber-green/20 transition-all focus:border-cyber-green/50 focus:outline-none focus:ring-2 focus:ring-cyber-green/10"
+          className="min-w-0 flex-1 font-archive-mono text-xs"
         />
-        <button
+        <Button
           type="button"
           onClick={handleAdd}
-          className="inline-flex min-h-11 items-center gap-1 rounded-lg border border-cyber-green/25 bg-cyber-green/10 px-3 text-xs font-bold text-cyber-green transition-all hover:bg-cyber-green/20 active:scale-[0.98]"
+          size="lg"
+          variant="secondary"
+          className="shrink-0"
         >
-          <Plus size={13} /> 新增
-        </button>
+          <Plus aria-hidden="true" /> 新增
+        </Button>
       </div>
     </div>
   );
 }
 
-// ── 添加关系弹窗 ──
 function AddRelationModal({ characters, relationTypes, usedTypeValues, onAddType, onRemoveType, onAdd, onClose, adding }) {
   const [charA, setCharA] = useState('');
   const [charB, setCharB] = useState('');
@@ -219,59 +259,67 @@ function AddRelationModal({ characters, relationTypes, usedTypeValues, onAddType
     onAdd({ character_id_a: charA, character_id_b: charB, relationship_type: type, affinity, description: desc || null });
   };
 
-  const opts = characters.map(c => (
-    <option key={c.character_id} value={c.character_id}>
-      {c.node_type === 'player' ? '[玩家] ' : ''}{c.display_name || c.name}
-    </option>
-  ));
+  return (
+    <Dialog open={true} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
+        <DialogHeader className="pr-12">
+          <DialogTitle className="flex items-center gap-2">
+            <Link2 className="h-5 w-5 text-primary" aria-hidden="true" />
+            添加关系
+          </DialogTitle>
+          <DialogDescription>
+            在两个档案节点之间建立连接，并记录关系类型、亲密度和描述。
+          </DialogDescription>
+        </DialogHeader>
 
-  return createPortal(
-    <div className="fixed inset-0 z-[1000] flex min-h-screen items-center justify-center overflow-y-auto p-4 font-mono" onClick={onClose}>
-      <div className="fixed inset-0 bg-[#05070a]/90 backdrop-blur-md backdrop-saturate-75" />
-      <div
-        className="relative w-full max-w-md overflow-hidden rounded-lg border border-cyber-green/20 bg-[#0d0d14]/95 shadow-[0_0_70px_rgba(167,239,158,0.08)] animate-fade-up"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="add-relation-title"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="absolute inset-0 pointer-events-none opacity-[0.04]" style={{
-          backgroundImage: 'linear-gradient(#A7EF9E 1px, transparent 1px), linear-gradient(90deg, #A7EF9E 1px, transparent 1px)',
-          backgroundSize: '20px 20px',
-        }} />
-        <div className="relative flex items-center justify-between border-b border-white/[0.04] px-5 py-4">
-          <div>
-            <h2 id="add-relation-title" className="font-display text-sm text-cyber-green tracking-widest flex items-center gap-2">
-              <Link2 size={16} /> NEW RELATIONSHIP
-            </h2>
-            <p className="mt-1 text-[10px] text-cyber-green/30">建立两个角色之间的图谱连接</p>
-          </div>
-          <button onClick={onClose} className="flex h-11 w-11 items-center justify-center rounded-lg text-cyber-green/30 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green/70" aria-label="关闭">
-            <X size={18} />
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} className="relative space-y-4 px-5 py-5">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">角色 A</label>
-              <select value={charA} onChange={e => setCharA(e.target.value)}
-                className="min-h-11 w-full bg-cyber-bg border border-cyber-green/20 rounded-lg px-3 py-2.5 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none focus:ring-2 focus:ring-cyber-green/10 transition-all">
-                <option value="">选择...</option>
-                {opts}
-              </select>
+        <form onSubmit={handleSubmit} className="min-w-0 space-y-5">
+          <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+            <div className="min-w-0 space-y-2">
+              <label htmlFor="relation-character-a" className="text-sm font-medium text-foreground">角色 A</label>
+              <Select value={charA} onValueChange={setCharA}>
+                <SelectTrigger id="relation-character-a">
+                  <SelectValue placeholder="选择角色" />
+                </SelectTrigger>
+                <SelectContent>
+                  {characters.map(character => (
+                    <SelectItem
+                      key={character.character_id}
+                      value={character.character_id}
+                      className="min-h-11"
+                    >
+                      {character.node_type === 'player' ? '[玩家] ' : ''}
+                      {character.display_name || character.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <div>
-              <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">角色 B</label>
-              <select value={charB} onChange={e => setCharB(e.target.value)}
-                className="min-h-11 w-full bg-cyber-bg border border-cyber-green/20 rounded-lg px-3 py-2.5 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none focus:ring-2 focus:ring-cyber-green/10 transition-all">
-                <option value="">选择...</option>
-                {opts}
-              </select>
+            <div className="min-w-0 space-y-2">
+              <label htmlFor="relation-character-b" className="text-sm font-medium text-foreground">角色 B</label>
+              <Select value={charB} onValueChange={setCharB}>
+                <SelectTrigger id="relation-character-b">
+                  <SelectValue placeholder="选择角色" />
+                </SelectTrigger>
+                <SelectContent>
+                  {characters.map(character => (
+                    <SelectItem
+                      key={character.character_id}
+                      value={character.character_id}
+                      className="min-h-11"
+                    >
+                      {character.node_type === 'player' ? '[玩家] ' : ''}
+                      {character.display_name || character.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
-          <div>
-            <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">关系类型</label>
+
+          <div className="min-w-0 space-y-2">
+            <span className="text-sm font-medium text-foreground">关系类型</span>
             <RelationTypePicker
+              idPrefix="add-relation"
               value={type}
               onChange={setType}
               relationTypes={relationTypes}
@@ -280,33 +328,51 @@ function AddRelationModal({ characters, relationTypes, usedTypeValues, onAddType
               onRemoveType={onRemoveType}
             />
           </div>
-          <div>
-            <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">
-              {isPlayerRelation ? '好感度' : '亲密度'}: {affinity}
+
+          <div className="space-y-2">
+            <label htmlFor="add-relation-affinity" className="flex items-center justify-between gap-3 text-sm font-medium text-foreground">
+              <span>{isPlayerRelation ? '好感度' : '亲密度'}</span>
+              <span className="font-archive-mono tabular-nums text-primary">{affinity}</span>
             </label>
-            <input type="range" min="-100" max="100" value={affinity}
+            <Input
+              id="add-relation-affinity"
+              type="range"
+              min="-100"
+              max="100"
+              value={affinity}
               onChange={e => setAffinity(Number(e.target.value))}
-              className="w-full accent-cyber-green" />
+              className="cursor-pointer accent-primary"
+            />
           </div>
-          <div>
-            <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">描述（可选）</label>
-            <input type="text" value={desc} onChange={e => setDesc(e.target.value)}
+
+          <div className="space-y-2">
+            <label htmlFor="add-relation-description" className="text-sm font-medium text-foreground">描述（可选）</label>
+            <Input
+              id="add-relation-description"
+              type="text"
+              value={desc}
+              onChange={e => setDesc(e.target.value)}
               placeholder="如：青梅竹马、宿敌..."
-              className="min-h-11 w-full bg-cyber-bg border border-cyber-green/20 rounded-lg px-3 py-2.5 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none focus:ring-2 focus:ring-cyber-green/10 placeholder:text-cyber-green/20 transition-all" />
+            />
           </div>
-          <button type="submit" disabled={adding || !charA || !charB || charA === charB || !type}
-            className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-cyber-green/30 bg-cyber-green/10 py-2.5 text-sm font-bold text-cyber-green transition-all hover:bg-cyber-green/20 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-30 disabled:active:scale-100">
-            {adding ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-            {adding ? '创建中...' : '创建关系'}
-          </button>
+
+          <DialogFooter>
+            <Button type="button" size="lg" variant="outline" onClick={onClose}>取消</Button>
+            <Button
+              type="submit"
+              size="lg"
+              disabled={adding || !charA || !charB || charA === charB || !type}
+            >
+              {adding ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Plus aria-hidden="true" />}
+              {adding ? '创建中...' : '创建关系'}
+            </Button>
+          </DialogFooter>
         </form>
-      </div>
-    </div>,
-    document.body
+      </DialogContent>
+    </Dialog>
   );
 }
 
-// ── 编辑/删除关系弹窗 ──
 function EditRelationModal({ edge, relationTypes, usedTypeValues, onAddType, onRemoveType, onUpdate, onDelete, onClose, saving }) {
   const [type, setType] = useState(edge.relationship_type);
   const [affinity, setAffinity] = useState(edge.affinity);
@@ -316,38 +382,34 @@ function EditRelationModal({ edge, relationTypes, usedTypeValues, onAddType, onR
   const targetName = edge.target?.display_name || edge.target?.name || edge.target;
   const isPlayerRelation = edge.source?.node_type === 'player' || edge.target?.node_type === 'player';
 
-  return createPortal(
-    <div className="fixed inset-0 z-[1000] flex min-h-screen items-center justify-center overflow-y-auto p-4 font-mono" onClick={onClose}>
-      <div className="fixed inset-0 bg-[#05070a]/90 backdrop-blur-md backdrop-saturate-75" />
-      <div
-        className="relative w-full max-w-md overflow-hidden rounded-lg border border-cyber-green/20 bg-[#0d0d14]/95 shadow-[0_0_70px_rgba(167,239,158,0.08)] animate-fade-up"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="edit-relation-title"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="absolute inset-0 pointer-events-none opacity-[0.04]" style={{
-          backgroundImage: 'linear-gradient(#A7EF9E 1px, transparent 1px), linear-gradient(90deg, #A7EF9E 1px, transparent 1px)',
-          backgroundSize: '20px 20px',
-        }} />
-        <div className="relative flex items-center justify-between border-b border-white/[0.04] px-5 py-4">
-          <div>
-            <h2 id="edit-relation-title" className="font-display text-sm text-cyber-green tracking-widest flex items-center gap-2">
-              <Link2 size={16} /> EDIT RELATIONSHIP
-            </h2>
-            <p className="mt-1 text-[10px] text-cyber-green/30">调整图谱连接属性</p>
-          </div>
-          <button onClick={onClose} className="flex h-11 w-11 items-center justify-center rounded-lg text-cyber-green/30 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green/70" aria-label="关闭">
-            <X size={18} />
-          </button>
-        </div>
-        <div className="relative space-y-4 px-5 py-5">
-          <p className="rounded-lg border border-cyber-green/10 bg-cyber-green/[0.03] px-3 py-2 text-xs text-cyber-green/55">
-            {sourceName} ↔ {targetName}
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    if (!type) return;
+    onUpdate(edge, { relationship_type: type, affinity, description: desc || null });
+  };
+
+  return (
+    <Dialog open={true} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
+        <DialogHeader className="pr-12">
+          <DialogTitle className="flex items-center gap-2">
+            <Link2 className="h-5 w-5 text-primary" aria-hidden="true" />
+            编辑关系
+          </DialogTitle>
+          <DialogDescription>
+            调整连接属性，或从关系档案图中删除这条记录。
+          </DialogDescription>
+        </DialogHeader>
+
+        <form onSubmit={handleSubmit} className="min-w-0 space-y-5">
+          <p className="break-words rounded-md border border-border bg-muted/45 px-3 py-3 text-sm text-foreground">
+            {sourceName} <span className="px-1 text-primary" aria-hidden="true">↔</span> {targetName}
           </p>
-          <div>
-            <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">关系类型</label>
+
+          <div className="min-w-0 space-y-2">
+            <span className="text-sm font-medium text-foreground">关系类型</span>
             <RelationTypePicker
+              idPrefix="edit-relation"
               value={type}
               onChange={setType}
               relationTypes={relationTypes}
@@ -356,41 +418,62 @@ function EditRelationModal({ edge, relationTypes, usedTypeValues, onAddType, onR
               onRemoveType={onRemoveType}
             />
           </div>
-          <div>
-            <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">
-              {isPlayerRelation ? '好感度' : '亲密度'}: {affinity}
+
+          <div className="space-y-2">
+            <label htmlFor="edit-relation-affinity" className="flex items-center justify-between gap-3 text-sm font-medium text-foreground">
+              <span>{isPlayerRelation ? '好感度' : '亲密度'}</span>
+              <span className="font-archive-mono tabular-nums text-primary">{affinity}</span>
             </label>
-            <input type="range" min="-100" max="100" value={affinity}
+            <Input
+              id="edit-relation-affinity"
+              type="range"
+              min="-100"
+              max="100"
+              value={affinity}
               onChange={e => setAffinity(Number(e.target.value))}
-              className="w-full accent-cyber-green" />
+              className="cursor-pointer accent-primary"
+            />
           </div>
-          <div>
-            <label className="text-[10px] font-mono text-cyber-green/50 uppercase block mb-1">描述</label>
-            <input type="text" value={desc} onChange={e => setDesc(e.target.value)}
-              className="min-h-11 w-full bg-cyber-bg border border-cyber-green/20 rounded-lg px-3 py-2.5 text-xs font-mono text-cyber-green focus:border-cyber-green/50 focus:outline-none focus:ring-2 focus:ring-cyber-green/10 transition-all" />
+
+          <div className="space-y-2">
+            <label htmlFor="edit-relation-description" className="text-sm font-medium text-foreground">描述</label>
+            <Input
+              id="edit-relation-description"
+              type="text"
+              value={desc}
+              onChange={e => setDesc(e.target.value)}
+            />
           </div>
-          <div className="flex gap-3">
-            <button onClick={() => onUpdate(edge, { relationship_type: type, affinity, description: desc || null })}
-              disabled={saving || !type}
-              className="min-h-11 flex-1 rounded-lg border border-cyber-green/30 bg-cyber-green/10 py-2 text-sm font-bold text-cyber-green transition-all hover:bg-cyber-green/20 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-30 disabled:active:scale-100">
-              {saving ? '保存中...' : '保存修改'}
-            </button>
-            <button onClick={() => onDelete(edge)}
+
+          <DialogFooter className="sm:justify-between">
+            <Button
+              type="button"
+              size="lg"
+              variant="destructive"
+              onClick={() => onDelete(edge)}
               disabled={saving}
-              className="flex min-h-11 items-center gap-1 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-bold text-red-400 transition-all hover:bg-red-500/20 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-30 disabled:active:scale-100">
-              <Trash2 size={14} /> 删除
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>,
-    document.body
+            >
+              <Trash2 aria-hidden="true" /> 删除
+            </Button>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row">
+              <Button type="button" size="lg" variant="outline" onClick={onClose}>取消</Button>
+              <Button type="submit" size="lg" disabled={saving || !type}>
+                {saving && <Loader2 className="animate-spin" aria-hidden="true" />}
+                {saving ? '保存中...' : '保存修改'}
+              </Button>
+            </div>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 export default function RelationshipGraph() {
   const navigate = useNavigate();
   const dialog = useDialog();
+  const { setPrimaryAction } = useArchiveShell();
+  const { theme } = useArchiveTheme();
   const { user, loading: userLoading } = useUser();
   const svgRef = useRef(null);
   const containerRef = useRef(null);
@@ -414,6 +497,23 @@ export default function RelationshipGraph() {
   const [activeRelationType, setActiveRelationType] = useState(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
+
+  const primaryAction = useMemo(() => (
+    <Button
+      type="button"
+      size="lg"
+      onClick={() => setShowAddModal(true)}
+      disabled={!user || loading}
+    >
+      <Plus aria-hidden="true" />
+      添加关系
+    </Button>
+  ), [loading, user]);
+
+  useEffect(() => {
+    setPrimaryAction(primaryAction);
+    return () => setPrimaryAction(null);
+  }, [primaryAction, setPrimaryAction]);
 
   useEffect(() => {
     localStorage.setItem(RELATION_TYPE_STORAGE_KEY, JSON.stringify(relationTypes));
@@ -494,6 +594,8 @@ export default function RelationshipGraph() {
     const W = graphSize.width || container.clientWidth;
     const H = graphSize.height || container.clientHeight;
     if (!W || !H) return;
+    const graphColors = readArchiveGraphColors(container);
+    const reduceMotion = prefersReducedMotion();
 
     if (simulationRef.current) {
       simulationRef.current.stop();
@@ -603,7 +705,7 @@ export default function RelationshipGraph() {
         });
     };
 
-    animateFlow();
+    if (!reduceMotion) animateFlow();
 
     // 边交互
     linkHit.on('mouseenter', function(event, d) {
@@ -639,10 +741,16 @@ export default function RelationshipGraph() {
         navigate(d.node_type === 'player' ? '/persona' : characterEditorPath(d.character_id));
       });
 
-    node.transition().delay((d, i) => Math.min(i, 16) * 45).duration(360).ease(d3.easeCubicOut).attr('opacity', 1);
+    node.transition()
+      .delay((d, i) => reduceMotion ? 0 : Math.min(i, 16) * 45)
+      .duration(reduceMotion ? 0 : 240)
+      .ease(d3.easeCubicOut)
+      .attr('opacity', 1);
 
     // 光晕
-    node.append('circle').attr('r', NODE_R + 10).attr('fill', d => d.node_type === 'player' ? PLAYER_CYAN : CYBER_GREEN)
+    node.append('circle').attr('r', NODE_R + 10).attr('fill', d => (
+      d.node_type === 'player' ? graphColors.player : graphColors.character
+    ))
       .attr('opacity', 0).attr('class', 'node-halo').attr('filter', 'url(#glow)');
 
     // 头像裁剪定义（在 defs 中定义，避免重复id冲突）
@@ -659,7 +767,7 @@ export default function RelationshipGraph() {
       const g = d3.select(this);
       const clipId = 'clip-' + d.character_id.replace(/[^a-zA-Z0-9]/g, '_');
       // 圆形底色
-      g.append('circle').attr('r', NODE_R - 2).attr('fill', CYBER_SURFACE).attr('pointer-events', 'none');
+      g.append('circle').attr('r', NODE_R - 2).attr('fill', graphColors.surface).attr('pointer-events', 'none');
       if (d.avatar_url) {
         g.append('image')
           .attr('href', d.avatar_url)
@@ -672,7 +780,8 @@ export default function RelationshipGraph() {
         g.append('text')
           .text((d.name || d.display_name || d.character_id).charAt(0))
           .attr('text-anchor', 'middle').attr('dy', '0.35em')
-          .attr('fill', d.node_type === 'player' ? PLAYER_CYAN : CYBER_GREEN).attr('font-family', 'Noto Sans SC, Microsoft YaHei, PingFang SC, system-ui, sans-serif')
+          .attr('fill', d.node_type === 'player' ? graphColors.player : graphColors.character)
+          .attr('font-family', 'Noto Sans SC, Microsoft YaHei, PingFang SC, system-ui, sans-serif')
           .attr('font-size', '18px').attr('font-weight', 'bold')
           .attr('pointer-events', 'none');
       }
@@ -681,24 +790,29 @@ export default function RelationshipGraph() {
     // 主体圆（描边）
     node.append('circle').attr('r', NODE_R)
       .attr('fill', 'none')
-      .attr('stroke', d => d.node_type === 'player' ? PLAYER_CYAN : (d.is_active ? CYBER_GREEN : '#EF4444'))
+      .attr('stroke', d => (
+        d.node_type === 'player'
+          ? graphColors.player
+          : (d.is_active ? graphColors.character : graphColors.inactive)
+      ))
       .attr('stroke-width', d => d.is_active ? 2.4 : 2.8)
       .attr('stroke-opacity', 0.9);
 
     // 装饰虚线环
     node.append('circle').attr('r', NODE_R - 4).attr('fill', 'none')
-      .attr('stroke', d => d.node_type === 'player' ? PLAYER_CYAN : CYBER_GREEN).attr('stroke-opacity', 0.26).attr('stroke-width', 1)
+      .attr('stroke', d => d.node_type === 'player' ? graphColors.player : graphColors.character)
+      .attr('stroke-opacity', 0.26).attr('stroke-width', 1)
       .attr('stroke-dasharray', '3 6');
 
     const playerBadge = node.filter(d => d.node_type === 'player');
     playerBadge.append('rect')
       .attr('x', -19).attr('y', -NODE_R - 19)
       .attr('width', 38).attr('height', 16).attr('rx', 4)
-      .attr('fill', '#071417').attr('stroke', PLAYER_CYAN).attr('stroke-opacity', 0.55);
+      .attr('fill', graphColors.surface).attr('stroke', graphColors.player).attr('stroke-opacity', 0.55);
     playerBadge.append('text')
       .text('玩家')
       .attr('text-anchor', 'middle').attr('dy', -NODE_R - 8)
-      .attr('fill', PLAYER_CYAN).attr('font-size', '9px').attr('font-weight', '700')
+      .attr('fill', graphColors.player).attr('font-size', '9px').attr('font-weight', '700')
       .attr('font-family', 'Noto Sans SC, Microsoft YaHei, PingFang SC, system-ui, sans-serif')
       .attr('pointer-events', 'none');
 
@@ -706,7 +820,8 @@ export default function RelationshipGraph() {
     node.append('text')
       .text(d => d.name || d.display_name || d.character_id)
       .attr('text-anchor', 'middle').attr('dy', NODE_R + 18)
-      .attr('fill', d => d.node_type === 'player' ? PLAYER_CYAN : CYBER_GREEN).attr('font-family', 'Noto Sans SC, Microsoft YaHei, PingFang SC, system-ui, sans-serif')
+      .attr('fill', d => d.node_type === 'player' ? graphColors.player : graphColors.character)
+      .attr('font-family', 'Noto Sans SC, Microsoft YaHei, PingFang SC, system-ui, sans-serif')
       .attr('font-size', '14px').attr('font-weight', '500')
       .attr('opacity', 0.92).attr('pointer-events', 'none');
 
@@ -747,7 +862,9 @@ export default function RelationshipGraph() {
         const scale = Math.min(W * 0.8 / bounds.width, H * 0.8 / bounds.height, 1.2);
         const tx = (W - bounds.width * scale) / 2 - bounds.x * scale;
         const ty = (H - bounds.height * scale) / 2 - bounds.y * scale;
-        svg.transition().duration(800).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+        svg.transition()
+          .duration(reduceMotion ? 0 : 260)
+          .call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
       }
     }, 1200);
 
@@ -758,7 +875,7 @@ export default function RelationshipGraph() {
       simulation.stop();
       centerTimeoutRef.current.cancel();
     };
-  }, [graphSize.height, graphSize.width, network, navigate, relationTypes]);
+  }, [graphSize.height, graphSize.width, network, navigate, relationTypes, theme]);
 
   // ── 操作 ──
   const showToast = (msg) => {
@@ -833,32 +950,33 @@ export default function RelationshipGraph() {
 
   const zoomIn = () => {
     const svg = d3.select(svgRef.current);
-    svg.transition().duration(300).call(zoomRef.current.scaleBy, 1.4);
+    if (!zoomRef.current) return;
+    svg.transition().duration(prefersReducedMotion() ? 0 : 220).call(zoomRef.current.scaleBy, 1.4);
   };
   const zoomOut = () => {
     const svg = d3.select(svgRef.current);
-    svg.transition().duration(300).call(zoomRef.current.scaleBy, 0.7);
+    if (!zoomRef.current) return;
+    svg.transition().duration(prefersReducedMotion() ? 0 : 220).call(zoomRef.current.scaleBy, 0.7);
   };
   const zoomReset = () => {
     const svg = d3.select(svgRef.current);
-    svg.transition().duration(500).call(zoomRef.current.transform, d3.zoomIdentity);
+    if (!zoomRef.current) return;
+    svg.transition().duration(prefersReducedMotion() ? 0 : 260).call(zoomRef.current.transform, d3.zoomIdentity);
   };
 
-  // ── Render ──
-  const modalOpen = showAddModal || !!editEdge;
   const usedTypeValues = new Set(network.edges.map(edge => edge.relationship_type).filter(Boolean));
   const isAuthError = !!error && /认证|未登录|401|token/i.test(error);
 
   return (
-    <div className="min-h-dvh memoria-page memoria-app-page flex flex-col select-none">
-      {toast && createPortal(
+    <section className="relative h-[calc(100dvh-4rem)] min-h-[32rem] min-w-0 select-none overflow-hidden bg-[hsl(var(--archive-graph-surface))] text-foreground">
+      {toast && (
         <div
           role="status"
-          className="pointer-events-none fixed left-1/2 top-5 z-[1100] -translate-x-1/2 rounded-lg border border-cyber-green/30 bg-[#07100a]/95 px-4 py-2 font-mono text-xs text-cyber-green shadow-[0_0_28px_rgba(167,239,158,0.16)] backdrop-blur-md animate-fade-up"
+          aria-live="polite"
+          className="pointer-events-none fixed left-1/2 top-20 z-[1200] w-[calc(100%-2rem)] max-w-md -translate-x-1/2 rounded-md border border-border bg-popover/95 px-4 py-3 text-center text-sm text-popover-foreground shadow-xl backdrop-blur-md"
         >
           {toast}
-        </div>,
-        document.body
+        </div>
       )}
       {showAddModal && (
         <AddRelationModal
@@ -886,134 +1004,144 @@ export default function RelationshipGraph() {
         />
       )}
 
-      {/* Header */}
-      <div className="memoria-app-header sticky top-0 z-20 border-b">
-        <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2.5 sm:px-5 sm:py-3">
-          <button onClick={() => navigate('/')}
-            aria-label="返回首页"
-            title="返回首页"
-            className="flex h-11 w-11 items-center justify-center gap-1.5 rounded-lg text-cyber-green/50 transition-all hover:bg-cyber-green/5 hover:text-cyber-green sm:w-auto sm:px-2 sm:font-mono sm:text-sm">
-            <ArrowLeft size={16} /> <span className="hidden sm:inline">Back</span>
-          </button>
-          <h1 className="flex min-w-0 items-center justify-center gap-1.5 whitespace-nowrap font-display text-[11px] tracking-[0.08em] text-cyber-green sm:gap-2 sm:text-base sm:tracking-[0.2em]">
-            <Users size={18} className="hidden shrink-0 sm:block" /> RELATIONSHIP GRAPH
-          </h1>
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <span className="text-[10px] font-mono text-cyber-green/30 hidden sm:inline">
-              {characters.length} 角色 · {network.edges.length} 边
-            </span>
-            <button onClick={() => setShowAddModal(true)}
-              disabled={!user || loading}
-              aria-label="添加关系"
-              title="添加关系"
-              className="flex h-11 w-11 items-center justify-center gap-1 rounded-lg border border-cyber-green/25 bg-cyber-green/10 font-mono text-xs text-cyber-green transition-all hover:bg-cyber-green/20 hover:shadow-[0_0_22px_rgba(167,239,158,0.12)] active:scale-95 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-cyber-green/10 disabled:hover:shadow-none disabled:active:scale-100 sm:w-auto sm:px-3">
-              <Plus size={14} /> <span className="hidden sm:inline">添加关系</span>
-            </button>
-            <button onClick={loadData} disabled={loading}
-              className="flex h-11 w-11 items-center justify-center rounded-lg border border-cyber-green/15 font-mono text-xs text-cyber-green/40 transition-all hover:bg-cyber-green/5 hover:text-cyber-green disabled:opacity-30"
-              aria-label="刷新关系图"
-              title="刷新关系图">
-              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            </button>
+      <div className="pointer-events-none absolute inset-x-3 top-3 z-20 flex min-w-0 items-start justify-between gap-3 sm:inset-x-5 sm:top-5">
+        <div className="pointer-events-auto min-w-0 rounded-lg border border-border bg-card/88 px-3 py-3 shadow-lg backdrop-blur-md sm:px-4">
+          <div className="flex min-w-0 items-center gap-3">
+            <Users className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
+            <div className="min-w-0">
+              <h1 className="truncate font-archive-serif text-base font-semibold text-foreground sm:text-lg">
+                关系档案图
+              </h1>
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 font-archive-mono text-[10px] text-muted-foreground">
+                <span><span className="tabular-nums text-foreground">{characters.length}</span> 个节点</span>
+                <span><span className="tabular-nums text-foreground">{network.edges.length}</span> 条关系</span>
+              </div>
+            </div>
           </div>
+        </div>
+
+        <div className="pointer-events-auto flex shrink-0 gap-2">
+          <Button
+            type="button"
+            size="lg"
+            className="lg:hidden"
+            onClick={() => setShowAddModal(true)}
+            disabled={!user || loading}
+          >
+            <Plus aria-hidden="true" />
+            <span className="hidden sm:inline">添加关系</span>
+          </Button>
+          <Button
+            type="button"
+            size="icon"
+            variant="outline"
+            onClick={loadData}
+            disabled={loading}
+            aria-label="刷新关系图"
+            title="刷新关系图"
+          >
+            <RefreshCw className={loading ? 'animate-spin' : ''} aria-hidden="true" />
+          </Button>
         </div>
       </div>
 
-      {/* Main */}
-      <div className="flex-1 relative">
-        {!modalOpen && <SideRays {...GRAPH_RAYS_PROPS} className="side-rays-graph" />}
-        {loading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-cyber-bg/80 backdrop-blur-sm">
-            <div className="flex flex-col items-center gap-3">
-              <Loader2 className="animate-spin text-cyber-green" size={30} />
-              <span className="font-mono text-xs text-cyber-green/50">加载关系网络...</span>
-            </div>
+      {loading && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3 text-muted-foreground" role="status" aria-live="polite">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" aria-hidden="true" />
+            <span className="font-archive-mono text-xs">加载关系网络...</span>
           </div>
-        )}
-        {error && (
-          <div className="absolute inset-x-4 top-4 z-10 flex justify-center">
-            <div className="flex w-full max-w-xl flex-col gap-3 rounded-lg border border-red-400/18 bg-red-400/[0.055] px-4 py-3 text-center shadow-[0_0_32px_rgba(248,113,113,0.08)] backdrop-blur-sm animate-fade-up sm:flex-row sm:items-center sm:justify-between sm:text-left">
-              <p className="text-sm font-mono text-red-200/80">{error}</p>
-              <button
-                onClick={isAuthError ? () => navigate('/') : loadData}
-                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-red-300/20 px-3 text-xs font-mono text-red-200/80 transition-all hover:bg-red-400/10"
-              >
-                {isAuthError ? '返回首页登录' : '重试'}
-              </button>
-            </div>
-          </div>
-        )}
-        {!loading && !error && network.nodes.length === 0 && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center">
-            <div className="memoria-glass animate-fade-up text-center rounded-lg px-8 py-7">
-              <Users size={56} className="mx-auto text-cyber-green/10 mb-5" />
-              <p className="font-mono text-sm text-cyber-green/30 mb-2">暂无关系数据</p>
-              <p className="font-mono text-[11px] text-cyber-green/15 mb-6">创建至少两个角色后，可在此构建关系图谱</p>
-              <button onClick={() => setShowAddModal(true)}
-                className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-cyber-green/25 bg-cyber-green/10 px-4 py-2 font-mono text-xs text-cyber-green/70 transition-all hover:bg-cyber-green/20 active:scale-95">
-                <Plus size={14} /> 添加第一条关系
-              </button>
-            </div>
-          </div>
-        )}
-        <div ref={containerRef} className="absolute inset-0 z-[1]">
-          <svg ref={svgRef} className="w-full h-full" />
         </div>
+      )}
+      {error && (
+        <div className="absolute inset-x-3 top-24 z-30 flex justify-center sm:inset-x-5">
+          <div className="flex w-full max-w-xl flex-col gap-3 rounded-lg border border-destructive/35 bg-destructive/10 px-4 py-3 shadow-xl backdrop-blur-md sm:flex-row sm:items-center sm:justify-between">
+            <p className="min-w-0 break-words text-sm text-destructive" role="alert">{error}</p>
+            <Button
+              type="button"
+              size="lg"
+              variant="outline"
+              onClick={isAuthError ? () => navigate('/') : loadData}
+              className="shrink-0 border-destructive/35 text-destructive hover:text-destructive"
+            >
+              {isAuthError ? '返回登录页' : '重试'}
+            </Button>
+          </div>
+        </div>
+      )}
+      {!loading && !error && network.nodes.length === 0 && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center px-4 pt-20">
+          <div className="w-full max-w-md rounded-lg border border-border bg-card/90 px-6 py-7 text-center shadow-xl backdrop-blur-md">
+            <Users className="mx-auto mb-4 h-12 w-12 text-muted-foreground" aria-hidden="true" />
+            <p className="font-archive-serif text-lg font-semibold text-foreground">暂无关系数据</p>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+              创建至少两个角色后，可在此构建关系图谱。
+            </p>
+            <Button
+              type="button"
+              size="lg"
+              className="mt-5"
+              onClick={() => setShowAddModal(true)}
+              disabled={!user}
+            >
+              <Plus aria-hidden="true" />
+              添加第一条关系
+            </Button>
+          </div>
+        </div>
+      )}
 
-        {/* 浮动控件 */}
-        {!loading && network.nodes.length > 0 && (
-          <>
-            <div className="absolute bottom-3 right-3 z-10 flex flex-col gap-1.5 animate-fade-up sm:bottom-6 sm:right-6">
-              <button onClick={zoomIn} className="memoria-glass flex h-11 w-11 items-center justify-center rounded-lg text-cyber-green/50 hover:text-cyber-green hover:border-cyber-green/30 active:scale-95 transition-all" title="放大" aria-label="放大关系图">
-                <ZoomIn size={16} />
-              </button>
-              <button onClick={zoomOut} className="memoria-glass flex h-11 w-11 items-center justify-center rounded-lg text-cyber-green/50 hover:text-cyber-green hover:border-cyber-green/30 active:scale-95 transition-all" title="缩小" aria-label="缩小关系图">
-                <ZoomOut size={16} />
-              </button>
-              <button onClick={zoomReset} className="memoria-glass flex h-11 w-11 items-center justify-center rounded-lg text-cyber-green/50 hover:text-cyber-green hover:border-cyber-green/30 active:scale-95 transition-all" title="重置" aria-label="重置关系图缩放">
-                <Maximize2 size={16} />
-              </button>
-            </div>
-            <div className="absolute bottom-3 left-3 right-[4.5rem] z-10 animate-fade-up sm:bottom-6 sm:left-6 sm:right-24 lg:right-auto lg:w-[min(48rem,calc(100%-7.5rem))]">
-              <div className="memoria-glass max-h-40 overflow-y-auto overscroll-contain rounded-lg p-2 font-mono text-[10px] sm:max-h-32 sm:p-2.5">
-                <div className="grid grid-cols-[repeat(auto-fit,minmax(7rem,1fr))] gap-1">
-                {relationTypes.map(rt => {
-                  const active = activeRelationType === rt.value;
-                  const dimmed = activeRelationType && !active;
-                  return (
-                    <div
-                      key={rt.value}
-                      className={[
-                        'flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1.5 transition-all duration-200',
-                        active
-                          ? 'border-cyber-green/45 bg-cyber-green/10 text-cyber-green shadow-[0_0_18px_rgba(167,239,158,0.16)] scale-[1.03]'
-                          : 'border-transparent text-cyber-green/50',
-                        dimmed ? 'opacity-35' : 'opacity-100',
-                      ].join(' ')}
-                      style={active ? { borderColor: `${rt.color}99`, boxShadow: `0 0 18px ${rt.color}2b` } : undefined}
-                    >
-                      <span
-                        className="h-2.5 w-2.5 shrink-0 rounded-full transition-all duration-200"
-                        style={{ backgroundColor: rt.color, boxShadow: active ? `0 0 12px ${rt.color}` : 'none' }}
-                      />
-                      <span className="truncate" title={rt.label}>{rt.label}</span>
-                    </div>
-                  );
-                })}
-                </div>
-              </div>
-            </div>
-          </>
-        )}
+      <div ref={containerRef} className="absolute inset-0 z-[1] min-w-0">
+        <svg
+          ref={svgRef}
+          className="h-full w-full"
+          role="img"
+          aria-label="角色与玩家之间的关系档案图"
+        />
       </div>
 
       {!loading && network.nodes.length > 0 && (
-        <div className="text-center py-2 border-t border-cyber-green/5 bg-[#0d0d14]/40 backdrop-blur-sm">
-          <span className="text-[10px] font-mono text-cyber-green/15">
-            拖拽节点 · 滚轮缩放 · 悬停高亮 · 点击边编辑 · 双击编辑节点
-          </span>
-        </div>
+        <>
+          <div className="absolute bottom-3 right-3 z-20 flex flex-col gap-2 sm:bottom-5 sm:right-5">
+            <Button type="button" size="icon" variant="outline" onClick={zoomIn} title="放大" aria-label="放大关系图">
+              <ZoomIn aria-hidden="true" />
+            </Button>
+            <Button type="button" size="icon" variant="outline" onClick={zoomOut} title="缩小" aria-label="缩小关系图">
+              <ZoomOut aria-hidden="true" />
+            </Button>
+            <Button type="button" size="icon" variant="outline" onClick={zoomReset} title="重置" aria-label="重置关系图缩放">
+              <Maximize2 aria-hidden="true" />
+            </Button>
+          </div>
+
+          <div className="absolute bottom-3 left-3 right-[4.5rem] z-20 max-h-36 overflow-y-auto overscroll-contain rounded-lg border border-border bg-card/88 p-2 shadow-lg backdrop-blur-md sm:bottom-5 sm:left-5 sm:right-24 sm:max-h-28 sm:p-3 lg:right-auto lg:w-[min(48rem,calc(100%-7.5rem))]">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(7rem,1fr))] gap-1 font-archive-mono text-[10px]">
+              {relationTypes.map(rt => {
+                const active = activeRelationType === rt.value;
+                const dimmed = activeRelationType && !active;
+                return (
+                  <div
+                    key={rt.value}
+                    className={[
+                      'flex min-h-8 min-w-0 items-center gap-2 rounded-md border px-2 py-1.5 transition-colors duration-200',
+                      active ? 'bg-accent text-accent-foreground' : 'border-transparent text-muted-foreground',
+                      dimmed ? 'opacity-35' : 'opacity-100',
+                    ].join(' ')}
+                    style={active ? { borderColor: rt.color } : undefined}
+                  >
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                      style={{ backgroundColor: rt.color }}
+                      aria-hidden="true"
+                    />
+                    <span className="truncate" title={rt.label}>{rt.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
       )}
-    </div>
+    </section>
   );
 }

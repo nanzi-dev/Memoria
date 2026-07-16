@@ -388,3 +388,248 @@ select.memoria-form-control {
     transform: none !important;
   }
 }
+
+/* Archive design system. These variables are scoped away from the home page. */
+.archive-scope,
+.archive-portal {
+  --background: 156 21% 7%;
+  --foreground: 42 23% 91%;
+  --card: 154 17% 10%;
+  --card-foreground: 42 23% 91%;
+  --popover: 154 19% 9%;
+  --popover-foreground: 42 23% 91%;
+  --primary: 42 49% 58%;
+  --primary-foreground: 154 26% 8%;
+  --secondary: 153 13% 15%;
+  --secondary-foreground: 42 19% 88%;
+  --muted: 154 11% 17%;
+  --muted-foreground: 43 9% 65%;
+  --accent: 153 17% 16%;
+  --accent-foreground: 42 22% 92%;
+  --destructive: 346 43% 48%;
+  --destructive-foreground: 40 28% 96%;
+  --border: 45 18% 25%;
+  --input: 46 15% 29%;
+  --ring: 42 49% 58%;
+  --archive-canvas: 156 21% 7%;
+  --archive-surface: 154 17% 10%;
+  --archive-surface-muted: 153 13% 13%;
+  --archive-rule: 45 18% 25%;
+  --archive-berry: 346 43% 48%;
+  --archive-graph-character: hsl(42 49% 58%);
+  --archive-graph-player: hsl(346 43% 58%);
+  --archive-graph-surface: hsl(154 17% 10%);
+  color-scheme: dark;
+}
+
+.archive-theme-light,
+[data-archive-theme="light"] .archive-portal {
+  --background: 45 39% 94%;
+  --foreground: 151 28% 13%;
+  --card: 45 45% 97%;
+  --card-foreground: 151 28% 13%;
+  --popover: 45 45% 97%;
+  --popover-foreground: 151 28% 13%;
+  --primary: 42 45% 42%;
+  --primary-foreground: 45 45% 97%;
+  --secondary: 139 13% 84%;
+  --secondary-foreground: 151 24% 16%;
+  --muted: 138 12% 87%;
+  --muted-foreground: 151 10% 38%;
+  --accent: 138 15% 82%;
+  --accent-foreground: 151 28% 13%;
+  --destructive: 346 49% 42%;
+  --destructive-foreground: 45 45% 97%;
+  --border: 139 12% 67%;
+  --input: 139 12% 61%;
+  --ring: 42 45% 42%;
+  --archive-canvas: 139 12% 88%;
+  --archive-surface: 45 45% 97%;
+  --archive-surface-muted: 137 14% 84%;
+  --archive-rule: 139 12% 67%;
+  --archive-berry: 346 49% 42%;
+  --archive-graph-character: hsl(42 45% 42%);
+  --archive-graph-player: hsl(346 49% 42%);
+  --archive-graph-surface: hsl(45 45% 97%);
+  color-scheme: light;
+}
+
+.archive-scope {
+  min-height: 100dvh;
+  overflow-x: clip;
+  background-color: hsl(var(--archive-canvas));
+  color: hsl(var(--foreground));
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
+  letter-spacing: 0;
+}
+
+.archive-shell {
+  background-image:
+    linear-gradient(hsl(var(--archive-rule) / 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--archive-rule) / 0.055) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+.archive-topbar {
+  background: hsl(var(--background) / 0.94);
+  box-shadow: 0 10px 28px hsl(155 30% 2% / 0.2);
+  backdrop-filter: blur(16px);
+}
+
+.archive-theme-light .archive-topbar {
+  box-shadow: 0 10px 28px hsl(151 20% 20% / 0.1);
+}
+
+.archive-content {
+  position: relative;
+  min-height: calc(100dvh - 4rem);
+}
+
+.archive-skip-link {
+  position: fixed;
+  top: 0;
+  left: 1rem;
+  z-index: 1300;
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  pointer-events: none;
+  transform: translateY(calc(-100% - 1rem));
+  border-radius: 6px;
+  background: hsl(var(--primary));
+  padding: 0.625rem 0.875rem;
+  color: hsl(var(--primary-foreground));
+  font-size: 0.875rem;
+  font-weight: 600;
+  opacity: 0;
+  transition: transform 180ms ease, opacity 180ms ease;
+}
+
+.archive-skip-link:focus-visible {
+  pointer-events: auto;
+  transform: translateY(0.75rem);
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 3px;
+  opacity: 1;
+}
+
+.archive-nav-link[aria-current="page"] {
+  box-shadow: inset 0 -1px 0 hsl(var(--primary) / 0.72);
+}
+
+.archive-world-clock > * {
+  color: hsl(var(--muted-foreground));
+}
+
+.archive-world-clock button:hover {
+  background: hsl(var(--accent));
+}
+
+.archive-world-clock button:focus-visible {
+  box-shadow: 0 0 0 2px hsl(var(--ring));
+}
+
+.archive-portal {
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
+  letter-spacing: 0;
+}
+
+.archive-toast {
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: 8px !important;
+  background: hsl(var(--popover)) !important;
+  color: hsl(var(--popover-foreground)) !important;
+  box-shadow: 0 18px 48px hsl(155 30% 2% / 0.3) !important;
+}
+
+.archive-toast-action {
+  border-radius: 6px !important;
+  background: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+}
+
+.archive-toast-cancel {
+  border-radius: 6px !important;
+  background: hsl(var(--secondary)) !important;
+  color: hsl(var(--secondary-foreground)) !important;
+}
+
+/* Existing non-home pages keep their layout while inheriting Archive surfaces. */
+.archive-scope .memoria-page,
+.archive-scope .character-editor-page,
+.archive-scope .memoria-app-page {
+  background: transparent !important;
+  color: hsl(var(--foreground));
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
+}
+
+.archive-scope .memoria-app-header {
+  top: 4rem;
+  border-color: hsl(var(--border)) !important;
+  background: hsl(var(--card) / 0.94) !important;
+  box-shadow: 0 10px 26px hsl(155 30% 2% / 0.16);
+}
+
+.archive-scope .memoria-panel,
+.archive-scope .memoria-glass {
+  border-color: hsl(var(--border));
+  background: hsl(var(--card) / 0.84);
+  box-shadow: 0 16px 42px hsl(155 30% 2% / 0.16);
+}
+
+.archive-scope .memoria-panel-muted,
+.archive-scope .memoria-editor-item {
+  border-color: hsl(var(--border));
+  background: hsl(var(--muted) / 0.58);
+}
+
+.archive-scope .memoria-section-heading {
+  border-color: hsl(var(--border));
+  color: hsl(var(--foreground));
+}
+
+.archive-scope .memoria-section-heading > svg,
+.archive-scope .memoria-form-label {
+  color: hsl(var(--primary));
+}
+
+.archive-scope .memoria-form-control {
+  border-color: hsl(var(--input));
+  background: hsl(var(--background) / 0.72);
+  color: hsl(var(--foreground));
+  font-family: 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
+}
+
+.archive-scope .memoria-form-control:focus {
+  border-color: hsl(var(--ring));
+  background: hsl(var(--background) / 0.9);
+  box-shadow: 0 0 0 3px hsl(var(--ring) / 0.14);
+}
+
+.archive-scope .memoria-skip-link {
+  display: none;
+}
+
+.archive-scope :focus-visible {
+  outline-color: hsl(var(--ring));
+}
+
+@media (max-width: 1023px) {
+  .archive-scope .memoria-app-header {
+    top: 4rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .archive-scope *,
+  .archive-scope *::before,
+  .archive-scope *::after,
+  .archive-portal *,
+  .archive-portal *::before,
+  .archive-portal *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

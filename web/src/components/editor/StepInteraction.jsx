@@ -1,26 +1,29 @@
 import TagInput from './TagInput';
+import { Clapperboard, Handshake, ShieldCheck } from 'lucide-react';
 
 export default function StepInteraction({ formData, updateField }) {
   const ir = formData.interaction_rules || {};
   const sc = formData.safety_constraints || {};
+  const labelStyle = 'mb-1.5 block font-archive-mono text-[11px] uppercase text-muted-foreground';
+  const inputStyle = 'min-h-11 w-full rounded-md border border-input bg-background px-3 font-archive-serif text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring';
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2 mb-4">
-        <span className="text-lg text-cyber-ink/60">🤝</span>
-        <h3 className="font-mono text-lg font-bold text-cyber-ink">交互规则 Interaction Rules</h3>
+      <div className="mb-4 flex items-center gap-2">
+        <Handshake className="h-5 w-5 text-primary" aria-hidden="true" />
+        <h3 className="font-archive-serif text-lg font-semibold text-foreground">交互规则 Interaction Rules</h3>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {/* Initial Attitude */}
         <div>
-          <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
+          <label className={labelStyle}>
             初始态度 Initial Attitude
           </label>
           <select
             value={ir.initial_attitude_to_player || 'neutral'}
             onChange={(e) => updateField('interaction_rules.initial_attitude_to_player', e.target.value)}
-            className="w-full px-2 py-1.5 text-sm font-mono text-cyber-ink bg-transparent border-b border-amber-300/50 focus:border-amber-500 focus:outline-none"
+            className={inputStyle}
           >
             <option value="friendly">友好 Friendly</option>
             <option value="neutral">中立 Neutral</option>
@@ -33,7 +36,7 @@ export default function StepInteraction({ formData, updateField }) {
 
       {/* Topics to Avoid Unless Trusted */}
       <div>
-        <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
+        <label className={labelStyle}>
           需要信任才能讨论的话题 Topics to Avoid Unless Trusted
         </label>
         <TagInput
@@ -45,7 +48,7 @@ export default function StepInteraction({ formData, updateField }) {
 
       {/* Topics Loves to Discuss */}
       <div>
-        <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
+        <label className={labelStyle}>
           喜欢讨论的话题 Topics Loves to Discuss
         </label>
         <TagInput
@@ -57,7 +60,7 @@ export default function StepInteraction({ formData, updateField }) {
 
       {/* Response to Rudeness */}
       <div>
-        <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
+        <label className={labelStyle}>
           对粗鲁行为的反应 Response to Rudeness
         </label>
         <TagInput
@@ -69,7 +72,7 @@ export default function StepInteraction({ formData, updateField }) {
 
       {/* Gift Reactions */}
       <div>
-        <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
+        <label className={labelStyle}>
           礼物反应 Gift Reactions (格式: 礼物类型, 反应)
         </label>
         <TagInput
@@ -83,15 +86,15 @@ export default function StepInteraction({ formData, updateField }) {
       </div>
 
       {/* Safety Constraints */}
-      <div className="border-t pt-4" style={{ borderColor: '#C4B594' }}>
-        <div className="flex items-center gap-2 mb-4">
-          <span className="text-lg text-cyber-ink/60">🛡️</span>
-          <h3 className="font-mono text-lg font-bold text-cyber-ink">安全约束 Safety Constraints</h3>
+      <div className="border-t border-border pt-4">
+        <div className="mb-4 flex items-center gap-2">
+          <ShieldCheck className="h-5 w-5 text-primary" aria-hidden="true" />
+          <h3 className="font-archive-serif text-lg font-semibold text-foreground">安全约束 Safety Constraints</h3>
         </div>
 
         <div className="space-y-4">
           <div>
-            <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
+            <label className={labelStyle}>
               需要避免的话题 Topics to Avoid
             </label>
             <TagInput
@@ -101,14 +104,14 @@ export default function StepInteraction({ formData, updateField }) {
             />
           </div>
           <div>
-            <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
+            <label className={labelStyle}>
               OOC处理方式 Out-of-Character Handling
             </label>
             <input
               type="text"
               value={sc.out_of_character_handling || ''}
               onChange={(e) => updateField('safety_constraints.out_of_character_handling', e.target.value)}
-              className="w-full px-2 py-1.5 text-sm font-mono text-cyber-ink bg-transparent border-b border-amber-300/50 focus:border-amber-500 focus:outline-none focus:bg-amber-50/50 transition-colors"
+              className={inputStyle}
               placeholder="How to handle out-of-character situations..."
             />
           </div>
@@ -116,15 +119,15 @@ export default function StepInteraction({ formData, updateField }) {
       </div>
 
       {/* Action Vocabulary (simplified) */}
-      <div className="border-t pt-4" style={{ borderColor: '#C4B594' }}>
-        <div className="flex items-center gap-2 mb-4">
-          <span className="text-lg text-cyber-ink/60">🎬</span>
-          <h3 className="font-mono text-lg font-bold text-cyber-ink">行为动作词库 Action Vocabulary</h3>
+      <div className="border-t border-border pt-4">
+        <div className="mb-4 flex items-center gap-2">
+          <Clapperboard className="h-5 w-5 text-primary" aria-hidden="true" />
+          <h3 className="font-archive-serif text-lg font-semibold text-foreground">行为动作词库 Action Vocabulary</h3>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
-            <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
+            <label className={labelStyle}>
               打招呼 Greeting
             </label>
             <TagInput
@@ -134,7 +137,7 @@ export default function StepInteraction({ formData, updateField }) {
             />
           </div>
           <div>
-            <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
+            <label className={labelStyle}>
               告别 Farewell
             </label>
             <TagInput
@@ -144,7 +147,7 @@ export default function StepInteraction({ formData, updateField }) {
             />
           </div>
           <div>
-            <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
+            <label className={labelStyle}>
               同意 Agreement
             </label>
             <TagInput
@@ -154,7 +157,7 @@ export default function StepInteraction({ formData, updateField }) {
             />
           </div>
           <div>
-            <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
+            <label className={labelStyle}>
               反对 Disagreement
             </label>
             <TagInput
@@ -164,7 +167,7 @@ export default function StepInteraction({ formData, updateField }) {
             />
           </div>
           <div className="md:col-span-2">
-            <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
+            <label className={labelStyle}>
               情绪反应 Emotional Reactions
             </label>
             <TagInput

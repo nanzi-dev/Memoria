@@ -1,32 +1,57 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { AlertTriangle, CheckCircle2, Info, Trash2, X } from 'lucide-react';
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Button, buttonVariants } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 const DialogContext = createContext(null);
 
 const VARIANT = {
   info: {
     Icon: Info,
-    panel: 'border-cyber-green/20 shadow-[0_0_70px_rgba(167,239,158,0.08)]',
-    icon: 'text-cyber-green bg-cyber-green/10 border-cyber-green/20',
-    confirm: 'bg-cyber-green/10 border-cyber-green/35 text-cyber-green hover:bg-cyber-green/20',
+    icon: 'border-primary/30 bg-primary/10 text-primary',
+    action: 'default',
   },
   success: {
     Icon: CheckCircle2,
-    panel: 'border-emerald-400/20 shadow-[0_0_70px_rgba(52,211,153,0.08)]',
-    icon: 'text-emerald-300 bg-emerald-400/10 border-emerald-400/20',
-    confirm: 'bg-emerald-400/10 border-emerald-400/35 text-emerald-300 hover:bg-emerald-400/20',
+    icon: 'border-primary/30 bg-primary/10 text-primary',
+    action: 'default',
   },
   warning: {
     Icon: AlertTriangle,
-    panel: 'border-amber-400/20 shadow-[0_0_70px_rgba(251,191,36,0.08)]',
-    icon: 'text-amber-300 bg-amber-400/10 border-amber-400/20',
-    confirm: 'bg-amber-400/10 border-amber-400/35 text-amber-300 hover:bg-amber-400/20',
+    icon: 'border-border bg-secondary text-secondary-foreground',
+    action: 'secondary',
   },
   danger: {
     Icon: Trash2,
-    panel: 'border-red-400/20 shadow-[0_0_70px_rgba(248,113,113,0.08)]',
-    icon: 'text-red-300 bg-red-400/10 border-red-400/20',
-    confirm: 'bg-red-500/10 border-red-400/35 text-red-300 hover:bg-red-500/20',
+    icon: 'border-destructive/35 bg-destructive/10 text-destructive',
+    action: 'destructive',
   },
 };
 
@@ -35,115 +60,273 @@ function normalizeOptions(options, fallbackTitle) {
   return { title: fallbackTitle, ...options };
 }
 
+function DialogMessage({
+  dialog,
+  variant,
+  Header,
+  Title,
+  Description,
+  closeControl,
+  footer,
+}) {
+  const Icon = variant.Icon;
+
+  return (
+    <>
+      <div className="flex min-w-0 items-start gap-4 p-5 pr-16 sm:p-6 sm:pr-16">
+        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-md border ${variant.icon}`}>
+          <Icon className="h-5 w-5" aria-hidden="true" />
+        </div>
+        <Header className="min-w-0 flex-1">
+          <Title className="break-words">{dialog.title}</Title>
+          <Description className="whitespace-pre-line break-words">
+            {dialog.message}
+          </Description>
+        </Header>
+        {closeControl}
+      </div>
+      <div className="border-t border-border bg-muted/25 p-4 sm:px-6">
+        {footer}
+      </div>
+    </>
+  );
+}
+
 export function DialogProvider({ children }) {
   const [dialog, setDialog] = useState(null);
+  const resultRef = useRef(undefined);
+  const openerRef = useRef(null);
+  const dialogRef = useRef(null);
+  const mountedRef = useRef(true);
 
   const close = useCallback((result) => {
-    setDialog((current) => {
-      current?.resolve(result);
-      return null;
-    });
+    const currentDialog = dialogRef.current;
+    if (!currentDialog) return;
+
+    dialogRef.current = null;
+    resultRef.current = undefined;
+    if (mountedRef.current) setDialog(null);
+
+    if (!currentDialog.settled) {
+      currentDialog.settled = true;
+      try {
+        currentDialog.resolve(result);
+      } catch {
+        // Promise settlement must not break dialog teardown.
+      }
+    }
+  }, []);
+
+  const restoreOpenerFocus = useCallback(() => {
+    const opener = openerRef.current;
+    openerRef.current = null;
+    if (!opener?.isConnected || typeof opener.focus !== 'function') return;
+
+    try {
+      opener.focus({ preventScroll: true });
+    } catch {
+      try {
+        opener.focus();
+      } catch {
+        // The opener may become disconnected while the dialog is closing.
+      }
+    }
+  }, []);
+
+  const presentDialog = useCallback((nextDialog) => {
+    if (!mountedRef.current) {
+      nextDialog.settled = true;
+      try {
+        nextDialog.resolve(nextDialog.dismissResult);
+      } catch {
+        // A retained context callback may be invoked after provider teardown.
+      }
+      return;
+    }
+
+    const previousDialog = dialogRef.current;
+    if (!previousDialog && typeof document !== 'undefined') {
+      try {
+        openerRef.current = document.activeElement;
+      } catch {
+        openerRef.current = null;
+      }
+    }
+
+    dialogRef.current = nextDialog;
+    resultRef.current = nextDialog.dismissResult;
+
+    if (previousDialog && !previousDialog.settled) {
+      previousDialog.settled = true;
+      try {
+        previousDialog.resolve(previousDialog.dismissResult);
+      } catch {
+        // Replacing a dialog must not prevent the next one from opening.
+      }
+    }
+
+    setDialog(nextDialog);
   }, []);
 
   const confirm = useCallback((options) => new Promise((resolve) => {
-    setDialog({
+    presentDialog({
       type: 'confirm',
       variant: 'warning',
       confirmText: '确认',
       cancelText: '取消',
       ...normalizeOptions(options, '确认操作'),
+      dismissResult: false,
+      settled: false,
       resolve,
     });
-  }), []);
+  }), [presentDialog]);
 
   const alert = useCallback((options) => new Promise((resolve) => {
-    setDialog({
+    presentDialog({
       type: 'alert',
       variant: 'info',
       confirmText: '知道了',
       ...normalizeOptions(options, '提示'),
+      dismissResult: undefined,
+      settled: false,
       resolve,
     });
-  }), []);
+  }), [presentDialog]);
+
+  const handleCloseAutoFocus = useCallback((event) => {
+    event.preventDefault();
+    if (dialogRef.current) return;
+    restoreOpenerFocus();
+  }, [restoreOpenerFocus]);
+
+  const handleOpenChange = useCallback((open, type) => {
+    if (!open && dialogRef.current?.type === type) close(resultRef.current);
+  }, [close]);
 
   useEffect(() => {
-    if (!dialog) return;
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') close(dialog.type === 'confirm' ? false : undefined);
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      const currentDialog = dialogRef.current;
+      dialogRef.current = null;
+      resultRef.current = undefined;
+
+      if (currentDialog && !currentDialog.settled) {
+        currentDialog.settled = true;
+        try {
+          currentDialog.resolve(currentDialog.dismissResult);
+        } catch {
+          // Provider teardown must not surface errors from pending callers.
+        }
+      }
+
+      restoreOpenerFocus();
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [close, dialog]);
+  }, [restoreOpenerFocus]);
 
   const value = useMemo(() => ({ alert, confirm }), [alert, confirm]);
-  const variant = dialog ? VARIANT[dialog.variant] || VARIANT.info : null;
-  const Icon = variant?.Icon;
+  const variant = dialog ? VARIANT[dialog.variant] || VARIANT.info : VARIANT.info;
 
   return (
     <DialogContext.Provider value={value}>
       {children}
-      {dialog && (
-        <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4 font-mono">
-          <div
-            className="absolute inset-0 bg-black/78 backdrop-blur-md"
-            onClick={() => close(dialog.type === 'confirm' ? false : undefined)}
-          />
-          <div
-            className={`relative w-full max-w-md overflow-hidden rounded-xl border bg-[#0d0d14]/95 animate-fade-up ${variant.panel}`}
-            role={dialog.type === 'confirm' ? 'alertdialog' : 'dialog'}
-            aria-modal="true"
-            aria-labelledby="app-dialog-title"
-            aria-describedby="app-dialog-message"
+
+      <AlertDialog
+        open={dialog?.type === 'confirm'}
+        onOpenChange={open => handleOpenChange(open, 'confirm')}
+      >
+        {dialog?.type === 'confirm' && (
+          <AlertDialogContent
+            className="max-w-md gap-0 overflow-hidden rounded-md p-0 motion-reduce:transition-none"
+            onPointerDownOutside={() => close(false)}
+            onCloseAutoFocus={handleCloseAutoFocus}
           >
-            <div className="absolute inset-0 pointer-events-none opacity-[0.04]" style={{
-              backgroundImage: 'linear-gradient(#A7EF9E 1px, transparent 1px), linear-gradient(90deg, #A7EF9E 1px, transparent 1px)',
-              backgroundSize: '20px 20px',
-            }} />
-            <div className="relative flex items-start gap-4 px-5 py-5">
-              <div className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border ${variant.icon}`}>
-                <Icon size={19} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-3">
-                  <h2 id="app-dialog-title" className="text-sm font-bold tracking-wider text-zinc-100">
-                    {dialog.title}
-                  </h2>
-                  <button
-                    type="button"
-                    onClick={() => close(dialog.type === 'confirm' ? false : undefined)}
-                    className="rounded-full p-1 text-cyber-green/25 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green/70"
-                    aria-label="关闭"
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-                <p id="app-dialog-message" className="mt-3 whitespace-pre-line text-sm leading-6 text-zinc-300/80">
-                  {dialog.message}
-                </p>
-              </div>
-            </div>
-            <div className="relative flex justify-end gap-2 border-t border-white/[0.04] bg-black/15 px-5 py-4">
-              {dialog.type === 'confirm' && (
-                <button
-                  type="button"
-                  onClick={() => close(false)}
-                  className="rounded-lg border border-cyber-green/12 px-4 py-2 text-sm text-cyber-green/55 transition-all hover:border-cyber-green/25 hover:bg-cyber-green/5 hover:text-cyber-green/80 active:scale-[0.98]"
+            <DialogMessage
+              dialog={dialog}
+              variant={variant}
+              Header={AlertDialogHeader}
+              Title={AlertDialogTitle}
+              Description={AlertDialogDescription}
+              closeControl={(
+                <AlertDialogCancel
+                  className="absolute right-3 top-3 h-11 min-h-11 w-11 min-w-11 border-0 bg-transparent p-0 text-muted-foreground shadow-none hover:bg-accent hover:text-accent-foreground"
+                  aria-label="关闭"
+                  title="关闭"
                 >
-                  {dialog.cancelText}
-                </button>
+                  <X aria-hidden="true" />
+                </AlertDialogCancel>
               )}
-              <button
-                type="button"
-                onClick={() => close(dialog.type === 'confirm' ? true : undefined)}
-                className={`rounded-lg border px-4 py-2 text-sm font-bold transition-all active:scale-[0.98] ${variant.confirm}`}
-                autoFocus
-              >
-                {dialog.confirmText}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              footer={(
+                <AlertDialogFooter>
+                  <AlertDialogCancel className="min-h-11">
+                    {dialog.cancelText}
+                  </AlertDialogCancel>
+                  <AlertDialogAction
+                    className={buttonVariants({
+                      variant: variant.action,
+                      size: 'lg',
+                      className: 'min-h-11',
+                    })}
+                    onClick={() => {
+                      resultRef.current = true;
+                    }}
+                    autoFocus
+                  >
+                    {dialog.confirmText}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              )}
+            />
+          </AlertDialogContent>
+        )}
+      </AlertDialog>
+
+      <Dialog
+        open={dialog?.type === 'alert'}
+        onOpenChange={open => handleOpenChange(open, 'alert')}
+      >
+        {dialog?.type === 'alert' && (
+          <DialogContent
+            className="max-w-md gap-0 overflow-hidden rounded-md p-0 motion-reduce:transition-none"
+            showClose={false}
+            onCloseAutoFocus={handleCloseAutoFocus}
+          >
+            <DialogMessage
+              dialog={dialog}
+              variant={variant}
+              Header={DialogHeader}
+              Title={DialogTitle}
+              Description={DialogDescription}
+              closeControl={(
+                <DialogClose
+                  className="absolute right-3 top-3 inline-flex h-11 min-h-11 w-11 min-w-11 items-center justify-center rounded-md text-muted-foreground transition-colors duration-200 hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring motion-reduce:transition-none"
+                  aria-label="关闭"
+                  title="关闭"
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </DialogClose>
+              )}
+              footer={(
+                <DialogFooter>
+                  <DialogClose asChild>
+                    <Button
+                      type="button"
+                      variant={variant.action}
+                      size="lg"
+                      onClick={() => {
+                        resultRef.current = undefined;
+                      }}
+                      autoFocus
+                    >
+                      {dialog.confirmText}
+                    </Button>
+                  </DialogClose>
+                </DialogFooter>
+              )}
+            />
+          </DialogContent>
+        )}
+      </Dialog>
     </DialogContext.Provider>
   );
 }
