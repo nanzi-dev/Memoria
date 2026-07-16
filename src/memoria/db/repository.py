@@ -730,6 +730,28 @@ CREATE INDEX IF NOT EXISTS idx_dialogue_turn_session_lease
 ON dialogue_turn(session_id, status, lease_expires_at);
 
 -- =========================
+-- 持久化后台任务
+-- =========================
+CREATE TABLE IF NOT EXISTS background_job (
+    job_id           TEXT PRIMARY KEY,
+    job_type         TEXT NOT NULL,
+    dedupe_key       TEXT NOT NULL UNIQUE,
+    payload          TEXT NOT NULL,
+    status           TEXT NOT NULL DEFAULT 'pending',
+    attempts         INTEGER NOT NULL DEFAULT 0,
+    available_at     TEXT NOT NULL,
+    lease_owner      TEXT,
+    lease_expires_at TEXT,
+    last_error       TEXT,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL,
+    completed_at     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_background_job_claim
+ON background_job(status, available_at, lease_expires_at, created_at);
+
+-- =========================
 -- 世界观知识库
 -- =========================
 CREATE TABLE IF NOT EXISTS knowledge_base (
@@ -1180,6 +1202,305 @@ def init_db():
                 conn.execute(
                     "ALTER TABLE character_card ADD COLUMN avatar_revision TEXT"
                 )
+
+
+# =========================
+# 持久化后台任务
+# =========================
+def _background_job_time(value: datetime | str | None = None) -> datetime:
+    if value is None:
+        return datetime.now(timezone.utc)
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _decode_background_job(row) -> dict | None:
+    job = _row_to_dict(row)
+    if job is None:
+        return None
+    try:
+        job["payload"] = json.loads(job["payload"])
+    except (TypeError, ValueError):
+        job["payload"] = {}
+    return job
+
+
+def _lock_background_job_write(conn) -> None:
+    if isinstance(conn, sqlite3.Connection):
+        if not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
+
+
+def _enqueue_background_job_in_transaction(
+    conn,
+    *,
+    job_type: str,
+    dedupe_key: str,
+    payload: dict[str, Any],
+    available_at: datetime | str | None = None,
+    now: datetime | str | None = None,
+) -> dict:
+    if not job_type or not dedupe_key:
+        raise ValueError("job_type and dedupe_key are required")
+    if not isinstance(payload, dict):
+        raise TypeError("background job payload must be a dict")
+
+    queued_at = _background_job_time(now)
+    now_iso = queued_at.isoformat()
+    available_at_iso = _background_job_time(available_at or queued_at).isoformat()
+    job_id = f"job_{uuid.uuid4().hex}"
+    encoded_payload = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+    _lock_background_job_write(conn)
+    conn.execute(
+        """
+        INSERT INTO background_job (
+            job_id, job_type, dedupe_key, payload, status, attempts,
+            available_at, lease_owner, lease_expires_at, last_error,
+            created_at, updated_at, completed_at
+        )
+        VALUES (?, ?, ?, ?, 'pending', 0, ?, NULL, NULL, NULL, ?, ?, NULL)
+        ON CONFLICT(dedupe_key) DO NOTHING
+        """,
+        (
+            job_id,
+            job_type,
+            dedupe_key,
+            encoded_payload,
+            available_at_iso,
+            now_iso,
+            now_iso,
+        ),
+    )
+    row = conn.execute(
+        "SELECT * FROM background_job WHERE dedupe_key = ?",
+        (dedupe_key,),
+    ).fetchone()
+    if row["job_type"] != job_type:
+        raise ValueError("dedupe_key is already used by another job type")
+    return _decode_background_job(row)
+
+
+def enqueue_background_job(
+    *,
+    job_type: str,
+    dedupe_key: str,
+    payload: dict[str, Any],
+    available_at: datetime | str | None = None,
+) -> dict:
+    """Persist one immutable job payload, deduplicated by caller-provided key."""
+    now = _background_job_time()
+    with get_conn() as conn:
+        return _enqueue_background_job_in_transaction(
+            conn,
+            job_type=job_type,
+            dedupe_key=dedupe_key,
+            payload=payload,
+            available_at=available_at,
+            now=now,
+        )
+
+
+def get_background_job(job_id: str) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM background_job WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()
+        return _decode_background_job(row)
+
+
+def claim_background_job(
+    *,
+    lease_owner: str,
+    lease_seconds: int = 60,
+    now: datetime | str | None = None,
+) -> dict | None:
+    """Atomically claim one due or expired job and increment its attempt count."""
+    if not lease_owner:
+        raise ValueError("lease_owner is required")
+    claimed_at = _background_job_time(now)
+    claimed_at_iso = claimed_at.isoformat()
+    lease_expires_at = (
+        claimed_at + timedelta(seconds=max(1, int(lease_seconds)))
+    ).isoformat()
+
+    with get_conn() as conn:
+        _lock_background_job_write(conn)
+        select_sql = """
+            SELECT *
+            FROM background_job
+            WHERE (
+                status IN ('pending', 'retry')
+                AND available_at <= ?
+            ) OR (
+                status = 'running'
+                AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+            )
+            ORDER BY available_at ASC, created_at ASC, job_id ASC
+            LIMIT 1
+        """
+        if _is_postgres_enabled():
+            select_sql = _append_postgres_clause(
+                select_sql,
+                "FOR UPDATE SKIP LOCKED",
+            )
+        candidate = conn.execute(
+            select_sql,
+            (claimed_at_iso, claimed_at_iso),
+        ).fetchone()
+        if candidate is None:
+            return None
+
+        updated = conn.execute(
+            """
+            UPDATE background_job
+            SET status = 'running',
+                attempts = attempts + 1,
+                lease_owner = ?,
+                lease_expires_at = ?,
+                last_error = NULL,
+                updated_at = ?,
+                completed_at = NULL
+            WHERE job_id = ?
+              AND (
+                    (
+                        status IN ('pending', 'retry')
+                        AND available_at <= ?
+                    ) OR (
+                        status = 'running'
+                        AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+                    )
+              )
+            """,
+            (
+                lease_owner,
+                lease_expires_at,
+                claimed_at_iso,
+                candidate["job_id"],
+                claimed_at_iso,
+                claimed_at_iso,
+            ),
+        )
+        if updated.rowcount != 1:
+            return None
+        row = conn.execute(
+            "SELECT * FROM background_job WHERE job_id = ?",
+            (candidate["job_id"],),
+        ).fetchone()
+        return _decode_background_job(row)
+
+
+def complete_background_job(
+    job_id: str,
+    *,
+    lease_owner: str,
+    now: datetime | str | None = None,
+) -> bool:
+    """Complete a job only while the caller still owns its active lease."""
+    completed_at = _background_job_time(now).isoformat()
+    with get_conn() as conn:
+        updated = conn.execute(
+            """
+            UPDATE background_job
+            SET status = 'completed',
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+                last_error = NULL,
+                updated_at = ?,
+                completed_at = ?
+            WHERE job_id = ?
+              AND status = 'running'
+              AND lease_owner = ?
+              AND lease_expires_at > ?
+            """,
+            (
+                completed_at,
+                completed_at,
+                job_id,
+                lease_owner,
+                completed_at,
+            ),
+        )
+        return updated.rowcount == 1
+
+
+def record_background_job_failure(
+    job_id: str,
+    *,
+    lease_owner: str,
+    error: str,
+    max_attempts: int,
+    retry_delay_seconds: float = 0,
+    now: datetime | str | None = None,
+) -> dict | None:
+    """Release a failed attempt for retry, or mark it terminal at the limit."""
+    failed_at = _background_job_time(now)
+    failed_at_iso = failed_at.isoformat()
+    max_attempts = max(1, int(max_attempts))
+    retry_at = (
+        failed_at + timedelta(seconds=max(0.0, float(retry_delay_seconds)))
+    ).isoformat()
+
+    with get_conn() as conn:
+        _lock_background_job_write(conn)
+        if _is_postgres_enabled():
+            row = conn.execute(
+                """
+                SELECT * FROM background_job
+                WHERE job_id = ?
+                FOR UPDATE
+                """,
+                (job_id,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM background_job WHERE job_id = ?",
+                (job_id,),
+            ).fetchone()
+        if (
+            row is None
+            or row["status"] != "running"
+            or row["lease_owner"] != lease_owner
+            or not row["lease_expires_at"]
+            or row["lease_expires_at"] <= failed_at_iso
+        ):
+            return None
+
+        terminal = int(row["attempts"]) >= max_attempts
+        status = "failed" if terminal else "retry"
+        available_at = row["available_at"] if terminal else retry_at
+        completed_at = failed_at_iso if terminal else None
+        conn.execute(
+            """
+            UPDATE background_job
+            SET status = ?,
+                available_at = ?,
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+                last_error = ?,
+                updated_at = ?,
+                completed_at = ?
+            WHERE job_id = ? AND status = 'running' AND lease_owner = ?
+            """,
+            (
+                status,
+                available_at,
+                str(error)[:4000],
+                failed_at_iso,
+                completed_at,
+                job_id,
+                lease_owner,
+            ),
+        )
+        updated = conn.execute(
+            "SELECT * FROM background_job WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()
+        return _decode_background_job(updated)
 
 
 # =========================
@@ -5672,7 +5993,7 @@ def claim_dialogue_turn(
     request_id: str,
     player_id: str,
     turn_kind: str,
-    lease_seconds: int = 120,
+    lease_seconds: int = 240,
 ) -> dict:
     """Claim one idempotent turn, or return its completed response."""
     now = datetime.now(timezone.utc)
@@ -5868,7 +6189,7 @@ def _commit_dialogue_turn_in_transaction(
     lease_owner = dialogue_turn["lease_owner"]
     row = conn.execute(
         """
-        SELECT status, lease_owner, response_data
+        SELECT status, lease_owner, lease_expires_at, response_data
         FROM dialogue_turn
         WHERE session_id = ? AND request_id = ?
         """,
@@ -5878,7 +6199,12 @@ def _commit_dialogue_turn_in_transaction(
         raise RuntimeError("dialogue turn claim does not exist")
     if row["status"] == "completed":
         return json.loads(row["response_data"])
-    if row["status"] != "processing" or row["lease_owner"] != lease_owner:
+    if (
+        row["status"] != "processing"
+        or row["lease_owner"] != lease_owner
+        or not row["lease_expires_at"]
+        or row["lease_expires_at"] <= now
+    ):
         raise DialogueTurnConflictError("对话轮次租约已失效")
 
     response = dialogue_turn["response"]
@@ -6009,6 +6335,16 @@ def _commit_dialogue_turn_in_transaction(
             ),
         )
 
+    for background_job in dialogue_turn.get("background_jobs") or []:
+        _enqueue_background_job_in_transaction(
+            conn,
+            job_type=background_job["job_type"],
+            dedupe_key=background_job["dedupe_key"],
+            payload=background_job["payload"],
+            available_at=background_job.get("available_at"),
+            now=now,
+        )
+
     response_data = json.dumps(response, ensure_ascii=False)
     completed = conn.execute(
         """
@@ -6017,8 +6353,17 @@ def _commit_dialogue_turn_in_transaction(
             response_data = ?, error = NULL, updated_at = ?, completed_at = ?
         WHERE session_id = ? AND request_id = ?
           AND status = 'processing' AND lease_owner = ?
+          AND lease_expires_at > ?
         """,
-        (response_data, now, now, session_id, request_id, lease_owner),
+        (
+            response_data,
+            now,
+            now,
+            session_id,
+            request_id,
+            lease_owner,
+            now,
+        ),
     )
     if completed.rowcount != 1:
         raise DialogueTurnConflictError("对话轮次租约已失效")

@@ -11,7 +11,6 @@
 
 import json
 import logging
-import re
 import uuid
 from typing import Callable
 
@@ -19,6 +18,7 @@ from memoria.core import (
     character_loader,
     llm_client,
     multi_character_memory,
+    performance,
     prompt_builder,
     world_clock,
 )
@@ -26,46 +26,16 @@ from memoria.core.config import configs
 from memoria.core import event_runtime, relationship_context
 from memoria.core.knowledge_retriever import retrieve_knowledge
 from memoria.core.locale import DEFAULT_LOCALE, Locale
-from memoria.core.memory_extractor import (
-    extract_player_memory,
-    record_generated_memory_claim,
+from memoria.core.output_safety import (
+    DialogueSafetyStream,
+    safety_check as _safety_check,
 )
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
 DebugSink = Callable[[str], None]
+EventSink = Callable[[str, dict], None]
 
-
-# =========================
-# 安全过滤
-# =========================
-RISK_PATTERNS = [
-    r"我是.{0,3}(AI|ai|人工智能|语言模型|机器人)",
-    r"作为.{0,3}(AI|ai|人工智能|语言模型)",
-    r"我(不能|无法)扮演",
-    r"我没有(真正的|真实的)情感",
-    r"系统提示词",
-    r"作为一个语言模型",
-]
-
-_RISK_RE = re.compile("|".join(RISK_PATTERNS)) if RISK_PATTERNS else None
-
-FALLBACK_LINE = "[皱眉]这话问得奇怪，不讲不讲。"
-
-def _safety_check(dialogue: str, fallback: str = FALLBACK_LINE) -> str:
-    """
-    输出安全检查：
-    - 命中 AI/系统泄露 → 替换兜底话术
-    """
-    if not dialogue:
-        return fallback
-    
-    if _RISK_RE and _RISK_RE.search(dialogue):
-        logger.warning("检测到高风险输出，已替换: %s", dialogue[:200])
-        return fallback
-    
-    return dialogue
-    
 
 # =========================
 # 数值裁剪
@@ -754,12 +724,13 @@ def start_session(
 # =========================
 # 主对话流程
 # =========================
-def run_dialogue_turn(
+def _run_dialogue_turn(
     session_id: str,
     player_message: str,
     request_id: str | None = None,
     debug: bool = False,
     debug_sink: DebugSink | None = None,
+    event_sink: EventSink | None = None,
 ) -> dict:
     """对应 /dialogue/turn"""
     session = repository.get_session(session_id)
@@ -782,66 +753,116 @@ def run_dialogue_turn(
     if claim["completed"]:
         return claim["response"]
     lease_owner = claim["lease_owner"]
+    stream_id = f"{request_id}:0"
 
     try:
-        card = _load_character_card(character_id, player_id, locale)
-        clock_snapshot = world_clock.get_clock_snapshot(player_id)
-        world_created_at = clock_snapshot.world_now.isoformat()
-        time_context = clock_snapshot.prompt_context(
-            repository.get_last_character_interaction_world_at(player_id, character_id),
-            locale=getattr(getattr(card, "speech_style", None), "language", "zh-CN"),
+        if event_sink:
+            event_sink("stage", {"stage": "preparation"})
+        with performance.measure("dialogue.turn.prepare"):
+            card = _load_character_card(character_id, player_id, locale)
+            clock_snapshot = world_clock.get_clock_snapshot(player_id)
+            world_created_at = clock_snapshot.world_now.isoformat()
+            time_context = clock_snapshot.prompt_context(
+                repository.get_last_character_interaction_world_at(
+                    player_id,
+                    character_id,
+                ),
+                locale=getattr(
+                    getattr(card, "speech_style", None),
+                    "language",
+                    "zh-CN",
+                ),
+            )
+            runtime_state = repository.get_runtime_state(
+                character_id,
+                player_id,
+                card,
+                query_context=player_message,
+            )
+            previous_affinity = _safe_float(
+                runtime_state.get("affection_level", 0)
+            )
+            previous_trust = _safe_float(runtime_state.get("trust_level", 0))
+            history = repository.get_short_term_history(
+                session_id,
+                limit_turns=configs.short_term_memory_turns,
+            )
+        if event_sink:
+            event_sink("stage", {"stage": "retrieval"})
+        with performance.measure("dialogue.turn.retrieval"):
+            knowledge = retrieve_knowledge(
+                owner_user_id=player_id,
+                character_id=character_id,
+                current_message=player_message,
+                recent_history=history,
+            )
+        with performance.measure("dialogue.turn.prompt"):
+            past_summaries_raw = repository.get_recent_summaries(
+                character_id,
+                player_id,
+                limit=3,
+            )
+            player_character = _load_player_character(player_id, player_name)
+            player_name = player_character["display_name"]
+            prompt_context = _load_single_character_prompt_context(
+                character_id,
+                player_id,
+                card,
+                session_id=session_id,
+                query_context=player_message,
+                fallback_known_player_facts=runtime_state.get(
+                    "known_player_facts"
+                ),
+                player_character=player_character,
+            )
+            runtime_state["known_player_facts"] = (
+                prompt_context["known_player_facts"]
+            )
+            past_summaries = [
+                summary["summary_text"] for summary in past_summaries_raw or []
+            ]
+            past_summaries.extend(prompt_context["cross_mode_memories"])
+            system_prompt = _build_system_prompt(
+                card,
+                runtime_state,
+                player_name,
+                player_character=player_character,
+                past_summaries=past_summaries,
+                relationship_graph_lines=(
+                    prompt_context["relationship_graph_lines"]
+                ),
+                time_context=time_context,
+                knowledge_context=knowledge.prompt_section,
+                locale=locale,
+            )
+        if event_sink:
+            event_sink(
+                "character_started",
+                {
+                    "stream_id": stream_id,
+                    "character_id": character_id,
+                    "character_name": card.meta.display_name or card.meta.name,
+                },
+            )
+            event_sink("stage", {"stage": "generation"})
+        safety_stream = (
+            DialogueSafetyStream(
+                lambda delta: event_sink(
+                    "dialogue_delta",
+                    {"stream_id": stream_id, "delta": delta},
+                )
+            )
+            if event_sink
+            else None
         )
-        runtime_state = repository.get_runtime_state(
-            character_id,
-            player_id,
-            card,
-            query_context=player_message,
-        )
-        previous_affinity = _safe_float(runtime_state.get("affection_level", 0))
-        previous_trust = _safe_float(runtime_state.get("trust_level", 0))
-        history = repository.get_short_term_history(session_id, limit_turns=8)
-        knowledge = retrieve_knowledge(
-            owner_user_id=player_id,
-            character_id=character_id,
-            current_message=player_message,
-            recent_history=history,
-        )
-        past_summaries_raw = repository.get_recent_summaries(
-            character_id, player_id, limit=3
-        )
-        player_character = _load_player_character(player_id, player_name)
-        player_name = player_character["display_name"]
-        prompt_context = _load_single_character_prompt_context(
-            character_id,
-            player_id,
-            card,
-            session_id=session_id,
-            query_context=player_message,
-            fallback_known_player_facts=runtime_state.get("known_player_facts"),
-            player_character=player_character,
-        )
-        runtime_state["known_player_facts"] = prompt_context["known_player_facts"]
-        past_summaries = [
-            summary["summary_text"] for summary in past_summaries_raw or []
-        ]
-        past_summaries.extend(prompt_context["cross_mode_memories"])
-        system_prompt = _build_system_prompt(
-            card,
-            runtime_state,
-            player_name,
-            player_character=player_character,
-            past_summaries=past_summaries,
-            relationship_graph_lines=prompt_context["relationship_graph_lines"],
-            time_context=time_context,
-            knowledge_context=knowledge.prompt_section,
-            locale=locale,
-        )
-        result = llm_client.call_role_turn(
-            system_prompt=system_prompt,
-            history=history + [{"role": "user", "content": player_message}],
-            debug=debug,
-            debug_sink=debug_sink,
-        )
+        with performance.measure("dialogue.turn.generation"):
+            result = llm_client.call_role_turn(
+                system_prompt=system_prompt,
+                history=history + [{"role": "user", "content": player_message}],
+                debug=debug,
+                debug_sink=debug_sink,
+                on_dialogue_delta=safety_stream.feed if safety_stream else None,
+            )
         if result.get("_fallback_mode"):
             logger.warning(
                 "LLM JSON降级触发 (character_id=%s, session_id=%s)",
@@ -849,7 +870,12 @@ def run_dialogue_turn(
                 session_id,
             )
 
-        base_dialogue = _safety_check(result.get("dialogue", ""))
+        raw_dialogue = result.get("dialogue", "")
+        base_dialogue = (
+            safety_stream.finish(raw_dialogue)
+            if safety_stream
+            else _safety_check(raw_dialogue)
+        )
         action = result.get("action") or card.action_vocabulary.default_action
         valid_actions = (
             getattr(card.action_vocabulary, "greeting_actions", [])
@@ -933,6 +959,33 @@ def run_dialogue_turn(
                 "world_created_at": world_created_at,
                 "knowledge_sources": knowledge.sources,
             }
+            background_jobs = []
+            checkpoint_interval = configs.long_term_memory_interval_turns
+            checkpoint_turn = (
+                repository.get_session_user_turn_count(session_id) + 1
+            )
+            if checkpoint_turn % checkpoint_interval == 0:
+                checkpoint_history = repository.get_short_term_history(
+                    session_id,
+                    limit_turns=checkpoint_interval,
+                )
+                checkpoint_history.extend([
+                    {"role": "user", "content": player_message},
+                    {"role": "assistant", "content": dialogue},
+                ])
+                background_jobs.append({
+                    "job_type": "single_checkpoint_memory",
+                    "dedupe_key": (
+                        f"single_checkpoint_memory:{session_id}:{checkpoint_turn}"
+                    ),
+                    "payload": {
+                        "owner_user_id": player_id,
+                        "scope_type": "character",
+                        "scope_id": character_id,
+                        "session_id": session_id,
+                        "history": checkpoint_history[-checkpoint_interval * 2:],
+                    },
+                })
             turn = {
                 "session_id": session_id,
                 "request_id": request_id,
@@ -967,49 +1020,44 @@ def run_dialogue_turn(
                         "response_field": "assistant_message_id",
                     },
                 ],
+                "background_jobs": background_jobs,
             }
             turn_holder["turn"] = turn
             return turn
 
         try:
-            event_results = event_runtime.detect_and_execute_events(
-                event_context,
-                dialogue_turn_factory=build_turn,
-            )
+            if event_sink:
+                event_sink("stage", {"stage": "events"})
+            with performance.measure("dialogue.turn.events"):
+                event_results = event_runtime.detect_and_execute_events(
+                    event_context,
+                    dialogue_turn_factory=build_turn,
+                )
         except Exception:
             logger.exception("事件系统处理失败，提交无事件结果的对话轮次")
             event_results = []
 
         if "turn" not in turn_holder:
             turn = build_turn(event_results)
-            response = repository.commit_dialogue_turn(
-                dialogue_turn=turn,
-                runtime_states=turn["runtime_states"],
-            )
+            if event_sink:
+                event_sink("stage", {"stage": "commit"})
+            with performance.measure("dialogue.turn.commit"):
+                response = repository.commit_dialogue_turn(
+                    dialogue_turn=turn,
+                    runtime_states=turn["runtime_states"],
+                )
         else:
             response = turn_holder["turn"]["response"]
 
-        try:
-            if repository.is_long_term_memory_checkpoint(
-                session_id, configs.long_term_memory_interval_turns
-            ):
-                player_history = repository.get_short_term_history(
-                    session_id,
-                    limit_turns=configs.long_term_memory_interval_turns,
-                )
-                record_generated_memory_claim(
-                    owner_user_id=player_id,
-                    scope_type="character",
-                    scope_id=character_id,
-                    fact_text=extract_player_memory(player_history),
-                    source_ids=[f"session:{session_id}"],
-                    provenance={
-                        "memory_kind": "player_fact",
-                        "session_id": session_id,
-                    },
-                )
-        except Exception:
-            logger.exception("长期记忆检查点保存失败")
+        if event_sink:
+            event_sink(
+                "character_completed",
+                {
+                    "stream_id": stream_id,
+                    "character_id": character_id,
+                    "response": response,
+                },
+            )
         return response
     except Exception as exc:
         repository.fail_dialogue_turn(
@@ -1019,3 +1067,23 @@ def run_dialogue_turn(
             str(exc),
         )
         raise
+
+
+def run_dialogue_turn(
+    session_id: str,
+    player_message: str,
+    request_id: str | None = None,
+    debug: bool = False,
+    debug_sink: DebugSink | None = None,
+    event_sink: EventSink | None = None,
+) -> dict:
+    """Run one dialogue turn and record end-to-end latency."""
+    with performance.measure("dialogue.turn.total"):
+        return _run_dialogue_turn(
+            session_id,
+            player_message,
+            request_id=request_id,
+            debug=debug,
+            debug_sink=debug_sink,
+            event_sink=event_sink,
+        )

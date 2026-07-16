@@ -473,6 +473,16 @@ class TestConfig:
         from memoria.core.config import configs
         assert configs.light_model is not None
 
+    def test_latency_sensitive_defaults_are_bounded(self):
+        from memoria.core.config import Configs
+
+        fields = Configs.model_fields
+        assert fields["llm_timeout_seconds"].default == 45.0
+        assert fields["light_task_max_output_tokens"].default == 400
+        assert fields["max_output_tokens"].default == 400
+        assert fields["knowledge_retrieval_top_k"].default == 4
+        assert fields["knowledge_injection_max_chars"].default == 4000
+
 class TestCharacterLoader:
     def test_reload_clears_cache(self):
         from memoria.core import character_loader

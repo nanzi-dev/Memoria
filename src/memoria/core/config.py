@@ -24,6 +24,8 @@ class Configs(BaseSettings):
     llm_api_key: SecretStr = ""
     llm_model: str = "deepseek-chat"
     llm_light_model: str = ""
+    llm_timeout_seconds: float = Field(default=45.0, gt=0, le=300)
+    light_task_max_output_tokens: int = Field(default=400, ge=1, le=4096)
     
     # 轻量任务专用 LLM 配置（可选，留空则使用主 LLM）
     llm_light_base_url: str = ""
@@ -48,7 +50,7 @@ class Configs(BaseSettings):
     auth_cookie_secure: bool = False
     short_term_memory_turns: int = Field(default = 8, ge = 1, le = 50)
     long_term_memory_interval_turns: int = Field(default = 5, ge = 1, le = 50)
-    max_output_tokens: int = Field(default = 600, ge = 1, le = 4096)
+    max_output_tokens: int = Field(default = 400, ge = 1, le = 4096)
     world_clock_default_timezone: str = "UTC"
     world_clock_scheduler_interval_seconds: float = Field(default=30.0, gt=0)
     world_clock_scheduler_lease_seconds: int = Field(default=90, ge=5)
@@ -61,10 +63,10 @@ class Configs(BaseSettings):
     # 世界观知识库 / RAG 配置
     knowledge_storage_path: str = "./data/knowledge"
     knowledge_query_max_chars: int = Field(default=4000, ge=100, le=20000)
-    knowledge_retrieval_top_k: int = Field(default=6, ge=1, le=50)
+    knowledge_retrieval_top_k: int = Field(default=4, ge=1, le=50)
     knowledge_max_chunks_per_document: int = Field(default=3, ge=1, le=20)
     knowledge_similarity_threshold: float = Field(default=0.60, ge=0.0, le=1.0)
-    knowledge_injection_max_chars: int = Field(default=6000, ge=500, le=50000)
+    knowledge_injection_max_chars: int = Field(default=4000, ge=500, le=50000)
     knowledge_upload_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024)
     knowledge_pdf_max_pages: int = Field(default=300, ge=1, le=2000)
     knowledge_extract_max_chars: int = Field(default=1_000_000, ge=1000)

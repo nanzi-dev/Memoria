@@ -18,6 +18,7 @@ from memoria.core.memory_extractor import summarize_session
 from memoria.core.locale import DEFAULT_LOCALE, Locale
 from memoria.api.user import require_current_user_id
 from memoria.api.knowledge_models import KnowledgeSource
+from memoria.api.streaming import create_sse_response
 from memoria.db import repository
 
 router = APIRouter()
@@ -465,6 +466,36 @@ def dialogue_turn(
         raise HTTPException(status_code=404, detail=str(e))
     except repository.DialogueTurnConflictError as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/dialogue/turn/stream")
+async def dialogue_turn_stream(
+    req: DialogueTurnRequest,
+    current_user_id: str = Depends(require_current_user_id),
+):
+    session = _get_owned_session(req.session_id, current_user_id)
+    _ensure_character_can_chat(session["character_id"], session["player_id"])
+    request_id = req.request_id or uuid.uuid4().hex
+
+    def worker(event_sink):
+        return orchestrator.run_dialogue_turn(
+            req.session_id,
+            req.player_message,
+            request_id=request_id,
+            event_sink=event_sink,
+        )
+
+    return create_sse_response(
+        worker,
+        started_data={
+            "session_id": req.session_id,
+            "request_id": request_id,
+            "turn_kind": "single",
+        },
+        completion_mapper=lambda result: DialogueTurnResponse(
+            **result
+        ).model_dump(mode="json"),
+    )
 
 # =========================
 # Session list

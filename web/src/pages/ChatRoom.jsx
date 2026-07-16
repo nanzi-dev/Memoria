@@ -19,6 +19,13 @@ import {
   restoreFailedDraft,
   settlePendingMessage,
 } from './chatOptimisticState';
+import {
+  appendDialogueDelta,
+  completeCharacter,
+  reconcileTurn,
+  startCharacter,
+} from '../utils/dialogueStreamState';
+import { retryDialogueTurnConflict } from '../utils/dialogueFallback';
 import useBrowserSpeech from '../hooks/useBrowserSpeech';
 
 import {
@@ -74,6 +81,33 @@ const CHAT_RAYS_PROPS = {
   falloff: 1.45,
   opacity: 0.82,
 };
+
+export function applyDialogueStreamEvent(messages, event) {
+  switch (event?.type) {
+    case 'character_started':
+      return startCharacter(messages, event);
+    case 'dialogue_delta':
+      return appendDialogueDelta(messages, event);
+    case 'character_completed':
+      return completeCharacter(messages, event);
+    case 'turn_completed':
+      return reconcileTurn(messages, event);
+    default:
+      return messages;
+  }
+}
+
+export function removeDialogueStreamPlaceholders(messages, streamIds) {
+  const ownedStreamIds = streamIds instanceof Set
+    ? streamIds
+    : new Set(streamIds || []);
+  if (!ownedStreamIds.size) return messages;
+  return messages.filter(message => !ownedStreamIds.has(message.stream_id));
+}
+
+export function shouldFallbackFromDialogueStream(hasReceivedDelta) {
+  return true;
+}
 
 function ChatBackdrop({ origin = 'top-right', tilt = -4 }) {
   return (
@@ -634,6 +668,7 @@ export default function ChatRoom() {
   const activeSingleCharacterIdRef = useRef(null);
 
   const activeSendRequestRef = useRef(null);
+  const activeStreamAbortControllerRef = useRef(null);
 
   const sendMessageRef = useRef(null);
 
@@ -707,6 +742,8 @@ export default function ChatRoom() {
   }
 
   function invalidatePendingSend() {
+    activeStreamAbortControllerRef.current?.abort();
+    activeStreamAbortControllerRef.current = null;
     activeSendRequestRef.current = null;
     setSending(false);
     setSendingMulti(false);
@@ -791,6 +828,8 @@ export default function ChatRoom() {
 
 
   function closeTrackedSessionsOnUnload() {
+    activeStreamAbortControllerRef.current?.abort();
+    activeStreamAbortControllerRef.current = null;
 
     idleEndTimersRef.current.forEach(timer => clearTimeout(timer));
 
@@ -1633,9 +1672,11 @@ export default function ChatRoom() {
     const requestId = createRequestId('dialogue-turn');
     const requestMode = view;
     const requestToken = { requestId, mode: requestMode };
+    const streamAbortController = new AbortController();
     const singleGeneration = singleRequestGenerationRef.current;
     const singleSessionAtSend = singleSessionId;
     activeSendRequestRef.current = requestToken;
+    activeStreamAbortControllerRef.current = streamAbortController;
 
     setInput(''); setSending(true); setSendingMulti(true);
 
@@ -1657,6 +1698,30 @@ export default function ChatRoom() {
           createClientMessageId(),
         )
       : null;
+    const dialogueStreamIds = new Set();
+    let receivedDialogueDelta = false;
+    const isCurrentSingleRequest = () => (
+      requestMode === 'single'
+      && singleGeneration === singleRequestGenerationRef.current
+      && activeSessionRef.current === singleSessionAtSend
+    );
+    const isCurrentGroupRequest = () => (
+      requestMode === 'group'
+      && groupGeneration === groupRequestGenerationRef.current
+    );
+    const handleDialogueStreamEvent = (event, isCurrentRequest) => {
+      if (!isCurrentRequest()) return;
+      if (event?.type === 'character_started' && event.data?.stream_id) {
+        dialogueStreamIds.add(event.data.stream_id);
+      }
+      if (event?.type === 'dialogue_delta') {
+        receivedDialogueDelta = true;
+      }
+      setMessages(prev => applyDialogueStreamEvent(prev, event));
+    };
+    const clearDialogueStreamPlaceholders = () => {
+      setMessages(prev => removeDialogueStreamPlaceholders(prev, dialogueStreamIds));
+    };
     setMessages(prev => view === 'group'
       ? mergeGroupMessages(prev, [pendingGroupMessage])
       : [...prev, pendingSingleMessage]);
@@ -1665,17 +1730,30 @@ export default function ChatRoom() {
 
       if (view === 'single') {
 
-        const res = await dialogue.sendMessage(singleSessionAtSend, text, requestId);
-        if (
-          singleGeneration !== singleRequestGenerationRef.current
-          || activeSessionRef.current !== singleSessionAtSend
-        ) return;
+        let res;
+        try {
+          res = await dialogue.streamMessage(
+            singleSessionAtSend,
+            text,
+            requestId,
+            event => handleDialogueStreamEvent(event, isCurrentSingleRequest),
+            { signal: streamAbortController.signal },
+          );
+        } catch (streamError) {
+          if (!isCurrentSingleRequest()) throw streamError;
+          if (!shouldFallbackFromDialogueStream(receivedDialogueDelta)) throw streamError;
+          res = await retryDialogueTurnConflict(
+            () => dialogue.sendMessage(singleSessionAtSend, text, requestId),
+            { shouldRetry: isCurrentSingleRequest },
+          );
+        }
+        if (!isCurrentSingleRequest()) return;
 
         const affinityDelta = currentDelta(res.current_affinity, affinity, res.affinity_delta);
         const trustDelta = currentDelta(res.current_trust, trust, res.trust_delta);
-        setMessages(prev => [
-          ...settlePendingMessage(prev, pendingSingleMessage.client_id),
-          {
+        setMessages(prev => {
+          const settled = settlePendingMessage(prev, pendingSingleMessage.client_id);
+          const finalAssistantMessage = {
             role: 'assistant',
             content: res.dialogue,
             action: res.action || '',
@@ -1684,11 +1762,19 @@ export default function ChatRoom() {
             showRelationshipDelta: true,
             world_created_at: res.world_created_at,
             message_id: res.assistant_message_id,
-          },
-        ]);
+          };
+          const reconciled = reconcileTurn(settled, res);
+          return reconciled.map(message => (
+            message.message_id != null
+            && res.assistant_message_id != null
+            && String(message.message_id) === String(res.assistant_message_id)
+              ? { ...message, ...finalAssistantMessage }
+              : message
+          ));
+        });
 
         if (user?.tts_auto_play && res.assistant_message_id != null) {
-          enqueueAutoplay(res.assistant_message_id, singleSessionId, 'single');
+          enqueueAutoplay(res.assistant_message_id, singleSessionAtSend, 'single');
         }
 
         setHistoryOffset(prev => prev + 2);
@@ -1734,9 +1820,26 @@ export default function ChatRoom() {
           return continued.session_id;
         };
 
-        const sendGroupTurn = (sessionId) => (
-          multiDialogue.discussMessage(sessionId, text, null, requestId)
-        );
+        const sendGroupTurn = async (sessionId) => {
+          try {
+            const response = await multiDialogue.streamDiscussMessage(
+              sessionId,
+              text,
+              null,
+              requestId,
+              event => handleDialogueStreamEvent(event, isCurrentGroupRequest),
+              { signal: streamAbortController.signal },
+            );
+            return response;
+          } catch (streamError) {
+            if (!isCurrentGroupRequest()) throw streamError;
+            if (!shouldFallbackFromDialogueStream(receivedDialogueDelta)) throw streamError;
+            return retryDialogueTurnConflict(
+              () => multiDialogue.discussMessage(sessionId, text, null, requestId),
+              { shouldRetry: isCurrentGroupRequest },
+            );
+          }
+        };
 
         if (multiSessionStatus !== 'active') {
           targetSessionId = await continueGroupSession();
@@ -1752,13 +1855,16 @@ export default function ChatRoom() {
           res = await sendGroupTurn(targetSessionId);
         }
 
-        if (groupGeneration !== groupRequestGenerationRef.current) return;
+        if (!isCurrentGroupRequest()) return;
         const groupResponses = Array.isArray(res.responses) ? res.responses : [res];
         const normalizedResponses = groupResponses.map(response => (
           normalizeGroupMessage(response, [...participants, ...allChars], { showRelationshipDelta: true })
         ));
         const addedResponses = registerLoadedGroupMessages(normalizedResponses);
-        setMessages(prev => mergeGroupMessages(prev, normalizedResponses));
+        setMessages(prev => {
+          const reconciled = reconcileTurn(prev, res);
+          return mergeGroupMessages(reconciled, normalizedResponses);
+        });
         if (addedResponses > 0) setHistoryOffset(prev => prev + addedResponses);
         syncGroupHistory();
 
@@ -1772,33 +1878,34 @@ export default function ChatRoom() {
       }
 
     } catch (e) {
-      const isCurrentGroupRequest = view === 'group'
-        && groupGeneration === groupRequestGenerationRef.current;
-      if (isCurrentGroupRequest && pendingGroupMessage?.client_id) {
+      const currentGroupRequest = isCurrentGroupRequest();
+      if (currentGroupRequest && pendingGroupMessage?.client_id) {
         setMessages(prev => mergeGroupMessages(
-          prev.filter(message => message.client_id !== pendingGroupMessage.client_id),
+          removeDialogueStreamPlaceholders(prev, dialogueStreamIds)
+            .filter(message => message.client_id !== pendingGroupMessage.client_id),
           [],
           { replacePending: false },
         ));
         setInput(current => restoreFailedDraft(current, text));
       }
-      const isCurrentSingleRequest = view === 'single'
-        && singleGeneration === singleRequestGenerationRef.current
-        && activeSessionRef.current === singleSessionAtSend;
-      if (isCurrentSingleRequest && pendingSingleMessage?.client_id) {
+      const currentSingleRequest = isCurrentSingleRequest();
+      if (currentSingleRequest && pendingSingleMessage?.client_id) {
         setMessages(prev => removePendingMessage(
-          prev,
+          removeDialogueStreamPlaceholders(prev, dialogueStreamIds),
           pendingSingleMessage.client_id,
         ));
         setInput(current => restoreFailedDraft(current, text));
       }
-      if (isCurrentSingleRequest || isCurrentGroupRequest) {
+      if (currentSingleRequest || currentGroupRequest) {
         setError(e.message);
       }
     }
 
     finally {
       if (activeSendRequestRef.current === requestToken) {
+        if (activeStreamAbortControllerRef.current === streamAbortController) {
+          activeStreamAbortControllerRef.current = null;
+        }
         activeSendRequestRef.current = null;
         setSending(false);
         setSendingMulti(false);

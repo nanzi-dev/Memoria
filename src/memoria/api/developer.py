@@ -47,7 +47,7 @@ def performance_snapshot(_current_user_id: str = Depends(require_admin_user_id))
     """查看关键路径耗时分布。"""
     return {
         "metrics": performance.snapshot(),
-        "sample_window": 200,
+        "sample_window": performance.sample_window(),
     }
 
 

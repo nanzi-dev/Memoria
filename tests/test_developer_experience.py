@@ -10,19 +10,51 @@ from fastapi import HTTPException
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 
-def test_performance_snapshot_records_distribution():
+def test_performance_snapshot_separates_metric_kinds():
     from memoria.core import performance
 
     performance.reset()
-    performance.record("llm.role_turn", 10)
-    performance.record("llm.role_turn", 30)
+    performance.record("dialogue.turn.total", 12)
+    performance.increment("llm.retry")
+    performance.observe("llm.prompt_chars", 450)
 
     data = performance.snapshot()
 
-    assert data["llm.role_turn"]["count"] == 2
-    assert data["llm.role_turn"]["avg_ms"] == 20
-    assert data["llm.role_turn"]["min_ms"] == 10
-    assert data["llm.role_turn"]["max_ms"] == 30
+    assert data["durations"]["dialogue.turn.total"]["count"] == 1
+    assert data["durations"]["dialogue.turn.total"]["p95_ms"] == 12
+    assert data["counters"]["llm.retry"] == 1
+    assert data["observations"]["llm.prompt_chars"]["count"] == 1
+    assert data["observations"]["llm.prompt_chars"]["max"] == 450
+
+
+def test_performance_reset_clears_all_metric_kinds():
+    from memoria.core import performance
+
+    performance.record("dialogue.turn.total", 12)
+    performance.increment("llm.retry", 2)
+    performance.observe("llm.output_chars", 80)
+
+    performance.reset()
+
+    assert performance.snapshot() == {
+        "durations": {},
+        "counters": {},
+        "observations": {},
+    }
+
+
+def test_developer_performance_uses_sampler_window(monkeypatch):
+    from memoria.api import developer
+
+    monkeypatch.setattr(developer.performance, "snapshot", lambda: {"durations": {}})
+    monkeypatch.setattr(developer.performance, "sample_window", lambda: 37)
+
+    result = developer.performance_snapshot(_current_user_id="admin")
+
+    assert result == {
+        "metrics": {"durations": {}},
+        "sample_window": 37,
+    }
 
 
 def test_replay_builds_step_and_state_timeline():

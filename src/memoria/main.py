@@ -31,6 +31,11 @@ from memoria.api.user import (
     router as user_router,
 )
 from memoria.core.config import configs
+from memoria.core.background_jobs import (
+    BackgroundJobWorker,
+    checkpoint_memory_lease_seconds,
+    register_checkpoint_memory_handlers,
+)
 from memoria.core.event_runtime import (
     ensure_default_event_templates,
     reconcile_event_schedule_due_times,
@@ -187,6 +192,20 @@ async def lifespan(app: FastAPI):
         daemon=True,
     )
     knowledge_recovery_thread.start()
+    memory_job_stop = threading.Event()
+    memory_job_worker = BackgroundJobWorker(
+        lease_seconds=checkpoint_memory_lease_seconds(
+            configs.llm_timeout_seconds
+        )
+    )
+    register_checkpoint_memory_handlers(memory_job_worker)
+    memory_job_thread = threading.Thread(
+        target=memory_job_worker.run,
+        args=(memory_job_stop,),
+        name="memoria-checkpoint-memory-worker",
+        daemon=True,
+    )
+    memory_job_thread.start()
     logger.info("Memoria 服务已启动 (v%s)", APP_VERSION)
     try:
         yield
@@ -194,6 +213,7 @@ async def lifespan(app: FastAPI):
         # ---------- shutdown ----------
         scheduler_task.cancel()
         knowledge_recovery_stop.set()
+        memory_job_stop.set()
         try:
             await scheduler_task
         except asyncio.CancelledError:
@@ -201,6 +221,9 @@ async def lifespan(app: FastAPI):
         await asyncio.to_thread(knowledge_recovery_thread.join, 5.0)
         if knowledge_recovery_thread.is_alive():
             logger.warning("知识文档恢复线程未能在 5 秒内停止")
+        await asyncio.to_thread(memory_job_thread.join, 5.0)
+        if memory_job_thread.is_alive():
+            logger.warning("长期记忆后台任务线程未能在 5 秒内停止")
         logger.info("Memoria 服务正在关闭...")
 
 

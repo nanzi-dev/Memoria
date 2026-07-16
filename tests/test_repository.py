@@ -6,7 +6,7 @@ from threading import Barrier
 
 import pytest, sys, json, uuid
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
@@ -1252,6 +1252,342 @@ class TestDedup:
         g1 = repository.save_group_memory("dg1","全体集结出发",["x"],0.5)
         g2 = repository.save_group_memory("dg1","全体集结出发了",["x"],0.8)
         assert g2 == g1
+
+
+class TestBackgroundJobs:
+    @pytest.fixture(autouse=True)
+    def clear_background_jobs(self):
+        with repository.get_conn() as conn:
+            conn.execute("DELETE FROM background_job")
+
+    def test_enqueue_deduplicates_by_key_without_replacing_payload(self):
+        dedupe_key = f"single-checkpoint:{uuid.uuid4().hex}:5"
+        first = repository.enqueue_background_job(
+            job_type="single_checkpoint_memory",
+            dedupe_key=dedupe_key,
+            payload={"session_id": "session-1", "history": ["first snapshot"]},
+        )
+        duplicate = repository.enqueue_background_job(
+            job_type="single_checkpoint_memory",
+            dedupe_key=dedupe_key,
+            payload={"session_id": "session-1", "history": ["replacement"]},
+        )
+
+        assert duplicate["job_id"] == first["job_id"]
+        assert duplicate["payload"] == {
+            "session_id": "session-1",
+            "history": ["first snapshot"],
+        }
+        with repository.get_conn() as conn:
+            count = conn.execute(
+                "SELECT COUNT(*) AS count FROM background_job WHERE dedupe_key = ?",
+                (dedupe_key,),
+            ).fetchone()["count"]
+        assert count == 1
+
+    def test_commit_dialogue_turn_persists_background_jobs_in_same_transaction(self):
+        suffix = uuid.uuid4().hex[:8]
+        session_id = f"atomic-job-session-{suffix}"
+        player_id = f"atomic-job-player-{suffix}"
+        request_id = f"atomic-job-request-{suffix}"
+        repository.create_session(session_id, "atomic-job-character", player_id, "Player")
+        claim = repository.claim_dialogue_turn(
+            session_id=session_id,
+            request_id=request_id,
+            player_id=player_id,
+            turn_kind="single",
+        )
+        dedupe_key = f"single_checkpoint_memory:{session_id}:5"
+
+        response = repository.commit_dialogue_turn(
+            dialogue_turn={
+                "session_id": session_id,
+                "request_id": request_id,
+                "player_id": player_id,
+                "lease_owner": claim["lease_owner"],
+                "response": {"dialogue": "记住了"},
+                "messages": [{"role": "user", "content": "我喜欢茉莉花茶"}],
+                "background_jobs": [{
+                    "job_type": "single_checkpoint_memory",
+                    "dedupe_key": dedupe_key,
+                    "payload": {
+                        "session_id": session_id,
+                        "history": [{"role": "user", "content": "我喜欢茉莉花茶"}],
+                    },
+                }],
+            },
+        )
+
+        assert response == {"dialogue": "记住了"}
+        with repository.get_conn() as conn:
+            job = conn.execute(
+                "SELECT * FROM background_job WHERE dedupe_key = ?",
+                (dedupe_key,),
+            ).fetchone()
+            turn = conn.execute(
+                """
+                SELECT status FROM dialogue_turn
+                WHERE session_id = ? AND request_id = ?
+                """,
+                (session_id, request_id),
+            ).fetchone()
+        assert job is not None
+        assert json.loads(job["payload"])["session_id"] == session_id
+        assert turn["status"] == "completed"
+
+    def test_commit_dialogue_turn_rolls_back_when_background_job_conflicts(self):
+        suffix = uuid.uuid4().hex[:8]
+        session_id = f"rollback-job-session-{suffix}"
+        player_id = f"rollback-job-player-{suffix}"
+        request_id = f"rollback-job-request-{suffix}"
+        dedupe_key = f"checkpoint-conflict:{suffix}"
+        repository.create_session(session_id, "rollback-job-character", player_id, "Player")
+        repository.enqueue_background_job(
+            job_type="single_checkpoint_memory",
+            dedupe_key=dedupe_key,
+            payload={"history": ["existing"]},
+        )
+        claim = repository.claim_dialogue_turn(
+            session_id=session_id,
+            request_id=request_id,
+            player_id=player_id,
+            turn_kind="single",
+        )
+
+        with pytest.raises(ValueError, match="another job type"):
+            repository.commit_dialogue_turn(
+                dialogue_turn={
+                    "session_id": session_id,
+                    "request_id": request_id,
+                    "player_id": player_id,
+                    "lease_owner": claim["lease_owner"],
+                    "response": {"dialogue": "不应提交"},
+                    "messages": [{"role": "user", "content": "这条消息应回滚"}],
+                    "background_jobs": [{
+                        "job_type": "group_checkpoint_memory",
+                        "dedupe_key": dedupe_key,
+                        "payload": {"history": ["replacement"]},
+                    }],
+                },
+            )
+
+        with repository.get_conn() as conn:
+            message_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM short_term_message WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()["count"]
+            turn = conn.execute(
+                """
+                SELECT status FROM dialogue_turn
+                WHERE session_id = ? AND request_id = ?
+                """,
+                (session_id, request_id),
+            ).fetchone()
+        assert message_count == 0
+        assert turn["status"] == "processing"
+
+    def test_expired_dialogue_turn_lease_cannot_commit_after_another_turn_is_claimed(self):
+        suffix = uuid.uuid4().hex[:8]
+        session_id = f"expired-turn-session-{suffix}"
+        player_id = f"expired-turn-player-{suffix}"
+        stale_request_id = f"stale-request-{suffix}"
+        repository.create_session(session_id, "expired-turn-character", player_id, "Player")
+        stale_claim = repository.claim_dialogue_turn(
+            session_id=session_id,
+            request_id=stale_request_id,
+            player_id=player_id,
+            turn_kind="single",
+            lease_seconds=30,
+        )
+        with repository.get_conn() as conn:
+            conn.execute(
+                """
+                UPDATE dialogue_turn
+                SET lease_expires_at = ?
+                WHERE session_id = ? AND request_id = ?
+                """,
+                ("2000-01-01T00:00:00+00:00", session_id, stale_request_id),
+            )
+
+        fresh_claim = repository.claim_dialogue_turn(
+            session_id=session_id,
+            request_id=f"fresh-request-{suffix}",
+            player_id=player_id,
+            turn_kind="single",
+        )
+
+        with pytest.raises(
+            repository.DialogueTurnConflictError,
+            match="租约已失效",
+        ):
+            repository.commit_dialogue_turn(
+                dialogue_turn={
+                    "session_id": session_id,
+                    "request_id": stale_request_id,
+                    "player_id": player_id,
+                    "lease_owner": stale_claim["lease_owner"],
+                    "response": {"dialogue": "过期结果"},
+                    "messages": [{"role": "user", "content": "不应落库"}],
+                },
+                runtime_states=[{
+                    "character_id": "expired-turn-character",
+                    "affection_level": 99,
+                    "trust_level": 99,
+                    "current_mood": "stale",
+                }],
+            )
+
+        with repository.get_conn() as conn:
+            message_count = conn.execute(
+                "SELECT COUNT(*) AS count FROM short_term_message WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()["count"]
+            runtime_state = conn.execute(
+                """
+                SELECT * FROM relationship_state
+                WHERE character_id = ? AND player_id = ?
+                """,
+                ("expired-turn-character", player_id),
+            ).fetchone()
+        assert message_count == 0
+        assert runtime_state is None
+        assert fresh_claim["completed"] is False
+
+    def test_claim_is_atomic_and_assigns_one_lease(self):
+        now = datetime(2026, 7, 16, 4, 0, tzinfo=timezone.utc)
+        queued = repository.enqueue_background_job(
+            job_type="single_checkpoint_memory",
+            dedupe_key=f"atomic-claim:{uuid.uuid4().hex}",
+            payload={"history": []},
+            available_at=now,
+        )
+        start = Barrier(2)
+
+        def claim(worker_id):
+            start.wait()
+            return repository.claim_background_job(
+                lease_owner=worker_id,
+                lease_seconds=60,
+                now=now,
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            claims = list(executor.map(claim, ["worker-1", "worker-2"]))
+
+        claimed = [claim for claim in claims if claim is not None]
+        assert len(claimed) == 1
+        assert claimed[0]["job_id"] == queued["job_id"]
+        assert claimed[0]["status"] == "running"
+        assert claimed[0]["attempts"] == 1
+        assert claimed[0]["lease_owner"] in {"worker-1", "worker-2"}
+
+    def test_claim_reclaims_an_expired_lease(self):
+        now = datetime(2026, 7, 16, 5, 0, tzinfo=timezone.utc)
+        queued = repository.enqueue_background_job(
+            job_type="group_checkpoint_memory",
+            dedupe_key=f"expired-lease:{uuid.uuid4().hex}",
+            payload={"group_thread_id": "thread-1", "history": []},
+            available_at=now,
+        )
+        first = repository.claim_background_job(
+            lease_owner="worker-1",
+            lease_seconds=30,
+            now=now,
+        )
+
+        reclaimed = repository.claim_background_job(
+            lease_owner="worker-2",
+            lease_seconds=30,
+            now=now + timedelta(seconds=31),
+        )
+
+        assert first["job_id"] == queued["job_id"]
+        assert reclaimed["job_id"] == queued["job_id"]
+        assert reclaimed["lease_owner"] == "worker-2"
+        assert reclaimed["attempts"] == 2
+
+    def test_complete_requires_current_lease_and_clears_it(self):
+        now = datetime(2026, 7, 16, 6, 0, tzinfo=timezone.utc)
+        queued = repository.enqueue_background_job(
+            job_type="single_checkpoint_memory",
+            dedupe_key=f"complete:{uuid.uuid4().hex}",
+            payload={"history": []},
+            available_at=now,
+        )
+        repository.claim_background_job(
+            lease_owner="worker-1",
+            lease_seconds=60,
+            now=now,
+        )
+
+        assert not repository.complete_background_job(
+            queued["job_id"],
+            lease_owner="stale-worker",
+            now=now + timedelta(seconds=1),
+        )
+        assert repository.complete_background_job(
+            queued["job_id"],
+            lease_owner="worker-1",
+            now=now + timedelta(seconds=1),
+        )
+
+        completed = repository.get_background_job(queued["job_id"])
+        assert completed["status"] == "completed"
+        assert completed["lease_owner"] is None
+        assert completed["lease_expires_at"] is None
+        assert completed["completed_at"] == (now + timedelta(seconds=1)).isoformat()
+
+    def test_failure_retries_when_attempts_remain_then_fails_terminally(self):
+        now = datetime(2026, 7, 16, 7, 0, tzinfo=timezone.utc)
+        queued = repository.enqueue_background_job(
+            job_type="single_checkpoint_memory",
+            dedupe_key=f"retry-fail:{uuid.uuid4().hex}",
+            payload={"history": ["immutable snapshot"]},
+            available_at=now,
+        )
+        repository.claim_background_job(
+            lease_owner="worker-1",
+            lease_seconds=60,
+            now=now,
+        )
+
+        retry = repository.record_background_job_failure(
+            queued["job_id"],
+            lease_owner="worker-1",
+            error="temporary model error",
+            max_attempts=2,
+            retry_delay_seconds=45,
+            now=now + timedelta(seconds=1),
+        )
+
+        assert retry["status"] == "retry"
+        assert retry["available_at"] == (now + timedelta(seconds=46)).isoformat()
+        assert retry["payload"] == {"history": ["immutable snapshot"]}
+        assert repository.claim_background_job(
+            lease_owner="too-early",
+            lease_seconds=60,
+            now=now + timedelta(seconds=45),
+        ) is None
+
+        claimed_again = repository.claim_background_job(
+            lease_owner="worker-2",
+            lease_seconds=60,
+            now=now + timedelta(seconds=46),
+        )
+        assert claimed_again["attempts"] == 2
+        failed = repository.record_background_job_failure(
+            queued["job_id"],
+            lease_owner="worker-2",
+            error="still broken",
+            max_attempts=2,
+            retry_delay_seconds=45,
+            now=now + timedelta(seconds=47),
+        )
+
+        assert failed["status"] == "failed"
+        assert failed["last_error"] == "still broken"
+        assert failed["lease_owner"] is None
+        assert failed["completed_at"] == (now + timedelta(seconds=47)).isoformat()
 
 
 class TestGroupDialoguePulseCommit:

@@ -19,6 +19,7 @@ from memoria.core.multi_character_orchestrator import (
 )
 from memoria.api.user import require_current_user_id
 from memoria.api.knowledge_models import KnowledgeSource
+from memoria.api.streaming import create_sse_response
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
@@ -540,6 +541,67 @@ async def multi_dialogue_turn(
     except Exception as e:
         logger.error(f"处理多角色对话异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="服务器内部错误")
+
+
+def _serialize_multi_turn_result(
+    result: dict | list[dict],
+    *,
+    discussion_mode: bool,
+) -> dict:
+    if not discussion_mode:
+        return MultiDialogueTurnResponse(**result).model_dump(mode="json")
+
+    responses = result if isinstance(result, list) else [result]
+    return MultiDialogueGroupResponse(
+        responses=[MultiDialogueTurnResponse(**item) for item in responses],
+        total_speakers=len(responses),
+        discussion_mode=True,
+        event_executions=[
+            execution
+            for response in responses
+            for execution in response.get("event_executions", [])
+        ],
+        event_notifications=[
+            notification
+            for response in responses
+            for notification in response.get("event_notifications", [])
+        ],
+    ).model_dump(mode="json")
+
+
+@router.post("/turn/stream")
+async def multi_dialogue_turn_stream(
+    request: MultiDialogueTurnRequest,
+    current_user_id: str = Depends(require_current_user_id),
+):
+    session = _get_owned_multi_session(request.session_id, current_user_id)
+    if session.get("status") != "active":
+        raise HTTPException(status_code=400, detail="会话已结束")
+    _require_active_session_participants(request.session_id)
+    request_id = request.request_id or uuid.uuid4().hex
+
+    def worker(event_sink):
+        return process_multi_character_turn(
+            session_id=request.session_id,
+            player_message=request.player_message,
+            discussion_mode=request.discussion_mode,
+            max_responses=request.max_responses,
+            request_id=request_id,
+            event_sink=event_sink,
+        )
+
+    return create_sse_response(
+        worker,
+        started_data={
+            "session_id": request.session_id,
+            "request_id": request_id,
+            "turn_kind": "multi",
+        },
+        completion_mapper=lambda result: _serialize_multi_turn_result(
+            result,
+            discussion_mode=request.discussion_mode,
+        ),
+    )
 
 
 @router.post("/interaction/trigger")

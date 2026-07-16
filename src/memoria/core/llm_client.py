@@ -13,6 +13,7 @@ import json
 import inspect
 import logging
 import re
+from time import perf_counter
 from typing import Callable, Optional
 from urllib.parse import urlsplit
 from urllib.request import getproxies, proxy_bypass
@@ -32,6 +33,228 @@ from memoria.core.config import configs
 logger = logging.getLogger(__name__)
 
 DebugSink = Callable[[str], None]
+
+
+def _replace_unpaired_surrogates(value):
+    if isinstance(value, str):
+        return "".join(
+            "\ufffd" if 0xD800 <= ord(char) <= 0xDFFF else char
+            for char in value
+        )
+    if isinstance(value, list):
+        return [_replace_unpaired_surrogates(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            _replace_unpaired_surrogates(key): _replace_unpaired_surrogates(item)
+            for key, item in value.items()
+        }
+    return value
+
+
+class _DialogueJsonStream:
+    """Decode the first complete top-level string-valued dialogue field."""
+
+    def __init__(self) -> None:
+        self._stack: list[str] = []
+        self._previous_significant = ""
+        self._in_token_string = False
+        self._token_is_top_level_key = False
+        self._token_raw = ""
+        self._token_escaped = False
+        self._awaiting_dialogue_colon = False
+        self._awaiting_dialogue_value = False
+        self._raw_value = ""
+        self._decoded_value = ""
+        self._in_value = False
+        self._value_escaped = False
+        self._done = False
+
+    @staticmethod
+    def _complete_prefix_length(raw_value: str) -> int:
+        index = 0
+        complete_end = 0
+        while index < len(raw_value):
+            if raw_value[index] != "\\":
+                index += 1
+                complete_end = index
+                continue
+
+            if index + 1 >= len(raw_value):
+                break
+            escape_type = raw_value[index + 1]
+            if escape_type != "u":
+                index += 2
+                complete_end = index
+                continue
+
+            if index + 6 > len(raw_value):
+                break
+            try:
+                codepoint = int(raw_value[index + 2:index + 6], 16)
+            except ValueError:
+                break
+            index += 6
+
+            if 0xD800 <= codepoint <= 0xDBFF:
+                if index >= len(raw_value):
+                    break
+                if raw_value[index] == "\\" and index + 2 > len(raw_value):
+                    break
+                if raw_value[index:index + 2] == "\\u":
+                    if index + 6 > len(raw_value):
+                        break
+                    try:
+                        low_surrogate = int(raw_value[index + 2:index + 6], 16)
+                    except ValueError:
+                        low_surrogate = -1
+                    if 0xDC00 <= low_surrogate <= 0xDFFF:
+                        index += 6
+
+            complete_end = index
+        return complete_end
+
+    def _decode_available(self) -> list[str]:
+        prefix_length = self._complete_prefix_length(self._raw_value)
+        if prefix_length <= 0:
+            return []
+        try:
+            decoded = json.loads(f'"{self._raw_value[:prefix_length]}"')
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return []
+        decoded = _replace_unpaired_surrogates(decoded)
+        if len(decoded) <= len(self._decoded_value):
+            return []
+        delta = decoded[len(self._decoded_value):]
+        self._decoded_value = decoded
+        return [delta] if delta else []
+
+    def _feed_value(self, text: str) -> list[str]:
+        for char in text:
+            if self._value_escaped:
+                self._raw_value += char
+                self._value_escaped = False
+                continue
+            if char == "\\":
+                self._raw_value += char
+                self._value_escaped = True
+                continue
+            if char == '"':
+                self._done = True
+                self._in_value = False
+                break
+            self._raw_value += char
+        return self._decode_available()
+
+    @property
+    def authoritative_dialogue(self) -> str | None:
+        return self._decoded_value if self._done else None
+
+    def feed(self, text: str) -> list[str]:
+        if self._done or not text:
+            return []
+        if self._in_value:
+            return self._feed_value(text)
+
+        for index, char in enumerate(text):
+            if self._in_token_string:
+                if self._token_escaped:
+                    self._token_raw += char
+                    self._token_escaped = False
+                    continue
+                if char == "\\":
+                    self._token_raw += char
+                    self._token_escaped = True
+                    continue
+                if char != '"':
+                    self._token_raw += char
+                    continue
+
+                self._in_token_string = False
+                if self._token_is_top_level_key:
+                    try:
+                        key = json.loads(f'"{self._token_raw}"')
+                    except json.JSONDecodeError:
+                        key = None
+                    self._awaiting_dialogue_colon = key == "dialogue"
+                self._previous_significant = '"'
+                continue
+
+            if self._awaiting_dialogue_colon:
+                if char.isspace():
+                    continue
+                self._awaiting_dialogue_colon = False
+                if char == ":":
+                    self._awaiting_dialogue_value = True
+                    self._previous_significant = char
+                    continue
+
+            if self._awaiting_dialogue_value:
+                if char.isspace():
+                    continue
+                self._awaiting_dialogue_value = False
+                if char == '"':
+                    self._in_value = True
+                    return self._feed_value(text[index + 1:])
+
+            if char == '"':
+                self._in_token_string = True
+                self._token_is_top_level_key = (
+                    self._stack == ["{"]
+                    and self._previous_significant in {"{", ","}
+                )
+                self._token_raw = ""
+                self._token_escaped = False
+                continue
+
+            if char in "{[":
+                self._stack.append(char)
+            elif char == "}" and self._stack and self._stack[-1] == "{":
+                self._stack.pop()
+            elif char == "]" and self._stack and self._stack[-1] == "[":
+                self._stack.pop()
+
+            if not char.isspace():
+                self._previous_significant = char
+        return []
+
+
+def _consume_role_stream(
+    response,
+    on_dialogue_delta: Callable[[str], None],
+    request_started_at: float,
+) -> tuple[str, str | None]:
+    raw_parts = []
+    dialogue_stream = _DialogueJsonStream()
+    ttft_recorded = False
+    for chunk in response:
+        choices = getattr(chunk, "choices", None) or []
+        if not choices:
+            continue
+        delta = getattr(choices[0], "delta", None)
+        content = getattr(delta, "content", None) or ""
+        if not content:
+            continue
+        raw_parts.append(content)
+        for dialogue_delta in dialogue_stream.feed(content):
+            if not dialogue_delta:
+                continue
+            if not ttft_recorded:
+                performance.record(
+                    "llm.role_turn.ttft",
+                    (perf_counter() - request_started_at) * 1000,
+                )
+                ttft_recorded = True
+            on_dialogue_delta(dialogue_delta)
+    return "".join(raw_parts), dialogue_stream.authoritative_dialogue
+
+
+def _finalize_role_turn_result(result, streamed_dialogue: str | None):
+    result = _replace_unpaired_surrogates(result)
+    if streamed_dialogue is not None and isinstance(result, dict):
+        result = dict(result)
+        result["dialogue"] = streamed_dialogue
+    return result
+
 
 # =========================
 # OpenAI Client（懒加载单例）
@@ -73,11 +296,23 @@ def _build_http_client(base_url: str):
 
 
 def _create_openai_client(base_url: str, api_key: str):
-    return OpenAI(
-        base_url=base_url,
-        api_key=api_key,
-        http_client=_build_http_client(base_url),
-    )
+    kwargs = {
+        "base_url": base_url,
+        "api_key": api_key,
+        "http_client": _build_http_client(base_url),
+    }
+    parameters = inspect.signature(OpenAI).parameters
+    if "timeout" in parameters or any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    ):
+        kwargs["timeout"] = configs.llm_timeout_seconds
+    if "max_retries" in parameters or any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    ):
+        kwargs["max_retries"] = 0
+    return OpenAI(**kwargs)
 
 def _get_client():
     global _client
@@ -451,6 +686,7 @@ def _retry_call(fn, *args, **kwargs):
             if not _is_retryable_error(e) or attempt >= _MAX_RETRIES - 1:
                 raise
             if attempt < _MAX_RETRIES - 1:
+                performance.increment("llm.retry")
                 delay = _BASE_DELAY * (2 ** attempt)
                 logger.warning("LLM重试 %d/%d (%.1fs后): %s", attempt + 1, _MAX_RETRIES, delay, e)
                 _time.sleep(delay)
@@ -466,6 +702,7 @@ def call_role_turn(
     model: str | None = None,
     debug: bool = False,
     debug_sink: DebugSink | None = None,
+    on_dialogue_delta: Callable[[str], None] | None = None,
 ) -> dict:
     """
     调用 LLM 生成 Role 一轮对话
@@ -485,27 +722,42 @@ def call_role_turn(
         "temperature": 0.8,
         "response_format": {"type": "json_object"},
     }
+    if on_dialogue_delta is not None:
+        request_payload["stream"] = True
+    performance.observe(
+        "llm.prompt_chars",
+        sum(len(str(message.get("content") or "")) for message in messages),
+    )
     if debug:
         _emit_debug(debug_sink, "role_turn.request", request_payload)
     
     # =========================
     # 1. 主请求
     # =========================
-    try:
-        with tracing.start_span("llm.role_turn", **{"llm.model": model, "llm.response_format": "json_object"}):
-            with performance.measure("llm.role_turn"):
-                response = _retry_call(_get_client().chat.completions.create,
-                    model = request_payload["model"],
-                    messages = request_payload["messages"],
-                    max_tokens = request_payload["max_tokens"],
-                    temperature = request_payload["temperature"],
-
-                    # 部分模型支持JSON强制模式
-                    response_format = request_payload["response_format"],
+    streamed_dialogue = None
+    response_format_unsupported = False
+    with tracing.start_span("llm.role_turn", **{"llm.model": model, "llm.response_format": "json_object"}):
+        with performance.measure("llm.role_turn"):
+            request_started_at = perf_counter()
+            try:
+                response = _retry_call(
+                    _get_client().chat.completions.create,
+                    **request_payload,
                 )
-    except BadRequestError:
+            except BadRequestError:
+                response_format_unsupported = True
+            else:
+                if on_dialogue_delta is not None:
+                    raw_text, streamed_dialogue = _consume_role_stream(
+                        response,
+                        on_dialogue_delta,
+                        request_started_at,
+                    )
+
+    if response_format_unsupported:
         # 某些厂商不支持 response_format
         logger.warning("模型不支持 response_format，已降级为普通调用")
+        performance.increment("llm.response_format_fallback")
         fallback_request = dict(request_payload)
         fallback_request.pop("response_format", None)
         if debug:
@@ -513,14 +765,21 @@ def call_role_turn(
 
         with tracing.start_span("llm.role_turn", **{"llm.model": model, "llm.response_format": "none"}):
             with performance.measure("llm.role_turn"):
-                response = _retry_call(_get_client().chat.completions.create,
-                    model = fallback_request["model"],
-                    messages = fallback_request["messages"],
-                    max_tokens = fallback_request["max_tokens"],
-                    temperature = fallback_request["temperature"],
+                request_started_at = perf_counter()
+                response = _retry_call(
+                    _get_client().chat.completions.create,
+                    **fallback_request,
                 )
+                if on_dialogue_delta is not None:
+                    raw_text, streamed_dialogue = _consume_role_stream(
+                        response,
+                        on_dialogue_delta,
+                        request_started_at,
+                    )
     
-    raw_text = response.choices[0].message.content or ""
+    if on_dialogue_delta is None:
+        raw_text = response.choices[0].message.content or ""
+    performance.observe("llm.output_chars", len(raw_text))
     if debug:
         _emit_debug(debug_sink, "role_turn.raw_response", {"content": raw_text})
     
@@ -529,6 +788,7 @@ def call_role_turn(
     # =========================
     result = _extract_json(raw_text)
     if result is not None:
+        result = _finalize_role_turn_result(result, streamed_dialogue)
         if debug:
             _emit_debug(debug_sink, "role_turn.parsed_response", result)
         return result
@@ -538,8 +798,10 @@ def call_role_turn(
     # =========================
     # 3. 修复重试
     # =========================
+    performance.increment("llm.json_repair")
     result = _retry_as_json(raw_text, model, debug=debug, debug_sink=debug_sink)
     if result is not None:
+        result = _finalize_role_turn_result(result, streamed_dialogue)
         if debug:
             _emit_debug(debug_sink, "role_turn.parsed_response", result)
         return result
@@ -547,7 +809,10 @@ def call_role_turn(
     # =========================
     # 4. 兜底返回
     # =========================
-    result = _plain_text_fallback(raw_text)
+    result = _finalize_role_turn_result(
+        _plain_text_fallback(raw_text),
+        streamed_dialogue,
+    )
     if debug:
         _emit_debug(debug_sink, "role_turn.fallback_response", result)
     return result
@@ -555,7 +820,11 @@ def call_role_turn(
 # =========================
 # 轻量任务模型（记忆/摘要等）
 # =========================
-def call_light_task(prompt: str, allow_reasoning_fallback: bool = True) -> str:
+def call_light_task(
+    prompt: str,
+    allow_reasoning_fallback: bool = True,
+    raise_on_error: bool = False,
+) -> str:
     """
     使用轻量模型处理辅助任务（低成本）
     """
@@ -568,7 +837,7 @@ def call_light_task(prompt: str, allow_reasoning_fallback: bool = True) -> str:
                 response = _retry_call(_get_light_client().chat.completions.create,
                     model = configs.light_model,
                     messages = [{"role": "user", "content": prompt}],
-                    max_tokens = 800,
+                    max_tokens = configs.light_task_max_output_tokens,
                     temperature = 0.3,
                 )
         
@@ -596,4 +865,6 @@ def call_light_task(prompt: str, allow_reasoning_fallback: bool = True) -> str:
         
     except Exception as e:
         logger.error(f"Exception in call_light_task: {e}")
+        if raise_on_error:
+            raise
         return ""

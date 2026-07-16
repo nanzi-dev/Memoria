@@ -13,7 +13,8 @@ import json
 import logging
 import random
 import uuid
-from typing import Literal
+from dataclasses import dataclass
+from typing import Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -22,6 +23,7 @@ from memoria.core import (
     event_runtime,
     llm_client,
     multi_character_memory,
+    performance,
     prompt_builder,
     relationship_context,
     world_clock,
@@ -29,14 +31,12 @@ from memoria.core import (
 from memoria.core.config import configs
 from memoria.core.knowledge_retriever import retrieve_knowledge
 from memoria.core.locale import DEFAULT_LOCALE, Locale
-from memoria.core.memory_extractor import (
-    extract_player_memory,
-    record_generated_memory_claim,
-)
+from memoria.core.output_safety import DialogueSafetyStream, safety_check
 from memoria.core.speaking_strategy import HybridStrategy
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
+EventSink = Callable[[str, dict], None]
 
 
 DialogueIntent = Literal[
@@ -73,6 +73,43 @@ class DialogueDecision(BaseModel):
         if value == 0:
             raise ValueError("reply_to_message_id must be non-zero")
         return value
+
+
+@dataclass(frozen=True)
+class GroupTurnContext:
+    player_character: dict
+    character_relationships: dict
+    group_thread_id: str | None
+    authorized_knowledge_base_ids: dict[str, list[str]]
+
+
+def _history_after_cutoff(
+    history: list[dict],
+    cutoff: str | None,
+) -> list[dict]:
+    if not cutoff:
+        return history
+    try:
+        cutoff_at = world_clock.as_utc(cutoff)
+    except (TypeError, ValueError):
+        logger.warning("无效的关系历史截止时间: %r", cutoff)
+        return history
+
+    filtered = []
+    for message in history:
+        created_at = message.get("created_at")
+        if not created_at:
+            filtered.append(message)
+            continue
+        try:
+            if world_clock.as_utc(created_at) >= cutoff_at:
+                filtered.append(message)
+        except (TypeError, ValueError):
+            logger.warning(
+                "忽略时间格式无效的群聊历史消息: message_id=%s",
+                message.get("message_id"),
+            )
+    return filtered
 
 
 # =========================
@@ -216,6 +253,36 @@ class MultiCharacterOrchestrator:
         return player_character
 
 
+    def _load_group_turn_context(self) -> GroupTurnContext:
+        player_character = self._refresh_player_character()
+        character_relationships = self._load_all_relationships()
+        group_thread_id = repository.get_group_thread_id(self.session_id)
+        authorized_knowledge_base_ids = {}
+        for character_id in dict.fromkeys(self.character_ids):
+            try:
+                authorized_knowledge_base_ids[character_id] = (
+                    repository.get_authorized_knowledge_base_ids(
+                        self.player_id,
+                        character_id=character_id,
+                        group_thread_id=group_thread_id,
+                    )
+                )
+            except Exception:
+                logger.warning(
+                    "预取角色知识库授权失败: session=%s, character=%s",
+                    self.session_id,
+                    character_id,
+                    exc_info=True,
+                )
+                authorized_knowledge_base_ids[character_id] = []
+        return GroupTurnContext(
+            player_character=player_character,
+            character_relationships=character_relationships,
+            group_thread_id=group_thread_id,
+            authorized_knowledge_base_ids=authorized_knowledge_base_ids,
+        )
+
+
     def _ensure_has_active_participants(self) -> None:
         if not self.participants:
             raise ValueError("群聊中没有可回复的在线角色")
@@ -247,6 +314,7 @@ class MultiCharacterOrchestrator:
         allow_multiple_responses: bool = False,
         max_responses: int | None = None,
         request_id: str | None = None,
+        event_sink: EventSink | None = None,
     ) -> dict | list[dict]:
         """
         处理玩家消息，决定哪个角色回应
@@ -282,8 +350,12 @@ class MultiCharacterOrchestrator:
 
         try:
             self._ensure_has_active_participants()
+            turn_context = self._load_group_turn_context()
             if not allow_multiple_responses:
-                speaker_id = self._decide_next_speaker(player_message)
+                speaker_id = self._decide_next_speaker(
+                    player_message,
+                    turn_context=turn_context,
+                )
                 history = repository.get_multi_character_thread_history(
                     self.session_id,
                     limit_messages=30,
@@ -304,8 +376,20 @@ class MultiCharacterOrchestrator:
                     clock_snapshot=clock_snapshot,
                     persist=False,
                     history_override=history,
+                    event_sink=event_sink,
+                    stream_id=f"{request_id}:0",
+                    turn_context=turn_context,
                 )
                 result["message_id"] = -2
+                if event_sink:
+                    event_sink(
+                        "character_completed",
+                        {
+                            "stream_id": f"{request_id}:0",
+                            "character_id": speaker_id,
+                            "response": result,
+                        },
+                    )
                 responses = [result]
                 self.last_pulse_state = self._build_pulse_state(
                     [
@@ -324,7 +408,11 @@ class MultiCharacterOrchestrator:
             else:
                 response_count = min(
                     3,
-                    self._decide_group_response_count(player_message, max_responses),
+                    self._decide_group_response_count(
+                        player_message,
+                        max_responses,
+                        turn_context,
+                    ),
                 )
                 responses = self._generate_group_discussion(
                     player_message,
@@ -332,6 +420,9 @@ class MultiCharacterOrchestrator:
                     clock_snapshot=clock_snapshot,
                     trigger_message_id=player_message_id,
                     staged_history=[staged_player_message],
+                    event_sink=event_sink,
+                    request_id=request_id,
+                    turn_context=turn_context,
                 )
 
             self._apply_group_event_results(
@@ -341,9 +432,9 @@ class MultiCharacterOrchestrator:
                 request_id=request_id,
                 lease_owner=lease_owner,
                 player_message=staged_player_message,
+                turn_context=turn_context,
             )
             committed_response = responses if allow_multiple_responses else responses[0]
-            self._save_player_checkpoint_memory_after_commit()
             return committed_response
         except Exception as exc:
             repository.fail_dialogue_turn(
@@ -364,6 +455,7 @@ class MultiCharacterOrchestrator:
         request_id: str,
         lease_owner: str,
         player_message: dict,
+        turn_context: GroupTurnContext | None = None,
     ) -> list:
         has_event_context = bool(getattr(self, "player_id", None)) and not any(
             not response.get("character_id")
@@ -376,7 +468,11 @@ class MultiCharacterOrchestrator:
         )
         contexts = []
         if has_event_context:
-            relationships = self._load_all_relationships()
+            relationships = (
+                turn_context.character_relationships
+                if turn_context is not None
+                else self._load_all_relationships()
+            )
             for response in responses:
                 contexts.append(event_runtime.build_event_context(
                     character_id=response["character_id"],
@@ -489,7 +585,12 @@ class MultiCharacterOrchestrator:
             group_state = {
                 **getattr(self, "last_pulse_state", {}),
                 "group_thread_id": (
-                    repository.get_group_thread_id(self.session_id) or self.session_id
+                    (
+                        turn_context.group_thread_id
+                        if turn_context is not None
+                        else repository.get_group_thread_id(self.session_id)
+                    )
+                    or self.session_id
                 ),
             }
             turn = {
@@ -501,6 +602,9 @@ class MultiCharacterOrchestrator:
                 "runtime_states": runtime_states,
                 "messages": messages,
                 "group_state": group_state,
+                "background_jobs": self._build_player_checkpoint_background_jobs(
+                    messages
+                ),
             }
             turn_holder["turn"] = turn
             return turn
@@ -556,45 +660,54 @@ class MultiCharacterOrchestrator:
         return message_id
 
 
-    def _save_player_checkpoint_memory_after_commit(self) -> None:
-        try:
-            if not repository.is_long_term_memory_checkpoint(
-                self.session_id, configs.long_term_memory_interval_turns
-            ):
-                return
-            history = repository.get_multi_character_thread_history(
-                self.session_id,
-                limit_messages=max(12, configs.long_term_memory_interval_turns * 4),
-            )
-            fact = extract_player_memory(history)
-            player_id = self.player_id
-            if not fact or not player_id:
-                return
-            generated_scope = multi_character_memory.resolve_generated_fact_scope(
-                self.session_id
-            )
-            if not generated_scope:
-                return
-            scope_type, scope_id = generated_scope
-            record_generated_memory_claim(
-                owner_user_id=player_id,
-                scope_type=scope_type,
-                scope_id=scope_id,
-                fact_text=fact,
-                source_ids=[f"session:{self.session_id}"],
-                provenance={
-                    "memory_kind": "player_fact",
-                    "session_id": self.session_id,
-                },
-            )
-        except Exception:
-            logger.error(
-                "群聊长期记忆保存失败: session=%s",
-                self.session_id,
-                exc_info=True,
-            )
+    def _build_player_checkpoint_background_jobs(
+        self,
+        messages: list[dict],
+    ) -> list[dict]:
+        checkpoint_interval = configs.long_term_memory_interval_turns
+        checkpoint_turn = (
+            repository.get_session_user_turn_count(self.session_id) + 1
+        )
+        if checkpoint_turn % checkpoint_interval != 0 or not self.player_id:
+            return []
+        generated_scope = multi_character_memory.resolve_generated_fact_scope(
+            self.session_id
+        )
+        if not generated_scope:
+            return []
+        scope_type, scope_id = generated_scope
+        history_limit = max(12, checkpoint_interval * 4)
+        history = repository.get_multi_character_thread_history(
+            self.session_id,
+            limit_messages=history_limit,
+        )
+        history.extend(
+            {
+                "role": message["role"],
+                "content": message["content"],
+            }
+            for message in messages
+        )
+        return [{
+            "job_type": "group_checkpoint_memory",
+            "dedupe_key": (
+                f"group_checkpoint_memory:{self.session_id}:{checkpoint_turn}"
+            ),
+            "payload": {
+                "owner_user_id": self.player_id,
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+                "session_id": self.session_id,
+                "history": history[-history_limit:],
+            },
+        }]
 
-    def _decide_group_response_count(self, player_message: str, max_responses: int | None = None) -> int:
+    def _decide_group_response_count(
+        self,
+        player_message: str,
+        max_responses: int | None = None,
+        turn_context: GroupTurnContext | None = None,
+    ) -> int:
         """按群聊语境决定本轮实际接话人数。"""
         participant_count = len(self.participants)
         if participant_count <= 1:
@@ -645,7 +758,7 @@ class MultiCharacterOrchestrator:
             if len(text) >= 80:
                 conversation_pressure += 0.5
 
-            relation_pressure = self._relationship_pressure_for_group()
+            relation_pressure = self._relationship_pressure_for_group(turn_context)
             if relation_pressure >= 70:
                 conversation_pressure += 0.8
             elif relation_pressure >= 40:
@@ -688,9 +801,16 @@ class MultiCharacterOrchestrator:
         return mentioned
 
 
-    def _relationship_pressure_for_group(self) -> float:
+    def _relationship_pressure_for_group(
+        self,
+        turn_context: GroupTurnContext | None = None,
+    ) -> float:
         """估算当前群聊关系强度，越高越适合多人接话。"""
-        relationships = self._load_all_relationships()
+        relationships = (
+            turn_context.character_relationships
+            if turn_context is not None
+            else self._load_all_relationships()
+        )
         if not relationships:
             return 0.0
         values = []
@@ -707,6 +827,9 @@ class MultiCharacterOrchestrator:
         clock_snapshot=None,
         trigger_message_id: int | None = None,
         staged_history: list[dict] | None = None,
+        event_sink: EventSink | None = None,
+        request_id: str | None = None,
+        turn_context: GroupTurnContext | None = None,
     ) -> list[dict]:
         """兼容旧调用名，内部执行逐条重决策的对话脉冲。"""
         return self.run_dialogue_pulse(
@@ -718,6 +841,9 @@ class MultiCharacterOrchestrator:
             persist_state=False,
             persist_messages=False,
             staged_history=staged_history,
+            event_sink=event_sink,
+            request_id=request_id,
+            turn_context=turn_context,
         )
 
 
@@ -734,22 +860,38 @@ class MultiCharacterOrchestrator:
         persist_messages: bool = True,
         extract_memory: bool = False,
         staged_history: list[dict] | None = None,
+        event_sink: EventSink | None = None,
+        request_id: str | None = None,
+        turn_context: GroupTurnContext | None = None,
     ) -> list[dict]:
-        """每生成一条消息后重读数据库历史，并重新决定下一动作。"""
+        """每生成一条消息后重新决定下一动作。"""
         self._ensure_has_active_participants()
         clock_snapshot = clock_snapshot or _clock_snapshot_for_player(self.player_id)
+        turn_context = turn_context or self._load_group_turn_context()
         max_messages = min(3, max(1, int(max_messages or 1)))
         responses: list[dict] = []
         decisions: list[DialogueDecision] = []
         staged_messages: list[dict] = []
-
-        for step in range(max_messages):
-            history = repository.get_multi_character_thread_history(
+        base_history = None
+        if not persist_messages:
+            base_history = repository.get_multi_character_thread_history(
                 self.session_id,
                 limit_messages=30,
             )
-            if not persist_messages:
-                history = [*history, *(staged_history or []), *staged_messages]
+
+        for step in range(max_messages):
+            stream_id = f"{request_id}:{step}" if request_id else None
+            if persist_messages:
+                history = repository.get_multi_character_thread_history(
+                    self.session_id,
+                    limit_messages=30,
+                )
+            else:
+                history = [
+                    *(base_history or []),
+                    *(staged_history or []),
+                    *staged_messages,
+                ]
             decision = self._decide_dialogue_action(
                 history=history,
                 trigger_source=trigger_source,
@@ -757,6 +899,7 @@ class MultiCharacterOrchestrator:
                 trigger_message_id=trigger_message_id,
                 initial_speaker_id=initial_speaker_id if step == 0 else None,
                 previous_responses=responses,
+                turn_context=turn_context,
             )
             decisions.append(decision)
             if decision.action == "wait":
@@ -775,6 +918,9 @@ class MultiCharacterOrchestrator:
                 clock_snapshot=clock_snapshot,
                 persist=False,
                 history_override=history,
+                event_sink=event_sink,
+                stream_id=stream_id,
+                turn_context=turn_context,
             )
             if self._is_redundant_dialogue_response(
                 result,
@@ -836,6 +982,15 @@ class MultiCharacterOrchestrator:
                     "topic": result.get("topic"),
                     "trigger_source": result.get("trigger_source"),
                 })
+            if event_sink and stream_id:
+                event_sink(
+                    "character_completed",
+                    {
+                        "stream_id": stream_id,
+                        "character_id": result.get("character_id"),
+                        "response": result,
+                    },
+                )
             responses.append(result)
             self.last_speaker_id = decision.speaker_id
             if decision.wait_for_player:
@@ -845,7 +1000,7 @@ class MultiCharacterOrchestrator:
         self.last_pulse_state = pulse_state
         if persist_state:
             repository.save_group_dialogue_state(
-                repository.get_group_thread_id(self.session_id) or self.session_id,
+                turn_context.group_thread_id or self.session_id,
                 self.player_id,
                 **pulse_state,
             )
@@ -915,12 +1070,14 @@ class MultiCharacterOrchestrator:
         trigger_message_id: int | None,
         initial_speaker_id: str | None,
         previous_responses: list[dict],
+        turn_context: GroupTurnContext | None = None,
     ) -> DialogueDecision:
         prompt = self._build_dialogue_decision_prompt(
             history=history,
             trigger_source=trigger_source,
             trigger_text=trigger_text,
             initial_speaker_id=initial_speaker_id,
+            turn_context=turn_context,
         )
         try:
             raw = llm_client.call_light_task(prompt, allow_reasoning_fallback=False)
@@ -938,6 +1095,7 @@ class MultiCharacterOrchestrator:
                 trigger_message_id=trigger_message_id,
                 initial_speaker_id=initial_speaker_id,
                 previous_responses=previous_responses,
+                turn_context=turn_context,
             )
 
 
@@ -948,8 +1106,14 @@ class MultiCharacterOrchestrator:
         trigger_source: str,
         trigger_text: str,
         initial_speaker_id: str | None,
+        turn_context: GroupTurnContext | None = None,
     ) -> str:
-        self._refresh_player_character()
+        if turn_context is None:
+            player_character = self._refresh_player_character()
+            group_thread_id = repository.get_group_thread_id(self.session_id)
+        else:
+            player_character = turn_context.player_character
+            group_thread_id = turn_context.group_thread_id
         participants = []
         for participant in self.participants:
             character_id = participant["character_id"]
@@ -996,7 +1160,7 @@ class MultiCharacterOrchestrator:
             for message in history[-12:]
         ]
         thread_state = repository.get_group_dialogue_state(
-            repository.get_group_thread_id(self.session_id) or self.session_id
+            group_thread_id or self.session_id
         ) or {}
         schema_example = {
             "action": "speak",
@@ -1020,7 +1184,7 @@ class MultiCharacterOrchestrator:
             f"触发来源: {trigger_source}",
             f"触发文本: {trigger_text[:800]}",
             f"首步指定发言者: {initial_speaker_id or '无'}",
-            f"玩家角色卡: {json.dumps(self.player_character, ensure_ascii=False)}",
+            f"玩家角色卡: {json.dumps(player_character, ensure_ascii=False)}",
             f"线程状态: {json.dumps(thread_state, ensure_ascii=False)}",
             f"参与角色: {json.dumps(participants, ensure_ascii=False)}",
             f"最近历史: {json.dumps(recent_history, ensure_ascii=False)}",
@@ -1090,6 +1254,7 @@ class MultiCharacterOrchestrator:
         trigger_message_id: int | None,
         initial_speaker_id: str | None,
         previous_responses: list[dict],
+        turn_context: GroupTurnContext | None = None,
     ) -> DialogueDecision:
         latest = history[-1] if history else {}
         if previous_responses:
@@ -1102,7 +1267,11 @@ class MultiCharacterOrchestrator:
         context = {
             "player_message": str(latest.get("content") or trigger_text),
             "last_speaker_id": latest.get("character_id") or self.last_speaker_id,
-            "character_relationships": self._load_all_relationships(),
+            "character_relationships": (
+                turn_context.character_relationships
+                if turn_context is not None
+                else self._load_all_relationships()
+            ),
             "previous_responses": previous_responses,
         }
         speaker_id = initial_speaker_id if initial_speaker_id in self.character_ids else None
@@ -1192,7 +1361,12 @@ class MultiCharacterOrchestrator:
         return responses[0]
     
     
-    def _decide_next_speaker(self, player_message: str) -> str:
+    def _decide_next_speaker(
+        self,
+        player_message: str,
+        *,
+        turn_context: GroupTurnContext | None = None,
+    ) -> str:
         """
         决定下一个发言的角色（使用策略系统）
         
@@ -1206,7 +1380,11 @@ class MultiCharacterOrchestrator:
         context = {
             "player_message": player_message,
             "last_speaker_id": self.last_speaker_id,
-            "character_relationships": self._load_all_relationships()
+            "character_relationships": (
+                turn_context.character_relationships
+                if turn_context is not None
+                else self._load_all_relationships()
+            ),
         }
         
         # 使用策略选择
@@ -1496,6 +1674,9 @@ class MultiCharacterOrchestrator:
         clock_snapshot=None,
         persist: bool = True,
         history_override: list[dict] | None = None,
+        event_sink: EventSink | None = None,
+        stream_id: str | None = None,
+        turn_context: GroupTurnContext | None = None,
     ) -> dict:
         """
         生成角色对玩家的回应
@@ -1507,11 +1688,11 @@ class MultiCharacterOrchestrator:
         Returns:
             dict: 角色回应结果
         """
-        self._refresh_player_character()
+        turn_context = turn_context or self._load_group_turn_context()
         if character_id not in self.character_cards:
             raise ValueError(f"角色不可回复: {character_id}")
         card = self.character_cards[character_id]
-        character_relationships = self._load_all_relationships()
+        character_relationships = turn_context.character_relationships
         relationship_history_cutoff = multi_character_memory.get_relationship_history_cutoff(
             self.player_id,
             self.character_ids,
@@ -1542,12 +1723,20 @@ class MultiCharacterOrchestrator:
                 limit_messages=20,
                 created_after=relationship_history_cutoff
             )
+        else:
+            history = _history_after_cutoff(
+                history,
+                relationship_history_cutoff,
+            )
         knowledge = retrieve_knowledge(
             owner_user_id=self.player_id,
             character_id=character_id,
-            group_thread_id=repository.get_group_thread_id(self.session_id),
+            group_thread_id=turn_context.group_thread_id,
             current_message=player_message,
             recent_history=history,
+            preauthorized_knowledge_base_ids=(
+                turn_context.authorized_knowledge_base_ids.get(character_id)
+            ),
         )
         decision = decision or DialogueDecision(
             action="speak",
@@ -1577,7 +1766,7 @@ class MultiCharacterOrchestrator:
             card=card,
             runtime_state=runtime_state,
             player_name=self.player_name,
-            player_character=self.player_character,
+            player_character=turn_context.player_character,
             other_characters=other_characters,
             character_relationships=character_relationships,
             past_summaries=self._load_memory_context(
@@ -1616,12 +1805,38 @@ class MultiCharacterOrchestrator:
         })
         
         # 调用 LLM
-        result = llm_client.call_role_turn(
-            system_prompt=system_prompt,
-            history=messages
+        if event_sink and stream_id:
+            event_sink(
+                "character_started",
+                {
+                    "stream_id": stream_id,
+                    "character_id": character_id,
+                    "character_name": card.meta.display_name or card.meta.name,
+                },
+            )
+        safety_stream = (
+            DialogueSafetyStream(
+                lambda delta: event_sink(
+                    "dialogue_delta",
+                    {"stream_id": stream_id, "delta": delta},
+                )
+            )
+            if event_sink and stream_id
+            else None
         )
+        with performance.measure("multi_dialogue.character.generate"):
+            result = llm_client.call_role_turn(
+                system_prompt=system_prompt,
+                history=messages,
+                on_dialogue_delta=safety_stream.feed if safety_stream else None,
+            )
         
-        dialogue = result.get("dialogue", "")
+        raw_dialogue = result.get("dialogue", "")
+        dialogue = (
+            safety_stream.finish(raw_dialogue)
+            if safety_stream
+            else safety_check(raw_dialogue)
+        )
         action = result.get("action", card.action_vocabulary.default_action)
         
         # 状态更新
@@ -2084,6 +2299,7 @@ def process_multi_character_turn(
     discussion_mode: bool = True,
     max_responses: int | None = None,
     request_id: str | None = None,
+    event_sink: EventSink | None = None,
 ) -> dict | list[dict]:
     """
     处理多角色对话轮次
@@ -2097,11 +2313,13 @@ def process_multi_character_turn(
     Returns:
         dict | list[dict]: 角色回应结果（单个或多个）
     """
-    orchestrator = MultiCharacterOrchestrator(session_id)
-    result = orchestrator.process_player_message(
-        player_message, 
-        allow_multiple_responses=discussion_mode,
-        max_responses=max_responses,
-        request_id=request_id,
-    )
-    return result
+    with performance.measure("multi_dialogue.turn.total"):
+        orchestrator = MultiCharacterOrchestrator(session_id)
+        result = orchestrator.process_player_message(
+            player_message,
+            allow_multiple_responses=discussion_mode,
+            max_responses=max_responses,
+            request_id=request_id,
+            event_sink=event_sink,
+        )
+        return result

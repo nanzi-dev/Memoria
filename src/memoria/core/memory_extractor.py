@@ -73,7 +73,12 @@ def clean_summary_text(raw_text: str | None) -> str | None:
     return text
 
 
-def extract_player_memory(history: list[dict], max_messages: int = 6) -> str | None:
+def extract_player_memory(
+    history: list[dict],
+    max_messages: int = 6,
+    *,
+    raise_on_error: bool = False,
+) -> str | None:
     """Extract one stable player fact without assistant, system, or RAG content."""
     player_messages = [
         str(message.get("content") or "").strip()
@@ -86,8 +91,17 @@ def extract_player_memory(history: list[dict], max_messages: int = 6) -> str | N
         player_messages="\n".join(f"- {message}" for message in player_messages)
     )
     try:
-        result = call_light_task(prompt, allow_reasoning_fallback=False)
+        if raise_on_error:
+            result = call_light_task(
+                prompt,
+                allow_reasoning_fallback=False,
+                raise_on_error=True,
+            )
+        else:
+            result = call_light_task(prompt, allow_reasoning_fallback=False)
     except Exception as exc:
+        if raise_on_error:
+            raise
         logger.warning("玩家长期记忆提取失败: %s", exc)
         return None
     return clean_summary_text(result)

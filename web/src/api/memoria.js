@@ -53,6 +53,100 @@ async function request(url, options = {}) {
   return resp.json();
 }
 
+function parseSseFrame(frame) {
+  let type = 'message';
+  const dataLines = [];
+
+  frame.split(/\r\n|\r|\n/).forEach(line => {
+    if (!line || line.startsWith(':')) return;
+    const separator = line.indexOf(':');
+    const field = separator < 0 ? line : line.slice(0, separator);
+    let value = separator < 0 ? '' : line.slice(separator + 1);
+    if (value.startsWith(' ')) value = value.slice(1);
+
+    if (field === 'event') type = value || 'message';
+    if (field === 'data') dataLines.push(value);
+  });
+
+  if (!dataLines.length) return null;
+  return {
+    type,
+    data: JSON.parse(dataLines.join('\n')),
+  };
+}
+
+function streamEventError(data) {
+  const message = data?.message
+    || data?.detail
+    || data?.error
+    || data?.error_type
+    || 'Stream request failed';
+  const error = new Error(message);
+  error.body = data;
+  return error;
+}
+
+async function requestStream(url, options = {}, onEvent = undefined) {
+  const headers = { ...options.headers };
+  if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const resp = await fetch(`${API_BASE}${url}`, {
+    ...options,
+    credentials: 'include',
+    headers,
+  });
+  if (!resp.ok) await throwResponseError(resp);
+  if (!resp.body?.getReader) throw new Error('Streaming response body is unavailable');
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  let terminalResponse;
+  let terminalReceived = false;
+
+  const dispatchFrame = frame => {
+    const event = parseSseFrame(frame);
+    if (!event) return;
+    onEvent?.(event);
+    if (event.type === 'error') throw streamEventError(event.data);
+    if (event.type === 'turn_completed') {
+      terminalReceived = true;
+      terminalResponse = event.data?.response ?? event.data;
+    }
+  };
+
+  const drainFrames = () => {
+    while (true) {
+      const separator = /\r\n\r\n|\n\n|\r\r/.exec(buffer);
+      if (!separator) return;
+      const frame = buffer.slice(0, separator.index);
+      buffer = buffer.slice(separator.index + separator[0].length);
+      dispatchFrame(frame);
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      drainFrames();
+    }
+    buffer += decoder.decode();
+    drainFrames();
+    if (buffer.trim()) dispatchFrame(buffer);
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (!terminalReceived) throw new Error('Streaming response ended before turn completion');
+  return terminalResponse;
+}
+
 async function requestBlob(url, options = {}) {
   const resp = await fetch(`${API_BASE}${url}`, {
     ...options,
@@ -472,6 +566,18 @@ export const dialogue = {
       }),
     });
   },
+  /** 流式发送消息，并逐帧接收回复 */
+  streamMessage(sessionId, playerMessage, requestId, onEvent, options = {}) {
+    return requestStream('/dialogue/turn/stream', {
+      ...options,
+      method: 'POST',
+      body: JSON.stringify({
+        session_id: sessionId,
+        player_message: playerMessage,
+        request_id: requestId,
+      }),
+    }, onEvent);
+  },
   /** 结束会话 */
   endSession(sessionId) {
     return request('/dialogue/session/end', {
@@ -544,6 +650,28 @@ export const multiDialogue = {
       method: 'POST',
       body: JSON.stringify(body),
     });
+  },
+  /** 流式发送群聊消息，后端按语境决定实际回复人数 */
+  streamDiscussMessage(
+    sessionId,
+    playerMessage,
+    maxResponses = null,
+    requestId = null,
+    onEvent,
+    options = {},
+  ) {
+    const body = {
+      session_id: sessionId,
+      player_message: playerMessage,
+      discussion_mode: true,
+      request_id: requestId,
+    };
+    if (maxResponses) body.max_responses = maxResponses;
+    return requestStream('/multi-dialogue/turn/stream', {
+      ...options,
+      method: 'POST',
+      body: JSON.stringify(body),
+    }, onEvent);
   },
   /** 结束会话 */
   endSession(sessionId) {
