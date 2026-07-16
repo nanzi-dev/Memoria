@@ -316,6 +316,79 @@ async def test_group_dialogue_http_event_execution_persists_to_database(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_group_dialogue_zero_speaker_surfaces_committed_event_metadata(
+    monkeypatch,
+):
+    _install_inline_fastapi(monkeypatch)
+    monkeypatch.setattr(
+        multi_character_orchestrator.MultiCharacterOrchestrator,
+        "_generate_group_discussion",
+        lambda *_args, **_kwargs: [],
+    )
+    player_id, headers = _create_identity("silent_group_e2e")
+    suffix = uuid.uuid4().hex[:8]
+    character_ids = [
+        f"silent_group_character_a_{suffix}",
+        f"silent_group_character_b_{suffix}",
+    ]
+    session_id = f"silent_group_session_{suffix}"
+    event_id = f"silent_group_event_{suffix}"
+    keyword = f"silent-group-keyword-{suffix}"
+    notification = f"silent group notification {suffix}"
+    for index, character_id in enumerate(character_ids):
+        _save_character(player_id, character_id, f"Silent Group Character {index}")
+    assert repository.create_multi_character_session(
+        session_id,
+        player_id,
+        "Player",
+        character_ids,
+    )
+
+    app = _app(event_admin_api.router, multi_dialogue_api.router)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        created = await client.post(
+            "/api/v1/admin/events",
+            headers=headers,
+            json=_event_payload(
+                event_id=event_id,
+                character_id=None,
+                keyword=keyword,
+                notification=notification,
+                state_changes={"trust_level": 3},
+            ),
+        )
+        assert created.status_code == 200, created.text
+
+        response = await client.post(
+            "/api/v1/multi-dialogue/turn",
+            headers=headers,
+            json={
+                "session_id": session_id,
+                "player_message": f"please trigger {keyword}",
+                "discussion_mode": True,
+                "request_id": f"silent-group-request-{suffix}",
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["responses"] == []
+    assert body["total_speakers"] == 0
+    assert body["event_executions"][0]["event_id"] == event_id
+    assert body["event_executions"][0]["status"] == "succeeded"
+    assert [item["message"] for item in body["event_notifications"]] == [notification]
+    assert len(
+        repository.get_event_trigger_history(
+            event_id=event_id,
+            player_id=player_id,
+        )
+    ) == 1
+    history = repository.get_multi_character_history(session_id, limit_messages=10)
+    assert [message["role"] for message in history] == ["user"]
+
+
+@pytest.mark.asyncio
 async def test_scheduled_event_http_execution_persists_and_advances_schedule(monkeypatch):
     _install_inline_fastapi(monkeypatch)
     player_id, headers = _create_identity("schedule_e2e")

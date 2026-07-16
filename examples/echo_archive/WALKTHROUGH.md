@@ -24,6 +24,14 @@
 - 主结局 ID：`echo_end_controlled_breakthrough`、`echo_end_after_flood`、`echo_end_silent_testimony`、`echo_end_failed_archive`
 - 季衡结果 ID：`echo_ji_romance`、`echo_ji_deep_partners`、`echo_ji_temporary_separation`、`echo_ji_professional_trust_lost`
 
+## 事件推进时序
+
+第1至第6卷的 `echo_vN_resolution` 同时要求 `echo_vN_turning_point` 和 `echo_vN_contradiction`。每卷转折事件采用 `match_mode: all`，`match_mode: all` 要求两个关键词出现在同一条玩家消息中，不能拆成两轮分别发送。
+
+`EVENT_HISTORY` 只读取检测前已经提交的历史批次，普通依赖不会在同一批次级联。取得第三条线索后，需要在后续轮次触发并提交 `echo_vN_contradiction`；`echo_vN_turning_point` 与 `echo_vN_contradiction` 两个前置事件都已提交后，至少再推进一轮，`echo_vN_resolution` 才能读取它们。除非使用显式 `TRIGGER_EVENT` 链接，否则不要把同一批次内刚触发的普通事件当作另一个事件的已完成历史。
+
+四项季衡选择不是第6卷现场选择。季衡选择只会在 `echo_v7_transition` 完成且 `echo_meta_decision_window` 已提交后解锁；主档选择也必须等待同一决策窗口。
+
 ## 第1卷《失声者》
 
 在 `echo_v1_thread` 开始。先确认孟宜声愿意用文字、节拍或代理朗读作证，再让林栖保全原始录音容器，江照比较版本历史，叶葭只分析可复核的底噪与剪接边界。
@@ -34,7 +42,7 @@
 
 单位结案：邢恪制造暴露并伪造时间，苏未真协调窗口。桥接证据是L-417与归航旧呼叫室底噪。
 
-推荐触发：在询问恢复过程或公开原音前说出 `保全证人`。这会把非口语证词、原音最小披露和证人自主权写入后续状态。
+推荐做法：在询问恢复过程或公开原音前，采用非口语证词、原音最小披露和证人自主授权。这只是叙事层面的保护原则，不会触发 `echo_choice_protect_witness`，也不会提前写入终局选择状态。
 
 ## 第2卷《纸鸟》
 
@@ -46,7 +54,7 @@
 
 单位结案：校方隐瞒演练与维修失误，监护人和解受到组合压力。桥接证据是GS-417通过学校目录重新识别去名记录。
 
-推荐推进：延续 `保全证人` 状态，只复制编码规则，不没收纸鸟，也不对学生做未经同意的心理评估。
+推荐推进：延续前述证人保护原则，只复制编码规则，不没收纸鸟，也不对学生做未经同意的心理评估。
 
 ## 第3卷《无菌室》
 
@@ -90,11 +98,7 @@
 
 关键线索：档案室二十二时十二分进入维护，交接箱二十二时二十七分离开；GH-0715封条有重新加压痕迹；宋闻铎盘与高叙盘分别删去不同责任字段；第三份离线主档的哈希前缀匹配。
 
-现场选择：
-
-- `按程序撤离`：保留双人校验与完整行动记录，降低证人位置暴露，季衡职业信任上升。
-- `继续留在现场`：可能多保全一段交接观察，但增加桥梁封控下的个人与证人风险，关系进入冷却可能性上升。
-- `单独行动`：可获得无法独立复核的路线观察，材料保持D级，并显著损害季衡的专业信任。
+本卷只完成调查事件、单位结论、桥接与转场，不开放任何季衡终局选择；四项季衡选择都要等到第7卷转场及决策窗口提交后再选择。
 
 单位结案：受控交接失败，但调查组保全运营图分片、确认基金会内部裂痕并定位主档。桥接证据是三份摘要共同指向“回声档案”。
 
@@ -103,6 +107,8 @@
 在 `echo_v7_thread` 先完成四层结构图：支持原记录、联络码映射、外部节点结果、撤回状态。再将第1至第6卷的联络码、版本哈希、付款、门禁和实体路线逐项回填。
 
 固定真相：二〇一五年制度具有逐项同意和到期删除；二〇一八年兼容例外使联络码长期有效；宋闻铎、顾承钧、魏岑明知跨用途运行，梁世闻、韩修远、罗勉购买或执行具体节点，苏未真与高叙承担不同执行责任；许知遥、贺临、江照的早期参与不能与后期明知滥用等同。
+
+完成 `echo_v7_transition` 后，再推进一轮触发并提交 `echo_meta_decision_window`。只有在 `echo_meta_decision_window` 已提交后，单独发送 `保全证人` 才会触发 `echo_choice_protect_witness`。
 
 最终处置必须明确选择其一：
 
@@ -139,15 +145,21 @@
 3. 第3卷完成 `echo_v3_resolution`，校正三套时钟，不公开完整病历。
 4. 第4卷完成 `echo_v4_resolution`，分开证明静默指令、融资动机与画像采购。
 5. 第5卷完成 `echo_v5_resolution`，用页码、权重字段和独立审查证明用途，不公开密封正文。
-6. 第6卷完成 `echo_v6_resolution`，在终局行动确认中选择 `echo_choice_procedural_exit`（`按程序撤离`）。
-7. 第7卷取得 `echo_v7_archive_map`，选择 `echo_choice_submit_tiered`（`提交分级证据`），随后触发 `echo_choice_trust_ji`（`我相信季衡`）。
+6. 第6卷完成 `echo_v6_resolution`、`echo_v6_bridge` 与 `echo_v6_transition`，不在本卷发送季衡选择。
+7. 第7卷取得 `echo_v7_archive_map` 并完成 `echo_v7_resolution`、`echo_v7_bridge` 与 `echo_v7_transition`。
+8. 在 `echo_v7_transition` 已提交后的下一轮触发并提交 `echo_meta_decision_window`。
+9. 发送 `echo_choice_submit_tiered`（`提交分级证据`），再推进一轮触发 `echo_end_controlled_breakthrough`。
+10. 决策窗口已提交后发送 `echo_choice_trust_ji`（`我相信季衡`），再推进一轮触发 `echo_ji_romance`。
 
 结果：`echo_end_controlled_breakthrough` 与 `echo_ji_romance`。闭环责任图进入审查，幸存者身份被限制披露；许观澜与季衡开始一段有明确回避规则的关系。城市仍需重建被暂停的支持服务，部分责任人尚未被最终裁判。
 
 ## 一条失败路线
 
 1. 依次完成 `echo_v1_resolution`、`echo_v2_resolution`、`echo_v3_resolution`、`echo_v4_resolution` 与 `echo_v5_resolution`，但持续跳过证人通知与二次识别审查。
-2. 完成 `echo_v6_resolution` 后，在终局行动确认中触发 `echo_choice_act_alone`（`单独行动`），使路线观察无法升级为正式证据。
-3. 第7卷取得 `echo_v7_archive_map` 后触发 `echo_choice_seal_master`（`封存主档`），在保管链已受损时错过监督窗口。
+2. 完成 `echo_v6_resolution`、`echo_v6_bridge` 与 `echo_v6_transition`，不在本卷发送季衡选择。
+3. 第7卷取得 `echo_v7_archive_map` 并完成 `echo_v7_resolution`、`echo_v7_bridge` 与 `echo_v7_transition`。
+4. 在 `echo_v7_transition` 已提交后的下一轮触发并提交 `echo_meta_decision_window`。
+5. 发送 `echo_choice_seal_master`（`封存主档`），再推进一轮触发 `echo_end_failed_archive`。
+6. 决策窗口已提交后发送 `echo_choice_act_alone`（`单独行动`），再推进一轮触发 `echo_ji_professional_trust_lost`。
 
 结果：`echo_end_failed_archive` 与 `echo_ji_professional_trust_lost`。团队知道闭环真相，但主档的版本与取得过程无法稳定提交；季衡终止共同办案。受影响者仍可通过单卷案件获得部分救济，长线问责则停留在苦涩的开放状态。

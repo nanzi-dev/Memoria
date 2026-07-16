@@ -255,6 +255,7 @@ def _seed_events(owner_user_id: str, events: list[EventDefinition]) -> None:
             description=event.description,
             priority=event.priority,
             exclusive_group=event.exclusive_group,
+            exclusive_scope=event.exclusive_scope,
             max_triggers_per_turn=event.max_triggers_per_turn,
             stop_processing=event.stop_processing,
             is_active=event.is_active,

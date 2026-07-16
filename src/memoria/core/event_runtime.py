@@ -68,6 +68,7 @@ def _event_definition_from_row(row: dict[str, Any]) -> EventDefinition:
         effects=json.loads(row["effects_config"]),
         priority=row.get("priority", 0),
         exclusive_group=row.get("exclusive_group"),
+        exclusive_scope=row.get("exclusive_scope") or "turn",
         max_triggers_per_turn=row.get("max_triggers_per_turn") or 3,
         stop_processing=bool(row.get("stop_processing", 0)),
         is_active=bool(row.get("is_active", 1)),
@@ -101,6 +102,7 @@ def build_event_context(
     execution_key: str | None = None,
     trigger_source: str = "dialogue",
     current_user_turn_persisted: bool = False,
+    response_index: int | None = None,
 ) -> EventContext:
     """Build one canonical event context for dialogue, group chat, and schedules."""
     session = repository.get_session(session_id)
@@ -162,6 +164,7 @@ def build_event_context(
         ),
         execution_key=execution_key,
         trigger_source=trigger_source,
+        response_index=response_index,
     )
 
 
@@ -238,13 +241,17 @@ def persist_event_context(
     )
 
 
-def _restore_batch_results(batch: dict[str, Any]) -> list[EventTriggerResult]:
+def _load_stored_batch_results(batch: dict[str, Any]) -> list[EventTriggerResult]:
     try:
         stored = json.loads(batch.get("results_data") or "[]")
     except (TypeError, ValueError):
         logger.error("Invalid event batch result payload", extra={"batch": batch})
         return []
-    restored = [EventTriggerResult.model_validate(item) for item in stored]
+    return [EventTriggerResult.model_validate(item) for item in stored]
+
+
+def _restore_batch_results(batch: dict[str, Any]) -> list[EventTriggerResult]:
+    restored = _load_stored_batch_results(batch)
     for result in restored:
         result.status = "skipped"
         result.deduplicated = True
@@ -261,6 +268,25 @@ def _replay_batch_results(
         execution_key,
     )
     return _restore_batch_results(batch)
+
+
+def _release_execution_claims(executions: list[dict[str, Any]]) -> None:
+    for execution in executions:
+        claim_token = execution.get("trigger_claim_token")
+        if claim_token:
+            repository.release_event_trigger_guard(
+                player_id=execution["player_id"],
+                event_id=execution["event_id"],
+                character_scope=execution.get("trigger_character_scope") or "",
+                claim_token=claim_token,
+            )
+        exclusive_claim_token = execution.get("exclusive_group_claim_token")
+        if exclusive_claim_token:
+            repository.release_event_exclusive_group(
+                player_id=execution["player_id"],
+                exclusive_group=execution["exclusive_group"],
+                claim_token=exclusive_claim_token,
+            )
 
 
 def _plan_event_chain(
@@ -288,17 +314,6 @@ def _plan_event_roots(
     executions: list[dict[str, Any]] = []
     planned_event_ids: set[str] = set()
 
-    def release_claim(execution: dict[str, Any]) -> None:
-        claim_token = execution.get("trigger_claim_token")
-        if not claim_token:
-            return
-        repository.release_event_trigger_guard(
-            player_id=execution["player_id"],
-            event_id=execution["event_id"],
-            character_scope=execution.get("trigger_character_scope") or "",
-            claim_token=claim_token,
-        )
-
     def visit(
         event: EventDefinition,
         chain_context: EventContext,
@@ -323,6 +338,7 @@ def _plan_event_roots(
             }
         )
         claim_token = None
+        exclusive_group_claim_token = None
         character_scope = event_context.character_id if event.character_id else ""
         if enforce_cooldown:
             claimed_at = datetime.now(timezone.utc)
@@ -343,23 +359,89 @@ def _plan_event_roots(
                     event_id=event.event_id,
                     event_name=event.event_name,
                     character_id=event_context.character_id,
+                    response_index=event_context.response_index,
                     triggered=False,
                     status="skipped",
                     error="事件已触发或仍在冷却中",
                 )
                 results.append(result)
                 executions.append(
-                    executor.build_execution_record(
-                        event,
-                        event_context,
-                        result,
-                        {
-                            "memories": [],
-                            "unlock_keys": [],
-                            "inbox_items": [],
-                            "proactive_messages": [],
-                        },
+                    {
+                        "player_id": event_context.player_id,
+                        **executor.build_execution_record(
+                            event,
+                            event_context,
+                            result,
+                            {
+                                "memories": [],
+                                "unlock_keys": [],
+                                "inbox_items": [],
+                                "proactive_messages": [],
+                            },
+                        ),
+                    }
+                )
+                return
+
+        if event.exclusive_group and event.exclusive_scope == "player":
+            claimed_at = datetime.now(timezone.utc)
+            exclusive_group_claim_token = uuid.uuid4().hex
+            try:
+                claimed = repository.claim_event_exclusive_group(
+                    player_id=event_context.player_id,
+                    exclusive_group=event.exclusive_group,
+                    claim_token=exclusive_group_claim_token,
+                    claimed_at=claimed_at.isoformat(),
+                    claim_expires_at=(
+                        claimed_at + timedelta(minutes=5)
+                    ).isoformat(),
+                )
+            except Exception:
+                if claim_token:
+                    repository.release_event_trigger_guard(
+                        player_id=event_context.player_id,
+                        event_id=event.event_id,
+                        character_scope=character_scope,
+                        claim_token=claim_token,
                     )
+                raise
+            if not claimed:
+                if claim_token:
+                    repository.release_event_trigger_guard(
+                        player_id=event_context.player_id,
+                        event_id=event.event_id,
+                        character_scope=character_scope,
+                        claim_token=claim_token,
+                    )
+                    claim_token = None
+                exclusive_group_claim_token = None
+                result = EventTriggerResult(
+                    execution_id=uuid.uuid4().hex,
+                    execution_key=chain_context.execution_key,
+                    event_id=event.event_id,
+                    event_name=event.event_name,
+                    character_id=event_context.character_id,
+                    response_index=event_context.response_index,
+                    triggered=False,
+                    status="skipped",
+                    error="同一玩家互斥组已有事件被选择",
+                )
+                results.append(result)
+                executions.append(
+                    {
+                        "player_id": event_context.player_id,
+                        **executor.build_execution_record(
+                            event,
+                            event_context,
+                            result,
+                            {
+                                "memories": [],
+                                "unlock_keys": [],
+                                "inbox_items": [],
+                                "proactive_messages": [],
+                            },
+                        ),
+                    }
                 )
                 return
 
@@ -377,19 +459,38 @@ def _plan_event_roots(
                     character_scope=character_scope,
                     claim_token=claim_token,
                 )
+            if exclusive_group_claim_token:
+                repository.release_event_exclusive_group(
+                    player_id=event_context.player_id,
+                    exclusive_group=event.exclusive_group,
+                    claim_token=exclusive_group_claim_token,
+                )
             raise
-        if result.status != "succeeded" and claim_token:
-            repository.release_event_trigger_guard(
-                player_id=event_context.player_id,
-                event_id=event.event_id,
-                character_scope=character_scope,
-                claim_token=claim_token,
-            )
-            claim_token = None
-        results.append(result)
-        executions.append(
-            {
+        if result.status != "succeeded":
+            if claim_token:
+                repository.release_event_trigger_guard(
+                    player_id=event_context.player_id,
+                    event_id=event.event_id,
+                    character_scope=character_scope,
+                    claim_token=claim_token,
+                )
+                claim_token = None
+            if exclusive_group_claim_token:
+                repository.release_event_exclusive_group(
+                    player_id=event_context.player_id,
+                    exclusive_group=event.exclusive_group,
+                    claim_token=exclusive_group_claim_token,
+                )
+                exclusive_group_claim_token = None
+        try:
+            execution = {
                 "player_id": event_context.player_id,
+                "exclusive_group": (
+                    event.exclusive_group
+                    if exclusive_group_claim_token
+                    else None
+                ),
+                "exclusive_group_claim_token": exclusive_group_claim_token,
                 **executor.build_execution_record(
                     event,
                     event_context,
@@ -404,7 +505,23 @@ def _plan_event_roots(
                     trigger_character_scope=character_scope,
                 ),
             }
-        )
+        except Exception:
+            if claim_token:
+                repository.release_event_trigger_guard(
+                    player_id=event_context.player_id,
+                    event_id=event.event_id,
+                    character_scope=character_scope,
+                    claim_token=claim_token,
+                )
+            if exclusive_group_claim_token:
+                repository.release_event_exclusive_group(
+                    player_id=event_context.player_id,
+                    exclusive_group=event.exclusive_group,
+                    claim_token=exclusive_group_claim_token,
+                )
+            raise
+        results.append(result)
+        executions.append(execution)
         if result.status != "succeeded":
             return
         for next_event_id in result.chained_events:
@@ -418,8 +535,7 @@ def _plan_event_roots(
         for root, root_context in roots:
             visit(root, root_context, 0, ())
     except Exception:
-        for execution in executions:
-            release_claim(execution)
+        _release_execution_claims(executions)
         raise
     return results, executions
 
@@ -431,22 +547,16 @@ def _runtime_state_after_results(
     affinity = context.current_affinity
     trust = context.current_trust
     mood = context.current_mood
-    changed = False
-    for result in results:
-        if result.status != "succeeded":
-            continue
-        changes = result.state_changes or {}
-        if "affection_level" in changes:
-            affinity = max(-100, min(100, affinity + float(changes["affection_level"])))
-            changed = True
-        if "trust_level" in changes:
-            trust = max(0, min(100, trust + float(changes["trust_level"])))
-            changed = True
-        if "current_mood" in changes:
-            mood = str(changes["current_mood"])
-            changed = True
-    if not changed:
+    state_changes = _runtime_state_changes_after_results(results)
+    if not state_changes:
         return None
+    for changes in state_changes:
+        if "affection_level" in changes:
+            affinity = max(-100, min(100, affinity + changes["affection_level"]))
+        if "trust_level" in changes:
+            trust = max(0, min(100, trust + changes["trust_level"]))
+        if "current_mood" in changes:
+            mood = changes["current_mood"]
     return {
         "character_id": context.character_id,
         "affection_level": affinity,
@@ -455,29 +565,96 @@ def _runtime_state_after_results(
     }
 
 
+def _runtime_state_changes_after_results(
+    results: list[EventTriggerResult],
+) -> list[dict[str, Any]]:
+    state_changes: list[dict[str, Any]] = []
+    for result in results:
+        if result.status != "succeeded":
+            continue
+        changes = result.state_changes or {}
+        normalized: dict[str, Any] = {}
+        if "affection_level" in changes:
+            normalized["affection_level"] = float(changes["affection_level"])
+        if "trust_level" in changes:
+            normalized["trust_level"] = float(changes["trust_level"])
+        if "current_mood" in changes:
+            normalized["current_mood"] = str(changes["current_mood"])
+        if normalized:
+            state_changes.append(normalized)
+    return state_changes
+
+
+def _runtime_state_after_results_with_claim_cleanup(
+    context: EventContext,
+    results: list[EventTriggerResult],
+    executions: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    try:
+        return _runtime_state_after_results(context, results)
+    except Exception:
+        _release_execution_claims(executions)
+        raise
+
+
 def _runtime_states_after_contexts(
     contexts: list[EventContext],
     results: list[EventTriggerResult],
+    *,
+    insert_only_unchanged_character_ids: set[str] | None = None,
+    apply_state_changes_to_current_character_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     states: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for context in contexts:
-        if context.character_id in seen:
-            continue
-        seen.add(context.character_id)
+    insert_only_ids = insert_only_unchanged_character_ids or set()
+    apply_to_current_ids = apply_state_changes_to_current_character_ids or set()
+    latest_contexts = {
+        context.character_id: context
+        for context in contexts
+    }
+    ordered_character_ids = list(
+        dict.fromkeys(context.character_id for context in contexts)
+    )
+    for character_id in ordered_character_ids:
+        context = latest_contexts[character_id]
         character_results = [
             result
             for result in results
-            if result.character_id == context.character_id
+            if result.character_id == character_id
         ]
-        state = _runtime_state_after_results(context, character_results) or {
-            "character_id": context.character_id,
-            "affection_level": context.current_affinity,
-            "trust_level": context.current_trust,
-            "current_mood": context.current_mood,
-        }
+        state_changes = _runtime_state_changes_after_results(character_results)
+        if state_changes and character_id in apply_to_current_ids:
+            state = {
+                "character_id": character_id,
+                "affection_level": context.current_affinity,
+                "trust_level": context.current_trust,
+                "current_mood": context.current_mood,
+                "state_changes": state_changes,
+            }
+        else:
+            state = _runtime_state_after_results(context, character_results)
+        if state is None:
+            state = {
+                "character_id": character_id,
+                "affection_level": context.current_affinity,
+                "trust_level": context.current_trust,
+                "current_mood": context.current_mood,
+            }
+            if character_id in insert_only_ids:
+                state["insert_only"] = True
         states.append(state)
     return states
+
+
+def _runtime_states_after_contexts_with_claim_cleanup(
+    contexts: list[EventContext],
+    results: list[EventTriggerResult],
+    executions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    try:
+        return _runtime_states_after_contexts(contexts, results)
+    except Exception:
+        _release_execution_claims(executions)
+        raise
 
 
 def _commit_planned_batch(
@@ -489,17 +666,21 @@ def _commit_planned_batch(
     schedule_completion: dict[str, Any] | None = None,
     dialogue_turn_factory: Callable[[list[EventTriggerResult]], dict] | None = None,
 ) -> list[EventTriggerResult]:
-    results_data = json.dumps(
-        [result.model_dump(mode="json") for result in results],
-        ensure_ascii=False,
-    )
-    dialogue_turn = dialogue_turn_factory(results) if dialogue_turn_factory else None
-    effective_runtime_states = (
-        dialogue_turn.get("runtime_states")
-        if dialogue_turn and "runtime_states" in dialogue_turn
-        else runtime_states
-    )
     try:
+        results_data = json.dumps(
+            [result.model_dump(mode="json") for result in results],
+            ensure_ascii=False,
+        )
+        dialogue_turn = (
+            dialogue_turn_factory(results)
+            if dialogue_turn_factory
+            else None
+        )
+        effective_runtime_states = (
+            dialogue_turn.get("runtime_states")
+            if dialogue_turn and "runtime_states" in dialogue_turn
+            else runtime_states
+        )
         commit = repository.commit_event_execution_batch(
             player_id=context.player_id,
             execution_key=str(context.execution_key),
@@ -511,17 +692,26 @@ def _commit_planned_batch(
             dialogue_turn=dialogue_turn,
         )
     except Exception:
-        for execution in executions:
-            claim_token = execution.get("trigger_claim_token")
-            if claim_token:
-                repository.release_event_trigger_guard(
-                    player_id=context.player_id,
-                    event_id=execution["event_id"],
-                    character_scope=execution.get("trigger_character_scope") or "",
-                    claim_token=claim_token,
-                )
+        _release_execution_claims(executions)
         raise
     if commit["deduplicated"]:
+        canonical_response = commit.get("dialogue_response")
+        if dialogue_turn is not None and canonical_response is not None:
+            local_response = dialogue_turn.get("response")
+            # Both orchestrators retain the factory response object.
+            if isinstance(local_response, dict) and isinstance(
+                canonical_response,
+                dict,
+            ):
+                local_response.clear()
+                local_response.update(canonical_response)
+            elif isinstance(local_response, list) and isinstance(
+                canonical_response,
+                list,
+            ):
+                local_response[:] = canonical_response
+            else:
+                dialogue_turn["response"] = canonical_response
         return _restore_batch_results(commit["batch"])
     get_event_executor()._sync_vector_memories(commit.get("inserted_memories") or [])
     return results
@@ -554,11 +744,16 @@ def execute_event_with_chain(
         batch_context,
         definitions_by_id,
     )
+    state = _runtime_state_after_results_with_claim_cleanup(
+        batch_context,
+        results,
+        executions,
+    )
     return _commit_planned_batch(
         batch_context,
         results,
         executions,
-        runtime_states=[state] if (state := _runtime_state_after_results(batch_context, results)) else [],
+        runtime_states=[state] if state else [],
     )
 
 
@@ -577,9 +772,9 @@ def detect_and_execute_events(
     context = context.model_copy(update={"execution_key": execution_key})
     existing = repository.get_event_execution_batch(context.player_id, execution_key)
     if existing:
-        restored = _replay_batch_results(context.player_id, execution_key, existing)
         if not dialogue_turn_factory:
-            return restored
+            return _replay_batch_results(context.player_id, execution_key, existing)
+        restored = _load_stored_batch_results(existing)
         return _commit_planned_batch(
             context,
             restored,
@@ -599,13 +794,23 @@ def detect_and_execute_events(
         definitions_by_id,
         enforce_cooldown=True,
     )
-    for result in results:
-        event = definitions_by_id.get(result.event_id)
-        if event and event in triggered_events:
-            result.condition_trace = [detector.evaluate_event(event, context)["condition"]]
+    try:
+        for result in results:
+            event = definitions_by_id.get(result.event_id)
+            if event and event in triggered_events:
+                result.condition_trace = [
+                    detector.evaluate_event(event, context)["condition"]
+                ]
+    except Exception:
+        _release_execution_claims(executions)
+        raise
 
     if runtime_states is None and results:
-        state = _runtime_state_after_results(context, results)
+        state = _runtime_state_after_results_with_claim_cleanup(
+            context,
+            results,
+            executions,
+        )
         runtime_states = [state] if state else []
     return _commit_planned_batch(
         context,
@@ -644,9 +849,9 @@ def detect_and_execute_event_contexts(
 
     existing = repository.get_event_execution_batch(player_id, execution_key)
     if existing:
-        restored = _replay_batch_results(player_id, execution_key, existing)
         if not dialogue_turn_factory:
-            return restored
+            return _replay_batch_results(player_id, execution_key, existing)
+        restored = _load_stored_batch_results(existing)
         return _commit_planned_batch(
             normalized_contexts[0],
             restored,
@@ -702,19 +907,28 @@ def detect_and_execute_event_contexts(
         enforce_cooldown=True,
     )
     root_contexts = {event.event_id: context for event, context in roots}
-    for result in results:
-        event = definitions_by_id.get(result.event_id)
-        root_context = root_contexts.get(result.event_id)
-        if event and root_context:
-            result.condition_trace = [
-                detector.evaluate_event(event, root_context)["condition"]
-            ]
+    try:
+        for result in results:
+            event = definitions_by_id.get(result.event_id)
+            root_context = root_contexts.get(result.event_id)
+            if event and root_context:
+                result.condition_trace = [
+                    detector.evaluate_event(event, root_context)["condition"]
+                ]
+    except Exception:
+        _release_execution_claims(executions)
+        raise
 
+    runtime_states = _runtime_states_after_contexts_with_claim_cleanup(
+        normalized_contexts,
+        results,
+        executions,
+    )
     return _commit_planned_batch(
         normalized_contexts[0],
         results,
         executions,
-        runtime_states=_runtime_states_after_contexts(normalized_contexts, results),
+        runtime_states=runtime_states,
         dialogue_turn_factory=dialogue_turn_factory,
     )
 
@@ -1110,7 +1324,11 @@ def run_due_time_events(
                             "payload": matching.model_dump_json(),
                             "world_created_at": scheduled_for.isoformat(),
                         })
-                runtime_state = _runtime_state_after_results(context, event_results)
+                runtime_state = _runtime_state_after_results_with_claim_cleanup(
+                    context,
+                    event_results,
+                    executions,
+                )
                 event_results = _commit_planned_batch(
                     context,
                     event_results,

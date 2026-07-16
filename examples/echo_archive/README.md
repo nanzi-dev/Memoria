@@ -17,9 +17,9 @@
 
 ## 内容规模
 
-- 55 个可播种内容文件：54 个非事件文件与 `events.json`
-- 26 个 JSON 文件：22 张 NPC 角色卡、1 张玩家卡、1 个清单、1 个关系文件、1 个检索评测文件
-- 28 个 Markdown 文件：26 篇知识文档、`README.md`、`WALKTHROUGH.md`
+- 56 个可播种内容文件：27 个 JSON 文件与 29 个 Markdown 文件
+- 27 个 JSON 文件：22 张 NPC 角色卡、1 张玩家卡、1 个清单、1 个关系文件、1 个检索评测文件、`events.json`
+- 29 个 Markdown 文件：26 篇知识文档、`README.md`、`WALKTHROUGH.md`、`攻略.md`
 - 84 个启用事件：六卷单位案、终卷真相、跨卷转场、八项选择与八个结局
 - 7 个固定卷组，使用 `echo_v1_session` / `echo_v1_thread` 至 `echo_v7_session` / `echo_v7_thread`
 - 72 条关系：22 条 `@player` 与 NPC 关系，50 条 NPC 与 NPC 关系

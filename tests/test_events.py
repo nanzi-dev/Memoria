@@ -1,6 +1,8 @@
 """
 事件执行器与检测器深入测试
 """
+from copy import deepcopy
+
 import pytest, sys, json, uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -726,6 +728,237 @@ class TestEventReliability:
         assert metrics["succeeded_count"] == 1
         assert metrics["deduplicated_count"] == 1
 
+    def test_single_event_replay_factory_receives_original_presentation_results(self):
+        from memoria.core import event_runtime
+        from memoria.core.event_schema import EffectType, EventEffect
+        from memoria.db import repository
+
+        suffix = uuid.uuid4().hex[:8]
+        player_id = f"single_replay_player_{suffix}"
+        character_id = f"single_replay_character_{suffix}"
+        event_id = f"single_replay_event_{suffix}"
+        execution_key = f"single-replay:{suffix}"
+        dialogue_override = "重放仍应呈现事件对白。"
+        notification = "重放仍应呈现事件通知。"
+        context = self._context(
+            execution_key=execution_key,
+            character_id=character_id,
+            player_id=player_id,
+        )
+        event = self._event(
+            event_id,
+            [
+                EventEffect(
+                    effect_type=EffectType.TRIGGER_DIALOGUE,
+                    dialogue_text=dialogue_override,
+                ),
+                EventEffect(
+                    effect_type=EffectType.MODIFY_STATE,
+                    state_changes={"trust_level": 3},
+                ),
+                EventEffect(
+                    effect_type=EffectType.NOTIFY_PLAYER,
+                    notification_message=notification,
+                ),
+            ],
+        )
+        assert repository.save_event_definition(
+            owner_user_id=player_id,
+            event_id=event_id,
+            event_name=event.event_name,
+            trigger_config=event.trigger_condition.model_dump_json(),
+            effects_config=json.dumps(
+                [effect.model_dump(mode="json") for effect in event.effects],
+                ensure_ascii=False,
+            ),
+            character_id=character_id,
+        )
+
+        first = event_runtime.detect_and_execute_events(context, [event])
+        captured = {}
+
+        def capture_presentation(results):
+            (
+                captured["dialogue"],
+                _,
+                captured["trust"],
+                _,
+                _,
+                captured["notification"],
+            ) = event_runtime.apply_event_results_to_dialogue_state(
+                results,
+                "原始回应",
+                20,
+                30,
+                "neutral",
+            )
+            captured["status"] = results[0].status
+            return {}
+
+        replay = event_runtime.detect_and_execute_events(
+            context,
+            [event],
+            dialogue_turn_factory=capture_presentation,
+        )
+
+        assert first[0].status == "succeeded"
+        assert captured == {
+            "dialogue": f"[事件触发] {dialogue_override}",
+            "trust": 33,
+            "notification": notification,
+            "status": "succeeded",
+        }
+        assert replay[0].status == "skipped"
+        assert replay[0].deduplicated is True
+        metrics = repository.get_event_execution_metrics(player_id, event_id)
+        assert metrics["deduplicated_count"] == 1
+
+    @pytest.mark.parametrize(
+        ("turn_kind", "canonical_response", "local_response"),
+        [
+            (
+                "single",
+                {
+                    "dialogue": "winner single response",
+                    "assistant_message_id": 101,
+                },
+                {
+                    "dialogue": "expired loser single response",
+                    "assistant_message_id": None,
+                },
+            ),
+            (
+                "multi",
+                [
+                    {
+                        "dialogue": "winner group response",
+                        "message_id": 202,
+                    }
+                ],
+                [
+                    {
+                        "dialogue": "expired loser group response",
+                        "message_id": -2,
+                    }
+                ],
+            ),
+        ],
+        ids=["single", "group"],
+    )
+    def test_commit_race_replaces_factory_response_with_canonical_dialogue(
+        self,
+        monkeypatch,
+        turn_kind,
+        canonical_response,
+        local_response,
+    ):
+        from memoria.core import event_runtime
+        from memoria.db import repository
+
+        suffix = uuid.uuid4().hex[:8]
+        player_id = f"commit_race_player_{suffix}"
+        character_id = f"commit_race_character_{suffix}"
+        session_id = f"commit_race_session_{suffix}"
+        request_id = f"commit_race_request_{suffix}"
+        execution_key = f"commit-race:{suffix}"
+        if turn_kind == "multi":
+            assert repository.create_multi_character_session(
+                session_id,
+                player_id,
+                "Player",
+                [character_id, f"commit_race_peer_{suffix}"],
+            )
+        else:
+            repository.create_session(
+                session_id,
+                character_id,
+                player_id,
+                "Player",
+            )
+
+        losing_claim = repository.claim_dialogue_turn(
+            session_id=session_id,
+            request_id=request_id,
+            player_id=player_id,
+            turn_kind=turn_kind,
+        )
+        with repository.get_conn() as conn:
+            conn.execute(
+                """
+                UPDATE dialogue_turn
+                SET lease_expires_at = '2000-01-01T00:00:00+00:00'
+                WHERE session_id = ? AND request_id = ?
+                """,
+                (session_id, request_id),
+            )
+        winning_claim = repository.claim_dialogue_turn(
+            session_id=session_id,
+            request_id=request_id,
+            player_id=player_id,
+            turn_kind=turn_kind,
+        )
+        repository.commit_event_execution_batch(
+            player_id=player_id,
+            execution_key=execution_key,
+            trigger_source=(
+                "multi_dialogue" if turn_kind == "multi" else "dialogue"
+            ),
+            results_data="[]",
+            executions=[],
+            dialogue_turn={
+                "session_id": session_id,
+                "request_id": request_id,
+                "player_id": player_id,
+                "lease_owner": winning_claim["lease_owner"],
+                "response": deepcopy(canonical_response),
+                "runtime_states": [],
+                "messages": [],
+            },
+        )
+
+        monkeypatch.setattr(
+            event_runtime.repository,
+            "get_event_execution_batch",
+            lambda player_id, execution_key: None,
+        )
+        context = self._context(
+            execution_key=execution_key,
+            character_id=character_id,
+            player_id=player_id,
+        ).model_copy(update={"session_id": session_id})
+        local_response = deepcopy(local_response)
+        turn_holder = {}
+
+        def build_losing_turn(results):
+            turn = {
+                "session_id": session_id,
+                "request_id": request_id,
+                "player_id": player_id,
+                "lease_owner": losing_claim["lease_owner"],
+                "response": local_response,
+                "runtime_states": [],
+                "messages": [],
+            }
+            turn_holder["turn"] = turn
+            return turn
+
+        if turn_kind == "multi":
+            replay = event_runtime.detect_and_execute_event_contexts(
+                [context],
+                [],
+                dialogue_turn_factory=build_losing_turn,
+            )
+        else:
+            replay = event_runtime.detect_and_execute_events(
+                context,
+                [],
+                dialogue_turn_factory=build_losing_turn,
+            )
+
+        assert replay == []
+        assert turn_holder["turn"]["response"] is local_response
+        assert local_response == canonical_response
+
     @pytest.mark.parametrize("cooldown_hours", [0, 2])
     def test_concurrent_once_or_cooldown_event_commits_side_effects_once(
         self,
@@ -1128,6 +1361,670 @@ class TestEventReliability:
             player_id,
             global_event.event_id,
         )["succeeded_count"] == 1
+
+    def test_player_exclusive_group_rejects_second_event_across_turns(self):
+        from memoria.core import event_runtime
+        from memoria.db import repository
+
+        suffix = uuid.uuid4().hex[:8]
+        player_id = f"player_scope_{suffix}"
+        character_id = f"player_scope_character_{suffix}"
+        first = self._event(
+            f"player_scope_first_{suffix}",
+            [],
+            exclusive_group="ending",
+            exclusive_scope="player",
+        )
+        second = self._event(
+            f"player_scope_second_{suffix}",
+            [],
+            exclusive_group="ending",
+            exclusive_scope="player",
+        )
+        for event in (first, second):
+            assert repository.save_event_definition(
+                owner_user_id=player_id,
+                event_id=event.event_id,
+                event_name=event.event_name,
+                trigger_config=event.trigger_condition.model_dump_json(),
+                effects_config="[]",
+                exclusive_group=event.exclusive_group,
+                exclusive_scope=event.exclusive_scope,
+            )
+
+        first_result = event_runtime.detect_and_execute_events(
+            self._context(
+                execution_key=f"player-scope:{suffix}:first",
+                character_id=character_id,
+                player_id=player_id,
+            ),
+            [first],
+        )[0]
+        second_result = event_runtime.detect_and_execute_events(
+            self._context(
+                execution_key=f"player-scope:{suffix}:second",
+                character_id=character_id,
+                player_id=player_id,
+            ),
+            [second],
+        )[0]
+
+        assert first_result.status == "succeeded"
+        assert second_result.status == "skipped"
+        assert repository.get_event_exclusive_group_selection(
+            player_id,
+            "ending",
+        )["selected_event_id"] == first.event_id
+
+    def test_selected_event_group_update_releases_old_group_selection(self):
+        from memoria.core import event_runtime
+        from memoria.db import repository
+
+        suffix = uuid.uuid4().hex[:8]
+        player_id = f"updated_group_player_{suffix}"
+        character_id = f"updated_group_character_{suffix}"
+        old_group = f"old_group_{suffix}"
+        new_group = f"new_group_{suffix}"
+        selected_event = self._event(
+            f"updated_group_selected_{suffix}",
+            [],
+            exclusive_group=old_group,
+            exclusive_scope="player",
+        )
+        competing_event = self._event(
+            f"updated_group_competing_{suffix}",
+            [],
+            exclusive_group=new_group,
+            exclusive_scope="player",
+        )
+        assert repository.save_event_definition(
+            owner_user_id=player_id,
+            event_id=selected_event.event_id,
+            event_name=selected_event.event_name,
+            trigger_config=selected_event.trigger_condition.model_dump_json(),
+            effects_config="[]",
+            exclusive_group=old_group,
+            exclusive_scope="player",
+        )
+        assert event_runtime.detect_and_execute_events(
+            self._context(
+                execution_key=f"updated-group:{suffix}:selected",
+                character_id=character_id,
+                player_id=player_id,
+            ),
+            [selected_event],
+        )[0].status == "succeeded"
+
+        assert repository.save_event_definition(
+            owner_user_id=player_id,
+            event_id=selected_event.event_id,
+            event_name=selected_event.event_name,
+            trigger_config=selected_event.trigger_condition.model_dump_json(),
+            effects_config="[]",
+            exclusive_group=new_group,
+            exclusive_scope="player",
+        )
+        assert repository.save_event_definition(
+            owner_user_id=player_id,
+            event_id=competing_event.event_id,
+            event_name=competing_event.event_name,
+            trigger_config=competing_event.trigger_condition.model_dump_json(),
+            effects_config="[]",
+            exclusive_group=new_group,
+            exclusive_scope="player",
+        )
+
+        assert repository.get_event_exclusive_group_selection(
+            player_id,
+            old_group,
+        ) is None
+        competing_result = event_runtime.detect_and_execute_events(
+            self._context(
+                execution_key=f"updated-group:{suffix}:competing",
+                character_id=character_id,
+                player_id=player_id,
+            ),
+            [competing_event],
+        )[0]
+        assert competing_result.status == "skipped"
+        assert repository.get_event_exclusive_group_selection(
+            player_id,
+            new_group,
+        )["selected_event_id"] == selected_event.event_id
+
+    def test_selected_event_scope_update_to_turn_releases_player_selection(self):
+        from memoria.core import event_runtime
+        from memoria.db import repository
+
+        suffix = uuid.uuid4().hex[:8]
+        player_id = f"updated_scope_player_{suffix}"
+        character_id = f"updated_scope_character_{suffix}"
+        exclusive_group = f"updated_scope_group_{suffix}"
+        selected_event = self._event(
+            f"updated_scope_selected_{suffix}",
+            [],
+            exclusive_group=exclusive_group,
+            exclusive_scope="player",
+        )
+        competing_event = self._event(
+            f"updated_scope_competing_{suffix}",
+            [],
+            exclusive_group=exclusive_group,
+            exclusive_scope="player",
+        )
+        assert repository.save_event_definition(
+            owner_user_id=player_id,
+            event_id=selected_event.event_id,
+            event_name=selected_event.event_name,
+            trigger_config=selected_event.trigger_condition.model_dump_json(),
+            effects_config="[]",
+            exclusive_group=exclusive_group,
+            exclusive_scope="player",
+        )
+        assert event_runtime.detect_and_execute_events(
+            self._context(
+                execution_key=f"updated-scope:{suffix}:selected",
+                character_id=character_id,
+                player_id=player_id,
+            ),
+            [selected_event],
+        )[0].status == "succeeded"
+
+        assert repository.save_event_definition(
+            owner_user_id=player_id,
+            event_id=selected_event.event_id,
+            event_name=selected_event.event_name,
+            trigger_config=selected_event.trigger_condition.model_dump_json(),
+            effects_config="[]",
+            exclusive_group=exclusive_group,
+            exclusive_scope="turn",
+        )
+        assert repository.save_event_definition(
+            owner_user_id=player_id,
+            event_id=competing_event.event_id,
+            event_name=competing_event.event_name,
+            trigger_config=competing_event.trigger_condition.model_dump_json(),
+            effects_config="[]",
+            exclusive_group=exclusive_group,
+            exclusive_scope="player",
+        )
+
+        assert repository.get_event_exclusive_group_selection(
+            player_id,
+            exclusive_group,
+        ) is None
+        competing_result = event_runtime.detect_and_execute_events(
+            self._context(
+                execution_key=f"updated-scope:{suffix}:competing",
+                character_id=character_id,
+                player_id=player_id,
+            ),
+            [competing_event],
+        )[0]
+        assert competing_result.status == "succeeded"
+        assert repository.get_event_exclusive_group_selection(
+            player_id,
+            exclusive_group,
+        )["selected_event_id"] == competing_event.event_id
+
+    @pytest.mark.parametrize(
+        ("updated_group", "updated_scope"),
+        [
+            ("new", "player"),
+            ("old", "turn"),
+        ],
+    )
+    def test_inflight_exclusive_claim_does_not_select_stale_group_after_update(
+        self,
+        updated_group,
+        updated_scope,
+    ):
+        from memoria.core import event_runtime
+        from memoria.db import repository
+
+        suffix = uuid.uuid4().hex[:8]
+        player_id = f"inflight_update_player_{suffix}"
+        character_id = f"inflight_update_character_{suffix}"
+        old_group = f"inflight_old_group_{suffix}"
+        new_group = f"inflight_new_group_{suffix}"
+        event = self._event(
+            f"inflight_update_event_{suffix}",
+            [],
+            exclusive_group=old_group,
+            exclusive_scope="player",
+        )
+        assert repository.save_event_definition(
+            owner_user_id=player_id,
+            event_id=event.event_id,
+            event_name=event.event_name,
+            trigger_config=event.trigger_condition.model_dump_json(),
+            effects_config="[]",
+            exclusive_group=old_group,
+            exclusive_scope="player",
+        )
+        context = self._context(
+            execution_key=f"inflight-update:{suffix}",
+            character_id=character_id,
+            player_id=player_id,
+        )
+        results, executions = event_runtime._plan_event_roots(
+            [(event, context)],
+            {event.event_id: event},
+            enforce_cooldown=True,
+        )
+        assert results[0].status == "succeeded"
+        assert executions[0]["exclusive_group_claim_token"]
+
+        current_group = new_group if updated_group == "new" else old_group
+        assert repository.save_event_definition(
+            owner_user_id=player_id,
+            event_id=event.event_id,
+            event_name=event.event_name,
+            trigger_config=event.trigger_condition.model_dump_json(),
+            effects_config="[]",
+            exclusive_group=current_group,
+            exclusive_scope=updated_scope,
+        )
+        repository.commit_event_execution_batch(
+            player_id=player_id,
+            execution_key=context.execution_key,
+            trigger_source=context.trigger_source,
+            results_data=json.dumps(
+                [result.model_dump(mode="json") for result in results],
+                ensure_ascii=False,
+            ),
+            executions=executions,
+        )
+
+        assert repository.get_event_exclusive_group_selection(
+            player_id,
+            old_group,
+        ) is None
+
+    def test_turn_exclusive_group_allows_different_event_on_later_turn(self):
+        from memoria.core import event_runtime
+        from memoria.db import repository
+
+        suffix = uuid.uuid4().hex[:8]
+        player_id = f"turn_scope_{suffix}"
+        character_id = f"turn_scope_character_{suffix}"
+        events = [
+            self._event(
+                f"turn_scope_{index}_{suffix}",
+                [],
+                exclusive_group="revelation",
+            )
+            for index in range(2)
+        ]
+        for event in events:
+            assert event.exclusive_scope == "turn"
+            assert repository.save_event_definition(
+                owner_user_id=player_id,
+                event_id=event.event_id,
+                event_name=event.event_name,
+                trigger_config=event.trigger_condition.model_dump_json(),
+                effects_config="[]",
+                exclusive_group=event.exclusive_group,
+            )
+
+        results = [
+            event_runtime.detect_and_execute_events(
+                self._context(
+                    execution_key=f"turn-scope:{suffix}:{index}",
+                    character_id=character_id,
+                    player_id=player_id,
+                ),
+                [event],
+            )[0]
+            for index, event in enumerate(events)
+        ]
+
+        assert [result.status for result in results] == ["succeeded", "succeeded"]
+        assert repository.get_event_exclusive_group_selection(
+            player_id,
+            "revelation",
+        ) is None
+
+    def test_concurrent_player_exclusive_group_commits_only_one_event(
+        self,
+        monkeypatch,
+    ):
+        from memoria.core import event_runtime
+        from memoria.db import repository
+
+        suffix = uuid.uuid4().hex[:8]
+        player_id = f"concurrent_scope_{suffix}"
+        character_id = f"concurrent_scope_character_{suffix}"
+        events = [
+            self._event(
+                f"concurrent_scope_{index}_{suffix}",
+                [],
+                exclusive_group="ending",
+                exclusive_scope="player",
+            )
+            for index in range(2)
+        ]
+        for event in events:
+            assert repository.save_event_definition(
+                owner_user_id=player_id,
+                event_id=event.event_id,
+                event_name=event.event_name,
+                trigger_config=event.trigger_condition.model_dump_json(),
+                effects_config="[]",
+                exclusive_group=event.exclusive_group,
+                exclusive_scope=event.exclusive_scope,
+            )
+
+        claim_barrier = Barrier(2)
+        original_claim = repository.claim_event_exclusive_group
+
+        def synchronized_claim(**kwargs):
+            claim_barrier.wait(timeout=5)
+            return original_claim(**kwargs)
+
+        monkeypatch.setattr(
+            event_runtime.repository,
+            "claim_event_exclusive_group",
+            synchronized_claim,
+        )
+
+        def run(index):
+            return event_runtime.detect_and_execute_events(
+                self._context(
+                    execution_key=f"concurrent-scope:{suffix}:{index}",
+                    character_id=character_id,
+                    player_id=player_id,
+                ),
+                [events[index]],
+            )[0]
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(run, range(2)))
+
+        assert sorted(result.status for result in results) == ["skipped", "succeeded"]
+        selected = repository.get_event_exclusive_group_selection(
+            player_id,
+            "ending",
+        )
+        assert selected["selected_event_id"] in {event.event_id for event in events}
+        assert sum(
+            len(repository.get_event_trigger_history(
+                event_id=event.event_id,
+                player_id=player_id,
+            ))
+            for event in events
+        ) == 1
+
+    @pytest.mark.parametrize("failure_point", ["context_state", "execution_record"])
+    def test_planning_exception_releases_event_claims(
+        self,
+        monkeypatch,
+        failure_point,
+    ):
+        from memoria.core import event_runtime
+        from memoria.db import repository
+
+        suffix = uuid.uuid4().hex[:8]
+        player_id = f"planning_failure_player_{suffix}"
+        character_id = f"planning_failure_character_{suffix}"
+        event = self._event(
+            f"planning_failure_event_{suffix}",
+            [],
+            exclusive_group=f"planning_failure_group_{suffix}",
+            exclusive_scope="player",
+        )
+        if failure_point == "context_state":
+            monkeypatch.setattr(
+                event_runtime,
+                "_context_state_for_result",
+                Mock(side_effect=RuntimeError("context state failed")),
+            )
+        else:
+            monkeypatch.setattr(
+                event_runtime.get_event_executor(),
+                "build_execution_record",
+                Mock(side_effect=RuntimeError("execution record failed")),
+            )
+
+        with pytest.raises(RuntimeError, match="failed"):
+            event_runtime.detect_and_execute_events(
+                self._context(
+                    execution_key=f"planning-failure:{suffix}",
+                    character_id=character_id,
+                    player_id=player_id,
+                ),
+                [event],
+            )
+
+        with repository.get_conn() as conn:
+            trigger_guard = conn.execute(
+                """
+                SELECT claim_token
+                FROM event_trigger_guard
+                WHERE player_id = ? AND event_id = ?
+                """,
+                (player_id, event.event_id),
+            ).fetchone()
+            exclusive_guard = conn.execute(
+                """
+                SELECT claim_token, selected_event_id
+                FROM event_exclusive_group_guard
+                WHERE player_id = ? AND exclusive_group = ?
+                """,
+                (player_id, event.exclusive_group),
+            ).fetchone()
+
+        assert trigger_guard["claim_token"] is None
+        assert exclusive_guard["claim_token"] is None
+        assert exclusive_guard["selected_event_id"] is None
+
+    def test_exclusive_claim_exception_releases_trigger_claim(
+        self,
+        monkeypatch,
+    ):
+        from memoria.core import event_runtime
+        from memoria.db import repository
+
+        suffix = uuid.uuid4().hex[:8]
+        player_id = f"exclusive_claim_failure_player_{suffix}"
+        character_id = f"exclusive_claim_failure_character_{suffix}"
+        event = self._event(
+            f"exclusive_claim_failure_event_{suffix}",
+            [],
+            exclusive_group=f"exclusive_claim_failure_group_{suffix}",
+            exclusive_scope="player",
+        )
+        monkeypatch.setattr(
+            event_runtime.repository,
+            "claim_event_exclusive_group",
+            Mock(side_effect=RuntimeError("exclusive claim failed")),
+        )
+
+        with pytest.raises(RuntimeError, match="exclusive claim failed"):
+            event_runtime.detect_and_execute_events(
+                self._context(
+                    execution_key=f"exclusive-claim-failure:{suffix}",
+                    character_id=character_id,
+                    player_id=player_id,
+                ),
+                [event],
+            )
+
+        with repository.get_conn() as conn:
+            trigger_guard = conn.execute(
+                """
+                SELECT claim_token
+                FROM event_trigger_guard
+                WHERE player_id = ? AND event_id = ?
+                """,
+                (player_id, event.event_id),
+            ).fetchone()
+
+        assert trigger_guard["claim_token"] is None
+
+    def test_dialogue_turn_factory_exception_releases_event_claims(self):
+        from memoria.core import event_runtime
+        from memoria.db import repository
+
+        suffix = uuid.uuid4().hex[:8]
+        player_id = f"dialogue_factory_player_{suffix}"
+        character_id = f"dialogue_factory_character_{suffix}"
+        event = self._event(
+            f"dialogue_factory_event_{suffix}",
+            [],
+            exclusive_group=f"dialogue_factory_group_{suffix}",
+            exclusive_scope="player",
+        )
+
+        def fail_dialogue_turn_factory(results):
+            raise RuntimeError("dialogue turn factory failed")
+
+        with pytest.raises(RuntimeError, match="dialogue turn factory failed"):
+            event_runtime.detect_and_execute_events(
+                self._context(
+                    execution_key=f"dialogue-factory:{suffix}",
+                    character_id=character_id,
+                    player_id=player_id,
+                ),
+                [event],
+                dialogue_turn_factory=fail_dialogue_turn_factory,
+            )
+
+        with repository.get_conn() as conn:
+            trigger_guard = conn.execute(
+                """
+                SELECT claim_token
+                FROM event_trigger_guard
+                WHERE player_id = ? AND event_id = ?
+                """,
+                (player_id, event.event_id),
+            ).fetchone()
+            exclusive_guard = conn.execute(
+                """
+                SELECT claim_token, selected_event_id
+                FROM event_exclusive_group_guard
+                WHERE player_id = ? AND exclusive_group = ?
+                """,
+                (player_id, event.exclusive_group),
+            ).fetchone()
+
+        assert trigger_guard["claim_token"] is None
+        assert exclusive_guard["claim_token"] is None
+        assert exclusive_guard["selected_event_id"] is None
+
+    @pytest.mark.parametrize("group_context", [False, True])
+    def test_condition_trace_exception_releases_event_claims(
+        self,
+        monkeypatch,
+        group_context,
+    ):
+        from memoria.core import event_runtime
+        from memoria.db import repository
+
+        suffix = uuid.uuid4().hex[:8]
+        player_id = f"trace_failure_player_{suffix}"
+        character_id = f"trace_failure_character_{suffix}"
+        event = self._event(
+            f"trace_failure_event_{suffix}",
+            [],
+            exclusive_group=f"trace_failure_group_{suffix}",
+            exclusive_scope="player",
+        )
+        context = self._context(
+            execution_key=f"trace-failure:{suffix}",
+            character_id=character_id,
+            player_id=player_id,
+        )
+        monkeypatch.setattr(
+            event_runtime.get_event_detector(),
+            "evaluate_event",
+            Mock(side_effect=RuntimeError("condition trace failed")),
+        )
+
+        with pytest.raises(RuntimeError, match="condition trace failed"):
+            if group_context:
+                event_runtime.detect_and_execute_event_contexts([context], [event])
+            else:
+                event_runtime.detect_and_execute_events(context, [event])
+
+        with repository.get_conn() as conn:
+            trigger_guard = conn.execute(
+                """
+                SELECT claim_token
+                FROM event_trigger_guard
+                WHERE player_id = ? AND event_id = ?
+                """,
+                (player_id, event.event_id),
+            ).fetchone()
+            exclusive_guard = conn.execute(
+                """
+                SELECT claim_token, selected_event_id
+                FROM event_exclusive_group_guard
+                WHERE player_id = ? AND exclusive_group = ?
+                """,
+                (player_id, event.exclusive_group),
+            ).fetchone()
+
+        assert trigger_guard["claim_token"] is None
+        assert exclusive_guard["claim_token"] is None
+        assert exclusive_guard["selected_event_id"] is None
+
+    @pytest.mark.parametrize("group_context", [False, True])
+    def test_runtime_state_conversion_exception_releases_event_claims(
+        self,
+        group_context,
+    ):
+        from memoria.core import event_runtime
+        from memoria.core.event_schema import EffectType, EventEffect
+        from memoria.db import repository
+
+        suffix = uuid.uuid4().hex[:8]
+        player_id = f"state_conversion_player_{suffix}"
+        character_id = f"state_conversion_character_{suffix}"
+        event = self._event(
+            f"state_conversion_event_{suffix}",
+            [
+                EventEffect(
+                    effect_type=EffectType.MODIFY_STATE,
+                    state_changes={"trust_level": "not-a-number"},
+                )
+            ],
+            exclusive_group=f"state_conversion_group_{suffix}",
+            exclusive_scope="player",
+        )
+        context = self._context(
+            execution_key=f"state-conversion:{suffix}",
+            character_id=character_id,
+            player_id=player_id,
+        )
+
+        with pytest.raises(ValueError, match="could not convert string to float"):
+            if group_context:
+                event_runtime.detect_and_execute_event_contexts([context], [event])
+            else:
+                event_runtime.detect_and_execute_events(context, [event])
+
+        with repository.get_conn() as conn:
+            trigger_guard = conn.execute(
+                """
+                SELECT claim_token
+                FROM event_trigger_guard
+                WHERE player_id = ? AND event_id = ?
+                """,
+                (player_id, event.event_id),
+            ).fetchone()
+            exclusive_guard = conn.execute(
+                """
+                SELECT claim_token, selected_event_id
+                FROM event_exclusive_group_guard
+                WHERE player_id = ? AND exclusive_group = ?
+                """,
+                (player_id, event.exclusive_group),
+            ).fetchone()
+
+        assert trigger_guard["claim_token"] is None
+        assert exclusive_guard["claim_token"] is None
+        assert exclusive_guard["selected_event_id"] is None
 
     def test_group_contexts_persist_base_state_without_event_matches(self):
         from memoria.core import event_runtime

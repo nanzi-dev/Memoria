@@ -8,7 +8,7 @@
 """
 
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -170,6 +170,7 @@ class EventDefinition(BaseModel):
     # 优先级
     priority: int = Field(default=0, description="优先级，数字越大越优先")
     exclusive_group: Optional[str] = None          # 同一轮同组只执行最高优先级事件
+    exclusive_scope: Literal["turn", "player"] = "turn"
     max_triggers_per_turn: int = Field(default=3, ge=1, le=20)
     stop_processing: bool = False                  # 触发后停止处理后续普通事件
     
@@ -197,6 +198,7 @@ class EventTriggerResult(BaseModel):
     event_id: str
     event_name: str
     character_id: Optional[str] = None
+    response_index: Optional[int] = None
     triggered: bool = Field(default=False, description="是否成功触发")
     effects_applied: list[str] = Field(default_factory=list, description="已应用的效果列表")
     notification: Optional[str] = None             # 需要显示给玩家的通知
@@ -279,6 +281,7 @@ class EventContext(BaseModel):
     active_multi_session_id: Optional[str] = None
     execution_key: Optional[str] = None
     trigger_source: str = "dialogue"
+    response_index: Optional[int] = None
 
 
 # 更新前向引用

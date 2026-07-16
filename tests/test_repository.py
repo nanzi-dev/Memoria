@@ -2,6 +2,7 @@
 数据库持久化层完整单元测试
 """
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from threading import Barrier
 
 import pytest, sys, json, uuid
@@ -38,6 +39,62 @@ class TestRuntimeState:
         s = repository.get_runtime_state("tC2e837a1","tP2e837a1",Fake())
         assert s["affection_level"] == 50.0
         assert s["current_mood"] == "happy"
+
+    def test_get_runtime_state_initialization_is_atomic_under_concurrency(
+        self,
+        monkeypatch,
+    ):
+        character_id = f"runtime-init-character-{uuid.uuid4().hex}"
+        player_id = f"runtime-init-player-{uuid.uuid4().hex}"
+        start = Barrier(2)
+        original_get_conn = repository.get_conn
+
+        @contextmanager
+        def synchronized_get_conn():
+            with original_get_conn() as conn:
+                class SynchronizedConnection:
+                    def execute(self, sql, parameters=()):
+                        normalized_sql = " ".join(sql.split())
+                        if (
+                            "INSERT INTO relationship_state" in normalized_sql
+                            and tuple(parameters[:2]) == (character_id, player_id)
+                        ):
+                            start.wait(timeout=5)
+                        return conn.execute(sql, parameters)
+
+                    def __getattr__(self, name):
+                        return getattr(conn, name)
+
+                yield SynchronizedConnection()
+
+        monkeypatch.setattr(repository, "get_conn", synchronized_get_conn)
+
+        def load(defaults):
+            class Mood:
+                default_mood = defaults[2]
+
+            class RuntimeState:
+                affection_level = defaults[0]
+                trust_level = defaults[1]
+                current_mood = Mood()
+
+            class Card:
+                runtime_state_schema = RuntimeState()
+
+            state = repository.get_runtime_state(character_id, player_id, Card())
+            return (
+                state["affection_level"],
+                state["trust_level"],
+                state["current_mood"],
+            )
+
+        defaults = [(11, 21, "calm"), (77, 87, "alert")]
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            states = list(executor.map(load, defaults))
+
+        assert states[0] == states[1]
+        assert states[0] in defaults
+
 
 class TestSession:
     def test_create_and_get(self):
@@ -568,6 +625,85 @@ class TestEventDefinition:
         definition = repository.get_event_definition(owner, event_id)
         assert definition["event_name"] == "Story event updated"
         assert definition["story_id"] == "graytide-finale"
+
+    def test_event_definition_exclusive_scope_survives_save_and_update(self):
+        owner = f"user_scope_{uuid.uuid4().hex[:8]}"
+        event_id = f"ev_scope_{uuid.uuid4().hex[:8]}"
+
+        assert repository.save_event_definition(
+            owner,
+            event_id,
+            "Player-exclusive event",
+            "{}",
+            "[]",
+            exclusive_group="ending",
+            exclusive_scope="player",
+        )
+        assert repository.get_event_definition(owner, event_id)["exclusive_scope"] == "player"
+
+        assert repository.save_event_definition_with_schedule(
+            owner_user_id=owner,
+            event_id=event_id,
+            event_name="Turn-exclusive event",
+            trigger_config="{}",
+            effects_config="[]",
+            schedule_state=None,
+            exclusive_group="ending",
+            exclusive_scope="turn",
+        )
+        assert repository.get_event_definition(owner, event_id)["exclusive_scope"] == "turn"
+
+    def test_player_exclusive_claim_backfills_earliest_legacy_trigger(self):
+        owner = f"user_legacy_scope_{uuid.uuid4().hex[:8]}"
+        group = f"legacy_ending_{uuid.uuid4().hex[:8]}"
+        earliest_event = f"legacy_first_{uuid.uuid4().hex[:8]}"
+        later_event = f"legacy_second_{uuid.uuid4().hex[:8]}"
+        for event_id in (earliest_event, later_event):
+            assert repository.save_event_definition(
+                owner,
+                event_id,
+                event_id,
+                "{}",
+                "[]",
+                character_id="legacy-character",
+                exclusive_group=group,
+                exclusive_scope="player",
+            )
+            repository.log_event_trigger(
+                event_id,
+                "legacy-character",
+                owner,
+                "legacy-session",
+                "{}",
+                "[]",
+            )
+        with repository.get_conn() as conn:
+            conn.execute(
+                """
+                UPDATE event_trigger_log
+                SET triggered_at = ?
+                WHERE player_id = ? AND event_id = ?
+                """,
+                ("2026-01-01T00:00:00+00:00", owner, earliest_event),
+            )
+            conn.execute(
+                """
+                UPDATE event_trigger_log
+                SET triggered_at = ?
+                WHERE player_id = ? AND event_id = ?
+                """,
+                ("2026-01-02T00:00:00+00:00", owner, later_event),
+            )
+
+        assert not repository.claim_event_exclusive_group(
+            player_id=owner,
+            exclusive_group=group,
+            claim_token="new-claim",
+            claimed_at="2026-01-03T00:00:00+00:00",
+            claim_expires_at="2026-01-03T00:05:00+00:00",
+        )
+        selected = repository.get_event_exclusive_group_selection(owner, group)
+        assert selected["selected_event_id"] == earliest_event
 
 
 class TestEventDeepIntegrationRepository:

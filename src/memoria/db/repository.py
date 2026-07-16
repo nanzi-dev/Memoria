@@ -401,6 +401,7 @@ CREATE TABLE IF NOT EXISTS event_definition (
     
     priority        INTEGER DEFAULT 0,
     exclusive_group TEXT,
+    exclusive_scope TEXT NOT NULL DEFAULT 'turn',
     max_triggers_per_turn INTEGER DEFAULT 3,
     stop_processing INTEGER DEFAULT 0,
     is_active       INTEGER DEFAULT 1,
@@ -450,6 +451,17 @@ CREATE TABLE IF NOT EXISTS event_trigger_guard (
     updated_at      TEXT NOT NULL,
 
     PRIMARY KEY (player_id, event_id, character_scope)
+);
+
+CREATE TABLE IF NOT EXISTS event_exclusive_group_guard (
+    player_id       TEXT NOT NULL,
+    exclusive_group TEXT NOT NULL,
+    selected_event_id TEXT,
+    claim_token     TEXT,
+    claim_expires_at TEXT,
+    updated_at      TEXT NOT NULL,
+
+    PRIMARY KEY (player_id, exclusive_group)
 );
 
 -- =========================
@@ -1172,6 +1184,11 @@ def init_db():
                 "ADD COLUMN IF NOT EXISTS story_id TEXT"
             )
             conn.execute(
+                "ALTER TABLE event_definition "
+                "ADD COLUMN IF NOT EXISTS exclusive_scope TEXT "
+                "NOT NULL DEFAULT 'turn'"
+            )
+            conn.execute(
                 "ALTER TABLE character_card "
                 "ADD COLUMN IF NOT EXISTS avatar_revision TEXT"
             )
@@ -1191,6 +1208,11 @@ def init_db():
             if "story_id" not in event_columns:
                 conn.execute(
                     "ALTER TABLE event_definition ADD COLUMN story_id TEXT"
+                )
+            if "exclusive_scope" not in event_columns:
+                conn.execute(
+                    "ALTER TABLE event_definition "
+                    "ADD COLUMN exclusive_scope TEXT NOT NULL DEFAULT 'turn'"
                 )
             character_columns = {
                 row["name"]
@@ -3596,12 +3618,13 @@ def get_runtime_state(
                  "current_mood": row["current_mood"],
              }
          else:
-             schema = card.runtime_state_schema
+             schema = getattr(card, "runtime_state_schema", None)
+             mood_schema = getattr(schema, "current_mood", None)
              
              state = {
                  "affection_level": getattr(schema, "affection_level", 0),
                  "trust_level": getattr(schema, "trust_level", 10),
-                 "current_mood": schema.current_mood.default_mood,
+                 "current_mood": getattr(mood_schema, "default_mood", "neutral"),
              }
              
              conn.execute(
@@ -3609,6 +3632,7 @@ def get_runtime_state(
                 INSERT INTO relationship_state
                 (character_id, player_id, affection_level, trust_level, current_mood, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(character_id, player_id) DO NOTHING
                 """,
                 (
                     character_id,
@@ -3619,6 +3643,19 @@ def get_runtime_state(
                     _now(),
                 ),
              )
+             row = conn.execute(
+                 """
+                 SELECT affection_level, trust_level, current_mood
+                 FROM relationship_state
+                 WHERE character_id = ? AND player_id = ?
+                 """,
+                 (character_id, player_id),
+             ).fetchone()
+             state = {
+                 "affection_level": row["affection_level"],
+                 "trust_level": row["trust_level"],
+                 "current_mood": row["current_mood"],
+             }
              
          # Task 5 完成迁移后，prompt 路径不得再读取 legacy 长期记忆。
          if has_data_migration(LONG_TERM_FACT_BACKFILL_MIGRATION):
@@ -5438,6 +5475,7 @@ def _save_event_definition_in_transaction(
     description: str = None,
     priority: int = 0,
     exclusive_group: str = None,
+    exclusive_scope: str = "turn",
     max_triggers_per_turn: int = 3,
     stop_processing: bool = False,
     is_active: bool = True,
@@ -5450,9 +5488,9 @@ def _save_event_definition_in_transaction(
         """
         INSERT INTO event_definition
         (owner_user_id, event_id, event_name, description, character_id, story_id, trigger_config,
-         effects_config, priority, exclusive_group, max_triggers_per_turn,
+         effects_config, priority, exclusive_group, exclusive_scope, max_triggers_per_turn,
          stop_processing, is_active, created_at, updated_at, schedule, template_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(owner_user_id, event_id)
         DO UPDATE SET
             event_name=excluded.event_name,
@@ -5463,6 +5501,7 @@ def _save_event_definition_in_transaction(
             effects_config=excluded.effects_config,
             priority=excluded.priority,
             exclusive_group=excluded.exclusive_group,
+            exclusive_scope=excluded.exclusive_scope,
             max_triggers_per_turn=excluded.max_triggers_per_turn,
             stop_processing=excluded.stop_processing,
             is_active=excluded.is_active,
@@ -5481,6 +5520,7 @@ def _save_event_definition_in_transaction(
             effects_config,
             priority,
             exclusive_group,
+            exclusive_scope,
             max_triggers_per_turn,
             1 if stop_processing else 0,
             1 if is_active else 0,
@@ -5490,6 +5530,23 @@ def _save_event_definition_in_transaction(
             template_id,
         ),
     )
+    if exclusive_scope == "player" and exclusive_group:
+        conn.execute(
+            """
+            DELETE FROM event_exclusive_group_guard
+            WHERE player_id = ? AND selected_event_id = ?
+              AND exclusive_group <> ?
+            """,
+            (owner_user_id, event_id, exclusive_group),
+        )
+    else:
+        conn.execute(
+            """
+            DELETE FROM event_exclusive_group_guard
+            WHERE player_id = ? AND selected_event_id = ?
+            """,
+            (owner_user_id, event_id),
+        )
 
 
 def save_event_definition(
@@ -5502,6 +5559,7 @@ def save_event_definition(
     description: str = None,
     priority: int = 0,
     exclusive_group: str = None,
+    exclusive_scope: str = "turn",
     max_triggers_per_turn: int = 3,
     stop_processing: bool = False,
     is_active: bool = True,
@@ -5523,6 +5581,7 @@ def save_event_definition(
                 description=description,
                 priority=priority,
                 exclusive_group=exclusive_group,
+                exclusive_scope=exclusive_scope,
                 max_triggers_per_turn=max_triggers_per_turn,
                 stop_processing=stop_processing,
                 is_active=is_active,
@@ -5585,6 +5644,13 @@ def delete_event_definition(owner_user_id: str, event_id: str) -> bool:
             )
             conn.execute(
                 "DELETE FROM event_trigger_guard WHERE player_id = ? AND event_id = ?",
+                (owner_user_id, event_id),
+            )
+            conn.execute(
+                """
+                DELETE FROM event_exclusive_group_guard
+                WHERE player_id = ? AND selected_event_id = ?
+                """,
                 (owner_user_id, event_id),
             )
             deleted = conn.execute(
@@ -5828,6 +5894,141 @@ def release_event_trigger_guard(
             (_now(), player_id, event_id, character_scope or "", claim_token),
         )
     return cursor.rowcount == 1
+
+
+def claim_event_exclusive_group(
+    *,
+    player_id: str,
+    exclusive_group: str,
+    claim_token: str,
+    claimed_at: str,
+    claim_expires_at: str,
+) -> bool:
+    """Claim a player-scoped exclusive group unless it is already selected."""
+    with get_conn() as conn:
+        if not _is_postgres_enabled():
+            conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            """
+            INSERT INTO event_exclusive_group_guard
+            (player_id, exclusive_group, selected_event_id, claim_token,
+             claim_expires_at, updated_at)
+            VALUES (?, ?, NULL, NULL, NULL, ?)
+            ON CONFLICT(player_id, exclusive_group) DO NOTHING
+            """,
+            (player_id, exclusive_group, claimed_at),
+        )
+        lock_suffix = " FOR UPDATE" if _is_postgres_enabled() else ""
+        row = conn.execute(
+            """
+            SELECT selected_event_id, claim_token, claim_expires_at
+            FROM event_exclusive_group_guard
+            WHERE player_id = ? AND exclusive_group = ?
+            """ + lock_suffix,
+            (player_id, exclusive_group),
+        ).fetchone()
+        if row["selected_event_id"]:
+            return False
+
+        legacy_selection = conn.execute(
+            """
+            SELECT trigger_log.event_id
+            FROM event_trigger_log AS trigger_log
+            INNER JOIN event_definition AS definition
+              ON definition.owner_user_id = trigger_log.player_id
+             AND definition.event_id = trigger_log.event_id
+            WHERE trigger_log.player_id = ?
+              AND trigger_log.status = 'succeeded'
+              AND definition.exclusive_group = ?
+              AND definition.exclusive_scope = 'player'
+            ORDER BY
+              CASE WHEN trigger_log.triggered_at IS NULL THEN 1 ELSE 0 END,
+              trigger_log.triggered_at ASC,
+              trigger_log.id ASC
+            LIMIT 1
+            """,
+            (player_id, exclusive_group),
+        ).fetchone()
+        if legacy_selection:
+            conn.execute(
+                """
+                UPDATE event_exclusive_group_guard
+                SET selected_event_id = ?, claim_token = NULL,
+                    claim_expires_at = NULL, updated_at = ?
+                WHERE player_id = ? AND exclusive_group = ?
+                """,
+                (
+                    legacy_selection["event_id"],
+                    claimed_at,
+                    player_id,
+                    exclusive_group,
+                ),
+            )
+            return False
+
+        claimed_time = datetime.fromisoformat(claimed_at.replace("Z", "+00:00"))
+        if claimed_time.tzinfo is None:
+            claimed_time = claimed_time.replace(tzinfo=timezone.utc)
+        existing_claim = row["claim_token"]
+        existing_expiry = row["claim_expires_at"]
+        if existing_claim and existing_claim != claim_token and existing_expiry:
+            expires_at = datetime.fromisoformat(existing_expiry.replace("Z", "+00:00"))
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at > claimed_time:
+                return False
+
+        cursor = conn.execute(
+            """
+            UPDATE event_exclusive_group_guard
+            SET claim_token = ?, claim_expires_at = ?, updated_at = ?
+            WHERE player_id = ? AND exclusive_group = ?
+              AND selected_event_id IS NULL
+            """,
+            (
+                claim_token,
+                claim_expires_at,
+                claimed_at,
+                player_id,
+                exclusive_group,
+            ),
+        )
+        return cursor.rowcount == 1
+
+
+def release_event_exclusive_group(
+    *,
+    player_id: str,
+    exclusive_group: str,
+    claim_token: str,
+) -> bool:
+    with get_conn() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE event_exclusive_group_guard
+            SET claim_token = NULL, claim_expires_at = NULL, updated_at = ?
+            WHERE player_id = ? AND exclusive_group = ?
+              AND selected_event_id IS NULL AND claim_token = ?
+            """,
+            (_now(), player_id, exclusive_group, claim_token),
+        )
+    return cursor.rowcount == 1
+
+
+def get_event_exclusive_group_selection(
+    player_id: str,
+    exclusive_group: str,
+) -> dict | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM event_exclusive_group_guard
+            WHERE player_id = ? AND exclusive_group = ?
+              AND selected_event_id IS NOT NULL
+            """,
+            (player_id, exclusive_group),
+        ).fetchone()
+    return _row_to_dict(row)
 
 
 def get_event_execution_batch(player_id: str, execution_key: str) -> dict | None:
@@ -6117,6 +6318,8 @@ def _save_runtime_states_in_transaction(
             trust_level=state["trust_level"],
             current_mood=state["current_mood"],
             now=now,
+            insert_only=bool(state.get("insert_only")),
+            state_changes=state.get("state_changes"),
         )
 
 
@@ -6129,43 +6332,130 @@ def _save_runtime_state_in_transaction(
     trust_level: float,
     current_mood: str,
     now: str,
+    insert_only: bool = False,
+    state_changes: list[dict] | None = None,
 ) -> None:
-    conn.execute(
-        """
-        INSERT INTO relationship_state
-        (character_id, player_id, affection_level, trust_level,
-         current_mood, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(character_id, player_id)
-        DO UPDATE SET
-            affection_level=excluded.affection_level,
-            trust_level=excluded.trust_level,
-            current_mood=excluded.current_mood,
-            updated_at=excluded.updated_at
-        """,
-        (
-            character_id,
-            player_id,
-            affection_level,
-            trust_level,
-            current_mood,
-            now,
-        ),
-    )
+    if state_changes:
+        conn.execute(
+            """
+            INSERT INTO relationship_state
+            (character_id, player_id, affection_level, trust_level,
+             current_mood, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(character_id, player_id) DO NOTHING
+            """,
+            (
+                character_id,
+                player_id,
+                affection_level,
+                trust_level,
+                current_mood,
+                now,
+            ),
+        )
+        for changes in state_changes:
+            assignments: list[str] = []
+            parameters: list[Any] = []
+            if "affection_level" in changes:
+                delta = float(changes["affection_level"])
+                assignments.append(
+                    """
+                    affection_level = CASE
+                        WHEN affection_level + ? < -100 THEN -100
+                        WHEN affection_level + ? > 100 THEN 100
+                        ELSE affection_level + ?
+                    END
+                    """
+                )
+                parameters.extend([delta, delta, delta])
+            if "trust_level" in changes:
+                delta = float(changes["trust_level"])
+                assignments.append(
+                    """
+                    trust_level = CASE
+                        WHEN trust_level + ? < 0 THEN 0
+                        WHEN trust_level + ? > 100 THEN 100
+                        ELSE trust_level + ?
+                    END
+                    """
+                )
+                parameters.extend([delta, delta, delta])
+            if "current_mood" in changes:
+                assignments.append("current_mood = ?")
+                parameters.append(str(changes["current_mood"]))
+            if not assignments:
+                continue
+            parameters.extend([now, character_id, player_id])
+            conn.execute(
+                f"""
+                UPDATE relationship_state
+                SET {", ".join(assignments)}, updated_at = ?
+                WHERE character_id = ? AND player_id = ?
+                """,
+                parameters,
+            )
+        row = conn.execute(
+            """
+            SELECT affection_level, trust_level, current_mood
+            FROM relationship_state
+            WHERE character_id = ? AND player_id = ?
+            """,
+            (character_id, player_id),
+        ).fetchone()
+        affection_level = row["affection_level"]
+        trust_level = row["trust_level"]
+        current_mood = row["current_mood"]
+    else:
+        relationship_state_conflict = (
+            "DO NOTHING"
+            if insert_only
+            else """
+            DO UPDATE SET
+                affection_level=excluded.affection_level,
+                trust_level=excluded.trust_level,
+                current_mood=excluded.current_mood,
+                updated_at=excluded.updated_at
+            """
+        )
+        conn.execute(
+            f"""
+            INSERT INTO relationship_state
+            (character_id, player_id, affection_level, trust_level,
+             current_mood, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(character_id, player_id)
+            {relationship_state_conflict}
+            """,
+            (
+                character_id,
+                player_id,
+                affection_level,
+                trust_level,
+                current_mood,
+                now,
+            ),
+        )
     player_id_node, character_id_node = _normalize_relationship_pair(
         player_node_id(player_id),
         character_id,
     )
-    conn.execute(
+    relationship_conflict = (
+        "DO NOTHING"
+        if insert_only
+        else """
+        DO UPDATE SET
+            affinity=excluded.affinity,
+            updated_at=excluded.updated_at
         """
+    )
+    conn.execute(
+        f"""
         INSERT INTO character_relationship
         (owner_user_id, character_id_a, character_id_b, relationship_type,
          affinity, description, created_at, updated_at)
         VALUES (?, ?, ?, '相识', ?, NULL, ?, ?)
         ON CONFLICT(owner_user_id, character_id_a, character_id_b)
-        DO UPDATE SET
-            affinity=excluded.affinity,
-            updated_at=excluded.updated_at
+        {relationship_conflict}
         """,
         (
             player_id,
@@ -6444,23 +6734,41 @@ def commit_event_execution_batch(
                 )
             for execution in executions:
                 claim_token = execution.get("trigger_claim_token")
-                if not claim_token:
-                    continue
-                conn.execute(
-                    """
-                    UPDATE event_trigger_guard
-                    SET claim_token = NULL, claim_expires_at = NULL, updated_at = ?
-                    WHERE player_id = ? AND event_id = ? AND character_scope = ?
-                      AND claim_token = ?
-                    """,
-                    (
-                        now,
-                        player_id,
-                        execution["event_id"],
-                        execution.get("trigger_character_scope") or "",
-                        claim_token,
-                    ),
+                if claim_token:
+                    conn.execute(
+                        """
+                        UPDATE event_trigger_guard
+                        SET claim_token = NULL, claim_expires_at = NULL, updated_at = ?
+                        WHERE player_id = ? AND event_id = ? AND character_scope = ?
+                          AND claim_token = ?
+                        """,
+                        (
+                            now,
+                            player_id,
+                            execution["event_id"],
+                            execution.get("trigger_character_scope") or "",
+                            claim_token,
+                        ),
+                    )
+                exclusive_claim_token = execution.get(
+                    "exclusive_group_claim_token"
                 )
+                if exclusive_claim_token:
+                    conn.execute(
+                        """
+                        UPDATE event_exclusive_group_guard
+                        SET claim_token = NULL, claim_expires_at = NULL,
+                            updated_at = ?
+                        WHERE player_id = ? AND exclusive_group = ?
+                          AND selected_event_id IS NULL AND claim_token = ?
+                        """,
+                        (
+                            now,
+                            player_id,
+                            execution["exclusive_group"],
+                            exclusive_claim_token,
+                        ),
+                    )
             dialogue_response = (
                 _commit_dialogue_turn_in_transaction(conn, dialogue_turn, now=now)
                 if dialogue_turn
@@ -6526,6 +6834,69 @@ def commit_event_execution_batch(
                     raise RuntimeError(
                         "event trigger claim was lost before atomic completion"
                     )
+
+            exclusive_claim_token = execution.get(
+                "exclusive_group_claim_token"
+            )
+            if exclusive_claim_token:
+                selected = conn.execute(
+                    """
+                    UPDATE event_exclusive_group_guard
+                    SET selected_event_id = ?, claim_token = NULL,
+                        claim_expires_at = NULL, updated_at = ?
+                    WHERE player_id = ? AND exclusive_group = ?
+                      AND selected_event_id IS NULL AND claim_token = ?
+                      AND EXISTS (
+                          SELECT 1
+                          FROM event_definition
+                          WHERE owner_user_id = ?
+                            AND event_id = ?
+                            AND exclusive_scope = 'player'
+                            AND exclusive_group = ?
+                      )
+                    """,
+                    (
+                        execution["event_id"],
+                        now,
+                        player_id,
+                        execution["exclusive_group"],
+                        exclusive_claim_token,
+                        player_id,
+                        execution["event_id"],
+                        execution["exclusive_group"],
+                    ),
+                )
+                if selected.rowcount != 1:
+                    released_stale = conn.execute(
+                        """
+                        UPDATE event_exclusive_group_guard
+                        SET claim_token = NULL, claim_expires_at = NULL,
+                            updated_at = ?
+                        WHERE player_id = ? AND exclusive_group = ?
+                          AND selected_event_id IS NULL AND claim_token = ?
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM event_definition
+                              WHERE owner_user_id = ?
+                                AND event_id = ?
+                                AND exclusive_scope = 'player'
+                                AND exclusive_group = ?
+                          )
+                        """,
+                        (
+                            now,
+                            player_id,
+                            execution["exclusive_group"],
+                            exclusive_claim_token,
+                            player_id,
+                            execution["event_id"],
+                            execution["exclusive_group"],
+                        ),
+                    )
+                    if released_stale.rowcount != 1:
+                        raise RuntimeError(
+                            "event exclusive group claim was lost before atomic completion"
+                        )
 
             conn.execute(
                 """
@@ -6858,6 +7229,13 @@ def delete_trigger_history(
             """,
             (event_id, player_id, character_id),
         )
+        conn.execute(
+            """
+            DELETE FROM event_exclusive_group_guard
+            WHERE player_id = ? AND selected_event_id = ?
+            """,
+            (player_id, event_id),
+        )
         return cur.rowcount
 
 
@@ -7033,6 +7411,7 @@ def save_event_definition_with_schedule(
     description: str = None,
     priority: int = 0,
     exclusive_group: str = None,
+    exclusive_scope: str = "turn",
     max_triggers_per_turn: int = 3,
     stop_processing: bool = False,
     is_active: bool = True,
@@ -7054,6 +7433,7 @@ def save_event_definition_with_schedule(
                 description=description,
                 priority=priority,
                 exclusive_group=exclusive_group,
+                exclusive_scope=exclusive_scope,
                 max_triggers_per_turn=max_triggers_per_turn,
                 stop_processing=stop_processing,
                 is_active=is_active,
