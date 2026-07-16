@@ -111,7 +111,13 @@ export default function Home() {
 
       {/* 内容 */}
       <div className="relative z-10 flex flex-col items-center min-h-dvh px-3 sm:px-4 py-8 sm:py-10 pointer-events-none">
-        <div className="mt-4 sm:mt-6 mb-2 pointer-events-auto">
+        <div className="mt-4 mb-2 flex items-center justify-center gap-3 sm:mt-6 sm:gap-4 pointer-events-auto">
+          <img
+            src="/memoria-icon.svg"
+            alt=""
+            aria-hidden="true"
+            className="h-11 w-11 shrink-0 sm:h-12 sm:w-12"
+          />
           <GlitchText speed={1} enableShadows enableOnHover={false} className="home-title">
             Memoria
           </GlitchText>
@@ -121,7 +127,7 @@ export default function Home() {
         </p>
         <div className="pointer-events-auto pill-nav-inline mb-10 max-w-[calc(100vw-1rem)] overflow-visible px-3 sm:px-6 py-2.5 rounded-full border border-cyber-green/20 bg-[#0d0d14]/60 backdrop-blur-md shadow-[0_0_20px_rgba(167,239,158,0.06),0_0_40px_rgba(167,239,158,0.03)]">
           <div className="flex items-center gap-1">
-            {/* User entry button — replaces the M logo's role as auth entry */}
+            {/* User entry button */}
             <button
               onClick={() => user ? setShowSettings(true) : setShowLogin(true)}
               className="w-[40px] h-[40px] sm:w-[36px] sm:h-[36px] rounded-full bg-[#0b0b0c] flex items-center justify-center flex-shrink-0 border border-cyber-green/15 hover:border-cyber-green/40 transition-colors overflow-hidden"

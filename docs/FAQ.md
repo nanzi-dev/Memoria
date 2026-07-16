@@ -281,7 +281,7 @@ PYTHONPATH=src uvicorn memoria.main:app --host 127.0.0.1 --port 8001
 ```bash
 cd deploy/docker
 cp .env.example .env
-# 编辑 .env，至少填入 LLM_API_KEY；生产环境请修改 POSTGRES_PASSWORD
+# 编辑 .env，填入 LLM_API_KEY，并设置高强度且唯一的 POSTGRES_PASSWORD（必填）
 docker compose up
 ```
 

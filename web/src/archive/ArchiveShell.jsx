@@ -356,7 +356,12 @@ export default function ArchiveShell() {
                 <TooltipTrigger asChild>
                   <Button variant="ghost" size="icon" asChild>
                     <Link to="/" aria-label="返回首页">
-                      <Archive className="h-5 w-5 text-primary" aria-hidden="true" />
+                      <img
+                        src="/memoria-icon.svg"
+                        alt=""
+                        aria-hidden="true"
+                        className="h-8 w-8"
+                      />
                     </Link>
                   </Button>
                 </TooltipTrigger>

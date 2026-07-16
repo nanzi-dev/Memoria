@@ -1,5 +1,8 @@
 FROM python:3.11-slim
 
+ARG TORCH_VERSION=2.2.2+cpu
+ARG PYTORCH_CPU_INDEX_URL=https://download.pytorch.org/whl/cpu
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -13,6 +16,7 @@ RUN apt-get update \
 
 COPY requirements.txt pyproject.toml README.md ./
 RUN pip install --upgrade pip \
+    && pip install --extra-index-url "${PYTORCH_CPU_INDEX_URL}" "torch==${TORCH_VERSION}" \
     && pip install -r requirements.txt
 
 COPY src ./src
