@@ -15,4 +15,3 @@ export const Input = forwardRef(function Input({ className, type, ...props }, re
     />
   );
 });
-

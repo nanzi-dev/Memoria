@@ -21,7 +21,6 @@ export const ScrollArea = forwardRef(function ScrollArea(
     </ScrollAreaPrimitive.Root>
   );
 });
-
 export const ScrollBar = forwardRef(function ScrollBar(
   { className, orientation = 'vertical', ...props },
   ref,
@@ -42,4 +41,3 @@ export const ScrollBar = forwardRef(function ScrollBar(
     </ScrollAreaPrimitive.ScrollAreaScrollbar>
   );
 });
-

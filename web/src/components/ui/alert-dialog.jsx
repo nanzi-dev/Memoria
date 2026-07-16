@@ -23,7 +23,6 @@ export const AlertDialogOverlay = forwardRef(function AlertDialogOverlay(
     />
   );
 });
-
 export const AlertDialogContent = forwardRef(function AlertDialogContent(
   { className, ...props },
   ref,
@@ -109,4 +108,3 @@ export const AlertDialogCancel = forwardRef(function AlertDialogCancel(
     />
   );
 });
-

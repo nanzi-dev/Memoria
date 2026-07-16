@@ -25,7 +25,6 @@ export const SheetOverlay = forwardRef(function SheetOverlay(
     />
   );
 });
-
 const sheetVariants = cva(
   'fixed z-[1001] flex gap-4 border-border bg-background p-5 text-foreground shadow-2xl transition-transform duration-200 ease-out',
   {
@@ -99,4 +98,3 @@ export const SheetDescription = forwardRef(function SheetDescription(
     />
   );
 });
-

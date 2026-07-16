@@ -30,4 +30,3 @@ export const TooltipContent = forwardRef(function TooltipContent(
     </TooltipPrimitive.Portal>
   );
 });
-

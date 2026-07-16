@@ -24,7 +24,6 @@ export const DialogOverlay = forwardRef(function DialogOverlay(
     />
   );
 });
-
 export const DialogContent = forwardRef(function DialogContent(
   { className, children, showClose = true, ...props },
   ref,
@@ -91,4 +90,3 @@ export const DialogDescription = forwardRef(function DialogDescription(
     />
   );
 });
-

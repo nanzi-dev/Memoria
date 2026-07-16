@@ -21,4 +21,3 @@ export const Separator = forwardRef(function Separator(
     />
   );
 });
-

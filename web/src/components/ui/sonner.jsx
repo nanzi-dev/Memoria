@@ -23,4 +23,3 @@ export function Toaster(props) {
 }
 
 export { toast };
-

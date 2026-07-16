@@ -8,4 +8,3 @@ export function Skeleton({ className, ...props }) {
     />
   );
 }
-
