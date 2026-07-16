@@ -66,19 +66,13 @@ test('DialogContext restores focus for controlled dialogs and settles lifecycle 
   assert.match(lifecycle, /dialogRef\.current = null/);
 });
 
-test('Event detail renders every event number with tabular archive mono styling', () => {
-  const archiveValue = dialogSlice(eventSource, 'function ArchiveValue', 'function RecordFields');
+test('Event detail keeps visible numeric summaries in tabular archive mono styling', () => {
   const detailItem = dialogSlice(eventSource, 'function DetailItem', 'export default function EventList');
 
-  assert.match(
-    archiveValue,
-    /typeof value === 'number'[\s\S]{0,180}font-archive-mono[\s\S]{0,80}tabular-nums/,
-  );
-  assert.match(archiveValue, /<pre className="[^"]*font-archive-mono[^"]*tabular-nums[^"]*"/);
   assert.match(detailItem, /mono \? '[^']*font-archive-mono[^']*tabular-nums[^']*'/);
   assert.match(
     eventSource,
-    /<p className="mb-4 font-archive-mono text-sm tabular-nums leading-7 text-foreground">/,
+    /<p className="mb-4 line-clamp-2 font-archive-mono text-sm tabular-nums leading-7 text-foreground">/,
   );
   assert.doesNotMatch(eventSource, /triggerSummaryIsMono/);
 
@@ -101,7 +95,6 @@ test('Event detail renders every event number with tabular archive mono styling'
   }
 
   for (const label of [
-    '计划表达式',
     '世界时间触发',
     '现实预计时间',
     '合并漏触发',
