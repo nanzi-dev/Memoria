@@ -58,6 +58,13 @@ JI_OUTCOMES = {
     "echo_ji_professional_trust_lost",
 }
 
+PLAYER_EXCLUSIVE_GROUPS = {
+    "echo_main_choice",
+    "echo_ji_choice",
+    "echo_main_ending",
+    "echo_ji_outcome",
+}
+
 
 @pytest.fixture
 def isolated_echo_archive_db(tmp_path, monkeypatch):
@@ -226,6 +233,29 @@ def test_echo_archive_choice_and_outcome_graph_is_complete():
     for event_id, phrase in phrase_contract.items():
         assert phrase in (events[event_id].trigger_condition.keywords or [])
 
+    decision_window_dependencies = {
+        condition.event_id
+        for condition in _walk_conditions(
+            events["echo_meta_decision_window"].trigger_condition
+        )
+        if condition.event_id
+    }
+    assert "echo_v7_transition" in decision_window_dependencies
+
+    ji_choices = {
+        event_id: event
+        for event_id, event in events.items()
+        if event.exclusive_group == "echo_ji_choice"
+    }
+    assert len(ji_choices) == 4
+    for event in ji_choices.values():
+        referenced = {
+            condition.event_id
+            for condition in _walk_conditions(event.trigger_condition)
+            if condition.event_id
+        }
+        assert "echo_meta_decision_window" in referenced
+
     expected_dependencies = {
         "echo_end_controlled_breakthrough": "echo_choice_submit_tiered",
         "echo_end_after_flood": "echo_choice_publish_raw",
@@ -253,6 +283,104 @@ def test_echo_archive_choice_and_outcome_graph_is_complete():
     }
     assert main_exclusive_groups == {"echo_main_ending"}
     assert ji_exclusive_groups == {"echo_ji_outcome"}
+
+
+def test_echo_archive_choice_and_ending_groups_are_player_scoped():
+    events = _read_json("events.json")
+    grouped_events = {
+        group: [
+            event
+            for event in events
+            if event.get("exclusive_group") == group
+        ]
+        for group in PLAYER_EXCLUSIVE_GROUPS
+    }
+
+    assert {group: len(members) for group, members in grouped_events.items()} == {
+        "echo_main_choice": 4,
+        "echo_ji_choice": 4,
+        "echo_main_ending": 4,
+        "echo_ji_outcome": 4,
+    }
+    for members in grouped_events.values():
+        assert all(event.get("exclusive_scope") == "player" for event in members)
+
+
+def test_echo_archive_revelations_remain_distinct_turn_scoped_events():
+    events = _read_json("events.json")
+
+    for volume in range(1, 7):
+        group = f"echo_v{volume}_revelation"
+        members = [
+            event
+            for event in events
+            if event.get("exclusive_group") == group
+        ]
+
+        assert {event["event_id"] for event in members} == {
+            f"echo_v{volume}_turning_point",
+            f"echo_v{volume}_contradiction",
+        }
+        assert all(
+            event.get("exclusive_scope", "turn") == "turn"
+            for event in members
+        )
+
+
+def test_echo_archive_v1_to_v6_resolutions_require_both_revelations():
+    events = {event["event_id"]: event for event in _read_json("events.json")}
+
+    for volume in range(1, 7):
+        turning_point = events[f"echo_v{volume}_turning_point"]
+        resolution = events[f"echo_v{volume}_resolution"]
+        prerequisites = {
+            condition["event_id"]
+            for condition in resolution["trigger_condition"]["sub_conditions"]
+            if condition["trigger_type"] == "event_history"
+        }
+
+        assert {
+            f"echo_v{volume}_turning_point",
+            f"echo_v{volume}_contradiction",
+        } <= prerequisites
+        assert turning_point["trigger_condition"]["trigger_type"] == "keyword_match"
+        assert turning_point["trigger_condition"]["match_mode"] == "all"
+        assert len(turning_point["trigger_condition"]["keywords"]) == 2
+
+
+def test_echo_archive_readme_reports_the_complete_module_inventory():
+    module_files = [
+        path
+        for path in MODULE_ROOT.rglob("*")
+        if path.is_file() and path.name != "PLAYTHROUGH_REPORT.md"
+    ]
+    readme = (MODULE_ROOT / "README.md").read_text(encoding="utf-8")
+    json_line = next(
+        line for line in readme.splitlines() if line.startswith("- 27 个 JSON 文件")
+    )
+    markdown_line = next(
+        line
+        for line in readme.splitlines()
+        if line.startswith("- 29 个 Markdown 文件")
+    )
+
+    assert len(module_files) == 56
+    assert sum(path.suffix == ".json" for path in module_files) == 27
+    assert sum(path.suffix == ".md" for path in module_files) == 29
+    assert "56 个可播种内容文件" in readme
+    assert "27 个 JSON 文件" in json_line
+    assert "`events.json`" in json_line
+    assert "29 个 Markdown 文件" in markdown_line
+    assert "`攻略.md`" in markdown_line
+
+
+def test_echo_archive_disclosure_costs_match_the_ending_graph():
+    disclosure_costs = (
+        MODULE_ROOT / "knowledge" / "v7_disclosure_costs.md"
+    ).read_text(encoding="utf-8")
+
+    assert "“沉默证词”通常来自保全证人" in disclosure_costs
+    assert "“失效档案”通常来自封存主档" in disclosure_costs
 
 
 def test_echo_archive_events_match_the_canonical_case_files():
@@ -309,6 +437,67 @@ def test_echo_archive_documented_success_and_failure_routes_reference_real_event
     assert set(successful_route + failure_route) <= event_ids
     for event_id in successful_route + failure_route:
         assert event_id in walkthrough
+
+
+def test_echo_archive_walkthrough_documents_actual_event_timing():
+    walkthrough = (MODULE_ROOT / "WALKTHROUGH.md").read_text(encoding="utf-8")
+    guide = (MODULE_ROOT / "攻略.md").read_text(encoding="utf-8")
+    volume_one = walkthrough.split("## 第1卷", 1)[1].split("## 第2卷", 1)[0]
+    volume_two = walkthrough.split("## 第2卷", 1)[1].split("## 第3卷", 1)[0]
+    volume_six = walkthrough.split("## 第6卷", 1)[1].split("## 第7卷", 1)[0]
+    volume_seven = walkthrough.split("## 第7卷", 1)[1].split(
+        "## 四个主结局", 1
+    )[0]
+    success_route = walkthrough.split("## 一条成功路线", 1)[1].split(
+        "## 一条失败路线", 1
+    )[0]
+    failure_route = walkthrough.split("## 一条失败路线", 1)[1]
+
+    assert "不会触发 `echo_choice_protect_witness`" in volume_one
+    assert "延续 `保全证人` 状态" not in volume_two
+    assert (
+        "只有在 `echo_meta_decision_window` 已提交后，单独发送 "
+        "`保全证人` 才会触发 `echo_choice_protect_witness`"
+    ) in volume_seven
+    assert "按程序撤离" not in volume_six
+    assert (
+        "第1至第6卷的 `echo_vN_resolution` 同时要求 "
+        "`echo_vN_turning_point` 和 `echo_vN_contradiction`"
+    ) in walkthrough
+    assert (
+        "`match_mode: all` 要求两个关键词出现在同一条玩家消息中"
+    ) in walkthrough
+    assert (
+        "`EVENT_HISTORY` 只读取检测前已经提交的历史批次"
+    ) in walkthrough
+    assert "普通依赖不会在同一批次级联" in walkthrough
+    assert "除非使用显式 `TRIGGER_EVENT` 链接" in walkthrough
+    assert "两个前置事件都已提交后，至少再推进一轮" in walkthrough
+    assert (
+        "季衡选择只会在 `echo_v7_transition` 完成且 "
+        "`echo_meta_decision_window` 已提交后解锁"
+    ) in walkthrough
+
+    assert success_route.index("echo_v7_transition") < success_route.index(
+        "echo_meta_decision_window"
+    )
+    assert success_route.index("echo_meta_decision_window") < success_route.index(
+        "echo_choice_trust_ji"
+    )
+    assert failure_route.index("echo_v7_transition") < failure_route.index(
+        "echo_meta_decision_window"
+    )
+    assert failure_route.index("echo_meta_decision_window") < failure_route.index(
+        "echo_choice_act_alone"
+    )
+
+    assert "转折事件的两个关键词必须放在同一条玩家消息中" in guide
+    assert "案件结论同时要求转折事件和矛盾核验已提交" in guide
+    assert "普通 `EVENT_HISTORY` 依赖不会在同一批次级联" in guide
+    assert (
+        "季衡选择需等待 `echo_v7_transition` 和 "
+        "`echo_meta_decision_window` 均已提交"
+    ) in guide
 
 
 def test_echo_archive_seeds_all_runtime_assets_idempotently(

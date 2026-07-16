@@ -40,6 +40,7 @@ class EventExecutor:
             event_id=event.event_id,
             event_name=event.event_name,
             character_id=context.character_id,
+            response_index=context.response_index,
             triggered=True,
             status="succeeded",
         )

@@ -19,6 +19,8 @@ def _event_row(character_id="c1"):
         "trigger_config": '{"trigger_type":"keyword_match","keywords":["test"]}',
         "effects_config": "[]",
         "priority": 0,
+        "exclusive_group": "ending",
+        "exclusive_scope": "player",
         "is_active": 1,
         "schedule": None,
         "template_id": None,
@@ -170,6 +172,79 @@ def test_create_event_persists_story_id(monkeypatch):
 
     assert response.success is True
     assert saved["story_id"] == "graytide"
+
+
+def test_create_update_and_toggle_event_preserve_exclusive_scope(monkeypatch):
+    from memoria.api import event_admin
+
+    saved = {}
+    monkeypatch.setattr(event_admin.repository, "get_event_definition", lambda *args: None)
+    monkeypatch.setattr(
+        event_admin.repository,
+        "save_event_definition_with_schedule",
+        lambda **kwargs: saved.update(kwargs) or True,
+    )
+
+    event_admin.create_event(
+        event_admin.EventCreateRequest(
+            event_id="evt_scope",
+            event_name="Scoped event",
+            exclusive_group="ending",
+            exclusive_scope="player",
+            trigger_condition=event_admin.TriggerConditionDTO(
+                trigger_type="keyword_match",
+                keywords=["scope"],
+            ),
+        ),
+        current_user_id="user-1",
+    )
+    assert saved["exclusive_scope"] == "player"
+
+    existing = _event_row(character_id=None)
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_event_definition",
+        lambda *args: existing,
+    )
+    saved.clear()
+    event_admin.update_event(
+        "evt_test",
+        event_admin.EventUpdateRequest(event_name="Renamed"),
+        current_user_id="user-1",
+    )
+    assert saved["exclusive_scope"] == "player"
+
+    saved.clear()
+    event_admin.toggle_event(
+        "evt_test",
+        active=False,
+        current_user_id="user-1",
+    )
+    assert saved["exclusive_scope"] == "player"
+
+
+def test_update_event_explicit_null_preserves_existing_exclusive_scope(monkeypatch):
+    from memoria.api import event_admin
+
+    saved = {}
+    monkeypatch.setattr(
+        event_admin.repository,
+        "get_event_definition",
+        lambda *args: _event_row(character_id=None),
+    )
+    monkeypatch.setattr(
+        event_admin.repository,
+        "save_event_definition_with_schedule",
+        lambda **kwargs: saved.update(kwargs) or True,
+    )
+
+    event_admin.update_event(
+        "evt_test",
+        event_admin.EventUpdateRequest(exclusive_scope=None),
+        current_user_id="user-1",
+    )
+
+    assert saved["exclusive_scope"] == "player"
 
 
 def test_update_event_persists_changed_character(monkeypatch):

@@ -11,7 +11,7 @@ import json
 import logging
 import re
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException
@@ -99,6 +99,7 @@ class EventCreateRequest(BaseModel):
     effects: list[EventEffectDTO] = Field(default_factory=list)
     priority: int = 0
     exclusive_group: Optional[str] = None
+    exclusive_scope: Literal["turn", "player"] = "turn"
     max_triggers_per_turn: int = Field(3, ge=1, le=20)
     stop_processing: bool = False
     is_active: bool = True
@@ -115,6 +116,7 @@ class EventUpdateRequest(BaseModel):
     effects: Optional[list[EventEffectDTO]] = None
     priority: Optional[int] = None
     exclusive_group: Optional[str] = None
+    exclusive_scope: Optional[Literal["turn", "player"]] = None
     max_triggers_per_turn: Optional[int] = Field(None, ge=1, le=20)
     stop_processing: Optional[bool] = None
     is_active: Optional[bool] = None
@@ -130,6 +132,7 @@ class EventListItem(BaseModel):
     story_id: Optional[str] = None
     priority: int
     exclusive_group: Optional[str] = None
+    exclusive_scope: Literal["turn", "player"] = "turn"
     max_triggers_per_turn: int = 3
     stop_processing: bool = False
     is_active: bool
@@ -558,6 +561,7 @@ def list_events(
                 story_id=r.get("story_id"),
                 priority=r.get("priority", 0),
                 exclusive_group=r.get("exclusive_group"),
+                exclusive_scope=r.get("exclusive_scope") or "turn",
                 max_triggers_per_turn=r.get("max_triggers_per_turn") or 3,
                 stop_processing=bool(r.get("stop_processing", 0)),
                 is_active=bool(r.get("is_active", 1)),
@@ -610,6 +614,7 @@ def get_event(
         story_id=row.get("story_id"),
         priority=row.get("priority", 0),
         exclusive_group=row.get("exclusive_group"),
+        exclusive_scope=row.get("exclusive_scope") or "turn",
         max_triggers_per_turn=row.get("max_triggers_per_turn") or 3,
         stop_processing=bool(row.get("stop_processing", 0)),
         is_active=bool(row.get("is_active", 1)),
@@ -687,6 +692,7 @@ def create_event(
         description=req.description,
         priority=req.priority,
         exclusive_group=req.exclusive_group,
+        exclusive_scope=req.exclusive_scope,
         max_triggers_per_turn=req.max_triggers_per_turn,
         stop_processing=req.stop_processing,
         is_active=req.is_active,
@@ -730,6 +736,7 @@ def update_event(
         if "exclusive_group" in req.model_fields_set
         else existing.get("exclusive_group")
     )
+    exclusive_scope = req.exclusive_scope or existing.get("exclusive_scope") or "turn"
     max_triggers_per_turn = (
         req.max_triggers_per_turn
         if req.max_triggers_per_turn is not None
@@ -802,6 +809,7 @@ def update_event(
         description=description,
         priority=priority,
         exclusive_group=exclusive_group,
+        exclusive_scope=exclusive_scope,
         max_triggers_per_turn=max_triggers_per_turn,
         stop_processing=stop_processing,
         is_active=is_active,
@@ -884,6 +892,7 @@ def toggle_event(
         description=existing.get("description"),
         priority=existing.get("priority", 0),
         exclusive_group=existing.get("exclusive_group"),
+        exclusive_scope=existing.get("exclusive_scope") or "turn",
         max_triggers_per_turn=existing.get("max_triggers_per_turn") or 3,
         stop_processing=bool(existing.get("stop_processing", 0)),
         is_active=active,

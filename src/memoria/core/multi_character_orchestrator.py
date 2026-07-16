@@ -27,6 +27,7 @@ from memoria.core import (
     world_clock,
 )
 from memoria.core.config import configs
+from memoria.core.event_schema import EventTriggerResult
 from memoria.core.knowledge_retriever import retrieve_knowledge
 from memoria.core.locale import DEFAULT_LOCALE, Locale
 from memoria.core.memory_extractor import (
@@ -365,37 +366,92 @@ class MultiCharacterOrchestrator:
         lease_owner: str,
         player_message: dict,
     ) -> list:
-        has_event_context = bool(getattr(self, "player_id", None)) and not any(
-            not response.get("character_id")
-            or "current_affinity" not in response
-            or "current_trust" not in response
-            or "current_mood" not in response
-            or "_previous_affinity" not in response
-            or "_previous_trust" not in response
+        required_response_fields = {
+            "character_id",
+            "current_affinity",
+            "current_trust",
+            "current_mood",
+            "_previous_affinity",
+            "_previous_trust",
+        }
+        responding_character_ids = {
+            response["character_id"]
             for response in responses
+            if response.get("character_id")
+        }
+        has_event_context = bool(getattr(self, "player_id", None)) and (
+            not responses
+            or all(
+                required_response_fields <= response.keys()
+                for response in responses
+            )
         )
         contexts = []
+        nonresponder_character_ids: set[str] = set()
         if has_event_context:
             relationships = self._load_all_relationships()
-            for response in responses:
+            nonresponder_character_ids = {
+                participant["character_id"]
+                for participant in self.participants
+                if participant["character_id"] not in responding_character_ids
+            }
+            ordered_context_inputs = [
+                (response["character_id"], response, response_index)
+                for response_index, response in enumerate(responses)
+            ] + [
+                (participant["character_id"], None, None)
+                for participant in self.participants
+                if participant["character_id"] not in responding_character_ids
+            ]
+            for character_id, response, response_index in ordered_context_inputs:
+                if response is not None:
+                    current_affinity = response["current_affinity"]
+                    current_trust = response["current_trust"]
+                    current_mood = response["current_mood"]
+                    previous_affinity = response["_previous_affinity"]
+                    previous_trust = response["_previous_trust"]
+                    affinity_delta = response.get(
+                        "affinity_delta",
+                        current_affinity - previous_affinity,
+                    )
+                    trust_delta = response.get(
+                        "trust_delta",
+                        current_trust - previous_trust,
+                    )
+                    npc_response = response.get("dialogue")
+                else:
+                    runtime_state = repository.get_runtime_state(
+                        character_id,
+                        self.player_id,
+                        self.character_cards.get(character_id),
+                    )
+                    current_affinity = runtime_state["affection_level"]
+                    current_trust = runtime_state["trust_level"]
+                    current_mood = runtime_state["current_mood"]
+                    previous_affinity = current_affinity
+                    previous_trust = current_trust
+                    affinity_delta = 0
+                    trust_delta = 0
+                    npc_response = None
                 contexts.append(event_runtime.build_event_context(
-                    character_id=response["character_id"],
+                    character_id=character_id,
                     player_id=self.player_id,
                     session_id=self.session_id,
-                    current_affinity=response["current_affinity"],
-                    current_trust=response["current_trust"],
-                    current_mood=response["current_mood"],
-                    previous_affinity=response["_previous_affinity"],
-                    previous_trust=response["_previous_trust"],
-                    affinity_delta=response["affinity_delta"],
-                    trust_delta=response["trust_delta"],
+                    current_affinity=current_affinity,
+                    current_trust=current_trust,
+                    current_mood=current_mood,
+                    previous_affinity=previous_affinity,
+                    previous_trust=previous_trust,
+                    affinity_delta=affinity_delta,
+                    trust_delta=trust_delta,
                     player_message=player_text,
-                    npc_response=response["dialogue"],
+                    npc_response=npc_response,
                     character_relationships=relationships,
                     world_time=clock_snapshot.world_now.isoformat(),
                     execution_key=f"multi:{self.session_id}:{request_id}",
                     trigger_source="multi_dialogue",
                     current_user_turn_persisted=False,
+                    response_index=response_index,
                 ))
 
         turn_holder: dict = {}
@@ -403,11 +459,33 @@ class MultiCharacterOrchestrator:
         def build_dialogue_turn(event_results: list) -> dict:
             if turn_holder:
                 return turn_holder["turn"]
-            for response, context in zip(responses, contexts):
+            contexts_by_response_index = {
+                context.response_index: context
+                for context in contexts
+                if context.response_index is not None
+            }
+            response_counts_by_character = {
+                character_id: sum(
+                    response.get("character_id") == character_id
+                    for response in responses
+                )
+                for character_id in responding_character_ids
+            }
+            for response_index, response in enumerate(responses):
+                context = contexts_by_response_index.get(response_index)
+                if context is None:
+                    continue
                 character_results = [
                     result
                     for result in event_results
-                    if result.character_id == response["character_id"]
+                    if result.response_index == response_index
+                    or (
+                        result.response_index is None
+                        and result.character_id == response["character_id"]
+                        and response_counts_by_character[
+                            response["character_id"]
+                        ] == 1
+                    )
                 ]
                 (
                     response["dialogue"],
@@ -438,24 +516,34 @@ class MultiCharacterOrchestrator:
                     event_runtime.collect_event_notifications(character_results)
                 )
 
-            runtime_states = [
-                {
-                    "character_id": response["character_id"],
-                    "affection_level": response["current_affinity"],
-                    "trust_level": response["current_trust"],
-                    "current_mood": response["current_mood"],
-                }
-                for response in responses
-                if all(
-                    key in response
-                    for key in (
-                        "character_id",
-                        "current_affinity",
-                        "current_trust",
-                        "current_mood",
-                    )
+            if contexts:
+                runtime_states = event_runtime._runtime_states_after_contexts(
+                    contexts,
+                    event_results,
+                    insert_only_unchanged_character_ids=nonresponder_character_ids,
+                    apply_state_changes_to_current_character_ids=(
+                        nonresponder_character_ids
+                    ),
                 )
-            ]
+            else:
+                runtime_states = [
+                    {
+                        "character_id": response["character_id"],
+                        "affection_level": response["current_affinity"],
+                        "trust_level": response["current_trust"],
+                        "current_mood": response["current_mood"],
+                    }
+                    for response in responses
+                    if all(
+                        key in response
+                        for key in (
+                            "character_id",
+                            "current_affinity",
+                            "current_trust",
+                            "current_mood",
+                        )
+                    )
+                ]
             messages = [{
                 **player_message,
                 "temporary_id": player_message["message_id"],
@@ -2084,6 +2172,7 @@ def process_multi_character_turn(
     discussion_mode: bool = True,
     max_responses: int | None = None,
     request_id: str | None = None,
+    include_event_metadata: bool = False,
 ) -> dict | list[dict]:
     """
     处理多角色对话轮次
@@ -2093,15 +2182,38 @@ def process_multi_character_turn(
         player_message: 玩家消息
         discussion_mode: 是否启用讨论模式（多角色连续发言）
         max_responses: 可选的人数上限；不传时按语境动态决定
-    
+        include_event_metadata: 是否返回整轮事件元数据
+
     Returns:
-        dict | list[dict]: 角色回应结果（单个或多个）
+        dict | list[dict]: 角色回应结果，或带整轮事件元数据的内部信封
     """
+    effective_request_id = request_id or uuid.uuid4().hex
     orchestrator = MultiCharacterOrchestrator(session_id)
     result = orchestrator.process_player_message(
         player_message, 
         allow_multiple_responses=discussion_mode,
         max_responses=max_responses,
-        request_id=request_id,
+        request_id=effective_request_id,
     )
-    return result
+    if not include_event_metadata:
+        return result
+
+    batch = repository.get_event_execution_batch(
+        orchestrator.player_id,
+        f"multi:{session_id}:{effective_request_id}",
+    )
+    stored_results = json.loads(batch["results_data"]) if batch else []
+    event_results = [
+        EventTriggerResult.model_validate(item)
+        for item in stored_results
+    ]
+    return {
+        "turn_response": result,
+        "event_executions": [
+            event_result.model_dump(mode="json")
+            for event_result in event_results
+        ],
+        "event_notifications": event_runtime.collect_event_notifications(
+            event_results
+        ),
+    }

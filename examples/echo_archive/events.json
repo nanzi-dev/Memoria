@@ -2972,7 +2972,8 @@
     "max_triggers_per_turn": 3,
     "stop_processing": true,
     "is_active": true,
-    "exclusive_group": "echo_main_choice"
+    "exclusive_group": "echo_main_choice",
+    "exclusive_scope": "player"
   },
   {
     "event_id": "echo_choice_publish_raw",
@@ -3025,7 +3026,8 @@
     "max_triggers_per_turn": 3,
     "stop_processing": true,
     "is_active": true,
-    "exclusive_group": "echo_main_choice"
+    "exclusive_group": "echo_main_choice",
+    "exclusive_scope": "player"
   },
   {
     "event_id": "echo_choice_submit_tiered",
@@ -3078,7 +3080,8 @@
     "max_triggers_per_turn": 3,
     "stop_processing": true,
     "is_active": true,
-    "exclusive_group": "echo_main_choice"
+    "exclusive_group": "echo_main_choice",
+    "exclusive_scope": "player"
   },
   {
     "event_id": "echo_choice_seal_master",
@@ -3131,7 +3134,8 @@
     "max_triggers_per_turn": 3,
     "stop_processing": true,
     "is_active": true,
-    "exclusive_group": "echo_main_choice"
+    "exclusive_group": "echo_main_choice",
+    "exclusive_scope": "player"
   },
   {
     "event_id": "echo_choice_trust_ji",
@@ -3187,7 +3191,8 @@
     "stop_processing": true,
     "is_active": true,
     "character_id": "echo_ji_heng",
-    "exclusive_group": "echo_ji_choice"
+    "exclusive_group": "echo_ji_choice",
+    "exclusive_scope": "player"
   },
   {
     "event_id": "echo_choice_procedural_exit",
@@ -3243,7 +3248,8 @@
     "stop_processing": true,
     "is_active": true,
     "character_id": "echo_ji_heng",
-    "exclusive_group": "echo_ji_choice"
+    "exclusive_group": "echo_ji_choice",
+    "exclusive_scope": "player"
   },
   {
     "event_id": "echo_choice_stay_scene",
@@ -3299,7 +3305,8 @@
     "stop_processing": true,
     "is_active": true,
     "character_id": "echo_ji_heng",
-    "exclusive_group": "echo_ji_choice"
+    "exclusive_group": "echo_ji_choice",
+    "exclusive_scope": "player"
   },
   {
     "event_id": "echo_choice_act_alone",
@@ -3355,7 +3362,8 @@
     "stop_processing": true,
     "is_active": true,
     "character_id": "echo_ji_heng",
-    "exclusive_group": "echo_ji_choice"
+    "exclusive_group": "echo_ji_choice",
+    "exclusive_scope": "player"
   },
   {
     "event_id": "echo_end_controlled_breakthrough",
@@ -3409,7 +3417,8 @@
     "max_triggers_per_turn": 3,
     "stop_processing": true,
     "is_active": true,
-    "exclusive_group": "echo_main_ending"
+    "exclusive_group": "echo_main_ending",
+    "exclusive_scope": "player"
   },
   {
     "event_id": "echo_end_after_flood",
@@ -3463,7 +3472,8 @@
     "max_triggers_per_turn": 3,
     "stop_processing": true,
     "is_active": true,
-    "exclusive_group": "echo_main_ending"
+    "exclusive_group": "echo_main_ending",
+    "exclusive_scope": "player"
   },
   {
     "event_id": "echo_end_silent_testimony",
@@ -3517,7 +3527,8 @@
     "max_triggers_per_turn": 3,
     "stop_processing": true,
     "is_active": true,
-    "exclusive_group": "echo_main_ending"
+    "exclusive_group": "echo_main_ending",
+    "exclusive_scope": "player"
   },
   {
     "event_id": "echo_end_failed_archive",
@@ -3571,7 +3582,8 @@
     "max_triggers_per_turn": 3,
     "stop_processing": true,
     "is_active": true,
-    "exclusive_group": "echo_main_ending"
+    "exclusive_group": "echo_main_ending",
+    "exclusive_scope": "player"
   },
   {
     "event_id": "echo_ji_romance",
@@ -3628,7 +3640,8 @@
     "stop_processing": true,
     "is_active": true,
     "character_id": "echo_ji_heng",
-    "exclusive_group": "echo_ji_outcome"
+    "exclusive_group": "echo_ji_outcome",
+    "exclusive_scope": "player"
   },
   {
     "event_id": "echo_ji_deep_partners",
@@ -3685,7 +3698,8 @@
     "stop_processing": true,
     "is_active": true,
     "character_id": "echo_ji_heng",
-    "exclusive_group": "echo_ji_outcome"
+    "exclusive_group": "echo_ji_outcome",
+    "exclusive_scope": "player"
   },
   {
     "event_id": "echo_ji_temporary_separation",
@@ -3735,7 +3749,8 @@
     "stop_processing": true,
     "is_active": true,
     "character_id": "echo_ji_heng",
-    "exclusive_group": "echo_ji_outcome"
+    "exclusive_group": "echo_ji_outcome",
+    "exclusive_scope": "player"
   },
   {
     "event_id": "echo_ji_professional_trust_lost",
@@ -3785,6 +3800,7 @@
     "stop_processing": true,
     "is_active": true,
     "character_id": "echo_ji_heng",
-    "exclusive_group": "echo_ji_outcome"
+    "exclusive_group": "echo_ji_outcome",
+    "exclusive_scope": "player"
   }
 ]

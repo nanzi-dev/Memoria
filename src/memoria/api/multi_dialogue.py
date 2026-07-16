@@ -494,7 +494,14 @@ async def multi_dialogue_turn(
             discussion_mode=request.discussion_mode,
             max_responses=request.max_responses,
             request_id=request.request_id,
+            include_event_metadata=True,
         )
+        event_executions = None
+        event_notifications = None
+        if isinstance(result, dict) and "turn_response" in result:
+            event_executions = result.get("event_executions", [])
+            event_notifications = result.get("event_notifications", [])
+            result = result["turn_response"]
         
         # 根据是否为讨论模式返回不同格式
         if request.discussion_mode:
@@ -504,12 +511,12 @@ async def multi_dialogue_turn(
                     responses=[MultiDialogueTurnResponse(**r) for r in result],
                     total_speakers=len(result),
                     discussion_mode=True,
-                    event_executions=[
+                    event_executions=event_executions if event_executions is not None else [
                         execution
                         for response in result
                         for execution in response.get("event_executions", [])
                     ],
-                    event_notifications=[
+                    event_notifications=event_notifications if event_notifications is not None else [
                         notification
                         for response in result
                         for notification in response.get("event_notifications", [])
@@ -521,11 +528,23 @@ async def multi_dialogue_turn(
                     responses=[MultiDialogueTurnResponse(**result)],
                     total_speakers=1,
                     discussion_mode=True,
-                    event_executions=result.get("event_executions", []),
-                    event_notifications=result.get("event_notifications", []),
+                    event_executions=(
+                        event_executions
+                        if event_executions is not None
+                        else result.get("event_executions", [])
+                    ),
+                    event_notifications=(
+                        event_notifications
+                        if event_notifications is not None
+                        else result.get("event_notifications", [])
+                    ),
                 )
         else:
             # 单角色模式：返回单个回应
+            if event_executions is not None:
+                result["event_executions"] = event_executions
+            if event_notifications is not None:
+                result["event_notifications"] = event_notifications
             return MultiDialogueTurnResponse(**result)
     
     except HTTPException:
