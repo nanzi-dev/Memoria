@@ -72,3 +72,29 @@ test('unknown effects use a generic execution summary', () => {
     effect_type: 'unknown_effect',
   }), '执行其他事件效果');
 });
+
+test('event detail panel omits raw configuration and empty placeholders', () => {
+  assert.doesNotMatch(eventListSource, /function ArchiveValue/);
+  assert.doesNotMatch(eventListSource, /function RecordFields/);
+  assert.doesNotMatch(
+    eventListSource,
+    /触发类型字段|条件字段|计划表达式|世界时区|时间倍率/,
+  );
+  assert.doesNotMatch(eventListSource, /<RecordFields/);
+  assert.match(eventListSource, /event\.exclusive_group &&/);
+  assert.match(eventListSource, /event\.stop_processing &&/);
+  assert.match(eventListSource, /Number\(event\.missed_count\) > 0/);
+  assert.match(eventListSource, /event\.template_id &&/);
+});
+
+test('event detail panel keeps concise summaries and management actions', () => {
+  assert.match(eventListSource, /line-clamp-2/);
+  assert.match(eventListSource, /eventEffectLabel\(effect\.effect_type\)/);
+  assert.match(eventListSource, /summarizeEventEffect\(effect\)/);
+  assert.match(eventListSource, /onClick=\{onEdit\}/);
+  assert.match(eventListSource, /onClick=\{onToggle\}/);
+  assert.match(eventListSource, /onClick=\{onDelete\}/);
+  assert.match(eventListSource, /onClick=\{onRefresh\}/);
+  assert.match(eventListSource, /停用事件/);
+  assert.match(eventListSource, /这里只显示事件摘要/);
+});

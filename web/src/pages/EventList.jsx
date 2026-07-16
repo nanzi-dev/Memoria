@@ -44,6 +44,7 @@ import { eventAdmin } from '@/api/memoria';
 import { useDialog } from '@/context/DialogContext';
 import { useUser } from '@/context/UserContext';
 import { eventEditorPath } from '@/utils/navigationState';
+import { eventEffectLabel, summarizeEventEffect } from './eventDetailSummary';
 
 const TRIGGER_TYPES = [
   { value: 'affinity_threshold', label: '好感度阈值', Icon: Heart },
@@ -74,18 +75,6 @@ const STATUS_FILTERS = [
   { value: 'disabled', label: '停用' },
 ];
 const AUTH_ERROR_PATTERN = /认证|未登录|401|token/i;
-const EFFECT_LABELS = {
-  modify_state: '修改状态',
-  unlock_content: '解锁内容',
-  trigger_dialogue: '触发对话',
-  add_memory: '添加记忆',
-  change_mood: '改变情绪',
-  notify_player: '通知玩家',
-  trigger_event: '触发事件链',
-  branch_event: '分支事件',
-  npc_proactive_dialogue: 'NPC 主动发言',
-  update_event_progress: '更新事件进度',
-};
 
 function getSearchText(evt) {
   return [
@@ -157,9 +146,7 @@ function describeTrigger(condition, fallbackType) {
     return `${comparison} ${source.threshold ?? '未设置'}`;
   }
   if (type === 'mood_match') return `目标情绪：${source.mood || '未设置'}`;
-  if (type === 'time_based') {
-    return source.schedule ? `计划：${source.schedule}` : '尚未配置时间计划';
-  }
+  if (type === 'time_based') return '按预定时间触发';
   if (type === 'world_time_window') {
     return `${source.time_window_start || '--:--'} 至 ${source.time_window_end || '--:--'}`;
   }
@@ -168,45 +155,6 @@ function describeTrigger(condition, fallbackType) {
     return `${Array.isArray(source.sub_conditions) ? source.sub_conditions.length : 0} 个子条件`;
   }
   return TRIGGER_LABELS[type] || type;
-}
-
-function ArchiveValue({ value }) {
-  if (value == null || value === '') return <span className="text-muted-foreground">未设置</span>;
-  if (typeof value === 'boolean') return <span>{value ? '是' : '否'}</span>;
-  if (typeof value === 'number') {
-    return (
-      <span className="break-words font-archive-mono tabular-nums">
-        {String(value)}
-      </span>
-    );
-  }
-  if (typeof value === 'object') {
-    return (
-      <pre className="max-w-full whitespace-pre-wrap break-words font-archive-mono text-xs tabular-nums leading-5 text-foreground">
-        {JSON.stringify(value, null, 2)}
-      </pre>
-    );
-  }
-  return <span className="break-words">{String(value)}</span>;
-}
-
-function RecordFields({ record, omit = [] }) {
-  const entries = Object.entries(record || {}).filter(([key]) => !omit.includes(key));
-  if (!entries.length) {
-    return <p className="text-sm text-muted-foreground">没有额外参数。</p>;
-  }
-  return (
-    <dl className="divide-y divide-border border-y border-border">
-      {entries.map(([key, value]) => (
-        <div key={key} className="grid min-w-0 gap-1 py-3 sm:grid-cols-[minmax(140px,0.35fr)_minmax(0,1fr)] sm:gap-5">
-          <dt className="break-all font-archive-mono text-[11px] tabular-nums text-muted-foreground">{key}</dt>
-          <dd className="min-w-0 text-sm leading-6 text-foreground">
-            <ArchiveValue value={value} />
-          </dd>
-        </div>
-      ))}
-    </dl>
-  );
 }
 
 function DetailItem({ label, value, mono = false }) {
@@ -493,7 +441,7 @@ export default function EventList() {
         <EmptyDetail
           icon={Zap}
           title="选择一个事件"
-          description="从目录中选择事件后，这里会展开触发配置、执行效果与运行记录。"
+          description="从目录中选择事件后，这里只显示事件摘要；完整配置请进入编辑页查看。"
         />
       )}
     />
@@ -728,6 +676,14 @@ function EventDetailPanel({
   const TriggerIcon = TRIGGER_ICONS[event?.trigger_type] || Activity;
   const effects = Array.isArray(event?.effects) ? event.effects : [];
   const isTimeBased = event?.trigger_type === 'time_based';
+  const hasScheduleDetails = !!event?.next_run_at
+    || !!event?.next_due_real_at
+    || Number(worldClock?.time_scale) === 0
+    || Number(event?.missed_count) > 0;
+  const hasRunRecords = !!event?.last_triggered_at
+    || !!event?.updated_at
+    || !!event?.template_id
+    || !!event?.created_at;
 
   return (
     <section aria-labelledby="event-detail-title" className="min-w-0">
@@ -821,54 +777,51 @@ function EventDetailPanel({
           </dl>
 
           <ArchiveSection icon={Zap} title="触发配置" index="01">
-            <p className="mb-4 font-archive-mono text-sm tabular-nums leading-7 text-foreground">
+            <p className="mb-4 line-clamp-2 font-archive-mono text-sm tabular-nums leading-7 text-foreground">
               {describeTrigger(event.trigger_condition, event.trigger_type)}
             </p>
             <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
               <DetailItem label="绑定角色" value={event.character_id || '全局事件'} mono />
-              <DetailItem label="独占分组" value={event.exclusive_group || '未设置'} mono />
-              <DetailItem
-                label="命中后处理"
-                value={event.stop_processing ? '停止后续事件匹配' : '继续匹配其他事件'}
-              />
-              <DetailItem
-                label="触发类型字段"
-                value={event.trigger_type || '未设置'}
-                mono
-              />
+              {event.exclusive_group && (
+                <DetailItem label="独占分组" value={event.exclusive_group} mono />
+              )}
+              {event.stop_processing && (
+                <DetailItem label="命中后处理" value="停止后续事件匹配" />
+              )}
             </dl>
-            <div className="mt-5">
-              <h4 className="mb-2 text-xs font-semibold text-foreground">条件字段</h4>
-              <RecordFields record={event.trigger_condition} />
-            </div>
           </ArchiveSection>
 
           {isTimeBased && (
             <ArchiveSection icon={CalendarClock} title="运行排期" index="02">
-              <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
-                <DetailItem label="计划表达式" value={event.schedule || '尚未排期'} mono />
-                <DetailItem
-                  label="世界时间触发"
-                  value={event.next_run_at ? formatScheduleTime(event.next_run_at) : '尚未计算'}
-                  mono
-                />
-                <DetailItem
-                  label="现实预计时间"
-                  value={event.next_due_real_at
-                    ? formatScheduleTime(event.next_due_real_at)
-                    : Number(worldClock?.time_scale) === 0
-                      ? '世界时间已暂停'
-                      : '尚未计算'}
-                  mono
-                />
-                <DetailItem label="合并漏触发" value={`${Number(event.missed_count) || 0} 次`} mono />
-                <DetailItem label="世界时区" value={worldClock?.timezone || '未同步'} mono />
-                <DetailItem
-                  label="时间倍率"
-                  value={worldClock ? `${worldClock.time_scale}x` : '未同步'}
-                  mono
-                />
-              </dl>
+              {hasScheduleDetails ? (
+                <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+                  {event.next_run_at && (
+                    <DetailItem
+                      label="世界时间触发"
+                      value={formatScheduleTime(event.next_run_at)}
+                      mono
+                    />
+                  )}
+                  {(event.next_due_real_at || Number(worldClock?.time_scale) === 0) && (
+                    <DetailItem
+                      label="现实预计时间"
+                      value={event.next_due_real_at
+                        ? formatScheduleTime(event.next_due_real_at)
+                        : '世界时间已暂停'}
+                      mono
+                    />
+                  )}
+                  {Number(event.missed_count) > 0 && (
+                    <DetailItem
+                      label="合并漏触发"
+                      value={`${Number(event.missed_count)} 次`}
+                      mono
+                    />
+                  )}
+                </dl>
+              ) : (
+                <p className="text-sm text-muted-foreground">暂无可用排期。</p>
+              )}
             </ArchiveSection>
           )}
 
@@ -885,14 +838,11 @@ function EventDetailPanel({
                       </span>
                       <div className="min-w-0 flex-1">
                         <h4 className="font-archive-serif text-base font-semibold text-foreground">
-                          {EFFECT_LABELS[effect.effect_type] || effect.effect_type || '未命名效果'}
+                          {eventEffectLabel(effect.effect_type)}
                         </h4>
-                        <p className="mt-1 break-all font-archive-mono text-[10px] tabular-nums text-muted-foreground">
-                          {effect.effect_type || 'unknown'}
+                        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                          {summarizeEventEffect(effect)}
                         </p>
-                        <div className="mt-3">
-                          <RecordFields record={effect} omit={['effect_type']} />
-                        </div>
                       </div>
                     </div>
                   </article>
@@ -902,12 +852,24 @@ function EventDetailPanel({
           </ArchiveSection>
 
           <ArchiveSection icon={Clock} title="运行记录" index={isTimeBased ? '04' : '03'} last>
-            <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
-              <DetailItem label="最后触发" value={formatDateTime(event.last_triggered_at)} mono />
-              <DetailItem label="最后更新" value={formatDateTime(event.updated_at)} mono />
-              <DetailItem label="模板" value={event.template_id || '未使用模板'} mono />
-              <DetailItem label="创建时间" value={formatDateTime(event.created_at)} mono />
-            </dl>
+            {hasRunRecords ? (
+              <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+                {event.last_triggered_at && (
+                  <DetailItem label="最后触发" value={formatDateTime(event.last_triggered_at)} mono />
+                )}
+                {event.updated_at && (
+                  <DetailItem label="最后更新" value={formatDateTime(event.updated_at)} mono />
+                )}
+                {event.template_id && (
+                  <DetailItem label="模板" value={event.template_id} mono />
+                )}
+                {event.created_at && (
+                  <DetailItem label="创建时间" value={formatDateTime(event.created_at)} mono />
+                )}
+              </dl>
+            ) : (
+              <p className="text-sm text-muted-foreground">暂无运行记录。</p>
+            )}
           </ArchiveSection>
         </div>
       )}
