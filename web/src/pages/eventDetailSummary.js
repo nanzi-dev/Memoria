@@ -12,7 +12,9 @@ const EFFECT_LABELS = {
 };
 
 export function eventEffectLabel(effectType) {
-  return EFFECT_LABELS[effectType] || '其他效果';
+  return Object.hasOwn(EFFECT_LABELS, effectType)
+    ? EFFECT_LABELS[effectType]
+    : '其他效果';
 }
 
 export function summarizeEventEffect(effect = {}) {

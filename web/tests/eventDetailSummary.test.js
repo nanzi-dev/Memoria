@@ -16,6 +16,8 @@ test('event effect labels use known Chinese labels and a generic fallback', () =
   assert.equal(eventEffectLabel('modify_state'), '修改状态');
   assert.equal(eventEffectLabel('unknown_effect'), '其他效果');
   assert.equal(eventEffectLabel(), '其他效果');
+  assert.equal(eventEffectLabel('__proto__'), '其他效果');
+  assert.equal(eventEffectLabel('constructor'), '其他效果');
   assert.equal(typeof eventListSource, 'string');
 });
 
