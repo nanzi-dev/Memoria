@@ -1,6 +1,6 @@
 # Memoria API 文档
 
-完整的 REST API 参考，业务端点前缀为 `/api/v1`（多角色对话为 `/api/v1/multi-dialogue`），系统端点 `/health`、`/ready`、`/admin/log-level` 不带该前缀。
+完整的 REST 与 SSE API 参考。业务端点前缀为 `/api/v1`（多角色对话为 `/api/v1/multi-dialogue`），系统端点 `/health`、`/ready`、`/admin/log-level` 不带该前缀。
 
 访问 http://127.0.0.1:8001/docs 可查看 Swagger 交互式文档，http://127.0.0.1:8001/redoc 可查看 ReDoc 文档。
 
@@ -122,6 +122,41 @@ Content-Type: application/json
 ```
 
 `knowledge_sources` 只包含当前用户已授权绑定且实际注入本轮 Prompt 的来源；未命中知识时为空数组。
+
+### 3.1 流式发送对话消息
+
+```http
+POST /api/v1/dialogue/turn/stream
+Accept: text/event-stream
+Content-Type: application/json
+
+{
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "player_message": "你好，小黑！",
+  "request_id": "turn-550e8400-001"
+}
+```
+
+请求体、鉴权、会话归属和 `request_id` 幂等语义与 `POST /api/v1/dialogue/turn` 相同。响应使用 Server-Sent Events，不需要 WebSocket。每帧格式为：
+
+```text
+event: <event_type>
+data: <紧凑 JSON>
+```
+
+单聊事件顺序和载荷：
+
+| 事件 | 关键字段 | 说明 |
+|------|----------|------|
+| `turn_started` | `session_id`, `request_id`, `turn_kind` | 流已被工作器接管；单聊的 `turn_kind` 为 `single` |
+| `stage` | `stage` | 当前阶段：`preparation`、`retrieval`、`generation`、`events`、`commit` |
+| `character_started` | `stream_id`, `character_id`, `character_name` | 某个角色开始生成 |
+| `dialogue_delta` | `stream_id`, `delta` | 经过输出安全流处理的增量对话文本 |
+| `character_completed` | `stream_id`, `character_id`, `response` | 角色回复完成，`response` 为该角色的完整结果 |
+| `turn_completed` | `response` | 整个轮次完成，`response` 与非流式 REST 端点的最终响应等价 |
+| `error` | `detail`, `error_type` | 容量不足或工作器失败；发送后结束流 |
+
+`stream_id` 在同一轮次内关联角色开始、文本增量和角色完成事件。客户端应以 `turn_completed.response` 作为最终权威结果，不要仅用增量文本自行重建状态字段。
 
 ### 4. 获取会话列表
 ```http
@@ -895,6 +930,95 @@ GET /api/v1/admin/events/{event_id}/executions?limit=100
 
 指标接口可按事件过滤，返回执行总数、成功/失败/跳过数量、去重数量和耗时统计。执行历史包含 `execution_id`、幂等键、触发来源、状态、效果、结果、错误、耗时和完成时间。
 
+### 16. 模拟事件
+
+```http
+POST /api/v1/admin/events/{event_id}/simulate
+Content-Type: application/json
+
+{
+  "character_id": "npc_luo_xiaohei",
+  "session_id": "simulation-session",
+  "player_message": "我找到了线索",
+  "current_affinity": 35,
+  "current_trust": 20,
+  "current_mood": "警觉",
+  "dialogue_count": 8,
+  "event_data": {
+    "chapter": "investigation"
+  }
+}
+```
+
+该端点用于事件编辑器和调试工具进行 dry-run：
+
+1. 读取当前用户的事件定义与已有 `event_context_state`。
+2. 用请求覆盖值构造模拟上下文并调用事件条件评估。
+3. 条件匹配时只调用事件规划，返回计划结果。
+4. 不提交事件效果，不写入触发历史、执行记录、记忆、通知、关系、剧情状态或群聊消息。
+
+角色专属事件可省略 `character_id` 并使用事件绑定角色；模拟全局事件时必须显式提供当前用户拥有的 `character_id`。
+
+可选上下文字段包括：
+
+| 字段 | 说明 |
+|------|------|
+| `session_id` | 模拟会话 ID；省略时使用内部模拟 ID |
+| `player_message`, `npc_response` | 本轮玩家与 NPC 文本 |
+| `current_affinity`, `current_trust`, `current_mood` | 当前运行状态；数值省略时默认为 0，情绪默认为 `neutral` |
+| `previous_affinity`, `previous_trust` | 变化前状态 |
+| `affinity_delta`, `trust_delta` | 本轮关系变化 |
+| `dialogue_count`, `total_dialogue_count` | 会话内和累计对话计数 |
+| `session_duration_minutes` | 会话持续时间 |
+| `unlocked_content` | 已解锁内容列表 |
+| `character_relationships` | 角色关系上下文 |
+| `event_history` | 用于条件判断的事件历史 |
+| `world_time` | ISO 8601 世界时间 |
+| `event_data` | 与已持久化事件上下文合并的附加数据 |
+
+**响应示例（字段节选）：**
+
+```json
+{
+  "matched": true,
+  "evaluation": {
+    "event_id": "evt_story_clue",
+    "event_name": "发现剧情线索",
+    "active": true,
+    "cooldown_passed": true,
+    "matched": true,
+    "condition": {
+      "trigger_type": "keyword_match",
+      "matched": true,
+      "config": {
+        "trigger_type": "keyword_match",
+        "keywords": ["线索"],
+        "match_mode": "any"
+      },
+      "children": []
+    }
+  },
+  "context": {
+    "character_id": "npc_luo_xiaohei",
+    "player_id": "player_001",
+    "trigger_source": "simulation"
+  },
+  "planned_result": {
+    "execution_id": "generated-execution-id",
+    "execution_key": "simulation:evt_story_clue",
+    "event_id": "evt_story_clue",
+    "event_name": "发现剧情线索",
+    "character_id": "npc_luo_xiaohei",
+    "triggered": true,
+    "status": "succeeded",
+    "effects": [],
+    "effects_applied": []
+  }
+}
+```
+
+实际响应中的 `context` 是完整序列化的事件上下文，`planned_result` 是完整序列化的 `EventTriggerResult`；上例仅展示常用字段。未匹配时 `planned_result` 为 `null`。这里的 `status` 描述规划结果，模拟端点仍不会提交任何效果。
+
 ---
 
 ## 剧情状态 API
@@ -1033,13 +1157,22 @@ Content-Type: application/json
 
 ## 多角色对话 API
 
-多角色对话系统支持 2-5 个 NPC 同时参与群聊，提供自然的多角色互动体验。
+多角色会话至少需要 2 个不重复 NPC。公开创建 API 当前没有参与人数上限，也没有运行时添加/移除参与者的公开端点；参与者集合由创建或续聊时的 session 固定。
 
 单聊和多角色对话每轮都会读取当前用户的角色关系图谱。Prompt 明确要求模型以当前图谱为准：图谱中存在的关系覆盖角色卡背景、旧记忆和历史发言，图谱中不存在的关系边表示未定义关系。关系类型按用户保存的自定义文本原样呈现，不限制固定枚举；`affinity` 作为中性的关系强度呈现，具体含义以关系类型和说明为准。
 
 编排器还会根据关系图谱最近修订时间过滤旧上下文：长期记忆、共享记忆和群体记忆只剔除修订前的关系相关事实，非关系事实继续保留；跨 session 原始群聊历史按修订时间截止，不能推翻当前图谱。同一会话中如果已经产生了与当前图谱冲突的关系发言，例如图谱已改为某个自定义关系但历史回复仍说师徒，该发言会在送入 LLM 前跳过，避免错误历史继续强化。
 
-自主或事件驱动的群聊脉冲会原子提交本次全部角色消息、关系与参与者状态、脉冲完成状态和未读通知；失败时整体不可见。长期记忆提取在提交后以 best effort 执行，不影响已提交消息与通知的一致性。
+每个群聊都有稳定的逻辑 `group_thread_id`。结束后继续群聊会在同一逻辑线程下创建新的物理 session，因此历史、知识绑定、自主状态和未读通知都跨 session 延续。已结束且没有 active session 的线程需要接收脉冲时，运行时会自动创建一个 active carrier session。
+
+玩家轮次与群聊脉冲是两条不同执行路径：
+
+- **玩家轮次**：`max_responses` 接受 1-5；编排器继续受参与人数和内部上限约束，当前最多提交 3 个角色回复。
+- **普通自主脉冲**：世界时钟不能暂停；距离上次脉冲至少经过 2 个现实分钟和 20 个世界分钟；当天自主消息数未达到 24；至少有 2 个 active 参与者；并且存在未解决话题钩子、角色目标，或群聊未等待玩家且有当前主题。
+- **事件脉冲**：由 `npc_proactive_dialogue` 等事件效果触发，绕过普通脉冲的现实/世界冷却和每日预算，但仍受本次消息上限约束。
+- **本次消息上限**：当前普通和事件脉冲都最多生成并提交 1 条角色消息，不等同于玩家轮次的 `max_responses`。
+
+普通脉冲通过 lease/claim 防止多个调度器并发重复生成。提交时，角色消息、临时回复引用修正、关系、参与者统计、脉冲状态和线程级未读通知位于同一事务中；失败时整体不可见。运行时还会抑制重复回复。长期记忆提取在提交后以 best effort 执行，不影响已经提交的消息与通知。
 
 ### 1. 开始多角色会话
 ```http
@@ -1059,7 +1192,7 @@ Content-Type: application/json
 - `player_id`: 玩家ID
 - `player_name`: 玩家显示名称
 - `group_name` (可选): 群聊名称，会写入会话列表
-- `character_ids`: 参与角色 ID 列表（2-5 个且不得重复）；不存在、属于其他用户或已禁用的角色都会被拒绝
+- `character_ids`: 参与角色 ID 列表（至少 2 个且不得重复，公开 API 当前没有上限）；不存在、属于其他用户或已禁用的角色都会被拒绝
 - `locale` (可选): `zh-CN` 或 `en-US`，默认 `zh-CN`；持久化后控制整个群聊线程的输出和语音语言
 
 **响应示例：**
@@ -1089,7 +1222,7 @@ Content-Type: application/json
   "session_id": "multi-session-uuid",
   "player_message": "大家好！",
   "discussion_mode": true,
-  "max_responses": 4,
+  "max_responses": 3,
   "request_id": "group-turn-001"
 }
 ```
@@ -1098,7 +1231,7 @@ Content-Type: application/json
 
 `request_id` 与单聊语义一致：可选，同一会话内用于安全重试和去重。相同 ID 的已完成请求返回原结果，不会再次生成角色回复或重复提交群聊副作用。
 
-根据讨论触发条件，响应可能是单角色回复，也可能是多角色连续讨论回复。`discussion_mode` 默认启用；`max_responses` 可传 1-5，但编排器会结合语境、参与人数和内部上限动态决定实际接话人数，当前最多 4 个角色发言。讨论模式下返回结构包含 `responses` 数组，每个元素对应一个角色发言。发送轮次前会重新校验全部会话参与者；任一参与角色卡不存在或被禁用时返回 400，避免以不完整参与者集合继续生成。
+根据讨论触发条件，响应可能是单角色回复，也可能是多角色连续讨论回复。`discussion_mode` 默认启用；`max_responses` 可传 1-5，但编排器会结合语境、参与人数和内部上限动态决定实际接话人数，当前最多 3 个角色发言。讨论模式下返回结构包含 `responses` 数组，每个元素对应一个角色发言。发送轮次前会重新校验全部会话参与者；任一参与角色卡不存在或被禁用时返回 400，避免以不完整参与者集合继续生成。
 
 **响应示例：**
 ```json
@@ -1138,6 +1271,31 @@ Content-Type: application/json
   "discussion_mode": true
 }
 ```
+
+### 2.1 流式发送多角色消息
+
+```http
+POST /api/v1/multi-dialogue/turn/stream
+Accept: text/event-stream
+Content-Type: application/json
+
+{
+  "session_id": "multi-session-uuid",
+  "player_message": "大家怎么看？",
+  "discussion_mode": true,
+  "max_responses": 3,
+  "request_id": "group-turn-001"
+}
+```
+
+请求体和幂等语义与 `POST /api/v1/multi-dialogue/turn` 相同，SSE 帧格式与单聊流式端点相同。当前多角色流会发送：
+
+- `turn_started`：`turn_kind` 为 `multi`
+- 每个实际发言角色各自的 `character_started`、`dialogue_delta`、`character_completed`
+- `turn_completed`：`response` 与非流式端点等价；讨论模式为包含 `responses` 的群体响应
+- `error`：返回安全错误详情后结束流
+
+多角色流当前不发送显式 `stage` 事件。多个角色的增量可能通过不同 `stream_id` 区分，客户端应分别渲染，并以 `turn_completed.response` 对齐最终消息 ID、事件结果和状态变化。
 
 ### 3. 触发角色间互动
 ```http
@@ -1267,6 +1425,25 @@ GET /api/v1/multi-dialogue/history/{session_id}?offset=0&limit=50
   }
 }
 ```
+
+### 5.1 标记逻辑群聊线程已读
+
+```http
+POST /api/v1/multi-dialogue/thread/{group_thread_id}/read
+```
+
+客户端完成该逻辑线程的历史或增量消息同步后调用。接口验证线程属于当前用户，并一次性清除该线程由自主/事件脉冲创建的聚合未读通知。
+
+**响应示例：**
+
+```json
+{
+  "group_thread_id": "group-thread-uuid",
+  "marked_read": 2
+}
+```
+
+`marked_read` 是本次实际标记为已读的通知数量。
 
 ### 6. 结束会话
 ```http
@@ -1413,7 +1590,7 @@ Content-Type: application/json
 }
 ```
 
-`query` 最长 4000 字符。指定 `knowledge_base_id` 时只预览该知识库；否则按全局、角色和群聊线程绑定检索。响应返回实际查询文本及最多 6 个来源：
+`query` 最长 4000 字符。指定 `knowledge_base_id` 时只预览该知识库；否则按全局、角色和群聊线程绑定检索。响应返回实际查询文本及最多 4 个来源：
 
 ```json
 {
@@ -1742,7 +1919,7 @@ Content-Type: application/json
 
 ### 1. 存活检查（Health Check）
 
-用于检测服务是否正常运行，常用于 Kubernetes / Docker 健康探针。
+仅用于检测应用进程是否存活，常用于 Kubernetes / Docker liveness 探针；不检查数据库可访问性。
 
 ```http
 GET /health
@@ -1760,7 +1937,7 @@ GET /health
 
 ### 2. 就绪检查（Readiness Check）
 
-用于检查服务依赖是否已就绪（如数据库连接、缓存服务等）。当依赖不可用时返回 503。
+用于检查数据库是否可访问。当数据库不可用时返回 503。
 
 ```http
 GET /ready
@@ -1849,10 +2026,14 @@ Authorization: Bearer token-value
 | `keyword_match` | 关键词匹配 |
 | `dialogue_count` | 对话次数 |
 | `time_based` | 基于时间 |
-| `item_acquired` | 获得物品（扩展）|
-| `quest_completed` | 完成任务（扩展）|
-| `relationship_change` | 关系变化 |
+| `item_acquired` | 获得物品（枚举保留，检测尚未实现）|
+| `quest_completed` | 完成任务（枚举保留，检测尚未实现）|
+| `relationship_change` | 关系变化（枚举保留，检测尚未实现）|
 | `mood_match` | 情绪匹配 |
+| `npc_keyword_match` | NPC 回复关键词匹配 |
+| `state_delta` | 本轮好感度或信任度变化量 |
+| `event_history` | 已提交事件历史及状态 |
+| `world_time_window` | 玩家世界时间窗口与星期 |
 | `composite` | 复合条件（AND/OR）|
 
 ## 效果类型参考
@@ -1867,11 +2048,12 @@ Authorization: Bearer token-value
 | `add_memory` | 添加长期记忆 |
 | `change_mood` | 改变情绪 |
 | `notify_player` | 通知玩家 |
-| `grant_item` | 给予物品（扩展）|
-| `start_quest` | 开启任务（扩展）|
-| `modify_relationship` | 修改角色间关系 |
+| `grant_item` | 给予物品（枚举保留，执行尚未实现）|
+| `start_quest` | 开启任务（枚举保留，执行尚未实现）|
+| `modify_relationship` | 修改角色间关系（枚举保留，执行尚未实现）|
 | `trigger_event` | 触发另一个事件（事件链）|
 | `branch_event` | 按上下文分支触发事件 |
 | `npc_proactive_dialogue` | NPC 主动发言（多角色编排器）|
+| `update_event_progress` | 更新多阶段事件的进度或状态 |
 
 ---

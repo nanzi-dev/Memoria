@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 REAL_COOLDOWN = timedelta(minutes=2)
 WORLD_COOLDOWN = timedelta(minutes=20)
 DAILY_AUTONOMOUS_MESSAGE_LIMIT = 24
-MAX_PULSE_MESSAGES = 3
+MAX_PULSE_MESSAGES = 1
 
 
 def _parse_iso(value: str | None) -> datetime | None:

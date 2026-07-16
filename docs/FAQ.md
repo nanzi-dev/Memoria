@@ -10,8 +10,14 @@
 cd Memoria
 # 确保虚拟环境已激活
 source .venv/bin/activate  # Linux/Mac
-# 重新安装依赖
-pip install -r requirements.txt
+# 以可编辑模式安装项目和开发依赖
+pip install -e ".[dev]"
+```
+
+完成可编辑安装后，通常可以直接运行 `uvicorn memoria.main:app`。如果不安装项目，则必须显式把 `src/` 加入模块搜索路径：
+
+```bash
+PYTHONPATH=src uvicorn memoria.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
 ---
@@ -190,6 +196,43 @@ SPEECH_STORAGE_PATH=./data/speech
 3. 若手动改库，需要同步更新 `character_relationship_revision.updated_at`，或重新通过 API 保存一次关系。
 4. 检查是否在图谱修改之后又产生了新的对话和记忆；过滤只会排除修订时间之前的旧关系上下文，不会屏蔽修订之后新写入的内容，也不会删除非关系长期记忆。
 5. 删除关系表示“未定义关系”，不是“关系中立”。如果需要明确普通队友、陌生、敌对等态度，应在图谱中创建对应关系边。
+
+---
+
+### Q: 群聊为什么没有自主发言？
+
+普通自主脉冲不是固定定时发言。当前实现只有在以下条件同时满足时才会生成消息：
+
+1. 世界时钟未暂停。
+2. 距离上次普通自主脉冲至少经过 2 分钟真实时间和 20 分钟世界时间。
+3. 当日普通自主消息预算尚未达到 24 条。
+4. 逻辑群聊线程中至少有 2 个活跃参与者。
+5. 存在发言动机，例如未解决的剧情钩子、角色目标，或在线程不处于等待玩家状态时存在当前话题。
+
+普通脉冲和事件脉冲当前每次都最多生成 1 条消息。事件脉冲会绕过普通脉冲的真实时间冷却、世界时间冷却和每日预算，但仍要求至少 2 个活跃参与者。线程状态租约用于避免多个 worker 重复执行同一个脉冲。
+
+脉冲成功后，消息、关系变化、参与者更新、线程状态和未读通知会在同一事务中原子提交。相关记忆提取在事务提交后以 best effort 执行；提取失败会记录日志，但不会回滚已经提交的对话和状态。
+
+---
+
+### Q: 群聊 session 已结束，为什么同一群聊仍可能继续发言？
+
+`session_id` 表示一次物理会话，`group_thread_id` 表示可跨多个物理 session 延续的逻辑群聊线程。历史消息、未读状态和自主脉冲都以逻辑线程为连续上下文。
+
+结束当前 session 不等于关闭逻辑线程。后续脉冲需要写入消息时，系统可以为该 `group_thread_id` 自动创建新的 active carrier session，因此表现为同一群聊在新 session 中继续。排查时应同时查看 `group_thread_id` 和当前承载它的 active session，而不是只检查旧 `session_id`。
+
+---
+
+### Q: checkpoint memory 为什么没有立即出现？
+
+单聊和群聊的 checkpoint memory 由持久后台任务处理，任务类型分别为 `single_checkpoint_memory` 和 `group_checkpoint_memory`。任务状态包括 `pending`、`running`、`retry`、`completed` 和 `failed`。
+
+- `dedupe_key` 和数据库唯一约束防止同一 checkpoint 重复入队。
+- worker 通过租约领取任务；租约过期的 `running` 任务可以被重新领取。
+- 默认最多尝试 3 次，失败后默认等待 5 秒再重试。
+- 完成或失败更新只有在 worker 仍持有有效租约时才会生效。
+
+短时间处于 `pending`、`running` 或 `retry` 属于正常后台处理。持续停留或最终进入 `failed` 时，应检查后台 worker 和对应任务日志，而不是重复结束会话来触发相同任务。
 
 ---
 
