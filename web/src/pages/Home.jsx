@@ -112,12 +112,6 @@ export default function Home() {
       {/* 内容 */}
       <div className="relative z-10 flex flex-col items-center min-h-dvh px-3 sm:px-4 py-8 sm:py-10 pointer-events-none">
         <div className="mt-4 mb-2 flex items-center justify-center gap-3 sm:mt-6 sm:gap-4 pointer-events-auto">
-          <img
-            src="/memoria-icon.svg"
-            alt=""
-            aria-hidden="true"
-            className="h-11 w-11 shrink-0 sm:h-12 sm:w-12"
-          />
           <GlitchText speed={1} enableShadows enableOnHover={false} className="home-title">
             Memoria
           </GlitchText>
