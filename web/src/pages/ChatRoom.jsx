@@ -1,4 +1,12 @@
-import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
@@ -6,9 +14,13 @@ import { useUser } from '../context/UserContext';
 
 import { dialogue, multiDialogue, characterAdmin } from '../api/memoria';
 
-import SideRays from '../components/SideRays';
 import { EventInboxBanner, WorldClockDisplay } from '../components/WorldClock';
 import UserSettingsModal from '../components/UserSettingsModal';
+import { useArchiveShell } from '../archive/ArchiveShell';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Textarea } from '../components/ui/textarea';
+import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
 
 import { splitAssistantReply } from '../utils/chatMessages';
 import { beginOwnedRequest, createRequestEpoch } from '../utils/asyncRequestState';
@@ -30,9 +42,9 @@ import useBrowserSpeech from '../hooks/useBrowserSpeech';
 
 import {
 
-  Send, ArrowLeft, Heart, AlertTriangle, Loader2, User, X, Plus, Users,
+  Send, ArrowLeft, AlertTriangle, Loader2, User, X, Plus, Users,
 
-  Search, Cpu, Activity, MessageSquare, Mic, Square, Volume2,
+  Search, Cpu, MessageSquare, Mic, Square, Volume2,
   Pause, RotateCw
 
 } from 'lucide-react';
@@ -55,32 +67,9 @@ const MOOD_LABELS = {
 
 const MOOD_EMOJI = { happy: '😊', neutral: '😐', sad: '😢', angry: '😠', surprised: '😲', fearful: '😨', disgusted: '😖' };
 
-
-
-const MOOD_BORDER = { happy: 'border-emerald-400/60', neutral: 'border-slate-500/40', sad: 'border-blue-400/60', angry: 'border-red-400/60', surprised: 'border-yellow-400/60', fearful: 'border-purple-400/60', disgusted: 'border-orange-400/60' };
-
-const MOOD_GLOW = { happy: 'shadow-[0_0_12px_rgba(52,211,153,0.3)]', neutral: '', sad: 'shadow-[0_0_12px_rgba(96,165,250,0.3)]', angry: 'shadow-[0_0_12px_rgba(248,113,113,0.3)]' };
-const MOOD_BUBBLE = { happy: 'bg-emerald-950 border-emerald-400/20 text-zinc-200', neutral: 'bg-white/[0.03] border-white/[0.06] text-zinc-300', sad: 'bg-blue-950 border-blue-400/20 text-zinc-200', angry: 'bg-red-950 border-red-400/20 text-zinc-200', surprised: 'bg-yellow-950 border-yellow-400/20 text-zinc-200', fearful: 'bg-purple-950 border-purple-400/20 text-zinc-200', disgusted: 'bg-orange-950 border-orange-400/20 text-zinc-200' };
-
-
-
 const IDLE_SESSION_END_MS = 5 * 60 * 1000;
 const HISTORY_PAGE_SIZE = 20;
 const GROUP_POLL_INTERVAL_MS = 3 * 1000;
-
-const CHAT_RAYS_PROPS = {
-  speed: 2.1,
-  rayColor1: '#F8D36B',
-  rayColor2: '#9DD8FF',
-  intensity: 2.6,
-  spread: 2.15,
-  origin: 'top-right',
-  tilt: -4,
-  saturation: 1.35,
-  blend: 0.68,
-  falloff: 1.45,
-  opacity: 0.82,
-};
 
 export function applyDialogueStreamEvent(messages, event) {
   switch (event?.type) {
@@ -108,40 +97,6 @@ export function removeDialogueStreamPlaceholders(messages, streamIds) {
 export function shouldFallbackFromDialogueStream(hasReceivedDelta) {
   return true;
 }
-
-function ChatBackdrop({ origin = 'top-right', tilt = -4 }) {
-  return (
-    <SideRays
-      {...CHAT_RAYS_PROPS}
-      origin={origin}
-      tilt={tilt}
-      className="side-rays-chat"
-    />
-  );
-}
-
-
-
-// ═══════════════════════════════════════════════
-
-// Scanning line animation (for AI thinking)
-
-// ═══════════════════════════════════════════════
-
-function ScanLine() {
-
-  return (
-
-    <div className="absolute inset-0 overflow-hidden pointer-events-none rounded-lg" aria-hidden="true">
-
-      <div className="absolute inset-x-0 h-[2px] bg-gradient-to-r from-transparent via-cyber-green/40 to-transparent animate-scan" />
-
-    </div>
-
-  );
-
-}
-
 const toDelta = (value) => {
   const numeric = Number(value ?? 0);
   return Number.isFinite(numeric) ? numeric : 0;
@@ -336,21 +291,24 @@ function WorldDateSeparator({ value }) {
   const label = formatWorldDate(value);
   if (!label) return null;
   return (
-    <div className="flex items-center gap-3 py-1" role="separator" aria-label={`世界日期 ${label}`}>
-      <span className="h-px flex-1 bg-amber-200/10" />
-      <span className="shrink-0 text-[10px] text-amber-100/55">{label} · 世界时间</span>
-      <span className="h-px flex-1 bg-amber-200/10" />
+    <div className="flex items-center gap-3 py-2" role="separator" aria-label={`世界日期 ${label}`}>
+      <span className="h-px flex-1 bg-border" />
+      <span className="shrink-0 font-archive-mono text-[10px] text-muted-foreground tabular-nums">
+        {label} · 世界时间
+      </span>
+      <span className="h-px flex-1 bg-border" />
     </div>
   );
 }
 
-function MessageWorldTime({ value, align = 'left' }) {
+function MessageWorldTime({ value, align = 'left', messageId, pending = false }) {
   const label = formatWorldTime(value);
-  if (!label) return null;
+  if (!label && messageId == null && !pending) return null;
   return (
-    <div className={`mt-1 flex items-center gap-1 px-1 text-[10px] text-zinc-600 ${align === 'right' ? 'justify-end' : 'justify-start'}`}>
-      <span className="h-1 w-1 rounded-full bg-amber-300/45" />
-      <time dateTime={value}>{label}</time>
+    <div className={`mt-1.5 flex items-center gap-2 font-archive-mono text-[10px] text-muted-foreground tabular-nums ${align === 'right' ? 'justify-end' : 'justify-start'}`}>
+      {label && <time dateTime={value}>{label}</time>}
+      {messageId != null && <span>#{messageId}</span>}
+      {pending && <span>待发送</span>}
     </div>
   );
 }
@@ -389,8 +347,11 @@ function MessageAction({ children }) {
   if (!text) return null;
 
   return (
-    <span className="mx-0.5 inline-block max-w-full rounded-[4px] border border-emerald-200/45 bg-emerald-300/14 px-1.5 py-0 align-baseline font-character text-[0.94em] font-medium [line-height:inherit] text-emerald-50 shadow-[0_0_10px_rgba(110,231,183,0.12)] whitespace-normal break-words italic">
-      {text}
+    <span
+      data-stage-direction
+      className="font-archive-serif text-[0.94em] italic text-muted-foreground"
+    >
+      （{text}）
     </span>
   );
 }
@@ -434,13 +395,13 @@ function RelationshipDeltaLine({ affinityDelta = 0, trustDelta = 0 }) {
   );
 
   const renderDelta = (label, value) => (
-    <span className={value > 0 ? 'text-emerald-400/70' : 'text-red-400/70'}>
+    <span className={value > 0 ? 'text-primary' : 'text-destructive'}>
       {label} {value > 0 ? '+' : ''}{formatDelta(value)}
     </span>
   );
 
   return (
-    <div className="mt-0.5 ml-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] leading-normal">
+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-archive-mono text-[11px] leading-normal tabular-nums">
       {affinity !== 0 && renderDelta('好感', affinity)}
       {trust !== 0 && renderDelta('信任', trust)}
     </div>
@@ -464,15 +425,13 @@ function MessageAudioControl({ messageId, getAudioState, onToggle, onRetry }) {
           : '播放语音';
 
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon"
       onClick={() => isError ? onRetry(messageId) : onToggle(messageId)}
       disabled={isLoading}
-      className={`mt-1 flex h-11 w-11 items-center justify-center rounded-lg border transition-colors disabled:cursor-wait ${
-        isError
-          ? 'border-red-400/20 text-red-300/70 hover:border-red-400/40 hover:bg-red-400/5'
-          : 'border-cyber-green/10 text-cyber-green/35 hover:border-cyber-green/30 hover:bg-cyber-green/5 hover:text-cyber-green/70'
-      }`}
+      className={`mt-1 border border-border ${isError ? 'text-destructive' : 'text-muted-foreground hover:text-foreground'}`}
       aria-label={label}
       title={audioState.error || label}
     >
@@ -480,7 +439,7 @@ function MessageAudioControl({ messageId, getAudioState, onToggle, onRetry }) {
         : isPlaying ? <Pause size={15} />
           : isError ? <RotateCw size={15} />
             : <Volume2 size={15} />}
-    </button>
+    </Button>
   );
 }
 
@@ -496,37 +455,35 @@ function SpeechRecorderButton({ status, supported, disabled, onStart, onStop }) 
         : '当前浏览器不支持录音';
 
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
+      size="icon"
       onClick={isRecording ? onStop : onStart}
       disabled={disabled || isTranscribing || (!supported && !isRecording)}
-      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-all disabled:cursor-not-allowed disabled:opacity-25 ${
-        isRecording
-          ? 'border-red-400/35 bg-red-400/10 text-red-300 hover:bg-red-400/15'
-          : 'border-cyan-200/15 bg-cyan-200/[0.035] text-cyan-100/55 hover:border-cyan-200/35 hover:bg-cyan-200/[0.07] hover:text-cyan-100'
-      }`}
+      className={`shrink-0 ${isRecording ? 'border-destructive/60 bg-destructive/10 text-destructive' : 'text-muted-foreground'}`}
       aria-label={label}
       title={label}
     >
       {isTranscribing ? <Loader2 size={16} className="animate-spin" />
         : isRecording ? <Square size={15} fill="currentColor" />
           : <Mic size={17} />}
-    </button>
+    </Button>
   );
 }
 
 function SpeechErrorNotice({ error, onDismiss, onRetry }) {
   if (!error) return null;
   return (
-    <div role="alert" className="mb-2 flex items-center gap-2 rounded-lg border border-red-400/15 bg-red-400/[0.055] px-3 py-2 text-[11px] leading-5 text-red-200/75">
+    <div role="alert" className="mb-2 flex items-center gap-2 rounded-md border border-destructive/35 bg-destructive/10 px-3 py-2 text-xs leading-5 text-destructive">
       <AlertTriangle size={13} className="shrink-0" />
       <span className="min-w-0 flex-1 break-words">{error}</span>
-      <button type="button" onClick={onRetry} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-red-200/55 hover:bg-red-400/10 hover:text-red-100" aria-label="重试语音输入" title="重试语音输入">
+      <Button type="button" variant="ghost" size="icon" onClick={onRetry} className="shrink-0 text-destructive" aria-label="重试语音输入" title="重试语音输入">
         <RotateCw size={14} />
-      </button>
-      <button type="button" onClick={onDismiss} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-red-200/35 hover:bg-red-400/10 hover:text-red-100" aria-label="关闭语音错误">
+      </Button>
+      <Button type="button" variant="ghost" size="icon" onClick={onDismiss} className="shrink-0 text-destructive" aria-label="关闭语音错误">
         <X size={15} />
-      </button>
+      </Button>
     </div>
   );
 }
@@ -542,6 +499,7 @@ export default function ChatRoom() {
   const [searchParams] = useSearchParams();
 
   const navigate = useNavigate();
+  const { setPrimaryAction } = useArchiveShell();
 
   const { user, loading: userLoading, worldClock, getWorldNow } = useUser();
 
@@ -1608,20 +1566,26 @@ export default function ChatRoom() {
     if (selectedParticipants.some(p => !isCharacterActive(p))) { setError('离线角色不能用于新建群聊'); return; }
 
     nextSingleRequestGeneration();
+    const requestPlayerId = PLAYER_ID;
+    const generation = groupRequestGenerationRef.current + 1;
+    groupRequestGenerationRef.current = generation;
     setError(null); setView('single-loading');
 
     try {
 
       const res = await multiDialogue.startSession(
-        PLAYER_ID,
+        requestPlayerId,
         PLAYER_NAME,
         selectedParticipants.map(p => p.character_id),
         cleanGroupName,
       );
 
-      const generation = groupRequestGenerationRef.current + 1;
+      if (
+        generation !== groupRequestGenerationRef.current
+        || playerIdRef.current !== requestPlayerId
+      ) return;
+
       const groupThreadId = res.group_thread_id || res.session_id;
-      groupRequestGenerationRef.current = generation;
       loadedGroupMessageIdsRef.current = new Set();
       groupPollInFlightRef.current = null;
       activeGroupThreadIdRef.current = groupThreadId;
@@ -1646,7 +1610,14 @@ export default function ChatRoom() {
 
       setView('group');
 
-    } catch (e) { setError(e.message); setView('group-setup'); }
+    } catch (e) {
+      if (
+        generation !== groupRequestGenerationRef.current
+        || playerIdRef.current !== requestPlayerId
+      ) return;
+      setError(e.message);
+      setView('group-setup');
+    }
 
   };
 
@@ -1922,676 +1893,655 @@ export default function ChatRoom() {
 
 
 
-  // ── Helpers ──
+  // ── Archive workbench rendering ──
 
-  const getCharById = (id) => participants.find(p => p.character_id === id) || allChars.find(c => c.character_id === id);
+  const getCharById = (id) => (
+    participants.find(p => p.character_id === id)
+    || allChars.find(c => c.character_id === id)
+  );
 
-  // ═══════════════════════════════════════════════
+  const archivePrimaryAction = useMemo(() => {
+    if (view !== 'list' || userLoading || !PLAYER_ID) return null;
+    return (
+      <Button type="button" size="lg" onClick={enterGroupSetup}>
+        <Plus aria-hidden="true" />
+        新建群聊
+      </Button>
+    );
+  }, [PLAYER_ID, enterGroupSetup, userLoading, view]);
 
-  // View: Loading
-
-  // ═══════════════════════════════════════════════
+  useEffect(() => {
+    setPrimaryAction(archivePrimaryAction);
+    return () => setPrimaryAction(null);
+  }, [archivePrimaryAction, setPrimaryAction]);
 
   if (userLoading) {
-
     return (
-
-      <div className="min-h-screen bg-[#0b0b0c] flex items-center justify-center font-mono">
-
-        <div className="flex flex-col items-center gap-3">
-
-          <Loader2 className="animate-spin text-cyber-green/40" size={22} />
-
-          <span className="text-xs text-cyber-green/35">正在确认登录状态...</span>
-
-        </div>
-
+      <div className="flex h-[calc(100dvh-4rem)] items-center justify-center bg-background text-muted-foreground" role="status">
+        <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
+        <span className="sr-only">正在确认登录状态</span>
       </div>
-
     );
-
   }
 
   if (!user) {
-
     return (
-
-      <div className="min-h-screen bg-[#0b0b0c] flex flex-col font-mono">
-
-        <header className="flex items-center gap-3 px-4 py-2.5 border-b border-white/5 bg-[#0d0d14]/80 backdrop-blur-md shrink-0">
-
-          <button onClick={() => navigate('/')} className="text-cyber-green/30 hover:text-cyber-green/50 p-1" aria-label="返回首页"><ArrowLeft size={18} /></button>
-
-          <div className="flex items-center gap-2">
-
-            <Activity size={14} className="text-cyber-green/40" />
-
-            <span className="text-xs font-bold text-cyber-green/60 uppercase tracking-[0.15em]">Memoria</span>
-
-          </div>
-
-        </header>
-
-        <main className="flex-1 flex items-center justify-center px-6">
-
-          <div className="w-full max-w-sm text-center space-y-5">
-
-            <div className="mx-auto w-14 h-14 rounded-full border border-cyber-green/15 bg-cyber-green/[0.03] flex items-center justify-center">
-
-              <User size={22} className="text-cyber-green/35" />
-
-            </div>
-
-            <div className="space-y-2">
-
-              <h1 className="text-base font-semibold text-zinc-200">请先登录后使用对话功能</h1>
-
-              <p className="text-xs leading-6 text-cyber-green/25">登录后可以查看历史对话、开始单聊或创建群聊。</p>
-
-            </div>
-
-            <button onClick={() => navigate('/')} className="w-full min-h-11 rounded-lg border border-cyber-green/20 bg-cyber-green/10 text-sm font-medium text-cyber-green hover:bg-cyber-green/15 transition-colors">
-
-              返回登录
-
-            </button>
-
-          </div>
-
-        </main>
-
+      <div className="flex h-[calc(100dvh-4rem)] items-center justify-center bg-background px-4 font-archive-sans">
+        <section className="w-full max-w-sm rounded-lg border border-border bg-card p-6 text-center">
+          <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground">
+            <User aria-hidden="true" />
+          </span>
+          <h1 className="mt-4 font-archive-serif text-lg font-semibold text-foreground">请先登录后使用对话功能</h1>
+          <Button type="button" className="mt-5 w-full" onClick={() => navigate('/')}>
+            <ArrowLeft aria-hidden="true" />
+            返回登录
+          </Button>
+        </section>
       </div>
-
     );
-
   }
 
   if (view === 'single-loading') {
-
     return (
-
-      <div className="min-h-screen bg-[#0b0b0c] flex items-center justify-center font-mono">
-
-        <div className="flex flex-col items-center gap-4">
-
-          <div className="relative w-16 h-16 rounded-full border-2 border-cyber-green/20 flex items-center justify-center overflow-hidden">
-
-            {character?.avatar_url ? (
-
-              <img src={character.avatar_url} alt="" className="w-full h-full object-cover opacity-50" />
-
-            ) : (
-
-              <User size={24} className="text-cyber-green/20" />
-
-            )}
-
-            <ScanLine />
-
-          </div>
-
-          <Loader2 className="animate-spin text-cyber-green/40" size={20} />
-
-          <span className="text-xs text-cyber-green/40">正在连接 {character?.name || '角色'}...</span>
-
+      <div className="flex h-[calc(100dvh-4rem)] items-center justify-center bg-background font-archive-sans">
+        <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-5 py-4 text-muted-foreground" role="status">
+          {renderAvatar(character, 'h-10 w-10')}
+          <Loader2 className="h-5 w-5 animate-spin text-primary" aria-hidden="true" />
+          <span className="text-sm">正在连接 {character?.name || '角色'}</span>
         </div>
-
       </div>
-
     );
-
   }
 
+  if (view === 'list') return renderListView();
+  if (view === 'group-setup') return renderGroupSetup();
+  if (view === 'single') return renderChatWorkbench('single');
+  if (view === 'group') return renderChatWorkbench('group');
+  return null;
 
-
-  // ═══════════════════════════════════════════════
-
-  // View: List (Chat tab / Contacts)
-  // ═══════════════════════════════════════════════
-  if (view === 'list') {
+  function renderAvatar(entity, sizeClass = 'h-10 w-10', extraClass = '') {
+    const label = entity?.name || entity?.display_name || entity?.username || '';
     return (
-      <div className="min-h-screen memoria-page flex flex-col font-mono">
-        <ChatBackdrop />
-        <header className="memoria-glass flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 border-x-0 border-t-0 shrink-0">
-          <button
-            onClick={() => navigate('/')}
-            aria-label="返回首页"
-            title="返回首页"
-            className="text-cyber-green/30 hover:text-cyber-green/70 hover:bg-cyber-green/5 rounded-lg p-2 min-w-[44px] min-h-[44px] flex items-center justify-center transition-all"
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <div className="flex items-center gap-2">
-            <Activity size={14} className="text-cyber-green/40" />
-            <span className="text-xs font-bold text-cyber-green/60 uppercase tracking-[0.15em]">Memoria</span>
-            <span className="w-1.5 h-1.5 rounded-full bg-cyber-green/50 animate-pulse ml-1" />
-          </div>
-          <div className="flex-1 hidden sm:flex items-center justify-center max-w-md mx-auto">
-            <div className="relative w-full">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-cyber-green/20" />
-              <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="搜索对话..." className="w-full bg-[#0b0b0c]/80 border border-cyber-green/10 rounded-full pl-9 pr-4 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/15 focus:outline-none focus:border-cyber-green/35 focus:ring-2 focus:ring-cyber-green/10 transition-all" />
-            </div>
-          </div>
-          <button onClick={enterGroupSetup} className="text-xs px-3 py-1.5 min-h-[44px] rounded-full border border-cyber-green/15 text-cyber-green/45 hover:text-cyber-green/80 hover:border-cyber-green/35 hover:bg-cyber-green/10 active:scale-95 transition-all flex items-center gap-1.5 shrink-0"><Plus size={14} />群聊</button>
-        </header>
+      <span className={`${sizeClass} ${extraClass} flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted font-archive-serif text-sm font-semibold text-muted-foreground`}>
+        {entity?.avatar_url
+          ? <img src={entity.avatar_url} alt="" className="h-full w-full object-cover" />
+          : label.charAt(0).toUpperCase() || <User className="h-4 w-4" aria-hidden="true" />}
+      </span>
+    );
+  }
 
-        <div className="flex items-center gap-1 px-4 py-2 border-b border-cyber-green/[0.06] bg-[#0d0d14]/50 backdrop-blur-md">
-          <button onClick={() => { setActiveTab('chat'); setSearchQuery(''); }} className={`text-xs px-4 py-1.5 min-h-[44px] rounded-full border transition-all ${activeTab === 'chat' ? 'border-cyber-green/30 bg-cyber-green/10 text-cyber-green' : 'border-transparent text-cyber-green/30 hover:text-cyber-green/50'}`}>对话</button>
-          <button onClick={() => { setActiveTab('contacts'); setSearchQuery(''); }} className={`text-xs px-4 py-1.5 min-h-[44px] rounded-full border transition-all ${activeTab === 'contacts' ? 'border-cyber-green/30 bg-cyber-green/10 text-cyber-green' : 'border-transparent text-cyber-green/30 hover:text-cyber-green/50'}`}>联系人</button>
+  function renderErrorNotice() {
+    if (!error) return null;
+    return (
+      <div role="alert" className="flex items-start gap-2 rounded-md border border-destructive/35 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        <span className="min-w-0 flex-1 break-words">{error}</span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="-my-2 -mr-2 shrink-0 text-destructive"
+          onClick={() => setError(null)}
+          aria-label="关闭错误提示"
+        >
+          <X aria-hidden="true" />
+        </Button>
+      </div>
+    );
+  }
+
+  function renderSessionDirectory({ embedded = false, className = '' } = {}) {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    const filteredItems = chatItems.filter(item => {
+      if (!normalizedQuery) return true;
+      const name = item.type === 'single' ? item.name : item.group_name || '';
+      return (
+        name.toLowerCase().includes(normalizedQuery)
+        || String(item.last_message || '').toLowerCase().includes(normalizedQuery)
+      );
+    });
+    const contacts = allChars.filter(char => {
+      if (!normalizedQuery) return true;
+      return String(char.name || '').toLowerCase().includes(normalizedQuery);
+    });
+
+    return (
+      <section className={`${embedded ? 'hidden lg:flex' : 'flex'} ${className} min-h-0 min-w-0 flex-col border-r border-border bg-card`}>
+        <div className="flex min-h-16 items-center gap-2 border-b border-border px-3">
+          <div className="min-w-0 flex-1">
+            <p className="font-archive-mono text-[10px] uppercase text-muted-foreground">Dialogue Archive</p>
+            <h1 className="truncate font-archive-serif text-base font-semibold text-foreground">会话目录</h1>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={enterGroupSetup}
+            aria-label="新建群聊"
+            title="新建群聊"
+          >
+            <Plus aria-hidden="true" />
+          </Button>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-          {activeTab === 'chat' && ((() => {
-            if (chatItems.length === 0) {
-              return (
-                <div className="flex flex-col items-center justify-center h-full text-center p-8 space-y-4">
-                  <div className="w-16 h-16 rounded-full border-2 border-dashed border-cyber-green/10 flex items-center justify-center">
-                    <MessageSquare size={24} className="text-cyber-green/15" />
-                  </div>
-                  <p className="text-sm text-cyber-green/20 font-mono">暂无对话记录</p>
-                  <p className="text-[11px] text-cyber-green/10">切换至联系人标签开始新对话</p>
+        <div className="space-y-3 border-b border-border p-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <Input
+              type="search"
+              value={searchQuery}
+              onChange={event => setSearchQuery(event.target.value)}
+              placeholder={activeTab === 'chat' ? '搜索对话' : '搜索联系人'}
+              className="pl-9"
+            />
+          </div>
+          <Tabs
+            value={activeTab}
+            onValueChange={value => {
+              setActiveTab(value);
+              setSearchQuery('');
+            }}
+          >
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="chat">对话</TabsTrigger>
+              <TabsTrigger value="contacts">联系人</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {renderErrorNotice()}
+          {activeTab === 'chat' && (
+            <div className="mt-2 space-y-1">
+              {filteredItems.length === 0 ? (
+                <div className="flex min-h-40 flex-col items-center justify-center gap-2 text-center text-muted-foreground">
+                  <MessageSquare className="h-5 w-5" aria-hidden="true" />
+                  <p className="font-archive-serif text-sm">暂无对话记录</p>
                 </div>
-              );
-            }
-            return (
-              <div className="p-3 space-y-2">
-                {chatItems.filter(item => {
-                  if (!searchQuery) return true;
-                  const name = item.type === 'single' ? item.name : item.group_name || '';
-                  const msg = item.last_message || '';
-                  return name.toLowerCase().includes(searchQuery.toLowerCase()) || msg.toLowerCase().includes(searchQuery.toLowerCase());
-                }).map((item, i) => {
-                  const displayTime = item.last_message_at;
-                  const timeStr = formatChatTime(displayTime);
-                  if (item.type === 'group') {
-                    const groupParts = (item.participants || []).map(p => normalizeParticipant(p));
-                    const unreadCount = Math.max(0, Number(item.unread_count || 0));
-                    return (
-                      <div key={`group-${item.group_thread_id || item.session_id || i}`} onClick={() => enterGroupChat(item, groupParts)} className="memoria-glass memoria-card-hover animate-fade-up flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer group relative overflow-hidden" style={{ animationDelay: `${Math.min(i, 12) * 24}ms` }}>
-                        <div className="flex -space-x-2 shrink-0">
-                          {groupParts.slice(0, 3).map((p, j) => (
-                            <div key={p.character_id || j} className="memoria-avatar-ring w-10 h-10 rounded-full overflow-hidden border-2 border-[#0d0d14] bg-[#0b0b0c] ring-1 ring-cyber-green/10 transition-transform duration-200 group-hover:-translate-y-0.5">
-                              {p.avatar_url ? (
-                                <img src={p.avatar_url} alt="" className="w-full h-full object-cover" />
-                              ) : (
-                                <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-[11px] font-bold">{p.name?.charAt(0) || '?'}</div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5"><span className="font-character text-lg leading-none text-zinc-200 truncate">{item.group_name || '群聊'}</span></div>
-                          <div className="text-[11px] text-cyber-green/20 truncate mt-0.5">{item.last_message || '暂无消息'}</div>
-                        </div>
-                        <div className="flex min-w-[44px] flex-col items-end gap-1 shrink-0">
-                          <span className="text-[11px] text-cyber-green/15 whitespace-nowrap">{timeStr}</span>
-                          {unreadCount > 0 && (
-                            <span className="min-w-5 h-5 px-1.5 rounded-full bg-cyber-green/15 border border-cyber-green/25 text-[10px] leading-none text-cyber-green/80 tabular-nums flex items-center justify-center" aria-label={`${unreadCount} 条未读消息`}>
-                              {unreadCount > 99 ? '99+' : unreadCount}
-                            </span>
-                          )}
-                        </div>
-                        <div className="absolute left-0 top-3 bottom-3 w-px bg-cyber-green/0 group-hover:bg-cyber-green/35 transition-colors pointer-events-none" />
-                      </div>
-                    );
-                  }
-                  const itemActive = isCharacterActive(item);
-                  return (
-                    <div key={item.session_id || i} onClick={() => requestSingleChat(item)} className="memoria-glass memoria-card-hover animate-fade-up flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer group relative overflow-hidden" style={{ animationDelay: `${Math.min(i, 12) * 24}ms` }}>
-                      <div className={`memoria-avatar-ring w-10 h-10 rounded-full overflow-hidden border-2 bg-[#0b0b0c] shrink-0 group-hover:border-cyber-green/45 transition-all group-hover:scale-105 ${itemActive ? 'border-slate-700/30' : 'border-zinc-700/30 opacity-60 grayscale'}`}>
-                        {item.avatar_url ? <img src={item.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-sm font-bold">{item.name?.charAt(0)}</div>}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`font-character text-lg leading-none truncate ${itemActive ? 'text-zinc-200' : 'text-zinc-500'}`}>{item.name}</span>
-                          {!itemActive && <span className="text-[10px] text-zinc-500 border border-zinc-700/60 rounded-full px-1.5 py-0.5 shrink-0">离线</span>}
-                        </div>
-                        <div className="text-[11px] text-cyber-green/20 truncate mt-0.5">{item.last_message || '暂无消息'}</div>
-                      </div>
-                      <div className="flex flex-col items-end gap-1 shrink-0">
-                        <span className="text-[11px] text-cyber-green/15">{timeStr}</span>
-                      </div>
-                      <div className="absolute left-0 top-3 bottom-3 w-px bg-cyber-green/0 group-hover:bg-cyber-green/35 transition-colors pointer-events-none" />
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })())}
+              ) : filteredItems.map((item, index) => renderDirectoryItem(item, index))}
+            </div>
+          )}
           {activeTab === 'contacts' && (
-            <div className="p-3 space-y-0.5">
-              {allChars.filter(c => isCharacterActive(c)).map((char, i) => (
-                <div key={char.character_id} onClick={() => requestSingleChat(char)} className="memoria-glass memoria-card-hover animate-fade-up flex items-center gap-3 px-3 py-2.5 rounded-xl cursor-pointer group" style={{ animationDelay: `${Math.min(i, 12) * 22}ms` }}>
-                  <div className="memoria-avatar-ring w-10 h-10 rounded-full overflow-hidden border-2 border-slate-700/30 bg-[#0b0b0c] shrink-0 group-hover:border-cyber-green/40 transition-all group-hover:scale-105">
-                    {char.avatar_url ? <img src={char.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-sm font-bold">{char.name?.charAt(0)}</div>}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-character text-lg leading-none text-zinc-200 truncate">{char.name}</div>
-                    {char.core_identity && <div className="text-[11px] text-cyber-green/20 truncate mt-0.5">{char.core_identity}</div>}
-                  </div>
-                  <div className="flex items-center gap-1.5 text-[11px] text-cyber-green/35 shrink-0">
-                    <span className="w-1.5 h-1.5 rounded-full bg-cyber-green/45" />
-                    在线
-                  </div>
+            <div className="mt-2 space-y-1">
+              {contacts.map((char, index) => {
+                const active = isCharacterActive(char);
+                return (
+                  <button
+                    type="button"
+                    key={char.character_id}
+                    onClick={() => active
+                      ? requestSingleChat(char)
+                      : setError('角色已离线，不能新建聊天')}
+                    className="flex min-h-14 w-full items-center gap-3 rounded-md border border-transparent px-2 py-2 text-left transition-colors hover:border-border hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    style={{ animationDelay: `${Math.min(index, 12) * 20}ms` }}
+                  >
+                    {renderAvatar(char, 'h-10 w-10', active ? '' : 'grayscale opacity-55')}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-archive-serif text-sm font-semibold text-foreground">{char.name}</span>
+                      <span className="block truncate text-xs text-muted-foreground">{char.core_identity || (active ? '在线' : '离线')}</span>
+                    </span>
+                    <span className={`h-2 w-2 rounded-sm ${active ? 'bg-primary' : 'bg-muted-foreground/45'}`} aria-hidden="true" />
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
+
+  function renderDirectoryItem(item, index) {
+    const timeLabel = formatChatTime(item.last_message_at);
+    if (item.type === 'group') {
+      const groupParts = (item.participants || []).map(participant => normalizeParticipant(participant));
+      const unreadCount = Math.max(0, Number(item.unread_count || 0));
+      return (
+        <button
+          type="button"
+          key={`group-${item.group_thread_id || item.session_id || index}`}
+          onClick={() => enterGroupChat(item, groupParts)}
+          className="flex min-h-16 w-full items-center gap-3 rounded-md border border-transparent px-2 py-2 text-left transition-colors hover:border-border hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <span className="flex shrink-0 -space-x-2">
+            {groupParts.slice(0, 3).map((participant, participantIndex) => (
+              <Fragment key={participant.character_id || participantIndex}>
+                {renderAvatar(participant, 'h-9 w-9', 'border-card')}
+              </Fragment>
+            ))}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-archive-serif text-sm font-semibold text-foreground">
+              {item.group_name || '群聊'}
+            </span>
+            <span className="block truncate text-xs text-muted-foreground">{item.last_message || '暂无消息'}</span>
+          </span>
+          <span className="flex shrink-0 flex-col items-end gap-1 font-archive-mono text-[10px] text-muted-foreground tabular-nums">
+            <span>{timeLabel}</span>
+            {unreadCount > 0 && (
+              <span className="rounded-md border border-primary/35 bg-primary/10 px-1.5 py-0.5 text-primary" aria-label={`${unreadCount} 条未读消息`}>
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </span>
+        </button>
+      );
+    }
+
+    const active = isCharacterActive(item);
+    return (
+      <button
+        type="button"
+        key={item.session_id || index}
+        onClick={() => requestSingleChat(item)}
+        className="flex min-h-16 w-full items-center gap-3 rounded-md border border-transparent px-2 py-2 text-left transition-colors hover:border-border hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {renderAvatar(item, 'h-10 w-10', active ? '' : 'grayscale opacity-55')}
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2">
+            <span className="truncate font-archive-serif text-sm font-semibold text-foreground">{item.name}</span>
+            {!active && <span className="rounded-md border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">离线</span>}
+          </span>
+          <span className="block truncate text-xs text-muted-foreground">{item.last_message || '暂无消息'}</span>
+        </span>
+        <span className="shrink-0 font-archive-mono text-[10px] text-muted-foreground tabular-nums">{timeLabel}</span>
+      </button>
+    );
+  }
+
+  function renderListView() {
+    const activeContacts = allChars.filter(char => isCharacterActive(char)).length;
+    const groupCount = chatItems.filter(item => item.type === 'group').length;
+    return (
+      <div data-archive-chat-workbench className="h-[calc(100dvh-4rem)] min-w-0 overflow-hidden bg-background font-archive-sans text-foreground">
+        <div className="grid h-full min-h-0 grid-cols-1 lg:grid-cols-[minmax(220px,280px)_minmax(0,1fr)_minmax(240px,320px)]">
+          {renderSessionDirectory({ className: 'lg:col-span-2' })}
+          <aside className="hidden min-h-0 flex-col bg-background lg:flex">
+            <div className="min-h-16 border-b border-border px-4 py-3">
+              <p className="font-archive-mono text-[10px] uppercase text-muted-foreground">Archive Status</p>
+              <h2 className="font-archive-serif text-base font-semibold text-foreground">叙事索引</h2>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              <dl className="divide-y divide-border border-y border-border">
+                <SummaryRow label="全部会话" value={chatItems.length} />
+                <SummaryRow label="群聊会话" value={groupCount} />
+                <SummaryRow label="在线角色" value={activeContacts} />
+                <SummaryRow label="角色总数" value={allChars.length} />
+              </dl>
+              <div className="mt-5">
+                <h3 className="font-archive-serif text-sm font-semibold text-foreground">在线联系人</h3>
+                <div className="mt-2 space-y-1">
+                  {allChars.filter(char => isCharacterActive(char)).slice(0, 8).map(char => (
+                    <button
+                      type="button"
+                      key={char.character_id}
+                      onClick={() => requestSingleChat(char)}
+                      className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {renderAvatar(char, 'h-8 w-8')}
+                      <span className="min-w-0 flex-1 truncate font-archive-serif text-sm text-foreground">{char.name}</span>
+                      <span className="h-2 w-2 rounded-sm bg-primary" aria-hidden="true" />
+                    </button>
+                  ))}
                 </div>
-              ))}
-              {allChars.filter(c => !isCharacterActive(c)).length > 0 && (
-                <div className="pt-3 mt-2 border-t border-white/[0.03]">
-                  <div className="text-[10px] text-cyber-green/12 uppercase px-2 mb-1">离线</div>
-                  {allChars.filter(c => !isCharacterActive(c)).map((char, i) => (
-                    <div key={char.character_id} onClick={() => setError('角色已离线，不能新建聊天')} className="animate-fade-up flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all cursor-not-allowed group opacity-50" style={{ animationDelay: `${Math.min(i, 8) * 22}ms` }}>
-                      <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-slate-700/30 bg-[#0b0b0c] shrink-0">{char.avatar_url ? <img src={char.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/10 text-sm font-bold">{char.name?.charAt(0)}</div>}</div>
-                      <div className="flex-1 min-w-0"><div className="font-character text-lg leading-none text-zinc-500 truncate">{char.name}</div></div>
-                      <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 shrink-0">
-                        <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
-                        离线
-                      </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    );
+  }
+
+  function SummaryRow({ label, value }) {
+    return (
+      <div className="flex items-center justify-between gap-3 py-3">
+        <dt className="text-xs text-muted-foreground">{label}</dt>
+        <dd className="font-archive-mono text-sm text-foreground tabular-nums">{value}</dd>
+      </div>
+    );
+  }
+
+  function renderGroupSetup() {
+    const activeCharacters = allChars.filter(char => isCharacterActive(char));
+    return (
+      <div data-archive-chat-workbench className="h-[calc(100dvh-4rem)] min-w-0 overflow-hidden bg-background font-archive-sans text-foreground">
+        <div className="grid h-full min-h-0 grid-cols-1 lg:grid-cols-[minmax(220px,280px)_minmax(0,1fr)_minmax(240px,320px)]">
+          <section className="flex min-h-0 min-w-0 flex-col border-r border-border bg-background lg:col-span-2">
+            <div className="flex min-h-16 items-center gap-2 border-b border-border px-3 sm:px-4">
+              <Button type="button" variant="ghost" size="icon" onClick={goToList} aria-label="返回会话目录">
+                <ArrowLeft aria-hidden="true" />
+              </Button>
+              <div className="min-w-0 flex-1">
+                <p className="font-archive-mono text-[10px] uppercase text-muted-foreground">New Ensemble</p>
+                <h1 className="font-archive-serif text-base font-semibold text-foreground">创建群聊</h1>
+              </div>
+              <span className="font-archive-mono text-xs text-muted-foreground tabular-nums">
+                {participants.length}/{activeCharacters.length}
+              </span>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
+              <div className="mx-auto max-w-3xl space-y-5">
+                {renderErrorNotice()}
+                <section className="rounded-lg border border-border bg-card p-4">
+                  <label htmlFor="group-name" className="mb-2 block font-archive-serif text-sm font-semibold text-foreground">
+                    群聊名称
+                  </label>
+                  <Input
+                    id="group-name"
+                    type="text"
+                    value={groupName}
+                    onChange={event => {
+                      setGroupName(event.target.value);
+                      if (error) setError(null);
+                    }}
+                    maxLength={40}
+                    placeholder="输入唯一群名"
+                    aria-invalid={groupNameExists}
+                    className={groupNameExists ? 'border-destructive focus-visible:ring-destructive' : ''}
+                  />
+                  {groupNameExists && <p className="mt-2 text-xs text-destructive">群聊名称已存在，请换一个名称</p>}
+                </section>
+
+                <section className="rounded-lg border border-border bg-card p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <h2 className="font-archive-serif text-sm font-semibold text-foreground">选择角色</h2>
+                    <span className="font-archive-mono text-xs text-muted-foreground tabular-nums">{participants.length} 已选择</span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                    {activeCharacters.map(char => {
+                      const selected = participants.some(participant => participant.character_id === char.character_id);
+                      return (
+                        <button
+                          type="button"
+                          key={char.character_id}
+                          onClick={() => toggleParticipant(char)}
+                          aria-pressed={selected}
+                          className={`flex min-h-14 items-center gap-3 rounded-md border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                            selected
+                              ? 'border-primary/60 bg-primary/10'
+                              : 'border-border bg-background hover:bg-accent'
+                          }`}
+                        >
+                          {renderAvatar(char, 'h-9 w-9')}
+                          <span className="min-w-0 flex-1 truncate font-archive-serif text-sm font-semibold text-foreground">{char.name}</span>
+                          {selected && <X className="h-4 w-4 text-primary" aria-hidden="true" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                {participants.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {participants.map(participant => (
+                      <span key={participant.character_id} className="inline-flex min-h-11 items-center gap-2 rounded-md border border-border bg-muted px-2 text-sm text-foreground">
+                        {participant.name}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => toggleParticipant(participant)}
+                          aria-label={`移除 ${participant.name}`}
+                        >
+                          <X aria-hidden="true" />
+                        </Button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <Button
+                  type="button"
+                  size="lg"
+                  className="w-full"
+                  onClick={startGroupChat}
+                  disabled={participants.length < 2 || !groupName.trim() || groupNameExists}
+                >
+                  <Users aria-hidden="true" />
+                  开始群聊
+                  <span className="font-archive-mono tabular-nums">({participants.length}人)</span>
+                </Button>
+              </div>
+            </div>
+          </section>
+
+          <aside className="hidden min-h-0 flex-col bg-card lg:flex">
+            <div className="min-h-16 border-b border-border px-4 py-3">
+              <p className="font-archive-mono text-[10px] uppercase text-muted-foreground">Cast Sheet</p>
+              <h2 className="font-archive-serif text-base font-semibold text-foreground">群像名单</h2>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              {participants.length === 0 ? (
+                <p className="font-archive-serif text-sm text-muted-foreground">尚未选择角色</p>
+              ) : (
+                <div className="space-y-2">
+                  {participants.map((participant, index) => (
+                    <div key={participant.character_id} className="flex items-center gap-3 border-b border-border pb-2">
+                      <span className="w-6 shrink-0 font-archive-mono text-[10px] text-muted-foreground tabular-nums">
+                        {String(index + 1).padStart(2, '0')}
+                      </span>
+                      {renderAvatar(participant, 'h-9 w-9')}
+                      <span className="min-w-0 flex-1 truncate font-archive-serif text-sm text-foreground">{participant.name}</span>
                     </div>
                   ))}
                 </div>
               )}
             </div>
-          )}
+          </aside>
         </div>
-
       </div>
     );
   }
 
-  // View: Group Setup
-
-  // ═══════════════════════════════════════════════
-
-  if (view === 'group-setup') {
-
+  function renderChatWorkbench(mode) {
+    const isSingle = mode === 'single';
     return (
-
-      <div className="h-dvh max-h-dvh memoria-page flex flex-col overflow-hidden font-mono">
-        <ChatBackdrop origin="bottom-left" tilt={8} />
-
-        <header className="memoria-glass flex items-center gap-3 sm:gap-4 px-3 sm:px-6 py-3 border-x-0 border-t-0 shrink-0">
-
-          <button onClick={goToList} className="text-cyber-green/30 hover:text-cyber-green/50 p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg"><ArrowLeft size={18} /></button>
-
-          <h1 className="text-xs font-bold text-cyber-green/70 uppercase tracking-wider flex items-center gap-2"><Users size={14} />创建群聊</h1>
-
-        </header>
-
-        <div className="flex-1 min-h-0 overflow-y-auto px-3 sm:px-6 py-4 sm:py-6">
-          <div className="max-w-2xl mx-auto w-full space-y-5">
-
-          {error && (
-
-            <div className="flex items-start gap-2 text-[13px] text-red-400/80 bg-red-500/5 border border-red-500/10 rounded-lg px-3 py-2.5">
-
-              <AlertTriangle size={14} className="shrink-0 mt-0.5" /><span>{error}<button onClick={()=>setError(null)} className="ml-2 underline">关闭</button></span>
-
-            </div>
-
-          )}
-
-          {/* Group name */}
-
-          <div className="memoria-glass rounded-xl p-4">
-
-            <label htmlFor="group-name" className="text-[12px] text-cyber-green/40 uppercase tracking-wider mb-2 block">群聊名称</label>
-
-            <input
-              id="group-name"
-              type="text"
-              value={groupName}
-              onChange={e => { setGroupName(e.target.value); if (error) setError(null); }}
-              maxLength={40}
-              placeholder="输入唯一群名"
-              aria-invalid={groupNameExists}
-              className={`w-full bg-[#0b0b0c]/70 border rounded-lg px-3 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/12 focus:outline-none focus:ring-2 transition-all ${groupNameExists ? 'border-red-400/35 focus:border-red-400/55 focus:ring-red-400/10' : 'border-cyber-green/10 focus:border-cyber-green/35 focus:ring-cyber-green/10'}`}
-            />
-            {groupNameExists && (
-              <p className="mt-2 text-[12px] text-red-400/75">群聊名称已存在，请换一个名称</p>
-            )}
-
-          </div>
-
-          {/* Character selection */}
-
-          <div className="memoria-glass rounded-xl p-4">
-
-            <label className="text-[12px] text-cyber-green/40 uppercase tracking-wider mb-2 block">选择角色 ({participants.length})</label>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-
-              {allChars.filter(c => isCharacterActive(c)).map((char, i)=>{
-
-                const sel = participants.find(p=>p.character_id===char.character_id);
-
-                return (
-
-                  <div key={char.character_id} onClick={()=>toggleParticipant(char)} className={`memoria-card-hover animate-fade-up flex items-center gap-2 p-2 min-h-[48px] rounded-lg border cursor-pointer transition-all ${sel ? 'border-cyber-green/40 bg-cyber-green/5 shadow-[0_0_22px_rgba(167,239,158,0.08)]' : 'border-white/5 bg-[#0d0d14]/80 hover:border-cyber-green/20'}`} style={{ animationDelay: `${Math.min(i, 12) * 20}ms` }}>
-
-                    <div className="w-8 h-8 rounded-full overflow-hidden border border-white/10 bg-[#0d0d14] shrink-0">
-
-                      {char.avatar_url ? <img src={char.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-xs font-bold">{char.name?.charAt(0)}</div>}
-
-                    </div>
-
-                    <span className="font-character text-base leading-none text-cyber-green/70 truncate flex-1">{char.name}</span>
-
-                    {sel && <div className="text-cyber-green/40"><X size={13} /></div>}
-
-                  </div>
-
-                );
-
-              })}
-
-            </div>
-
-          </div>
-
-          {participants.length>0 && <div className="flex flex-wrap gap-1.5">{participants.map(p=><div key={p.character_id} className="flex items-center gap-1 text-[12px] bg-cyber-green/5 border border-cyber-green/15 rounded-full px-2 py-1 text-cyber-green/50"><span className="font-character text-sm leading-none">{p.name}</span><button onClick={()=>toggleParticipant(p)} aria-label={`移除 ${p.name}`} title={`移除 ${p.name}`} className="-my-2 -mr-2 ml-0.5 flex h-11 w-11 items-center justify-center text-cyber-green/20 transition-colors hover:text-red-400"><X size={10}/></button></div>)}</div>}
-
-          <button onClick={startGroupChat} disabled={participants.length<2 || !groupName.trim() || groupNameExists} className="w-full min-h-[44px] py-2.5 bg-cyber-green/10 hover:bg-cyber-green/20 border border-cyber-green/20 rounded-lg text-sm font-bold text-cyber-green disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"><Users size={16} />开始群聊 ({participants.length}人)</button>
-          </div>
-
+      <div data-archive-chat-workbench className="h-[calc(100dvh-4rem)] min-w-0 overflow-hidden bg-background font-archive-sans text-foreground">
+        <div className="grid h-full min-h-0 grid-cols-1 lg:grid-cols-[minmax(220px,280px)_minmax(0,1fr)_minmax(240px,320px)]">
+          {renderSessionDirectory({ embedded: true })}
+          {renderChatArea(mode)}
+          <aside className="hidden min-h-0 flex-col border-l border-border bg-card lg:flex">
+            {renderProfilePanel(mode)}
+          </aside>
         </div>
-
+        {showClockSettings && <UserSettingsModal onClose={() => setShowClockSettings(false)} />}
       </div>
-
     );
-
   }
 
-
-
-  // ═══════════════════════════════════════════════
-
-  // View: Single Chat
-
-  // ═══════════════════════════════════════════════
-
-  if (view === 'single') {
-
-    return renderSingleChat();
-
-  }
-
-
-
-  // ═══════════════════════════════════════════════
-
-  // View: Group Chat
-
-  // ═══════════════════════════════════════════════
-
-  if (view === 'group') {
-
-    return renderGroupChat();
-
-  }
-
-
-
-  return null;
-
-
-
-  // ═══════════════════════════════════════════════
-
-  // Single Chat Render
-
-  // ═══════════════════════════════════════════════
-
-  function renderSingleChat() {
-
-    const singleReadOnly = !isCharacterActive(character);
-    const moodEmoji = MOOD_EMOJI[mood] || '😐';
-    const moodBorder = MOOD_BORDER[mood] || 'border-slate-500/40';
-    const moodGlow = MOOD_GLOW[mood] || '';
-    const moodBubble = MOOD_BUBBLE[mood] || MOOD_BUBBLE.neutral;
-    const affinityPct = Math.round((affinity + 100) / 2);
-    const affinityColor = affinity > 30 ? 'text-red-400' : affinity < -30 ? 'text-blue-400' : 'text-cyber-green/40';
-    const trustValue = Math.min(100, Math.max(0, Math.round(Number(trust) || 0)));
-    const trustStars = Math.min(5, Math.max(0, Math.round(trustValue / 20)));
+  function renderChatArea(mode) {
+    const isSingle = mode === 'single';
+    const singleReadOnly = isSingle && !isCharacterActive(character);
+    const resolvedParticipants = participants.map(participant => normalizeParticipant(participant));
+    const activeParticipantCount = resolvedParticipants.filter(participant => isCharacterActive(participant)).length;
+    const title = isSingle ? character?.name : groupName || '群聊';
+    const status = isSingle
+      ? (singleReadOnly ? '离线 · 只读' : sending ? '正在回应' : MOOD_LABELS[mood])
+      : (sendingMulti ? '角色思考中' : `${activeParticipantCount}/${resolvedParticipants.length} 在线`);
 
     return (
-      <div className="h-dvh max-h-dvh memoria-page font-mono flex flex-col overflow-hidden">
-        <ChatBackdrop />
-
-        {/* ═══ Top bar: 融合型 — 返回+名字+状态徽章 ═══ */}
-        <header className="memoria-glass flex items-center gap-2 px-2.5 sm:px-3 py-2 border-x-0 border-t-0 shrink-0">
-          <button onClick={goToList} className="text-cyber-green/30 hover:text-cyber-green/50 p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg shrink-0">
-            <ArrowLeft size={18} />
-          </button>
-
-          {/* 角色头像小圆圈 — 点击展开详情 */}
-          <div
-            onClick={() => setShowDetail(!showDetail)}
-            className={`memoria-avatar-ring w-8 h-8 rounded-full overflow-hidden border-2 shrink-0 cursor-pointer ${moodBorder} ${moodGlow} transition-all duration-500 hover:scale-105`}
+      <section className="flex min-h-0 min-w-0 flex-col bg-background">
+        <div className="flex min-h-16 items-center gap-2 border-b border-border px-2 sm:px-3">
+          <Button type="button" variant="ghost" size="icon" onClick={goToList} className="lg:hidden" aria-label="返回会话目录">
+            <ArrowLeft aria-hidden="true" />
+          </Button>
+          <button
+            type="button"
+            onClick={() => setShowDetail(current => !current)}
+            className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-md px-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring lg:pointer-events-none"
           >
-            {character?.avatar_url
-              ? <img src={character.avatar_url} alt="" className="w-full h-full object-cover" />
-              : <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-xs font-bold">{character?.name?.charAt(0)}</div>}
+            {isSingle
+              ? renderAvatar(character, 'h-9 w-9')
+              : (
+                <span className="flex shrink-0 -space-x-2">
+                  {resolvedParticipants.slice(0, 2).map(participant => (
+                    <Fragment key={participant.character_id}>
+                      {renderAvatar(participant, 'h-9 w-9', 'border-background')}
+                    </Fragment>
+                  ))}
+                </span>
+              )}
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-archive-serif text-base font-semibold text-foreground">{title}</span>
+              <span className="block truncate font-archive-mono text-[10px] text-muted-foreground tabular-nums">{status}</span>
+            </span>
+          </button>
+          <div className="hidden min-w-0 sm:block">
+            <WorldClockDisplay
+              className="max-w-[220px]"
+              onClick={() => setShowClockSettings(true)}
+            />
           </div>
-
-          {/* 角色名 + 状态徽章行 — 点击展开详情 */}
-          <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setShowDetail(!showDetail)}>
-            <div className="flex items-center gap-2">
-              <h1 className="font-character text-lg leading-none text-zinc-200 truncate">{character?.name}</h1>
-              {singleReadOnly
-                ? <span className="text-[10px] text-zinc-500 border border-zinc-700/60 rounded-full px-1.5 py-0.5 shrink-0">离线</span>
-                : sending && <span className="w-1.5 h-1.5 rounded-full bg-cyber-green/50 animate-pulse shrink-0" />}
-            </div>
-            {/* 第二行：好感度 | 情绪 | 信任星级 */}
-            <div className="flex items-center gap-1.5 sm:gap-2 text-[12px] mt-0.5 overflow-hidden">
-              <span className={`flex items-center gap-0.5 ${affinityColor}`}>
-                <Heart size={10} fill={affinity > 30 ? 'currentColor' : 'none'} />
-                {affinity}
+          {isSingle && events.length > 0 && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="relative text-destructive"
+              onClick={() => setEvents([])}
+              aria-label="清除事件通知"
+              title="清除事件通知"
+            >
+              <AlertTriangle aria-hidden="true" />
+              <span className="absolute right-1 top-1 min-w-4 rounded-sm bg-destructive px-1 font-archive-mono text-[9px] text-destructive-foreground tabular-nums">
+                {events.length}
               </span>
-              <span className="text-zinc-500">|</span>
-              <span className="flex items-center gap-0.5 text-zinc-400">
-                <span className="text-sm leading-none">{moodEmoji}</span>
-                {MOOD_LABELS[mood]}
-              </span>
-              <span className="text-zinc-500">|</span>
-              <span className="flex items-center gap-0.5 text-amber-400/60">
-                {[...Array(5)].map((_, i) => (
-                  <span key={i} className={i < trustStars ? 'text-amber-400' : 'text-zinc-600'}>★</span>
-                ))}
-              </span>
-            </div>
-          </div>
-
-          <WorldClockDisplay
-            className="max-w-[178px] sm:max-w-[260px]"
-            onClick={() => setShowClockSettings(true)}
-          />
-
-          {/* 事件通知 */}
-          {events.length > 0 && (
-            <button onClick={() => setEvents([])} className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-lg transition-colors hover:bg-amber-400/5" aria-label="清除事件通知" title="事件通知">
-              <AlertTriangle size={14} className="text-amber-400/70" />
-              <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 rounded-full text-[13px] flex items-center justify-center text-white font-bold">{events.length}</span>
-            </button>
+            </Button>
           )}
-        </header>
+        </div>
 
         <EventInboxBanner
-          characterId={character?.character_id}
-          sessionId={singleSessionId}
+          characterId={isSingle ? character?.character_id : null}
+          sessionId={isSingle ? singleSessionId : multiSessionId}
         />
 
-        {/* ═══ 状态详情下拉面板 ═══ */}
         {showDetail && (
-          <div className="memoria-glass animate-fade-up border-x-0 border-t-0 px-4 py-3 space-y-3 shrink-0">
-            {/* 头像+名字+简介 */}
-            <div className="flex items-center gap-3">
-              <div className={`w-14 h-14 rounded-full overflow-hidden border-2 ${moodBorder} ${moodGlow}`}>
-                {character?.avatar_url
-                  ? <img src={character.avatar_url} alt="" className="w-full h-full object-cover" />
-                  : <div className="w-full h-full flex items-center justify-center text-cyber-green/20"><User size={24} /></div>}
-              </div>
-              <div className="flex-1">
-                <h2 className="font-character text-xl leading-none text-zinc-100">{character?.name}</h2>
-                {character?.identity?.core_identity_summary && (
-                  <p className="text-[12px] text-zinc-500">{character.identity.core_identity_summary}</p>
-                )}
-              </div>
-              <button onClick={() => setShowDetail(false)} className="flex h-11 w-11 items-center justify-center rounded-lg text-cyber-green/20 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green/40" aria-label="关闭角色详情" title="关闭角色详情"><X size={16} /></button>
-            </div>
-
-            {/* 标签 */}
-            {character?.status_labels?.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {character.status_labels.slice(0, 4).map((t, i) => (
-                  <span key={i} className="text-[13px] px-2 py-0.5 rounded-full bg-cyber-green/5 border border-cyber-green/10 text-cyber-green/40">{t}</span>
-                ))}
-              </div>
-            )}
-
-            {/* RPG 状态条 */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <div className="flex justify-between text-[12px] mb-0.5"><span className="text-cyber-green/40">好感度</span><span className={affinityColor}>{affinity}</span></div>
-                <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-red-400/30 to-red-400/60 rounded-full transition-all duration-700" style={{ width: `${affinityPct}%` }} />
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between text-[12px] mb-0.5"><span className="text-cyber-green/40">信任度</span><span className="text-amber-400/60">{trustValue}</span></div>
-                <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-amber-400/30 to-amber-400/60 rounded-full transition-all duration-700" style={{ width: `${trustValue}%` }} />
-                </div>
-              </div>
-            </div>
-
-            {/* 情绪 */}
-            <div className="flex items-center gap-2 text-[12px] text-cyber-green/40">
-              <span className="text-base">{moodEmoji}</span>
-              <span>当前情绪: {MOOD_LABELS[mood]}</span>
-            </div>
+          <div className="max-h-[42dvh] overflow-y-auto border-b border-border bg-card p-3 lg:hidden">
+            {renderProfilePanel(mode, true)}
           </div>
         )}
 
-        {/* ═══ 消息气泡区 ═══ */}
-        <div ref={messageScrollRef} style={{ overflowAnchor: 'none' }} className="relative flex-1 min-h-0 overflow-y-auto px-2.5 sm:px-3 py-3 space-y-3"
-          onScroll={(e) => { if (e.target.scrollTop < 60 && !loadingHistory && hasMoreHistory) loadMoreHistory(); }}>
+        <div
+          ref={messageScrollRef}
+          style={{ overflowAnchor: 'none' }}
+          className="relative min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5"
+          onScroll={event => {
+            if (event.target.scrollTop < 60 && !loadingHistory && hasMoreHistory) loadMoreHistory();
+          }}
+        >
+          <div className="mx-auto max-w-3xl space-y-4">
+            {renderErrorNotice()}
+            {messages.flatMap((message, messageIndex) => {
+              const isUser = message.role === 'user';
+              const charInfo = message.charId ? getCharById(message.charId) : null;
+              const replyParagraphs = isUser ? [message.content] : splitAssistantReply(message.content);
+              const currentWorldDate = worldDateKey(message.world_created_at);
+              const previousWorldDate = worldDateKey(messages[messageIndex - 1]?.world_created_at);
+              const showWorldDate = Boolean(currentWorldDate && currentWorldDate !== previousWorldDate);
 
-          {error && (
-            <div className="text-center text-red-400/50 text-xs p-2 bg-red-500/5 rounded-lg border border-red-500/10">
-              {error}<button onClick={() => setError(null)} className="ml-2 underline">关闭</button>
-            </div>
-          )}
-
-          {messages.flatMap((msg, i) => {
-            const isUser = msg.role === 'user';
-            const charInfo = msg.charId ? getCharById(msg.charId) : null;
-            const replyBubbles = isUser ? [msg.content] : splitAssistantReply(msg.content);
-            const currentWorldDate = worldDateKey(msg.world_created_at);
-            const previousWorldDate = worldDateKey(messages[i - 1]?.world_created_at);
-            const showWorldDate = !!currentWorldDate && currentWorldDate !== previousWorldDate;
-            return replyBubbles.map((bubble, bubbleIndex) => {
-              const isLastBubble = bubbleIndex === replyBubbles.length - 1;
-              return (
-              <Fragment key={`${msg.message_id ?? msg.client_id ?? i}-${bubbleIndex}`}>
-              {bubbleIndex === 0 && showWorldDate && (
-                <WorldDateSeparator value={msg.world_created_at} />
-              )}
-              <div className={`animate-fade-up flex gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
-                {/* 头像 */}
-                <div className={`w-8 h-8 rounded-full overflow-hidden border-2 shrink-0 mt-0.5 ${
-                  isUser ? 'border-cyber-green/10 bg-cyber-green/[0.03]' : moodBorder
-                }`}>
-                  {isUser ? (
-                    user?.avatar_url
-                      ? <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
-                      : <div className="w-full h-full flex items-center justify-center text-cyber-green/40 text-[13px] font-bold">{user?.username?.charAt(0)?.toUpperCase() || <User size={14} className="text-cyber-green/30" />}</div>
-                  ) : charInfo?.avatar_url || character?.avatar_url ? (
-                    <img src={charInfo?.avatar_url || character?.avatar_url} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-purple-800/10 text-purple-300/30 text-[13px] font-bold">
-                      {charInfo?.name?.charAt(0) || character?.name?.charAt(0) || '?'}
+              return replyParagraphs.map((paragraph, paragraphIndex) => {
+                const isLastParagraph = paragraphIndex === replyParagraphs.length - 1;
+                const speaker = isSingle
+                  ? character?.name
+                  : message.charName || charInfo?.name || '未知角色';
+                return (
+                  <Fragment key={`${message.message_id ?? message.client_id ?? messageIndex}-${paragraphIndex}`}>
+                    {paragraphIndex === 0 && showWorldDate && <WorldDateSeparator value={message.world_created_at} />}
+                    <div
+                      data-message-layout={isUser ? 'chat' : 'script'}
+                      className={isUser ? 'flex justify-end' : 'min-w-0'}
+                    >
+                      {isUser ? (
+                        <div className="max-w-[84%] sm:max-w-[70%]">
+                          <div className="rounded-md border border-primary/25 bg-primary/10 px-3 py-2 text-sm leading-6 text-foreground">
+                            <MessageContent content={paragraph} />
+                          </div>
+                          {isLastParagraph && (
+                            <MessageWorldTime
+                              value={message.world_created_at}
+                              align="right"
+                              messageId={message.message_id}
+                              pending={message._pending}
+                            />
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex min-w-0 gap-3">
+                          {renderAvatar(charInfo || character, 'h-9 w-9', 'mt-0.5')}
+                          <article data-archive-script-message className="min-w-0 flex-1 border-l border-border pl-3">
+                            <div data-scene-speaker className="font-archive-mono text-[10px] font-semibold uppercase text-primary">
+                              {speaker}
+                            </div>
+                            {paragraphIndex === 0 && message.action && (
+                              <div className="mt-1 leading-6">
+                                <MessageAction>{message.action}</MessageAction>
+                              </div>
+                            )}
+                            <p className="mt-1 whitespace-pre-wrap break-words font-archive-serif text-[15px] leading-7 text-foreground">
+                              <MessageContent content={paragraph} />
+                            </p>
+                            {message.showRelationshipDelta && isLastParagraph && (
+                              <RelationshipDeltaLine
+                                affinityDelta={message.affinity_delta}
+                                trustDelta={message.trust_delta}
+                              />
+                            )}
+                            {isLastParagraph && (
+                              <MessageWorldTime
+                                value={message.world_created_at}
+                                messageId={message.message_id}
+                              />
+                            )}
+                            {isLastParagraph && message.message_id != null && (
+                              <MessageAudioControl
+                                messageId={message.message_id}
+                                getAudioState={getAudioState}
+                                onToggle={toggleAudio}
+                                onRetry={retryAudio}
+                              />
+                            )}
+                          </article>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
+                  </Fragment>
+                );
+              });
+            })}
 
-                {/* 气泡内容 */}
-                <div className={`max-w-[82%] sm:max-w-[75%] ${isUser ? 'items-end' : 'items-start'}`}>
-                  {/* 角色名 + action 标签 */}
-                  {!isUser && (
-                    <div className="flex items-center gap-1.5 mb-0.5 ml-1">
-                      <span className="font-character text-sm leading-none text-zinc-400">{msg.charName || character?.name}</span>
-                    </div>
-                  )}
-
-                  <div
-                    className={`memoria-card-hover px-3 py-2 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap break-words border backdrop-blur-sm ${
-                      isUser
-                        ? 'bg-cyber-green/10 border-cyber-green/15 rounded-br-sm text-cyber-green/85'
-                        : `${moodBubble} border rounded-bl-sm`
-                    }`}
-                  >
-                    <MessageContent content={bubble} />
+            {sending && (
+              <div className="flex min-w-0 gap-3" role="status">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-muted">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden="true" />
+                </span>
+                <div data-archive-script-message className="min-w-0 flex-1 border-l border-border pl-3">
+                  <div data-scene-speaker className="font-archive-mono text-[10px] font-semibold uppercase text-primary">
+                    {isSingle ? character?.name : '群像'}
                   </div>
-
-                  {msg.showRelationshipDelta && isLastBubble && (
-                    <RelationshipDeltaLine affinityDelta={msg.affinity_delta} trustDelta={msg.trust_delta} />
-                  )}
-                  {isLastBubble && (
-                    <MessageWorldTime
-                      value={msg.world_created_at}
-                      align={isUser ? 'right' : 'left'}
-                    />
-                  )}
-                  {!isUser && isLastBubble && msg.message_id != null && (
-                    <MessageAudioControl
-                      messageId={msg.message_id}
-                      getAudioState={getAudioState}
-                      onToggle={toggleAudio}
-                      onRetry={retryAudio}
-                    />
-                  )}
+                  <div className="mt-1 flex items-center gap-2 font-archive-serif text-sm italic text-muted-foreground">
+                    <Cpu className="h-4 w-4 animate-pulse" aria-hidden="true" />
+                    <span data-stage-direction>（正在组织回应）</span>
+                  </div>
                 </div>
               </div>
-              </Fragment>
-              );
-            });
-          })}
-
-          {/* 思考中动画 */}
-          {sending && (
-            <div className="flex gap-2">
-              <div className={`w-8 h-8 rounded-full overflow-hidden border-2 ${moodBorder} bg-purple-500/[0.02] flex items-center justify-center shrink-0 mt-0.5 relative`}>
-                <Loader2 className="animate-spin text-cyber-green/25" size={14} />
-                <ScanLine />
-              </div>
-              <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl rounded-bl-sm px-4 py-2.5 relative">
-                <div className="flex items-center gap-1.5">
-                  <Cpu size={12} className="text-cyber-green/25 animate-pulse" />
-                  <span className="text-[13px] text-cyber-green/25">思考中...</span>
-                  <span className="flex gap-1 ml-1">
-                    <span className="w-1 h-1 bg-cyber-green/30 rounded-full animate-bounce" />
-                    <span className="w-1 h-1 bg-cyber-green/30 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
-                    <span className="w-1 h-1 bg-cyber-green/30 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
-                  </span>
-                </div>
-                <ScanLine />
-              </div>
-            </div>
-          )}
-
-          <div ref={bottomRef} />
+            )}
+            <div ref={bottomRef} />
+          </div>
 
           {loadingHistory && (
-            <div className="absolute top-2 inset-x-0 z-10 flex justify-center pointer-events-none">
-              <Loader2 className="animate-spin text-cyber-green/40" size={16} />
+            <div className="pointer-events-none absolute inset-x-0 top-2 flex justify-center">
+              <span className="rounded-md border border-border bg-card p-2 text-muted-foreground" role="status">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                <span className="sr-only">正在加载历史消息</span>
+              </span>
             </div>
           )}
         </div>
 
-        {/* ═══ 底部输入栏 — 功能型 ═══ */}
-        <div className="px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] border-t border-white/5 bg-[#0d0d14]/60 backdrop-blur-md shrink-0">
+        <div className="shrink-0 border-t border-border bg-card px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:px-4">
           <SpeechErrorNotice error={speechError} onDismiss={clearSpeechError} onRetry={startRecording} />
-          <div className="flex items-end gap-1.5">
+          <div className="flex items-end gap-2">
             <SpeechRecorderButton
               status={speechStatus}
               supported={isRecordingSupported}
@@ -2599,503 +2549,148 @@ export default function ChatRoom() {
               onStart={startRecording}
               onStop={stopRecording}
             />
-            {/* 输入框 */}
-            <textarea
+            <Textarea
               ref={inputRef}
               value={input}
-              onChange={e => setInput(e.target.value)}
+              onChange={event => setInput(event.target.value)}
               onKeyDown={handleKeyDown}
               rows={1}
-              placeholder={singleReadOnly ? '角色已离线，只能查看历史' : '输入消息...'}
+              placeholder={singleReadOnly ? '角色已离线，只能查看历史' : '输入消息'}
               disabled={singleReadOnly || sending || sendingMulti}
-              className="flex-1 bg-[#0b0b0c] border border-white/10 rounded-xl px-3 py-2 text-sm text-zinc-300 placeholder:text-cyber-green/10 resize-none focus:outline-none focus:border-cyber-green/30 transition-colors disabled:opacity-40 min-h-[44px] max-h-[100px]"
+              className="max-h-28 min-h-11 flex-1 resize-none"
             />
-
-            {/* 发送按钮 */}
-            <button
+            <Button
+              type="button"
+              size="icon"
               onClick={sendMessage}
               disabled={singleReadOnly || !input.trim() || sending || sendingMulti}
               aria-label="发送消息"
-              className="px-3 py-2 min-w-[44px] min-h-[44px] bg-cyber-green/10 hover:bg-cyber-green/[0.18] active:scale-95 border border-cyber-green/20 rounded-xl text-cyber-green disabled:opacity-20 disabled:cursor-not-allowed disabled:active:scale-100 transition-all shrink-0 flex items-center justify-center"
             >
-              <Send size={16} />
-            </button>
+              <Send aria-hidden="true" />
+            </Button>
           </div>
         </div>
-        {showClockSettings && <UserSettingsModal onClose={() => setShowClockSettings(false)} />}
-      </div>
+      </section>
     );
-
   }
-  function renderGroupChat() {
 
-    const resolvedParticipants = participants.map(p => normalizeParticipant(p));
-    const activeParticipantCount = resolvedParticipants.filter(p => isCharacterActive(p)).length;
+  function renderProfilePanel(mode, mobile = false) {
+    if (mode === 'group') return renderGroupProfile(mobile);
 
+    const affinityPercent = Math.min(100, Math.max(0, Math.round((affinity + 100) / 2)));
+    const trustValue = Math.min(100, Math.max(0, Math.round(Number(trust) || 0)));
+    const identitySummary = character?.identity?.core_identity_summary || character?.core_identity;
     return (
+      <div className={`${mobile ? '' : 'min-h-0 flex-1 overflow-y-auto'} p-4`}>
+        <div className="flex items-center gap-3 border-b border-border pb-4">
+          {renderAvatar(character, 'h-14 w-14')}
+          <div className="min-w-0 flex-1">
+            <p className="font-archive-mono text-[10px] uppercase text-muted-foreground">Character File</p>
+            <h2 className="truncate font-archive-serif text-lg font-semibold text-foreground">{character?.name}</h2>
+            {identitySummary && <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{identitySummary}</p>}
+          </div>
+        </div>
 
-      <div className="h-dvh max-h-dvh memoria-page font-mono flex flex-col overflow-hidden">
-        <ChatBackdrop origin="bottom-right" tilt={6} />
-
-        {/* Top bar */}
-
-        <header className="memoria-glass flex items-center gap-2 sm:gap-3 px-2.5 sm:px-4 py-2.5 border-x-0 border-t-0 shrink-0">
-
-          <button onClick={goToList} className="text-cyber-green/30 hover:text-cyber-green/50 p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg"><ArrowLeft size={18} /></button>
-
-          <div className="hidden -space-x-2 sm:flex">
-
-            {resolvedParticipants.slice(0,3).map(p => (
-
-              <div key={p.character_id} className="memoria-avatar-ring w-9 h-9 rounded-full overflow-hidden border-2 border-[#0d0d14] bg-[#0b0b0c] transition-transform duration-200 hover:-translate-y-0.5">
-
-                {p.avatar_url ? <img src={p.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-[12px] font-bold">{p.name?.charAt(0)}</div>}
-
-              </div>
-
+        {character?.status_labels?.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 border-b border-border py-3">
+            {character.status_labels.filter(Boolean).slice(0, 4).map((label, index) => (
+              <span key={`${label}-${index}`} className="rounded-md border border-border bg-muted px-2 py-1 text-[10px] text-muted-foreground">
+                {label}
+              </span>
             ))}
-
           </div>
+        )}
 
-          <div className="flex-1 min-w-0">
+        <div className="space-y-4 border-b border-border py-4">
+          <ArchiveMeter label="好感度" value={affinity} percent={affinityPercent} />
+          <ArchiveMeter label="信任度" value={trustValue} percent={trustValue} />
+        </div>
 
-            <h1 className="font-character text-lg leading-none text-zinc-200 truncate">{groupName || '群聊'} · {resolvedParticipants.length}人</h1>
+        <dl className="divide-y divide-border border-b border-border">
+          <SummaryRow label="当前心情" value={`${MOOD_EMOJI[mood] || MOOD_EMOJI.neutral} ${MOOD_LABELS[mood] || MOOD_LABELS.neutral}`} />
+          <SummaryRow label="会话状态" value={isCharacterActive(character) ? '进行中' : '离线只读'} />
+          <SummaryRow label="历史恢复" value={isRecovered ? '已恢复' : '新会话'} />
+          <SummaryRow label="消息数" value={messages.length} />
+        </dl>
 
-            <div className="flex items-center gap-1.5 text-[13px] text-cyber-green/30">
-
-              <span className="w-1.5 h-1.5 rounded-full bg-cyber-green/50 animate-pulse" />
-
-              {sendingMulti ? '角色思考中...' : `${activeParticipantCount} 在线`}
-
+        {events.length > 0 && (
+          <section className="mt-4">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-archive-serif text-sm font-semibold text-foreground">事件记录</h3>
+              <span className="font-archive-mono text-[10px] text-muted-foreground tabular-nums">{events.length}</span>
             </div>
-
-          </div>
-
-          <WorldClockDisplay
-            className="max-w-[178px] sm:max-w-[260px]"
-            onClick={() => setShowClockSettings(true)}
-          />
-
-        </header>
-
-
-
-        {/* Two-panel body */}
-
-        <div className="flex flex-1 min-h-0">
-
-          {/* Left: Member Panel */}
-
-          <aside className="hidden lg:flex w-[280px] min-h-0 flex-col border-r border-cyber-green/10 bg-[#0d0d14]/60 backdrop-blur-md overflow-y-auto shrink-0">
-
-            <div className="p-4 space-y-3">
-
-              <h3 className="text-[13px] text-cyber-green/30 uppercase tracking-[0.2em] flex items-center gap-1.5"><Users size={10} />群成员 ({resolvedParticipants.length})</h3>
-
-              {resolvedParticipants.map((p, i) => (
-
-                <div key={p.character_id} className="memoria-card-hover animate-fade-up flex items-center gap-2.5 p-2 rounded-lg hover:bg-white/[0.03] transition-colors" style={{ animationDelay: `${Math.min(i, 10) * 24}ms` }}>
-
-                  <div className="w-9 h-9 rounded-full overflow-hidden border-2 border-white/10 shrink-0">
-
-                    {p.avatar_url ? <img src={p.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-[12px] font-bold">{p.name?.charAt(0)}</div>}
-
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-
-                    <div className="font-character text-base leading-none text-zinc-200 truncate">{p.name}</div>
-
-                    <div className="flex items-center gap-1 text-[13px] text-cyber-green/20">
-
-                      <span className={`w-1 h-1 rounded-full ${isCharacterActive(p) ? 'bg-cyber-green/30 animate-pulse' : 'bg-zinc-600'}`} />
-
-                      {isCharacterActive(p) ? '在线' : '离线'}
-
-                    </div>
-
-                  </div>
-
+            <div className="mt-2 space-y-2">
+              {events.map((event, index) => (
+                <div key={event.id || index} className="rounded-md border border-border bg-background p-2 text-xs leading-5 text-muted-foreground">
+                  {event.description || event.name || event.event_name || '事件已触发'}
                 </div>
-
               ))}
-
             </div>
-
-          </aside>
-
-
-
-          {/* Right: Chat area */}
-
-          {renderChatArea('group')}
-
-        </div>
-
-        {showClockSettings && <UserSettingsModal onClose={() => setShowClockSettings(false)} />}
-
+          </section>
+        )}
       </div>
-
     );
-
   }
 
-
-
-  // ═══════════════════════════════════════════════
-
-  // Shared Chat Area
-
-  // ═══════════════════════════════════════════════
-
-  function renderChatArea(mode) {
-
-    const renderedParticipants = mode === 'group'
-      ? participants.map(p => normalizeParticipant(p))
-      : participants;
-
+  function ArchiveMeter({ label, value, percent }) {
     return (
-
-      <div className="flex-1 min-h-0 flex flex-col min-w-0">
-
-        <EventInboxBanner
-          characterId={mode === 'single' ? character?.character_id : null}
-          sessionId={mode === 'group' ? multiSessionId : singleSessionId}
-        />
-
-        {/* Mobile: compact character info */}
-
-        {mode === 'single' && (
-
-          <div className="lg:hidden flex items-center gap-2 px-4 py-2 border-b border-white/5 bg-[#0d0d14]/40 shrink-0">
-
-            <div className={`w-7 h-7 rounded-full overflow-hidden border-2 ${MOOD_BORDER[mood]} shrink-0`}>
-
-              {character?.avatar_url ? <img src={character.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-[12px] font-bold">{character?.name?.charAt(0)}</div>}
-
-            </div>
-
-            <div className="flex-1 flex items-center gap-3 text-[12px]">
-
-              <span className="text-cyber-green/30 flex items-center gap-1"><Heart size={12} className={affinity>30?'text-red-400':''}/>{affinity}</span>
-
-              <span className="text-cyber-green/30">{MOOD_EMOJI[mood]} {MOOD_LABELS[mood]}</span>
-
-              {/* Affinity bar mobile */}
-
-              <div className="flex-1 max-w-[80px]">
-
-                <div className="h-1 bg-white/5 rounded-full overflow-hidden">
-
-                  <div className="h-full bg-cyber-green/40 rounded-full transition-all" style={{width:`${Math.round((affinity+100)/2)}%`}} />
-
-                </div>
-
-              </div>
-
-            </div>
-
-          </div>
-
-        )}
-
-
-
-        {/* Messages */}
-
-        <div ref={messageScrollRef} style={{ overflowAnchor: 'none' }} className="relative flex-1 min-h-0 overflow-y-auto px-2.5 sm:px-4 py-3 space-y-3" onScroll={(e) => {
-
-          if (e.target.scrollTop < 60 && !loadingHistory && hasMoreHistory) loadMoreHistory();
-
-        }}>
-
-          {error && (
-
-            <div className="text-center text-red-400/50 text-xs p-2 bg-red-500/5 rounded-lg border border-red-500/10">
-
-              {error}<button onClick={()=>setError(null)} className="ml-2 underline">关闭</button>
-
-            </div>
-
-          )}
-
-          {messages.flatMap((msg, i) => {
-
-            const isUser = msg.role === 'user';
-
-            const charInfo = msg.charId ? getCharById(msg.charId) : null;
-
-            const replyBubbles = isUser ? [msg.content] : splitAssistantReply(msg.content);
-
-            const currentWorldDate = worldDateKey(msg.world_created_at);
-
-            const previousWorldDate = worldDateKey(messages[i - 1]?.world_created_at);
-
-            const showWorldDate = !!currentWorldDate && currentWorldDate !== previousWorldDate;
-
-            return replyBubbles.map((bubble, bubbleIndex) => {
-
-              const isLastBubble = bubbleIndex === replyBubbles.length - 1;
-
-              return (
-
-              <Fragment key={`${msg.message_id ?? msg.client_id ?? i}-${bubbleIndex}`}>
-
-              {bubbleIndex === 0 && showWorldDate && (
-
-                <WorldDateSeparator value={msg.world_created_at} />
-
-              )}
-
-              <div className={`animate-fade-up flex gap-2.5 ${isUser ? 'flex-row-reverse' : ''}`}>
-
-                <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full overflow-hidden border-2 shrink-0 mt-0.5 ${isUser ? 'border-cyber-green/10 bg-cyber-green/[0.03] flex items-center justify-center' : 'border-purple-500/15'}`}>
-
-                  {isUser ? (
-
-                    user?.avatar_url ? (
-
-                      <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
-
-                    ) : user ? (
-
-                      <div className="w-full h-full flex items-center justify-center text-cyber-green/40 text-[13px] font-bold">{user.username?.charAt(0)?.toUpperCase()}</div>
-
-                    ) : (
-
-                      <User size={18} className="text-cyber-green/30" />
-
-                    )
-
-                  ) : charInfo?.avatar_url || mode==='single' && character?.avatar_url ? (
-
-                    <img src={charInfo?.avatar_url || character?.avatar_url} alt="" className="w-full h-full object-cover" />
-
-                  ) : (
-
-                    <div className="w-full h-full flex items-center justify-center bg-purple-800/10 text-purple-300/30 text-[13px] font-bold">
-
-                      {charInfo?.name?.charAt(0) || character?.name?.charAt(0) || '?'}
-
-                    </div>
-
-                  )}
-
-                </div>
-
-                <div className={`max-w-[82%] sm:max-w-[72%] ${isUser ? 'items-end' : 'items-start'}`}>
-
-                  {!isUser && (msg.charName || mode==='single') && (
-
-                    <div className="font-character text-sm leading-none text-cyber-green/35 mb-1 ml-1">
-
-                      {mode==='single' ? character?.name : msg.charName}
-
-                    </div>
-
-                  )}
-
-                  <div className={`memoria-card-hover px-3 py-2 rounded-xl text-sm leading-relaxed whitespace-pre-wrap break-words backdrop-blur-sm ${
-
-                    isUser
-
-                      ? 'bg-cyber-green/10 border border-cyber-green/15 rounded-br-sm text-cyber-green/85'
-
-                      : 'bg-white/[0.03] border border-white/[0.06] rounded-bl-sm text-zinc-300'
-
-                  }`}>
-
-                    <MessageContent content={bubble} />
-
-                    {/* Scan line on AI messages when sending */}
-
-                    {!isUser && sendingMulti && i === messages.length - 1 && isLastBubble && <ScanLine />}
-
-                  </div>
-
-                  {msg.showRelationshipDelta && isLastBubble && (
-                    <RelationshipDeltaLine affinityDelta={msg.affinity_delta} trustDelta={msg.trust_delta} />
-                  )}
-
-                  {isLastBubble && (
-
-                    <MessageWorldTime
-
-                      value={msg.world_created_at}
-
-                      align={isUser ? 'right' : 'left'}
-
-                    />
-
-                  )}
-
-                  {!isUser && isLastBubble && msg.message_id != null && (
-                    <MessageAudioControl
-                      messageId={msg.message_id}
-                      getAudioState={getAudioState}
-                      onToggle={toggleAudio}
-                      onRetry={retryAudio}
-                    />
-                  )}
-
-                </div>
-
-              </div>
-
-              </Fragment>
-
-              );
-
-            });
-
-          })}
-
-          {sending && (
-
-            <div className="flex gap-2.5">
-
-              <div className="w-8 h-8 rounded-full overflow-hidden border-2 border-purple-500/10 bg-purple-500/[0.02] flex items-center justify-center shrink-0 mt-0.5 relative">
-
-                <Loader2 className="animate-spin text-cyber-green/25" size={14} />
-
-                <ScanLine />
-
-              </div>
-
-              <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl rounded-bl-sm px-4 py-2.5 relative">
-
-                <div className="flex items-center gap-1.5">
-
-                  <Cpu size={12} className="text-cyber-green/25 animate-pulse" />
-
-                  <span className="text-[13px] text-cyber-green/25">角色思考中</span>
-
-                  <span className="flex gap-1 ml-1">
-
-                    <span className="w-1 h-1 bg-cyber-green/30 rounded-full animate-bounce" />
-
-                    <span className="w-1 h-1 bg-cyber-green/30 rounded-full animate-bounce" style={{animationDelay:'0.15s'}} />
-
-                    <span className="w-1 h-1 bg-cyber-green/30 rounded-full animate-bounce" style={{animationDelay:'0.3s'}} />
-
-                  </span>
-
-                </div>
-
-                <ScanLine />
-
-              </div>
-
-            </div>
-
-          )}
-
-          <div ref={bottomRef} />
-
-          {loadingHistory && (
-
-            <div className="absolute top-2 inset-x-0 z-10 flex justify-center pointer-events-none">
-
-              <Loader2 className="animate-spin text-cyber-green/40" size={16} />
-
-            </div>
-
-          )}
-
+      <div>
+        <div className="mb-1.5 flex items-center justify-between gap-3">
+          <span className="text-xs text-muted-foreground">{label}</span>
+          <span className="font-archive-mono text-xs text-foreground tabular-nums">{value}</span>
         </div>
-
-
-
-        {/* Participant strip (group) */}
-
-        {mode === 'group' && (
-
-          <div className="px-4 py-1.5 flex items-center gap-2 border-t border-white/[0.03] bg-[#0d0d14]/35 overflow-x-auto shrink-0">
-
-            {renderedParticipants.map((p, i) => (
-
-              <div key={p.character_id} className="animate-fade-up flex flex-col items-center gap-0.5 shrink-0" style={{ animationDelay: `${Math.min(i, 12) * 18}ms` }} title={p.name}>
-
-                <div className={`w-7 h-7 rounded-full overflow-hidden border border-white/5 bg-[#0d0d14] ${isCharacterActive(p) ? '' : 'opacity-45 grayscale'}`}>
-
-                  {p.avatar_url ? <img src={p.avatar_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-cyber-green/20 text-[12px] font-bold">{p.name?.charAt(0)}</div>}
-
-                </div>
-
-                <span className={`font-character text-sm leading-none truncate max-w-[52px] ${isCharacterActive(p) ? 'text-cyber-green/25' : 'text-zinc-600'}`}>{p.name}</span>
-
-              </div>
-
-            ))}
-
-          </div>
-
-        )}
-
-
-
-        {/* Input */}
-
-        <div className="px-3 sm:px-4 pt-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] border-t border-white/5 bg-[#0d0d14]/60 backdrop-blur-md shrink-0">
-
-          <SpeechErrorNotice error={speechError} onDismiss={clearSpeechError} onRetry={startRecording} />
-
-          <div className="flex gap-2">
-
-            <SpeechRecorderButton
-              status={speechStatus}
-              supported={isRecordingSupported}
-              disabled={sending || sendingMulti}
-              onStart={startRecording}
-              onStop={stopRecording}
-            />
-
-            <textarea
-
-              ref={inputRef}
-
-              value={input}
-
-              onChange={e => setInput(e.target.value)}
-
-              onKeyDown={handleKeyDown}
-
-              rows={1}
-
-              placeholder="输入消息..."
-
-              disabled={sending || sendingMulti}
-
-              className="flex-1 bg-[#0b0b0c] border border-white/10 rounded-xl px-3 sm:px-4 py-2.5 text-sm text-zinc-300 placeholder:text-cyber-green/10 resize-none focus:outline-none focus:border-cyber-green/30 transition-colors disabled:opacity-40 min-h-[44px] max-h-[96px]"
-
-            />
-
-            <button
-
-              onClick={sendMessage}
-
-              disabled={!input.trim() || sending || sendingMulti}
-
-              aria-label="发送消息"
-
-              className="px-3 sm:px-4 py-2.5 bg-cyber-green/10 hover:bg-cyber-green/[0.18] active:scale-95 border border-cyber-green/20 rounded-xl text-cyber-green disabled:opacity-20 disabled:cursor-not-allowed disabled:active:scale-100 transition-all shrink-0 min-w-[44px] min-h-[44px] flex items-center justify-center"
-
-            >
-
-              <Send size={16} />
-
-            </button>
-
-          </div>
-
-          <div className="hidden sm:block text-[12px] text-cyber-green/10 mt-1.5 text-center">Enter 发送 · Shift+Enter 换行</div>
-
+        <div className="h-1.5 overflow-hidden rounded-sm bg-muted">
+          <div className="h-full rounded-sm bg-primary transition-[width] duration-500" style={{ width: `${percent}%` }} />
         </div>
-
       </div>
-
     );
-
   }
 
+  function renderGroupProfile(mobile = false) {
+    const resolvedParticipants = participants.map(participant => normalizeParticipant(participant));
+    const activeParticipantCount = resolvedParticipants.filter(participant => isCharacterActive(participant)).length;
+    return (
+      <div className={`${mobile ? '' : 'min-h-0 flex-1 overflow-y-auto'} p-4`}>
+        <div className="border-b border-border pb-4">
+          <p className="font-archive-mono text-[10px] uppercase text-muted-foreground">Ensemble File</p>
+          <h2 className="mt-1 truncate font-archive-serif text-lg font-semibold text-foreground">{groupName || '群聊'}</h2>
+          <p className="mt-1 font-archive-mono text-[10px] text-muted-foreground tabular-nums">
+            {multiSessionId || '会话准备中'}
+          </p>
+        </div>
+
+        <dl className="divide-y divide-border border-b border-border">
+          <SummaryRow label="会话状态" value={multiSessionStatus === 'active' ? '进行中' : '已结束'} />
+          <SummaryRow label="同步状态" value={groupHistoryReady ? '已同步' : '同步中'} />
+          <SummaryRow label="在线成员" value={`${activeParticipantCount}/${resolvedParticipants.length}`} />
+          <SummaryRow label="消息数" value={messages.length} />
+        </dl>
+
+        <section className="mt-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="font-archive-serif text-sm font-semibold text-foreground">群成员</h3>
+            <span className="font-archive-mono text-[10px] text-muted-foreground tabular-nums">{resolvedParticipants.length}</span>
+          </div>
+          <div className="mt-2 space-y-1">
+            {resolvedParticipants.map((participant, index) => {
+              const active = isCharacterActive(participant);
+              return (
+                <div key={participant.character_id} className="flex min-h-12 items-center gap-3 border-b border-border py-2">
+                  <span className="w-5 shrink-0 font-archive-mono text-[10px] text-muted-foreground tabular-nums">
+                    {String(index + 1).padStart(2, '0')}
+                  </span>
+                  {renderAvatar(participant, 'h-9 w-9', active ? '' : 'grayscale opacity-55')}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-archive-serif text-sm text-foreground">{participant.name}</span>
+                    <span className="block text-[10px] text-muted-foreground">{active ? '在线' : '离线'}</span>
+                  </span>
+                  <span className={`h-2 w-2 rounded-sm ${active ? 'bg-primary' : 'bg-muted-foreground/45'}`} aria-hidden="true" />
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      </div>
+    );
+  }
 }

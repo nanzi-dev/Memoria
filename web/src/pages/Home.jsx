@@ -13,6 +13,19 @@ const AddCharacterBadge = lazy(() =>
   import('../components/CharacterBadge').then((module) => ({ default: module.AddCharacterBadge }))
 );
 
+function CharacterArchiveLoading({ label = '正在载入角色档案...' }) {
+  return (
+    <div
+      className="flex min-h-[260px] w-full items-center justify-center gap-3 px-4 text-cyber-green/60"
+      role="status"
+      aria-live="polite"
+    >
+      <Loader2 className="animate-spin" size={18} />
+      <span className="font-mono text-sm">{label}</span>
+    </div>
+  );
+}
+
 export default function Home() {
   const [characters, setCharacters] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -136,19 +149,14 @@ export default function Home() {
         </div>
 
 
-        {loading && (
-          <div className="flex items-center gap-3 text-cyber-green/50">
-            <Loader2 className="animate-spin" size={18} />
-            <span className="font-mono text-sm">加载中...</span>
-          </div>
-        )}
+        {loading && <CharacterArchiveLoading />}
 
         {error && (
           <div className="text-red-400 font-mono text-xs mb-8">错误: {error}</div>
         )}
 
         {!loading && (
-          <Suspense fallback={null}>
+          <Suspense fallback={<CharacterArchiveLoading label="正在准备角色卡片..." />}>
             <div className="flex flex-wrap justify-center gap-5 sm:gap-8 max-w-5xl pointer-events-auto px-1">
               {characters.map((char) => (
                 <CharacterBadge

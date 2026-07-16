@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
-import { Upload, Link, X, Image as ImageIcon } from 'lucide-react';
+import { Fingerprint, Image as ImageIcon, Link, Upload, X } from 'lucide-react';
 import TagInput from './TagInput';
 import { useDialog } from '../../context/DialogContext';
+import { Button } from '@/components/ui/button';
 
 export default function StepIdentity({ formData, updateField, showAvatar = true }) {
   const dialog = useDialog();
@@ -27,15 +28,15 @@ export default function StepIdentity({ formData, updateField, showAvatar = true 
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2 mb-4">
-        <span className="text-lg text-cyber-ink/60">👤</span>
-        <h3 className="font-mono text-lg font-bold text-cyber-ink">身份信息 Identity</h3>
+      <div className="mb-4 flex items-center gap-2">
+        <Fingerprint className="h-5 w-5 text-primary" aria-hidden="true" />
+        <h3 className="font-archive-serif text-lg font-semibold text-foreground">身份信息 Identity</h3>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {infoFields.map(({ key, label, value, multiline }) => (
           <div key={key} className={multiline ? 'md:col-span-2' : ''}>
-            <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
+            <label className="mb-1.5 block font-archive-mono text-[11px] uppercase text-muted-foreground">
               {label}
             </label>
             {multiline ? (
@@ -43,7 +44,7 @@ export default function StepIdentity({ formData, updateField, showAvatar = true 
                 value={value}
                 onChange={(e) => updateField(key, e.target.value)}
                 rows={3}
-                className="w-full px-2 py-1.5 text-sm font-mono text-cyber-ink bg-amber-50/50 border-b border-amber-300/50 focus:border-amber-500 focus:outline-none focus:bg-amber-50 rounded-t resize-none transition-colors"
+                className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-archive-serif text-base leading-7 text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 placeholder={`Enter ${label.toLowerCase()}...`}
               />
             ) : (
@@ -51,7 +52,7 @@ export default function StepIdentity({ formData, updateField, showAvatar = true 
                 type="text"
                 value={value}
                 onChange={(e) => updateField(key, e.target.value)}
-                className="w-full px-2 py-1.5 text-sm font-mono text-cyber-ink bg-transparent border-b border-amber-300/50 focus:border-amber-500 focus:outline-none focus:bg-amber-50/50 transition-colors"
+                className="min-h-11 w-full rounded-md border border-input bg-background px-3 font-archive-serif text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 placeholder={`Enter ${label.toLowerCase()}...`}
               />
             )}
@@ -61,7 +62,7 @@ export default function StepIdentity({ formData, updateField, showAvatar = true 
 
       {/* Aliases */}
       <div>
-        <label className="block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider">
+        <label className="mb-1.5 block font-archive-mono text-[11px] uppercase text-muted-foreground">
           别名 Aliases
         </label>
         <TagInput
@@ -73,85 +74,90 @@ export default function StepIdentity({ formData, updateField, showAvatar = true 
 
       {/* Avatar */}
       {showAvatar && <div className="space-y-3">
-        <label className="block text-[11px] text-amber-700/60 font-mono uppercase tracking-wider">
+        <label className="block font-archive-mono text-[11px] uppercase text-muted-foreground">
           头像 Avatar
         </label>
 
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-4">
+        <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-start">
           {/* Preview */}
           <div
-            className="relative w-24 h-24 flex-shrink-0 rounded-lg overflow-hidden border-2 border-dashed"
-            style={{ borderColor: dragOver ? '#D4A574' : '#C4B594' }}
+            className={`relative h-24 w-24 flex-shrink-0 overflow-hidden rounded-md border-2 border-dashed ${
+              dragOver ? 'border-primary bg-primary/5' : 'border-border'
+            }`}
           >
             {avatarUrl && !imgError ? (
               <img
                 src={avatarUrl}
                 alt="Avatar"
-                className="w-full h-full object-cover"
+                className="h-full w-full object-cover"
                 onError={() => setImgError(true)}
               />
             ) : (
-              <div className="w-full h-full flex items-center justify-center bg-amber-100/30">
-                <ImageIcon size={28} className="text-amber-700/30" />
+              <div className="flex h-full w-full items-center justify-center bg-muted/40">
+                <ImageIcon className="h-7 w-7 text-muted-foreground" aria-hidden="true" />
               </div>
             )}
           </div>
 
           {/* Controls */}
           <div className="flex-1 space-y-2">
-            <div
-              className={`relative rounded border-2 border-dashed px-3 py-4 text-center cursor-pointer transition-colors ${
+            <button
+              type="button"
+              className={`relative min-h-20 w-full cursor-pointer rounded-md border-2 border-dashed px-3 py-4 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
                 dragOver
-                  ? 'border-amber-500 bg-amber-100/50'
-                  : 'border-amber-300/40 hover:border-amber-400/60 bg-amber-50/30'
+                  ? 'border-primary bg-primary/5'
+                  : 'border-border bg-muted/25 hover:bg-muted/40'
               }`}
               onClick={() => fileInputRef.current?.click()}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
               onDrop={handleDrop}
             >
-              <Upload size={16} className="mx-auto text-amber-600/50 mb-1" />
-              <p className="text-[10px] font-mono text-amber-700/50">
+              <Upload className="mx-auto mb-1 h-4 w-4 text-primary" aria-hidden="true" />
+              <span className="block font-archive-mono text-[10px] text-muted-foreground">
                 点击或拖放上传 (PNG/JPEG/WebP ≤2MB)
-              </p>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp"
-                className="hidden"
-                onChange={handleFileChange}
-              />
-            </div>
+              </span>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              className="hidden"
+              onChange={handleFileChange}
+            />
 
             <div className="flex gap-2">
-              <div className="flex-1 relative">
-                <Link size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-amber-700/40" />
+              <div className="relative min-w-0 flex-1">
+                <Link className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
                 <input
                   type="text"
                   value={urlInput}
                   onChange={(e) => setUrlInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleUrlSubmit(); }}
                   placeholder="或粘贴网络图片 URL..."
-                  className="w-full pl-7 pr-2 py-1 text-xs font-mono text-cyber-ink bg-transparent border-b border-amber-300/50 focus:border-amber-500 focus:outline-none transition-colors"
+                  className="min-h-11 w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 font-archive-mono text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 />
               </div>
-              <button
+              <Button
+                type="button"
+                variant="outline"
                 onClick={handleUrlSubmit}
                 disabled={!urlInput.trim()}
-                className="px-2 py-1 text-[10px] font-mono text-amber-700/60 hover:text-amber-800 border border-amber-300/30 rounded hover:bg-amber-100/50 disabled:opacity-30 transition-colors"
               >
                 设置
-              </button>
+              </Button>
             </div>
 
             {avatarUrl && (
-              <button
+              <Button
+                type="button"
+                variant="ghost"
                 onClick={handleClear}
-                className="flex items-center gap-1 text-[10px] font-mono text-red-600/60 hover:text-red-700 transition-colors"
+                className="text-destructive hover:bg-destructive/5 hover:text-destructive"
               >
-                <X size={10} />
+                <X aria-hidden="true" />
                 清除头像
-              </button>
+              </Button>
             )}
           </div>
         </div>

@@ -1,52 +1,77 @@
 import {
-  useState,
-  useEffect,
-  useMemo,
   useCallback,
   useDeferredValue,
+  useEffect,
+  useMemo,
   useRef,
+  useState,
 } from 'react';
-import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft,
+  AlertCircle,
+  BookOpen,
+  CheckCircle2,
+  Clock,
+  Database,
+  Edit2,
+  Eye,
+  FileText,
+  FileUp,
+  Files,
+  Layers3,
+  Link2,
+  Loader2,
+  PenTool,
   Plus,
   Power,
   PowerOff,
-  Trash2,
-  Loader2,
-  Search,
-  Upload,
-  FileText,
-  X,
-  Database,
-  Edit2,
   RefreshCw,
-  Link2,
-  Eye,
-  AlertCircle,
-  CheckCircle2,
-  Clock,
-  PenTool,
-  FileUp,
-  BookOpen,
-  Files,
-  Layers3,
-  CircleDot,
+  Search,
+  Trash2,
+  Upload,
+  X,
 } from 'lucide-react';
-import { knowledgeApi } from '../api/memoria';
-import { useDialog } from '../context/DialogContext';
-import { useUser } from '../context/UserContext';
-import FadeContent from '../components/FadeContent';
+
+import ArchiveWorkspace from '@/archive/ArchiveWorkspace';
+import { useArchiveShell } from '@/archive/ArchiveShell';
+import FadeContent from '@/components/FadeContent';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Textarea } from '@/components/ui/textarea';
+import { knowledgeApi } from '@/api/memoria';
+import { useDialog } from '@/context/DialogContext';
+import { useUser } from '@/context/UserContext';
 
 const AUTH_ERROR_PATTERN = /认证|未登录|401|token/i;
 
 const DOCUMENT_STATUS_MAP = {
-  queued: { label: '队列中', tone: 'info', Icon: Clock },
-  processing: { label: '处理中', tone: 'processing', Icon: Loader2 },
-  ready: { label: '已就绪', tone: 'success', Icon: CheckCircle2 },
-  failed: { label: '失败', tone: 'error', Icon: AlertCircle },
+  queued: { label: '队列中', Icon: Clock },
+  processing: { label: '处理中', Icon: Loader2 },
+  ready: { label: '已就绪', Icon: CheckCircle2 },
+  failed: { label: '失败', Icon: AlertCircle },
 };
+
+const STATUS_FILTERS = [
+  { id: 'all', label: '全部' },
+  { id: 'enabled', label: '已启用' },
+  { id: 'disabled', label: '已停用' },
+];
 
 function getDocumentCount(base) {
   return Number(base?.document_count ?? base?.documents?.length ?? 0);
@@ -69,7 +94,12 @@ function mergeBaseSummary(current, detail) {
   return {
     ...current,
     ...detail,
-    document_count: Number(detail?.document_count ?? documents?.length ?? current?.document_count ?? 0),
+    document_count: Number(
+      detail?.document_count
+      ?? documents?.length
+      ?? current?.document_count
+      ?? 0
+    ),
     ready_document_count: Number(
       detail?.ready_document_count
       ?? documents?.filter(doc => doc.status === 'ready').length
@@ -80,41 +110,12 @@ function mergeBaseSummary(current, detail) {
   };
 }
 
-function useEscapeClose(show, onClose) {
-  useEffect(() => {
-    if (!show) return undefined;
-    const handleKeyDown = event => {
-      if (event.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [show, onClose]);
-}
-
-const STATUS_FILTERS = [
-  { id: 'all', label: '全部' },
-  { id: 'enabled', label: '已启用' },
-  { id: 'disabled', label: '已停用' },
-];
-
-function SummaryMetric({ icon: Icon, label, value, tone = 'green' }) {
-  const toneClass = tone === 'green'
-    ? 'bg-cyber-green/10 text-cyber-green'
-    : tone === 'amber'
-    ? 'bg-amber-300/10 text-amber-200'
-    : tone === 'muted'
-    ? 'bg-white/[0.05] text-zinc-400'
-    : 'bg-cyber-green/10 text-cyber-green';
-
+function EmptyDetail({ icon: Icon, title, description }) {
   return (
-    <div className="flex min-w-0 items-center gap-3">
-      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${toneClass}`}>
-        <Icon size={16} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-lg font-semibold leading-none text-zinc-100 tabular-nums">{value}</p>
-        <p className="mt-1 text-xs text-zinc-500">{label}</p>
-      </div>
+    <div className="flex min-h-[480px] flex-col items-center justify-center border-y border-dashed border-border px-6 text-center">
+      <Icon className="h-9 w-9 text-muted-foreground" aria-hidden="true" />
+      <h2 className="mt-4 font-archive-serif text-lg font-semibold text-foreground">{title}</h2>
+      <p className="mt-2 max-w-sm text-sm leading-6 text-muted-foreground">{description}</p>
     </div>
   );
 }
@@ -122,6 +123,7 @@ function SummaryMetric({ icon: Icon, label, value, tone = 'green' }) {
 export default function KnowledgeManager() {
   const navigate = useNavigate();
   const dialog = useDialog();
+  const { setPrimaryAction } = useArchiveShell();
   const { user, loading: userLoading } = useUser();
 
   const [bases, setBases] = useState([]);
@@ -134,14 +136,12 @@ export default function KnowledgeManager() {
   const [busyBaseId, setBusyBaseId] = useState(null);
   const listRequestRef = useRef(0);
 
-  // 选中的知识库详情
   const [selectedBaseId, setSelectedBaseId] = useState(null);
   const [selectedBase, setSelectedBase] = useState(null);
   const [baseLoading, setBaseLoading] = useState(false);
   const [detailError, setDetailError] = useState('');
   const detailRequestRef = useRef(0);
 
-  // 模态框状态
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showBindingModal, setShowBindingModal] = useState(false);
@@ -190,7 +190,6 @@ export default function KnowledgeManager() {
     return () => { listRequestRef.current += 1; };
   }, [loadBases]);
 
-  // 加载选中知识库的详细信息
   const loadBaseDetail = useCallback(async (baseId, { soft = false } = {}) => {
     if (!baseId) return;
     const requestId = ++detailRequestRef.current;
@@ -260,16 +259,17 @@ export default function KnowledgeManager() {
     };
   }, [selectedBaseId, shouldPollSelectedBase, loadBaseDetail]);
 
-  // 切换启停状态
   async function handleToggleBase(base) {
     if (!base) return;
     setBusyBaseId(base.knowledge_base_id);
     setNotice('');
     try {
       await knowledgeApi.setEnabled(base.knowledge_base_id, !base.is_enabled);
-      setBases(prev => prev.map(b =>
-        b.knowledge_base_id === base.knowledge_base_id ? { ...b, is_enabled: !b.is_enabled } : b
-      ));
+      setBases(prev => prev.map(b => (
+        b.knowledge_base_id === base.knowledge_base_id
+          ? { ...b, is_enabled: !b.is_enabled }
+          : b
+      )));
       setNotice(!base.is_enabled ? '知识库已启用' : '知识库已禁用');
       setTimeout(() => setNotice(''), 1800);
       if (selectedBaseId === base.knowledge_base_id) {
@@ -282,7 +282,6 @@ export default function KnowledgeManager() {
     }
   }
 
-  // 删除知识库
   async function handleDeleteBase(base) {
     if (!base) return;
     const ok = await dialog.confirm({
@@ -311,288 +310,131 @@ export default function KnowledgeManager() {
     }
   }
 
-  // 筛选与统计
   const deferredSearch = useDeferredValue(search);
   const filtered = useMemo(() => {
     const q = deferredSearch.trim().toLowerCase();
-    return bases.filter(b => {
-      if (statusFilter === 'enabled' && !b.is_enabled) return false;
-      if (statusFilter === 'disabled' && b.is_enabled) return false;
+    return bases.filter(base => {
+      if (statusFilter === 'enabled' && !base.is_enabled) return false;
+      if (statusFilter === 'disabled' && base.is_enabled) return false;
       if (!q) return true;
-      const searchText = [
-        b.name,
-        b.description,
-        b.knowledge_base_id,
-      ].filter(Boolean).join(' ').toLowerCase();
-      return searchText.includes(q);
+      return [
+        base.name,
+        base.description,
+        base.knowledge_base_id,
+      ].filter(Boolean).join(' ').toLowerCase().includes(q);
     });
   }, [bases, deferredSearch, statusFilter]);
 
   const totalDocs = bases.reduce((sum, base) => sum + getDocumentCount(base), 0);
-  const enabledCount = bases.filter(b => b.is_enabled).length;
+  const enabledCount = bases.filter(base => base.is_enabled).length;
   const isAuthError = !!error && AUTH_ERROR_PATTERN.test(error);
   const isAuthBlocked = !user || isAuthError;
   const selectedSummary = bases.find(base => base.knowledge_base_id === selectedBaseId) || null;
+  const activeBase = selectedBase?.knowledge_base_id === selectedBaseId
+    ? selectedBase
+    : selectedSummary;
+
+  const openCreate = useCallback(() => setShowCreateModal(true), []);
+  const primaryAction = useMemo(() => (
+    <Button type="button" size="lg" onClick={openCreate} disabled={isAuthBlocked || loading}>
+      <Plus aria-hidden="true" />
+      新建知识库
+    </Button>
+  ), [isAuthBlocked, loading, openCreate]);
+
+  useEffect(() => {
+    setPrimaryAction(primaryAction);
+    return () => setPrimaryAction(null);
+  }, [primaryAction, setPrimaryAction]);
 
   function handleSelectBase(base) {
     setSelectedBase(base);
     setSelectedBaseId(base.knowledge_base_id);
   }
 
+  function clearFilters() {
+    setSearch('');
+    setStatusFilter('all');
+  }
+
+  const noticeNode = notice ? (
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed right-3 top-20 z-[950] flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded-md border border-primary/30 bg-popover px-4 py-3 text-sm text-popover-foreground shadow-xl sm:right-5"
+    >
+      <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+      <span>{notice}</span>
+    </div>
+  ) : null;
+
   return (
-    <div className="memoria-page memoria-app-page relative min-h-dvh overflow-x-hidden font-character text-zinc-100">
-      <a
-        href="#knowledge-workspace"
-        className="memoria-skip-link"
-      >
-        跳到知识库工作区
-      </a>
-
-      <header className="memoria-app-header sticky top-0 z-30 border-b">
-        <div className="mx-auto flex max-w-[1480px] items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
-          <div className="flex min-w-0 items-center gap-3">
-            <button
-              type="button"
-              onClick={() => navigate('/')}
-              aria-label="返回首页"
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/[0.07] text-zinc-400 transition-colors hover:border-cyber-green/25 hover:bg-cyber-green/[0.06] hover:text-cyber-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40"
-            >
-              <ArrowLeft size={18} />
-            </button>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <BookOpen size={17} className="shrink-0 text-cyber-green" />
-                <h1 className="truncate text-lg font-semibold text-zinc-100 sm:text-xl">知识库管理</h1>
-              </div>
-              <p className="mt-0.5 hidden text-xs text-zinc-500 sm:block">整理资料、配置生效范围并检查文档处理状态</p>
-            </div>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => loadBases({ soft: true })}
-              disabled={isAuthBlocked || loading || refreshing}
-              aria-label="刷新知识库"
-              title="刷新"
-              className="flex h-11 w-11 items-center justify-center rounded-lg border border-white/[0.08] text-zinc-400 transition-colors hover:border-cyber-green/25 hover:bg-cyber-green/[0.06] hover:text-cyber-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowCreateModal(true)}
-              disabled={isAuthBlocked || loading}
-              className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-cyber-green px-3.5 text-sm font-semibold text-[#09100b] transition-colors hover:bg-[#b8f7b0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/50 focus-visible:ring-offset-2 focus-visible:ring-offset-[#090d11] disabled:cursor-not-allowed disabled:opacity-40 sm:px-4"
-            >
-              <Plus size={17} />
-              <span className="hidden sm:inline">新建知识库</span>
-              <span className="sm:hidden">新建</span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main id="knowledge-workspace" className="relative z-10 mx-auto max-w-[1480px] px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
-        {notice && (
-          <div role="status" aria-live="polite" className="fixed right-4 top-20 z-50 flex items-center gap-2 rounded-lg border border-cyber-green/25 bg-[#111a15] px-4 py-3 text-sm text-cyber-green shadow-2xl animate-fade-up sm:right-6">
-            <CheckCircle2 size={16} />
-            <span>{notice}</span>
-          </div>
+    <>
+      <ArchiveWorkspace
+        className="[&_button]:min-h-11"
+        indexLabel="Archive index / knowledge registry"
+        title="知识档案"
+        description="整理检索资料，核对文档处理状态，并配置知识在对话中的生效范围。"
+        stats={[
+          { icon: Layers3, label: '知识库', value: bases.length },
+          { icon: CheckCircle2, label: '已启用', value: enabledCount },
+          { icon: Files, label: '文档总数', value: totalDocs },
+          { icon: PowerOff, label: '已停用', value: bases.length - enabledCount },
+        ]}
+        mobileAction={(
+          <Button type="button" size="lg" onClick={openCreate} disabled={isAuthBlocked || loading}>
+            <Plus aria-hidden="true" />
+            新建知识库
+          </Button>
         )}
+        notice={noticeNode}
+        directory={(
+          <KnowledgeDirectory
+            bases={bases}
+            filtered={filtered}
+            loading={loading}
+            refreshing={refreshing}
+            error={error}
+            isAuthError={isAuthError}
+            isAuthBlocked={isAuthBlocked}
+            search={search}
+            statusFilter={statusFilter}
+            selectedBaseId={selectedBaseId}
+            onSearchChange={setSearch}
+            onStatusFilterChange={setStatusFilter}
+            onClearFilters={clearFilters}
+            onRefresh={() => loadBases({ soft: true })}
+            onRecover={isAuthError ? () => navigate('/') : () => loadBases()}
+            onCreate={openCreate}
+            onSelect={handleSelectBase}
+          />
+        )}
+        detail={selectedBaseId ? (
+          <FadeContent key={selectedBaseId}>
+            <BaseDetailPanel
+              base={activeBase}
+              loading={baseLoading}
+              error={detailError}
+              busy={busyBaseId === selectedBaseId}
+              onRefresh={() => loadBaseDetail(selectedBaseId)}
+              onEdit={() => setShowEditModal(true)}
+              onToggle={() => handleToggleBase(activeBase)}
+              onDelete={() => handleDeleteBase(activeBase)}
+              onShowBindingModal={() => setShowBindingModal(true)}
+              onShowUploadModal={() => setShowUploadModal(true)}
+              onShowPasteModal={() => setShowPasteModal(true)}
+              onShowPreviewModal={() => setShowPreviewModal(true)}
+            />
+          </FadeContent>
+        ) : (
+          <EmptyDetail
+            icon={BookOpen}
+            title="选择一个知识库"
+            description="从目录中选择知识库后，这里会展开文档、绑定范围与运行状态。"
+          />
+        )}
+      />
 
-        <FadeContent className="mb-5 border-b border-white/[0.07] pb-5">
-          <div className="grid grid-cols-2 gap-x-6 gap-y-4 md:grid-cols-4">
-            <SummaryMetric icon={Layers3} label="知识库" value={bases.length} />
-            <SummaryMetric icon={CircleDot} label="已启用" value={enabledCount} tone="green" />
-            <SummaryMetric icon={Files} label="文档总数" value={totalDocs} tone="amber" />
-            <SummaryMetric icon={PowerOff} label="已停用" value={bases.length - enabledCount} tone="muted" />
-          </div>
-        </FadeContent>
-
-        <div className="grid items-start gap-4 lg:grid-cols-[minmax(290px,360px)_minmax(0,1fr)] lg:gap-5">
-          <aside className="memoria-panel overflow-hidden">
-            <div className="border-b border-white/[0.07] p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-sm font-semibold text-zinc-100">资料库</h2>
-                  <p className="mt-1 text-xs text-zinc-500">{filtered.length} 个结果</p>
-                </div>
-                <Database size={18} className="text-cyber-green/65" />
-              </div>
-
-              <label htmlFor="knowledge-search" className="mt-4 block text-xs font-medium text-zinc-400">
-                搜索知识库
-              </label>
-              <div className="relative mt-2">
-                <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-                <input
-                  id="knowledge-search"
-                  type="search"
-                  value={search}
-                  onChange={event => setSearch(event.target.value)}
-                  placeholder="名称、描述或 ID"
-                  className="min-h-11 w-full rounded-lg border border-cyber-green/12 bg-black/25 pl-9 pr-10 text-sm text-zinc-100 outline-none transition-colors placeholder:text-zinc-600 focus:border-cyber-green/40 focus:ring-2 focus:ring-cyber-green/10"
-                />
-                {search && (
-                  <button
-                    type="button"
-                    onClick={() => setSearch('')}
-                    aria-label="清空搜索"
-                    title="清空搜索"
-                    className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-white/[0.05] hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35"
-                  >
-                    <X size={15} />
-                  </button>
-                )}
-              </div>
-
-              <div className="mt-3 grid grid-cols-3 rounded-lg bg-black/25 p-1" aria-label="按状态筛选">
-                {STATUS_FILTERS.map(option => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => setStatusFilter(option.id)}
-                    aria-pressed={statusFilter === option.id}
-                    className={`min-h-11 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35 ${
-                      statusFilter === option.id
-                        ? 'bg-cyber-green/[0.09] text-cyber-green shadow-sm'
-                        : 'text-zinc-500 hover:bg-white/[0.04] hover:text-zinc-300'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {error && (
-              <div role="alert" className="m-3 rounded-lg border border-red-400/20 bg-red-400/[0.06] p-3">
-                <div className="flex items-start gap-2 text-sm leading-5 text-red-100/85">
-                  <AlertCircle size={16} className="mt-0.5 shrink-0" />
-                  <p>{error}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={isAuthError ? () => navigate('/') : () => loadBases()}
-                  className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg border border-red-300/20 px-3 text-xs font-medium text-red-100/80 transition-colors hover:bg-red-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/35"
-                >
-                  {!isAuthError && <RefreshCw size={14} />}
-                  {isAuthError ? '返回首页登录' : '重新加载'}
-                </button>
-              </div>
-            )}
-
-            {loading && (
-              <div className="space-y-2 p-3" aria-label="正在加载知识库">
-                {[0, 1, 2, 3].map(item => (
-                  <div key={item} className="h-[88px] animate-pulse rounded-lg bg-white/[0.035]" />
-                ))}
-              </div>
-            )}
-
-            {!loading && !error && filtered.length === 0 && (
-              <div className="flex min-h-64 flex-col items-center justify-center px-6 py-10 text-center">
-                <Database size={30} className="text-zinc-700" />
-                <p className="mt-3 text-sm font-medium text-zinc-300">
-                  {bases.length === 0 ? '还没有知识库' : '没有匹配的知识库'}
-                </p>
-                <p className="mt-1 text-xs leading-5 text-zinc-600">
-                  {bases.length === 0 ? '创建后即可添加文档与绑定范围' : '尝试调整关键词或状态筛选'}
-                </p>
-                <button
-                  type="button"
-                  onClick={bases.length === 0
-                    ? () => setShowCreateModal(true)
-                    : () => { setSearch(''); setStatusFilter('all'); }}
-                  className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-lg border border-white/[0.09] px-3 text-xs font-medium text-zinc-300 transition-colors hover:bg-white/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35"
-                >
-                  {bases.length === 0 ? <Plus size={14} /> : <X size={14} />}
-                  {bases.length === 0 ? '创建知识库' : '清除筛选'}
-                </button>
-              </div>
-            )}
-
-            {!loading && filtered.length > 0 && (
-              <div className="max-h-[560px] space-y-1.5 overflow-y-auto p-2 lg:max-h-[calc(100dvh-315px)]">
-                {filtered.map((base, index) => {
-                  const isSelected = selectedBaseId === base.knowledge_base_id;
-                  const docCount = getDocumentCount(base);
-                  const readyCount = Number(base.ready_document_count ?? 0);
-
-                  return (
-                    <FadeContent key={base.knowledge_base_id} delay={Math.min(index, 6) * 0.025}>
-                      <button
-                        type="button"
-                        onClick={() => handleSelectBase(base)}
-                        aria-current={isSelected ? 'true' : undefined}
-                        className={`group relative w-full rounded-lg border px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35 ${
-                          isSelected
-                            ? 'border-cyber-green/25 bg-cyber-green/[0.07]'
-                            : 'border-transparent hover:border-white/[0.07] hover:bg-white/[0.035]'
-                        } ${base.is_enabled ? '' : 'opacity-65 hover:opacity-90'}`}
-                      >
-                        <span className={`absolute inset-y-3 left-0 w-0.5 rounded-r-full ${base.is_enabled ? 'bg-cyber-green' : 'bg-zinc-600'}`} />
-                        <span className="flex items-start gap-3">
-                          <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-                            isSelected ? 'bg-cyber-green/10 text-cyber-green' : 'bg-white/[0.045] text-zinc-500'
-                          }`}>
-                            <Database size={16} />
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="flex items-center justify-between gap-2">
-                              <span className="truncate text-sm font-semibold text-zinc-100">{base.name}</span>
-                              <span className={`shrink-0 text-[11px] font-medium ${base.is_enabled ? 'text-cyber-green/80' : 'text-zinc-500'}`}>
-                                {base.is_enabled ? '启用' : '停用'}
-                              </span>
-                            </span>
-                            <span className="mt-1 block truncate text-xs text-zinc-500">
-                              {base.description || '暂无描述'}
-                            </span>
-                            <span className="mt-2 flex items-center gap-3 text-[11px] text-zinc-600">
-                              <span>{docCount} 个文档</span>
-                              <span>{readyCount} 个可用</span>
-                            </span>
-                          </span>
-                        </span>
-                      </button>
-                    </FadeContent>
-                  );
-                })}
-              </div>
-            )}
-          </aside>
-
-          <section className="min-w-0">
-            {selectedBaseId ? (
-              <FadeContent key={selectedBaseId}>
-                <BaseDetailPanel
-                  base={selectedBase?.knowledge_base_id === selectedBaseId ? selectedBase : selectedSummary}
-                  loading={baseLoading}
-                  error={detailError}
-                  busy={busyBaseId === selectedBaseId}
-                  onRefresh={() => loadBaseDetail(selectedBaseId)}
-                  onEdit={() => setShowEditModal(true)}
-                  onToggle={() => handleToggleBase(selectedBase || selectedSummary)}
-                  onDelete={() => handleDeleteBase(selectedBase || selectedSummary)}
-                  onShowBindingModal={() => setShowBindingModal(true)}
-                  onShowUploadModal={() => setShowUploadModal(true)}
-                  onShowPasteModal={() => setShowPasteModal(true)}
-                  onShowPreviewModal={() => setShowPreviewModal(true)}
-                />
-              </FadeContent>
-            ) : (
-              <div className="memoria-panel-muted flex min-h-[560px] flex-col items-center justify-center border-dashed px-6 text-center">
-                <BookOpen size={36} className="text-zinc-700" />
-                <h2 className="mt-4 text-base font-semibold text-zinc-300">选择一个知识库</h2>
-                <p className="mt-2 max-w-sm text-sm leading-6 text-zinc-600">选中左侧知识库后，可在这里管理文档、绑定范围和启用状态。</p>
-              </div>
-            )}
-          </section>
-        </div>
-      </main>
-
-      {/* 创建知识库模态框 */}
       <CreateBaseModal
         show={showCreateModal}
         onClose={() => setShowCreateModal(false)}
@@ -607,13 +449,16 @@ export default function KnowledgeManager() {
         }}
       />
 
-      {/* 编辑知识库模态框 */}
       <EditBaseModal
         show={showEditModal}
         base={selectedBase}
         onClose={() => setShowEditModal(false)}
         onSuccess={(updated) => {
-          setBases(prev => prev.map(b => b.knowledge_base_id === updated.knowledge_base_id ? mergeBaseSummary(b, updated) : b));
+          setBases(prev => prev.map(base => (
+            base.knowledge_base_id === updated.knowledge_base_id
+              ? mergeBaseSummary(base, updated)
+              : base
+          )));
           setSelectedBase(updated);
           setShowEditModal(false);
           setNotice('知识库已更新');
@@ -662,231 +507,193 @@ export default function KnowledgeManager() {
         base={selectedBase}
         onClose={() => setShowPreviewModal(false)}
       />
-    </div>
+    </>
   );
 }
 
-// ═══════════════════════════════════════════════
-// 创建知识库模态框
-// ═══════════════════════════════════════════════
-function CreateBaseModal({ show, onClose, onSuccess }) {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  useEscapeClose(show, onClose);
-
-  useEffect(() => {
-    if (show) {
-      setName('');
-      setDescription('');
-      setError('');
-    }
-  }, [show]);
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (!name.trim()) {
-      setError('请输入知识库名称');
-      return;
-    }
-
-    setSubmitting(true);
-    setError('');
-    try {
-      const newBase = await knowledgeApi.createBase({ name: name.trim(), description: description.trim() || null });
-      onSuccess(newBase);
-    } catch (err) {
-      setError(err.message || '创建失败');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  if (!show) return null;
-
-  return createPortal(
-    <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4 font-mono">
-      <div className="absolute inset-0 bg-black/78 backdrop-blur-md" onClick={onClose} />
-      <div role="dialog" aria-modal="true" aria-labelledby="create-base-title" className="relative w-full max-w-md overflow-hidden rounded-lg border border-cyber-green/20 bg-[#0d0d14]/95 shadow-[0_0_70px_rgba(167,239,158,0.08)] animate-fade-up">
-        <div className="absolute inset-0 pointer-events-none opacity-[0.04]" style={{
-          backgroundImage: 'linear-gradient(#9AD7FF 1px, transparent 1px), linear-gradient(90deg, #9AD7FF 1px, transparent 1px)',
-          backgroundSize: '20px 20px',
-        }} />
-        
-        <form onSubmit={handleSubmit} className="relative p-5">
-          <div className="flex items-start justify-between mb-4">
-            <div>
-              <h2 id="create-base-title" className="text-sm font-bold tracking-wider text-zinc-100">创建知识库</h2>
-              <p className="mt-1 text-[11px] text-zinc-400/70">新建一个独立的知识库</p>
-            </div>
-            <button type="button" onClick={onClose} aria-label="关闭创建知识库窗口" className="flex h-11 w-11 items-center justify-center rounded-lg text-cyber-green/40 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40">
-              <X size={16} />
-            </button>
+function KnowledgeDirectory({
+  bases,
+  filtered,
+  loading,
+  refreshing,
+  error,
+  isAuthError,
+  isAuthBlocked,
+  search,
+  statusFilter,
+  selectedBaseId,
+  onSearchChange,
+  onStatusFilterChange,
+  onClearFilters,
+  onRefresh,
+  onRecover,
+  onCreate,
+  onSelect,
+}) {
+  return (
+    <>
+      <div className="border-b border-border p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="font-archive-serif text-base font-semibold text-foreground">资料目录</h2>
+            <p className="mt-1 font-archive-mono text-[10px] text-muted-foreground">
+              {filtered.length} records
+            </p>
           </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={onRefresh}
+            disabled={isAuthBlocked || loading || refreshing}
+            aria-label="刷新知识库列表"
+            title="刷新知识库列表"
+          >
+            <RefreshCw className={refreshing ? 'animate-spin' : ''} aria-hidden="true" />
+          </Button>
+        </div>
 
-          {error && (
-            <div role="alert" className="mb-4 rounded-lg border border-red-400/18 bg-red-400/[0.055] px-3 py-2 text-xs text-red-200/80">
-              {error}
-            </div>
-          )}
-
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="create-base-name" className="block text-[11px] font-bold text-zinc-300 mb-1.5">名称 *</label>
-              <input
-                id="create-base-name"
-                type="text"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                maxLength={120}
-                placeholder="例如：游戏世界观设定"
-                className="w-full rounded-lg border border-cyber-green/12 bg-cyber-surface/70 px-3 py-2 text-sm text-cyber-green/85 outline-none transition-all placeholder:text-cyber-green/22 focus:border-cyber-green/42 focus:ring-2 focus:ring-cyber-green/10"
-                autoFocus
-              />
-            </div>
-
-            <div>
-              <label htmlFor="create-base-description" className="block text-[11px] font-bold text-zinc-300 mb-1.5">描述</label>
-              <textarea
-                id="create-base-description"
-                value={description}
-                onChange={e => setDescription(e.target.value)}
-                maxLength={2000}
-                rows={3}
-                placeholder="可选：简要描述该知识库的用途"
-                className="w-full rounded-lg border border-cyber-green/12 bg-cyber-surface/70 px-3 py-2 text-sm text-cyber-green/85 outline-none transition-all placeholder:text-cyber-green/22 focus:border-cyber-green/42 focus:ring-2 focus:ring-cyber-green/10 resize-none"
-              />
-            </div>
-          </div>
-
-          <div className="mt-5 flex justify-end gap-2">
-            <button
+        <label htmlFor="knowledge-search" className="mt-4 block text-xs font-medium text-foreground">
+          搜索知识库
+        </label>
+        <div className="relative mt-2">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <Input
+            id="knowledge-search"
+            type="search"
+            value={search}
+            onChange={event => onSearchChange(event.target.value)}
+            placeholder="名称、描述或 ID"
+            className="pl-9 pr-11"
+          />
+          {search && (
+            <Button
               type="button"
-              onClick={onClose}
-              className="min-h-[44px] rounded-lg border border-cyber-green/12 px-4 py-2 text-sm text-cyber-green/55 transition-all hover:border-cyber-green/25 hover:bg-cyber-green/5 hover:text-cyber-green/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35"
+              variant="ghost"
+              size="icon"
+              onClick={() => onSearchChange('')}
+              aria-label="清空搜索"
+              title="清空搜索"
+              className="absolute right-0 top-1/2 -translate-y-1/2"
             >
-              取消
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="flex min-h-[44px] items-center gap-2 rounded-lg border border-cyber-green/35 bg-cyber-green/10 px-4 py-2 text-sm font-bold text-cyber-green transition-all hover:bg-cyber-green/20 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40 disabled:cursor-not-allowed disabled:opacity-50"
+              <X aria-hidden="true" />
+            </Button>
+          )}
+        </div>
+
+        <div className="mt-3 grid grid-cols-3 gap-1 rounded-md border border-border bg-muted/35 p-1" aria-label="按状态筛选">
+          {STATUS_FILTERS.map(option => (
+            <Button
+              key={option.id}
+              type="button"
+              variant={statusFilter === option.id ? 'secondary' : 'ghost'}
+              onClick={() => onStatusFilterChange(option.id)}
+              aria-pressed={statusFilter === option.id}
+              className="h-11 px-2 text-xs"
             >
-              {submitting && <Loader2 size={14} className="animate-spin" />}
-              {submitting ? '创建中...' : '创建'}
-            </button>
-          </div>
-        </form>
+              {option.label}
+            </Button>
+          ))}
+        </div>
       </div>
-    </div>,
-    document.body
-  );
-}
 
-// ═══════════════════════════════════════════════
-// 编辑知识库模态框
-// ═══════════════════════════════════════════════
-function EditBaseModal({ show, base, onClose, onSuccess }) {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-  useEscapeClose(show, onClose);
-
-  useEffect(() => {
-    if (show && base) {
-      setName(base.name || '');
-      setDescription(base.description || '');
-      setError('');
-    }
-  }, [show, base]);
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (!base) return;
-    if (!name.trim()) {
-      setError('请输入知识库名称');
-      return;
-    }
-
-    setSubmitting(true);
-    setError('');
-    try {
-      const updated = await knowledgeApi.updateBase(base.knowledge_base_id, {
-        name: name.trim(),
-        description: description.trim() || null,
-      });
-      onSuccess(updated);
-    } catch (err) {
-      setError(err.message || '更新失败');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  if (!show || !base) return null;
-
-  return createPortal(
-    <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4 font-mono">
-      <div className="absolute inset-0 bg-black/78 backdrop-blur-md" onClick={onClose} />
-      <div role="dialog" aria-modal="true" aria-labelledby="edit-base-title" className="relative w-full max-w-md overflow-hidden rounded-lg border border-cyber-green/20 bg-[#0d0d14]/95 shadow-[0_0_70px_rgba(167,239,158,0.08)] animate-fade-up">
-        <form onSubmit={handleSubmit} className="relative p-5">
-          <div className="flex items-start justify-between mb-4">
-            <h2 id="edit-base-title" className="text-sm font-bold tracking-wider text-zinc-100">编辑知识库</h2>
-            <button type="button" onClick={onClose} aria-label="关闭编辑知识库窗口" className="flex h-11 w-11 items-center justify-center rounded-lg text-cyber-green/40 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40">
-              <X size={16} />
-            </button>
+      {error && (
+        <div role="alert" className="m-3 rounded-md border border-destructive/35 bg-destructive/10 p-3">
+          <div className="flex items-start gap-2 text-sm leading-6 text-destructive">
+            <AlertCircle className="mt-1 h-4 w-4 shrink-0" aria-hidden="true" />
+            <p className="break-words">{error}</p>
           </div>
+          <Button type="button" variant="outline" onClick={onRecover} className="mt-3">
+            {!isAuthError && <RefreshCw aria-hidden="true" />}
+            {isAuthError ? '返回首页登录' : '重新加载'}
+          </Button>
+        </div>
+      )}
 
-          {error && (
-            <div role="alert" className="mb-4 rounded-lg border border-red-400/18 bg-red-400/[0.055] px-3 py-2 text-xs text-red-200/80">
-              {error}
+      {loading && (
+        <div className="space-y-2 p-3" aria-label="正在加载知识库">
+          {[0, 1, 2, 3].map(item => <Skeleton key={item} className="h-24" />)}
+        </div>
+      )}
+
+      {!loading && !error && filtered.length === 0 && (
+        <div className="flex min-h-64 flex-col items-center justify-center px-6 py-10 text-center">
+          <Database className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
+          <p className="mt-3 text-sm font-medium text-foreground">
+            {bases.length === 0 ? '还没有知识库' : '没有匹配的知识库'}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            {bases.length === 0 ? '创建后即可添加文档与绑定范围' : '尝试调整关键词或状态筛选'}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={bases.length === 0 ? onCreate : onClearFilters}
+            className="mt-4"
+          >
+            {bases.length === 0 ? <Plus aria-hidden="true" /> : <X aria-hidden="true" />}
+            {bases.length === 0 ? '创建知识库' : '清除筛选'}
+          </Button>
+        </div>
+      )}
+
+      {!loading && filtered.length > 0 && (
+        <div className="max-h-[620px] space-y-1 overflow-y-auto p-2 lg:max-h-[calc(100dvh-310px)]">
+          {(search.trim() || statusFilter !== 'all') && (
+            <div className="flex min-h-11 items-center justify-between gap-2 px-2 text-[11px] text-muted-foreground">
+              <span className="font-archive-mono">显示 {filtered.length} / {bases.length}</span>
+              <Button type="button" variant="ghost" size="sm" onClick={onClearFilters}>清除</Button>
             </div>
           )}
-
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="edit-base-name" className="block text-[11px] font-bold text-zinc-300 mb-1.5">名称 *</label>
-              <input
-                id="edit-base-name"
-                type="text"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                maxLength={120}
-                className="w-full rounded-lg border border-cyber-green/12 bg-cyber-surface/70 px-3 py-2 text-sm text-cyber-green/85 outline-none transition-all focus:border-cyber-green/42 focus:ring-2 focus:ring-cyber-green/10"
-              />
-            </div>
-            <div>
-              <label htmlFor="edit-base-description" className="block text-[11px] font-bold text-zinc-300 mb-1.5">描述</label>
-              <textarea
-                id="edit-base-description"
-                value={description}
-                onChange={e => setDescription(e.target.value)}
-                maxLength={2000}
-                rows={3}
-                className="w-full rounded-lg border border-cyber-green/12 bg-cyber-surface/70 px-3 py-2 text-sm text-cyber-green/85 outline-none transition-all focus:border-cyber-green/42 focus:ring-2 focus:ring-cyber-green/10 resize-none"
-              />
-            </div>
-          </div>
-
-          <div className="mt-5 flex justify-end gap-2">
-            <button type="button" onClick={onClose} className="min-h-[44px] rounded-lg border border-cyber-green/12 px-4 py-2 text-sm text-cyber-green/55 transition-all hover:border-cyber-green/25 hover:bg-cyber-green/5 hover:text-cyber-green/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35">
-              取消
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="flex min-h-[44px] items-center gap-2 rounded-lg border border-cyber-green/35 bg-cyber-green/10 px-4 py-2 text-sm font-bold text-cyber-green transition-all hover:bg-cyber-green/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {submitting && <Loader2 size={14} className="animate-spin" />}
-              {submitting ? '保存中...' : '保存'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>,
-    document.body
+          {filtered.map((base, index) => {
+            const isSelected = selectedBaseId === base.knowledge_base_id;
+            const docCount = getDocumentCount(base);
+            const readyCount = Number(base.ready_document_count ?? 0);
+            return (
+              <FadeContent key={base.knowledge_base_id} delay={Math.min(index, 6) * 0.025}>
+                <button
+                  type="button"
+                  onClick={() => onSelect(base)}
+                  aria-current={isSelected ? 'true' : undefined}
+                  className={`min-h-[92px] w-full rounded-md border px-3 py-3 text-left transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    isSelected
+                      ? 'border-primary/45 bg-primary/10'
+                      : 'border-transparent hover:border-border hover:bg-accent'
+                  } ${base.is_enabled ? '' : 'opacity-70 hover:opacity-100'}`}
+                >
+                  <span className="flex min-w-0 items-start gap-3">
+                    <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-md border ${
+                      isSelected
+                        ? 'border-primary/30 bg-primary/10 text-primary'
+                        : 'border-border bg-muted/45 text-muted-foreground'
+                    }`}>
+                      <Database className="h-4 w-4" aria-hidden="true" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
+                        <span className="min-w-0 break-words font-archive-serif text-sm font-semibold text-foreground">
+                          {base.name || base.knowledge_base_id}
+                        </span>
+                        <span className="shrink-0 text-[11px] font-medium text-muted-foreground">
+                          {base.is_enabled ? '● 启用' : '○ 停用'}
+                        </span>
+                      </span>
+                      <span className="mt-1 block break-words text-xs leading-5 text-muted-foreground">
+                        {base.description || '暂无描述'}
+                      </span>
+                      <span className="mt-2 flex flex-wrap gap-x-3 gap-y-1 font-archive-mono text-[10px] tabular-nums text-muted-foreground">
+                        <span>{docCount} docs</span>
+                        <span>{readyCount} ready</span>
+                      </span>
+                    </span>
+                  </span>
+                </button>
+              </FadeContent>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -922,7 +729,11 @@ function BaseDetailPanel({
       await knowledgeApi.deleteDocument(doc.document_id);
       onRefresh();
     } catch (err) {
-      await dialog.alert({ title: '删除失败', message: err.message || '删除文档失败', variant: 'danger' });
+      await dialog.alert({
+        title: '删除失败',
+        message: err.message || '删除文档失败',
+        variant: 'danger',
+      });
     } finally {
       setDeletingDocId(null);
     }
@@ -934,7 +745,11 @@ function BaseDetailPanel({
       await knowledgeApi.retryDocument(doc.document_id);
       onRefresh();
     } catch (err) {
-      await dialog.alert({ title: '重试失败', message: err.message || '重试处理失败', variant: 'danger' });
+      await dialog.alert({
+        title: '重试失败',
+        message: err.message || '重试处理失败',
+        variant: 'danger',
+      });
     } finally {
       setRetryingDocId(null);
     }
@@ -948,243 +763,228 @@ function BaseDetailPanel({
   );
 
   return (
-    <section aria-labelledby="base-detail-title" className="memoria-panel overflow-hidden">
-      <div className="border-b border-white/[0.07] px-4 py-4 sm:px-5">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg ${
-              base?.is_enabled ? 'bg-cyber-green/10 text-cyber-green' : 'bg-white/[0.05] text-zinc-500'
-            }`}>
-              <BookOpen size={19} />
+    <section aria-labelledby="base-detail-title" className="min-w-0">
+      <div className="flex min-w-0 flex-col gap-4 border-b border-border pb-5 xl:flex-row xl:items-start xl:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md border border-border bg-muted/45 text-primary">
+            <BookOpen className="h-5 w-5" aria-hidden="true" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 id="base-detail-title" className="break-words font-archive-serif text-xl font-semibold text-foreground sm:text-2xl">
+                {base?.name || '加载中...'}
+              </h2>
+              {base && (
+                <span className="rounded border border-border bg-muted/45 px-2 py-1 text-[11px] font-medium text-foreground">
+                  {base.is_enabled ? '● 已启用' : '○ 已停用'}
+                </span>
+              )}
             </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 id="base-detail-title" className="break-words text-lg font-semibold text-zinc-100 sm:text-xl">
-                  {base?.name || '加载中...'}
-                </h2>
-                {base && (
-                  <span className={`rounded-md px-2 py-1 text-[11px] font-medium ${
-                    base.is_enabled ? 'bg-cyber-green/10 text-cyber-green' : 'bg-white/[0.05] text-zinc-500'
-                  }`}>
-                    {base.is_enabled ? '已启用' : '已停用'}
-                  </span>
-                )}
-              </div>
-              {base && <p className="mt-1 truncate font-mono text-[11px] text-zinc-600">{base.knowledge_base_id}</p>}
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-400">
-                {base?.description || '暂无描述。可通过编辑补充该知识库的用途和内容范围。'}
+            {base && (
+              <p className="mt-1 break-all font-archive-mono text-[10px] text-muted-foreground">
+                {base.knowledge_base_id}
               </p>
-            </div>
+            )}
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">
+              {base?.description || '暂无描述。可通过编辑补充该知识库的用途和内容范围。'}
+            </p>
           </div>
+        </div>
 
-          <div className="flex shrink-0 items-center gap-1 self-end xl:self-auto">
-            <button type="button" onClick={onEdit} disabled={!base || busy} aria-label="编辑知识库" title="编辑" className="flex h-11 w-11 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-white/[0.05] hover:text-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35 disabled:cursor-not-allowed disabled:opacity-40">
-              <Edit2 size={16} />
-            </button>
-            <button type="button" onClick={onToggle} disabled={!base || busy} aria-label={base?.is_enabled ? '停用知识库' : '启用知识库'} title={base?.is_enabled ? '停用' : '启用'} className="flex h-11 w-11 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-cyber-green/[0.07] hover:text-cyber-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35 disabled:cursor-not-allowed disabled:opacity-40">
-              {busy ? <Loader2 size={16} className="animate-spin" /> : base?.is_enabled ? <PowerOff size={16} /> : <Power size={16} />}
-            </button>
-            <button type="button" onClick={onDelete} disabled={!base || busy} aria-label="删除知识库" title="删除" className="flex h-11 w-11 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-red-400/[0.08] hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/35 disabled:cursor-not-allowed disabled:opacity-40">
-              <Trash2 size={16} />
-            </button>
-          </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2 self-end xl:self-auto">
+          <Button type="button" variant="outline" onClick={onEdit} disabled={!base || busy}>
+            <Edit2 aria-hidden="true" />
+            编辑
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={onToggle}
+            disabled={!base || busy}
+            aria-label={base?.is_enabled ? '停用知识库' : '启用知识库'}
+          >
+            {busy
+              ? <Loader2 className="animate-spin" aria-hidden="true" />
+              : base?.is_enabled
+                ? <PowerOff aria-hidden="true" />
+                : <Power aria-hidden="true" />}
+            {base?.is_enabled ? '停用' : '启用'}
+          </Button>
+          <Button type="button" variant="destructive" onClick={onDelete} disabled={!base || busy}>
+            <Trash2 aria-hidden="true" />
+            删除
+          </Button>
         </div>
       </div>
 
       {loading && (
-        <div className="space-y-4 p-5" aria-label="正在加载知识库详情">
-          <div className="h-20 animate-pulse rounded-lg bg-white/[0.035]" />
-          <div className="h-14 animate-pulse rounded-lg bg-white/[0.035]" />
-          <div className="h-52 animate-pulse rounded-lg bg-white/[0.035]" />
+        <div className="space-y-4 py-5" aria-label="正在加载知识库详情">
+          <Skeleton className="h-20" />
+          <Skeleton className="h-14" />
+          <Skeleton className="h-52" />
         </div>
       )}
 
       {!loading && error && (
-        <div role="alert" className="m-5 rounded-lg border border-red-400/20 bg-red-400/[0.06] p-4">
-          <p className="text-sm text-red-100/85">{error}</p>
-          <button type="button" onClick={onRefresh} className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg border border-red-300/20 px-3 text-xs font-medium text-red-100/80 hover:bg-red-400/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/40">
-            <RefreshCw size={13} /> 重新加载
-          </button>
+        <div role="alert" className="my-5 rounded-md border border-destructive/35 bg-destructive/10 p-4">
+          <p className="break-words text-sm text-destructive">{error}</p>
+          <Button type="button" variant="outline" onClick={onRefresh} className="mt-3">
+            <RefreshCw aria-hidden="true" />
+            重新加载
+          </Button>
         </div>
       )}
 
       {!loading && !error && base && (
         <div>
-          <dl className="grid grid-cols-2 border-b border-white/[0.07] bg-black/10 sm:grid-cols-4">
+          <dl className="grid grid-cols-2 divide-x divide-y divide-border border-b border-border sm:grid-cols-4 sm:divide-y-0">
             {[
               ['文档', getDocumentCount(base)],
               ['已就绪', readyDocumentCount],
               ['绑定范围', bindings.length],
               ['运行状态', base.is_enabled ? '参与检索' : '暂停检索'],
-            ].map(([label, value], index) => (
-              <div
-                key={label}
-                className={`px-4 py-3 sm:px-5 ${
-                  index % 2 === 0 ? 'border-r border-white/[0.06]' : ''
-                } ${index < 2 ? 'border-b border-white/[0.06] sm:border-b-0' : ''} ${
-                  index === 1 ? 'sm:border-r' : ''
-                }`}
-              >
-                <dt className="text-[11px] text-zinc-600">{label}</dt>
-                <dd className="mt-1 text-sm font-semibold text-zinc-200 tabular-nums">{value}</dd>
+            ].map(([label, value]) => (
+              <div key={label} className="min-w-0 px-3 py-4 sm:px-4">
+                <dt className="text-[11px] text-muted-foreground">{label}</dt>
+                <dd className="mt-1 break-words font-archive-mono text-sm font-semibold tabular-nums text-foreground">
+                  {value}
+                </dd>
               </div>
             ))}
           </dl>
 
-          <div className="grid grid-cols-2 gap-2 border-b border-white/[0.07] p-4 sm:p-5 xl:grid-cols-4">
-            <button
-              type="button"
-              onClick={onShowUploadModal}
-              disabled={busy}
-              className="flex min-h-11 items-center justify-center gap-2 rounded-lg bg-cyber-green px-3 text-sm font-semibold text-[#09100b] transition-colors hover:bg-[#b8f7b0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/45 disabled:cursor-not-allowed disabled:opacity-45"
-            >
-              <Upload size={16} />
+          <div className="grid grid-cols-2 gap-2 border-b border-border py-5 xl:grid-cols-4">
+            <Button type="button" onClick={onShowUploadModal} disabled={busy}>
+              <Upload aria-hidden="true" />
               上传文件
-            </button>
-            <button
-              type="button"
-              onClick={onShowPasteModal}
-              disabled={busy}
-              className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-cyber-green/20 bg-cyber-green/[0.055] px-3 text-sm font-medium text-cyber-green transition-colors hover:bg-cyber-green/[0.09] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35 disabled:cursor-not-allowed disabled:opacity-45"
-            >
-              <PenTool size={16} />
+            </Button>
+            <Button type="button" variant="secondary" onClick={onShowPasteModal} disabled={busy}>
+              <PenTool aria-hidden="true" />
               粘贴文本
-            </button>
-            <button
-              type="button"
-              onClick={onShowBindingModal}
-              disabled={busy}
-              className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-white/[0.09] px-3 text-sm font-medium text-zinc-300 transition-colors hover:bg-white/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/35 disabled:cursor-not-allowed disabled:opacity-45"
-            >
-              <Link2 size={16} />
+            </Button>
+            <Button type="button" variant="outline" onClick={onShowBindingModal} disabled={busy}>
+              <Link2 aria-hidden="true" />
               管理绑定
-            </button>
-            <button
-              type="button"
-              onClick={onShowPreviewModal}
-              disabled={busy}
-              className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-white/[0.09] px-3 text-sm font-medium text-zinc-300 transition-colors hover:bg-white/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35 disabled:cursor-not-allowed disabled:opacity-45"
-            >
-              <Eye size={16} />
+            </Button>
+            <Button type="button" variant="outline" onClick={onShowPreviewModal} disabled={busy}>
+              <Eye aria-hidden="true" />
               检索预览
-            </button>
+            </Button>
           </div>
 
-          <section aria-labelledby="binding-summary-title" className="border-b border-white/[0.07] px-4 py-4 sm:px-5">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <Link2 size={15} className="shrink-0 text-amber-200/80" />
-                <h3 id="binding-summary-title" className="text-sm font-semibold text-zinc-200">生效范围</h3>
-              </div>
-              <span className="text-xs text-zinc-600">{bindings.length} 项</span>
-            </div>
-
+          <ArchiveSection icon={Link2} title="生效范围" index="01">
             {bindings.length === 0 ? (
-              <div className="mt-3 flex items-center justify-between gap-4 border-l-2 border-zinc-700 py-1 pl-3">
-                <p className="text-xs leading-5 text-zinc-500">尚未绑定，该知识库不会进入任何对话上下文。</p>
-                <button type="button" onClick={onShowBindingModal} className="min-h-11 shrink-0 rounded-md px-2 text-xs font-medium text-amber-200/75 hover:bg-amber-300/[0.05] hover:text-amber-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/35">
-                  去配置
-                </button>
+              <div className="flex flex-col items-start justify-between gap-3 border-l-2 border-border py-1 pl-3 sm:flex-row sm:items-center">
+                <p className="text-sm leading-6 text-muted-foreground">
+                  尚未绑定，该知识库不会进入任何对话上下文。
+                </p>
+                <Button type="button" variant="ghost" onClick={onShowBindingModal}>去配置</Button>
               </div>
             ) : (
-              <div className="mt-3 flex flex-wrap gap-2">
+              <dl className="divide-y divide-border border-y border-border">
                 {bindings.map((binding, index) => {
                   const targetLabel = binding.target_type === 'global'
                     ? '全局'
                     : binding.target_type === 'character'
-                    ? '角色'
-                    : '群聊';
+                      ? '角色'
+                      : '群聊';
                   return (
-                    <span key={`${binding.target_type}-${binding.target_id || index}`} className="inline-flex min-h-8 max-w-full items-center gap-2 rounded-md border border-amber-300/10 bg-amber-300/[0.035] px-2.5 text-xs text-zinc-400">
-                      <span className="shrink-0 font-medium text-amber-100/75">{targetLabel}</span>
-                      <span className="truncate font-mono text-[11px] text-zinc-500">{binding.target_id || '所有上下文'}</span>
-                    </span>
+                    <div
+                      key={`${binding.target_type}-${binding.target_id || index}`}
+                      className="grid min-w-0 gap-1 py-3 sm:grid-cols-[140px_minmax(0,1fr)] sm:gap-5"
+                    >
+                      <dt className="text-xs font-medium text-foreground">{targetLabel}</dt>
+                      <dd className="break-all font-archive-mono text-xs text-muted-foreground">
+                        {binding.target_id || '所有上下文'}
+                      </dd>
+                    </div>
                   );
                 })}
-              </div>
+              </dl>
             )}
-          </section>
+          </ArchiveSection>
 
-          <section aria-labelledby="document-list-title">
-            <div className="flex items-center justify-between gap-3 border-b border-white/[0.07] px-4 py-4 sm:px-5">
-              <div className="flex min-w-0 items-center gap-2">
-                <FileText size={15} className="shrink-0 text-cyber-green/70" />
-                <h3 id="document-list-title" className="text-sm font-semibold text-zinc-200">文档</h3>
-              </div>
-              <span className="text-xs text-zinc-600">{documents.length} 项</span>
-            </div>
-
+          <ArchiveSection icon={FileText} title="文档文稿" index="02" last>
             {documents.length === 0 ? (
-              <div className="flex min-h-48 flex-col items-center justify-center px-5 py-10 text-center">
-                <FileText size={30} className="text-zinc-700" />
-                <p className="mt-3 text-sm font-medium text-zinc-400">暂无文档</p>
-                <p className="mt-1 text-xs text-zinc-600">上传文件或粘贴文本后，可在此查看处理状态。</p>
+              <div className="flex min-h-48 flex-col items-center justify-center border-y border-dashed border-border px-5 py-10 text-center">
+                <FileText className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
+                <p className="mt-3 text-sm font-medium text-foreground">暂无文档</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  上传文件或粘贴文本后，可在此查看处理状态。
+                </p>
               </div>
             ) : (
-              <div className="divide-y divide-white/[0.06]">
+              <div className="divide-y divide-border border-y border-border">
                 {documents.map(doc => {
                   const statusInfo = DOCUMENT_STATUS_MAP[doc.status] || DOCUMENT_STATUS_MAP.queued;
                   const StatusIcon = statusInfo.Icon;
-                  const docBusy = deletingDocId === doc.document_id || retryingDocId === doc.document_id;
-                  const statusClass = doc.status === 'ready'
-                    ? 'bg-cyber-green/10 text-cyber-green'
-                    : doc.status === 'failed'
-                    ? 'bg-red-400/[0.08] text-red-300'
-                    : 'bg-cyan-300/[0.08] text-cyan-200';
+                  const docBusy = deletingDocId === doc.document_id
+                    || retryingDocId === doc.document_id;
+                  const statusTone = doc.status === 'failed'
+                    ? 'border-destructive/35 bg-destructive/10 text-destructive'
+                    : doc.status === 'ready'
+                      ? 'border-primary/30 bg-primary/10 text-primary'
+                      : 'border-border bg-muted/45 text-muted-foreground';
 
                   return (
-                    <article key={doc.document_id} className="px-4 py-4 transition-colors hover:bg-white/[0.018] sm:px-5">
-                      <div className="flex items-start gap-3">
-                        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${statusClass}`}>
-                          <StatusIcon size={16} className={doc.status === 'processing' ? 'animate-spin' : ''} />
+                    <article key={doc.document_id} className="py-4">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md border ${statusTone}`}>
+                          <StatusIcon
+                            className={`h-4 w-4 ${doc.status === 'processing' ? 'animate-spin' : ''}`}
+                            aria-hidden="true"
+                          />
                         </div>
-
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                             <div className="min-w-0">
-                              <h4 className="break-words text-sm font-semibold text-zinc-200">{doc.original_name}</h4>
-                              <p className="mt-1 truncate font-mono text-[10px] text-zinc-600">{doc.document_id}</p>
-                              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500">
+                              <h4 className="break-words font-archive-serif text-base font-semibold text-foreground">
+                                {doc.original_name}
+                              </h4>
+                              <p className="mt-1 break-all font-archive-mono text-[10px] text-muted-foreground">
+                                {doc.document_id}
+                              </p>
+                              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
                                 <span>{doc.source_type === 'upload' ? '文件上传' : '文本粘贴'}</span>
-                                <span>{formatByteSize(doc.byte_size)}</span>
-                                <span className={`font-medium ${
-                                  doc.status === 'ready' ? 'text-cyber-green/75' :
-                                  doc.status === 'failed' ? 'text-red-300/75' :
-                                  'text-cyan-200/70'
-                                }`}>
-                                  {statusInfo.label}
-                                </span>
+                                <span className="font-archive-mono tabular-nums">{formatByteSize(doc.byte_size)}</span>
+                                <span className="font-medium">{statusInfo.label}</span>
                               </div>
                             </div>
-
                             <div className="flex shrink-0 items-center gap-1 self-end sm:self-start">
                               {doc.status === 'failed' && (
-                                <button
+                                <Button
                                   type="button"
+                                  variant="ghost"
+                                  size="icon"
                                   onClick={() => handleRetryDocument(doc)}
                                   disabled={docBusy}
                                   aria-label={`重试处理 ${doc.original_name}`}
                                   title="重试处理"
-                                  className="flex h-11 w-11 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-cyber-green/[0.07] hover:text-cyber-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/35 disabled:cursor-not-allowed disabled:opacity-45"
                                 >
-                                  {retryingDocId === doc.document_id ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
-                                </button>
+                                  {retryingDocId === doc.document_id
+                                    ? <Loader2 className="animate-spin" aria-hidden="true" />
+                                    : <RefreshCw aria-hidden="true" />}
+                                </Button>
                               )}
-                              <button
+                              <Button
                                 type="button"
+                                variant="ghost"
+                                size="icon"
                                 onClick={() => handleDeleteDocument(doc)}
                                 disabled={docBusy}
                                 aria-label={`删除文档 ${doc.original_name}`}
                                 title="删除文档"
-                                className="flex h-11 w-11 items-center justify-center rounded-lg text-zinc-600 transition-colors hover:bg-red-400/[0.08] hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/35 disabled:cursor-not-allowed disabled:opacity-45"
+                                className="hover:text-destructive"
                               >
-                                {deletingDocId === doc.document_id ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
-                              </button>
+                                {deletingDocId === doc.document_id
+                                  ? <Loader2 className="animate-spin" aria-hidden="true" />
+                                  : <Trash2 aria-hidden="true" />}
+                              </Button>
                             </div>
                           </div>
 
                           {doc.error_message && (
-                            <p className="mt-3 border-l-2 border-red-400/35 py-1 pl-3 text-xs leading-5 text-red-200/70">
+                            <p role="alert" className="mt-3 border-l-2 border-destructive/45 py-1 pl-3 text-xs leading-5 text-destructive">
                               {doc.error_message}
                             </p>
                           )}
@@ -1195,55 +995,221 @@ function BaseDetailPanel({
                 })}
               </div>
             )}
-          </section>
+          </ArchiveSection>
         </div>
       )}
     </section>
   );
 }
 
-function ModalFrame({ show, title, description, onClose, children, maxWidth = 'max-w-lg' }) {
-  useEscapeClose(show, onClose);
-  if (!show) return null;
-
-  const titleId = `knowledge-modal-${title.replace(/\s+/g, '-')}`;
-  return createPortal(
-    <div className="fixed inset-0 z-[1300] flex items-center justify-center p-3 font-mono sm:p-5">
-      <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={onClose} />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className={`relative flex max-h-[calc(100vh-1.5rem)] w-full ${maxWidth} flex-col overflow-hidden rounded-lg border border-cyber-green/20 bg-[#0d0d14]/98 shadow-[0_0_70px_rgba(167,239,158,0.08)] animate-fade-up sm:max-h-[calc(100vh-2.5rem)]`}
-      >
-        <div className="flex shrink-0 items-start justify-between gap-4 border-b border-white/[0.06] px-4 py-4 sm:px-5">
-          <div className="min-w-0">
-            <h2 id={titleId} className="text-sm font-bold tracking-wider text-zinc-100">{title}</h2>
-            {description && <p className="mt-1 text-[11px] leading-5 text-zinc-400/70">{description}</p>}
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={`关闭${title}窗口`}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-cyber-green/40 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40"
-          >
-            <X size={17} />
-          </button>
+function ArchiveSection({ icon: Icon, title, index, children, last = false }) {
+  return (
+    <section className={`py-5 ${last ? '' : 'border-b border-border'}`}>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+          <h3 className="font-archive-serif text-lg font-semibold text-foreground">{title}</h3>
         </div>
-        <div className="min-h-0 overflow-y-auto p-4 sm:p-5">{children}</div>
+        <span className="font-archive-mono text-[10px] text-muted-foreground">{index}</span>
       </div>
-    </div>,
-    document.body
+      {children}
+    </section>
+  );
+}
+
+function ModalFrame({
+  show,
+  title,
+  description,
+  onClose,
+  children,
+  className = 'max-w-lg',
+}) {
+  return (
+    <Dialog open={show} onOpenChange={open => { if (!open) onClose(); }}>
+      <DialogContent className={`max-h-[calc(100dvh-2rem)] overflow-y-auto [&_button]:min-h-11 ${className}`}>
+        <DialogHeader className="pr-10">
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        {children}
+      </DialogContent>
+    </Dialog>
   );
 }
 
 function ModalError({ message }) {
   if (!message) return null;
   return (
-    <div role="alert" className="mb-4 flex items-start gap-2 rounded-lg border border-red-400/18 bg-red-400/[0.055] px-3 py-2.5 text-xs leading-5 text-red-200/80">
-      <AlertCircle size={14} className="mt-0.5 shrink-0" />
-      <span>{message}</span>
+    <div role="alert" className="flex items-start gap-2 rounded-md border border-destructive/35 bg-destructive/10 px-3 py-2.5 text-xs leading-5 text-destructive">
+      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+      <span className="break-words">{message}</span>
     </div>
+  );
+}
+
+function CreateBaseModal({ show, onClose, onSuccess }) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (show) {
+      setName('');
+      setDescription('');
+      setError('');
+    }
+  }, [show]);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (!name.trim()) {
+      setError('请输入知识库名称');
+      return;
+    }
+
+    setSubmitting(true);
+    setError('');
+    try {
+      const newBase = await knowledgeApi.createBase({
+        name: name.trim(),
+        description: description.trim() || null,
+      });
+      onSuccess(newBase);
+    } catch (err) {
+      setError(err.message || '创建失败');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <ModalFrame
+      show={show}
+      title="创建知识库"
+      description="新建一个独立的知识档案集合。"
+      onClose={onClose}
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <ModalError message={error} />
+        <div>
+          <label htmlFor="create-base-name" className="mb-2 block text-xs font-medium text-foreground">
+            名称 *
+          </label>
+          <Input
+            id="create-base-name"
+            value={name}
+            onChange={event => setName(event.target.value)}
+            maxLength={120}
+            placeholder="例如：游戏世界观设定"
+            autoFocus
+          />
+        </div>
+        <div>
+          <label htmlFor="create-base-description" className="mb-2 block text-xs font-medium text-foreground">
+            描述
+          </label>
+          <Textarea
+            id="create-base-description"
+            value={description}
+            onChange={event => setDescription(event.target.value)}
+            maxLength={2000}
+            rows={3}
+            placeholder="可选：简要描述该知识库的用途"
+          />
+        </div>
+        <DialogFooter className="border-t border-border pt-4">
+          <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+          <Button type="submit" disabled={submitting}>
+            {submitting && <Loader2 className="animate-spin" aria-hidden="true" />}
+            {submitting ? '创建中...' : '创建'}
+          </Button>
+        </DialogFooter>
+      </form>
+    </ModalFrame>
+  );
+}
+
+function EditBaseModal({ show, base, onClose, onSuccess }) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (show && base) {
+      setName(base.name || '');
+      setDescription(base.description || '');
+      setError('');
+    }
+  }, [show, base]);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    if (!base) return;
+    if (!name.trim()) {
+      setError('请输入知识库名称');
+      return;
+    }
+
+    setSubmitting(true);
+    setError('');
+    try {
+      const updated = await knowledgeApi.updateBase(base.knowledge_base_id, {
+        name: name.trim(),
+        description: description.trim() || null,
+      });
+      onSuccess(updated);
+    } catch (err) {
+      setError(err.message || '更新失败');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <ModalFrame
+      show={show && !!base}
+      title="编辑知识库"
+      description="修改档案名称与用途说明。"
+      onClose={onClose}
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <ModalError message={error} />
+        <div>
+          <label htmlFor="edit-base-name" className="mb-2 block text-xs font-medium text-foreground">
+            名称 *
+          </label>
+          <Input
+            id="edit-base-name"
+            value={name}
+            onChange={event => setName(event.target.value)}
+            maxLength={120}
+            autoFocus
+          />
+        </div>
+        <div>
+          <label htmlFor="edit-base-description" className="mb-2 block text-xs font-medium text-foreground">
+            描述
+          </label>
+          <Textarea
+            id="edit-base-description"
+            value={description}
+            onChange={event => setDescription(event.target.value)}
+            maxLength={2000}
+            rows={3}
+          />
+        </div>
+        <DialogFooter className="border-t border-border pt-4">
+          <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+          <Button type="submit" disabled={submitting}>
+            {submitting && <Loader2 className="animate-spin" aria-hidden="true" />}
+            {submitting ? '保存中...' : '保存'}
+          </Button>
+        </DialogFooter>
+      </form>
+    </ModalFrame>
   );
 }
 
@@ -1260,8 +1226,16 @@ function BindingModal({ show, base, onClose, onSuccess }) {
     if (!show || !base) return;
     const bindings = base.bindings || [];
     setGlobalEnabled(bindings.some(binding => binding.target_type === 'global'));
-    setCharacterIds(bindings.filter(binding => binding.target_type === 'character').map(binding => binding.target_id));
-    setGroupIds(bindings.filter(binding => binding.target_type === 'group_thread').map(binding => binding.target_id));
+    setCharacterIds(
+      bindings
+        .filter(binding => binding.target_type === 'character')
+        .map(binding => binding.target_id)
+    );
+    setGroupIds(
+      bindings
+        .filter(binding => binding.target_type === 'group_thread')
+        .map(binding => binding.target_id)
+    );
     setError('');
     setLoading(true);
     knowledgeApi.getBindingTargets()
@@ -1303,26 +1277,29 @@ function BindingModal({ show, base, onClose, onSuccess }) {
       title="管理绑定"
       description="决定该知识库在哪些对话上下文中参与检索。"
       onClose={onClose}
-      maxWidth="max-w-2xl"
+      className="max-w-2xl"
     >
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} className="space-y-5">
         <ModalError message={error} />
         {loading ? (
-          <div className="flex min-h-44 items-center justify-center gap-2 text-sm text-cyber-green/45">
-            <Loader2 size={17} className="animate-spin" /> 加载绑定目标...
+          <div className="flex min-h-44 items-center justify-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            加载绑定目标...
           </div>
         ) : (
-          <div className="space-y-5">
-            <label className="flex min-h-[48px] cursor-pointer items-center gap-3 rounded-lg border border-amber-400/14 bg-amber-400/[0.035] px-3 py-2.5 hover:bg-amber-400/[0.06]">
+          <>
+            <label className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md border border-border bg-muted/35 px-3 py-2.5">
               <input
                 type="checkbox"
                 checked={globalEnabled}
                 onChange={event => setGlobalEnabled(event.target.checked)}
-                className="h-4 w-4 accent-[#A7EF9E]"
+                className="h-5 w-5 shrink-0 accent-primary"
               />
               <span>
-                <span className="block text-sm font-bold text-amber-100/85">全局生效</span>
-                <span className="mt-0.5 block text-[11px] text-zinc-400/65">所有单聊和群聊上下文均可使用</span>
+                <span className="block text-sm font-medium text-foreground">全局生效</span>
+                <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+                  所有单聊和群聊上下文均可使用
+                </span>
               </span>
             </label>
 
@@ -1342,16 +1319,18 @@ function BindingModal({ show, base, onClose, onSuccess }) {
               selectedIds={groupIds}
               onToggle={id => toggleId(setGroupIds, groupIds, id)}
             />
-          </div>
+          </>
         )}
 
-        <div className="mt-5 flex flex-col-reverse gap-2 border-t border-white/[0.06] pt-4 sm:flex-row sm:justify-end">
-          <button type="button" onClick={onClose} className="min-h-[44px] rounded-lg border border-white/10 px-4 text-sm text-zinc-300/70 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20">取消</button>
-          <button type="submit" disabled={loading || submitting} className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-cyber-green/30 bg-cyber-green/10 px-4 text-sm font-bold text-cyber-green hover:bg-cyber-green/18 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40 disabled:cursor-not-allowed disabled:opacity-45">
-            {submitting ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
+        <DialogFooter className="border-t border-border pt-4">
+          <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+          <Button type="submit" disabled={loading || submitting}>
+            {submitting
+              ? <Loader2 className="animate-spin" aria-hidden="true" />
+              : <Link2 aria-hidden="true" />}
             {submitting ? '保存中...' : '保存绑定'}
-          </button>
-        </div>
+          </Button>
+        </DialogFooter>
       </form>
     </ModalFrame>
   );
@@ -1360,19 +1339,31 @@ function BindingModal({ show, base, onClose, onSuccess }) {
 function BindingTargetList({ title, emptyText, items, idKey, selectedIds, onToggle }) {
   return (
     <fieldset>
-      <legend className="mb-2 text-xs font-bold tracking-wider text-zinc-300">{title}</legend>
+      <legend className="mb-2 font-archive-serif text-base font-semibold text-foreground">
+        {title}
+      </legend>
       {items.length === 0 ? (
-        <p className="rounded-lg border border-white/[0.06] px-3 py-4 text-xs text-zinc-500">{emptyText}</p>
+        <p className="border-y border-border px-3 py-4 text-xs text-muted-foreground">{emptyText}</p>
       ) : (
-        <div className="grid max-h-44 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+        <div className="grid max-h-48 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
           {items.map(item => {
             const id = item[idKey];
             return (
-              <label key={id} className="flex min-h-[48px] cursor-pointer items-center gap-3 rounded-lg border border-white/[0.07] bg-white/[0.02] px-3 py-2 hover:border-cyber-green/18 hover:bg-cyber-green/[0.035]">
-                <input type="checkbox" checked={selectedIds.includes(id)} onChange={() => onToggle(id)} className="h-4 w-4 shrink-0 accent-[#9AD7FF]" />
+              <label
+                key={id}
+                className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md border border-border px-3 py-2 transition-colors hover:bg-accent"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(id)}
+                  onChange={() => onToggle(id)}
+                  className="h-5 w-5 shrink-0 accent-primary"
+                />
                 <span className="min-w-0">
-                  <span className="block truncate text-sm text-zinc-200/85">{item.name || id}</span>
-                  <span className="mt-0.5 block truncate text-[10px] text-zinc-500">{id}</span>
+                  <span className="block break-words text-sm text-foreground">{item.name || id}</span>
+                  <span className="mt-0.5 block break-all font-archive-mono text-[10px] text-muted-foreground">
+                    {id}
+                  </span>
                 </span>
               </label>
             );
@@ -1419,8 +1410,13 @@ function UploadDocumentModal({ show, base, onClose, onSuccess }) {
   }
 
   return (
-    <ModalFrame show={show && !!base} title="上传文档" description={`添加文件到「${base?.name || ''}」`} onClose={onClose}>
-      <form onSubmit={handleSubmit}>
+    <ModalFrame
+      show={show && !!base}
+      title="上传文档"
+      description={`添加文件到「${base?.name || ''}」`}
+      onClose={onClose}
+    >
+      <form onSubmit={handleSubmit} className="space-y-5">
         <ModalError message={error} />
         <label htmlFor="knowledge-upload-file" className="sr-only">选择要上传的文档</label>
         <input
@@ -1434,20 +1430,30 @@ function UploadDocumentModal({ show, base, onClose, onSuccess }) {
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="flex min-h-48 w-full flex-col items-center justify-center rounded-lg border border-dashed border-cyber-green/22 bg-cyber-green/[0.025] px-5 text-center transition-colors hover:border-cyber-green/40 hover:bg-cyber-green/[0.05] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40"
+          className="flex min-h-48 w-full flex-col items-center justify-center rounded-md border border-dashed border-border bg-muted/25 px-5 text-center transition-colors hover:border-primary/45 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <FileUp size={30} className="text-cyber-green/65" />
-          <span className="mt-3 max-w-full break-all text-sm font-bold text-zinc-200/85">{file ? file.name : '选择文件'}</span>
-          <span className="mt-2 text-[11px] leading-5 text-zinc-400/60">TXT、MD、PDF、DOCX，服务器默认上限 10 MB</span>
-          {file && <span className="mt-1 text-[10px] text-cyber-green/55">{(file.size / 1024 / 1024).toFixed(2)} MB</span>}
+          <FileUp className="h-8 w-8 text-primary" aria-hidden="true" />
+          <span className="mt-3 max-w-full break-all text-sm font-medium text-foreground">
+            {file ? file.name : '选择文件'}
+          </span>
+          <span className="mt-2 text-xs leading-5 text-muted-foreground">
+            TXT、MD、PDF、DOCX，服务器默认上限 10 MB
+          </span>
+          {file && (
+            <span className="mt-1 font-archive-mono text-[10px] tabular-nums text-muted-foreground">
+              {(file.size / 1024 / 1024).toFixed(2)} MB
+            </span>
+          )}
         </button>
-        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          <button type="button" onClick={onClose} className="min-h-[44px] rounded-lg border border-white/10 px-4 text-sm text-zinc-300/70 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20">取消</button>
-          <button type="submit" disabled={submitting || !file} className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-cyber-green/30 bg-cyber-green/10 px-4 text-sm font-bold text-cyber-green hover:bg-cyber-green/18 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40 disabled:cursor-not-allowed disabled:opacity-45">
-            {submitting ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+        <DialogFooter className="border-t border-border pt-4">
+          <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+          <Button type="submit" disabled={submitting || !file}>
+            {submitting
+              ? <Loader2 className="animate-spin" aria-hidden="true" />
+              : <Upload aria-hidden="true" />}
             {submitting ? '上传中...' : '上传并处理'}
-          </button>
-        </div>
+          </Button>
+        </DialogFooter>
       </form>
     </ModalFrame>
   );
@@ -1476,7 +1482,10 @@ function PasteDocumentModal({ show, base, onClose, onSuccess }) {
     setSubmitting(true);
     setError('');
     try {
-      await knowledgeApi.pasteDocument(base.knowledge_base_id, { title: title.trim(), text: text.trim() });
+      await knowledgeApi.pasteDocument(base.knowledge_base_id, {
+        title: title.trim(),
+        text: text.trim(),
+      });
       await onSuccess();
     } catch (err) {
       setError(err.message || '添加文本失败');
@@ -1486,25 +1495,52 @@ function PasteDocumentModal({ show, base, onClose, onSuccess }) {
   }
 
   return (
-    <ModalFrame show={show && !!base} title="粘贴文本" description={`直接添加纯文本到「${base?.name || ''}」`} onClose={onClose} maxWidth="max-w-2xl">
-      <form onSubmit={handleSubmit}>
+    <ModalFrame
+      show={show && !!base}
+      title="粘贴文本"
+      description={`直接添加纯文本到「${base?.name || ''}」`}
+      onClose={onClose}
+      className="max-w-2xl"
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
         <ModalError message={error} />
-        <label className="block text-xs font-bold text-zinc-300">
-          文档标题
-          <input value={title} onChange={event => setTitle(event.target.value)} maxLength={180} autoFocus placeholder="例如：北区交通规则" className="mt-2 min-h-[44px] w-full rounded-lg border border-cyber-green/12 bg-cyber-surface/70 px-3 text-sm font-normal text-cyber-green/85 outline-none placeholder:text-cyber-green/22 focus:border-cyber-green/42 focus:ring-2 focus:ring-cyber-green/10" />
-        </label>
-        <label className="mt-4 block text-xs font-bold text-zinc-300">
-          文档内容
-          <textarea value={text} onChange={event => setText(event.target.value)} rows={11} placeholder="粘贴需要索引的知识内容..." className="mt-2 w-full resize-y rounded-lg border border-cyber-green/12 bg-cyber-surface/70 px-3 py-3 text-sm font-normal leading-6 text-cyber-green/85 outline-none placeholder:text-cyber-green/22 focus:border-cyber-green/42 focus:ring-2 focus:ring-cyber-green/10" />
-        </label>
-        <div className="mt-2 text-right text-[10px] text-zinc-500">{text.length.toLocaleString()} 字符</div>
-        <div className="mt-5 flex flex-col-reverse gap-2 border-t border-white/[0.06] pt-4 sm:flex-row sm:justify-end">
-          <button type="button" onClick={onClose} className="min-h-[44px] rounded-lg border border-white/10 px-4 text-sm text-zinc-300/70 hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20">取消</button>
-          <button type="submit" disabled={submitting} className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-cyber-green/30 bg-cyber-green/10 px-4 text-sm font-bold text-cyber-green hover:bg-cyber-green/18 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40 disabled:cursor-not-allowed disabled:opacity-45">
-            {submitting ? <Loader2 size={14} className="animate-spin" /> : <PenTool size={14} />}
-            {submitting ? '提交中...' : '添加并处理'}
-          </button>
+        <div>
+          <label htmlFor="paste-document-title" className="mb-2 block text-xs font-medium text-foreground">
+            文档标题
+          </label>
+          <Input
+            id="paste-document-title"
+            value={title}
+            onChange={event => setTitle(event.target.value)}
+            maxLength={180}
+            autoFocus
+            placeholder="例如：北区交通规则"
+          />
         </div>
+        <div>
+          <label htmlFor="paste-document-text" className="mb-2 block text-xs font-medium text-foreground">
+            文档内容
+          </label>
+          <Textarea
+            id="paste-document-text"
+            value={text}
+            onChange={event => setText(event.target.value)}
+            rows={11}
+            placeholder="粘贴需要索引的知识内容..."
+          />
+          <div className="mt-2 text-right font-archive-mono text-[10px] tabular-nums text-muted-foreground">
+            {text.length.toLocaleString()} 字符
+          </div>
+        </div>
+        <DialogFooter className="border-t border-border pt-4">
+          <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+          <Button type="submit" disabled={submitting}>
+            {submitting
+              ? <Loader2 className="animate-spin" aria-hidden="true" />
+              : <PenTool aria-hidden="true" />}
+            {submitting ? '提交中...' : '添加并处理'}
+          </Button>
+        </DialogFooter>
       </form>
     </ModalFrame>
   );
@@ -1562,57 +1598,113 @@ function PreviewModal({ show, base, onClose }) {
   }
 
   return (
-    <ModalFrame show={show && !!base} title="检索预览" description={`仅检索「${base?.name || ''}」中当前上下文可访问的已就绪内容。`} onClose={onClose} maxWidth="max-w-3xl">
-      <form onSubmit={handleSubmit}>
+    <ModalFrame
+      show={show && !!base}
+      title="检索预览"
+      description={`仅检索「${base?.name || ''}」中当前上下文可访问的已就绪内容。`}
+      onClose={onClose}
+      className="max-w-3xl"
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
         <ModalError message={error} />
         <div className="grid gap-3 sm:grid-cols-2">
-          <label className="text-xs font-bold text-zinc-300">
-            角色上下文
-            <select value={characterId} onChange={event => setCharacterId(event.target.value)} disabled={targetsLoading} className="mt-2 min-h-[44px] w-full rounded-lg border border-white/10 bg-[#11131a] px-3 text-sm font-normal text-zinc-200 outline-none focus:border-cyber-green/35 focus:ring-2 focus:ring-cyber-green/10 disabled:opacity-50">
-              <option value="">不指定角色</option>
-              {targets.characters.map(item => <option key={item.character_id} value={item.character_id}>{item.name}</option>)}
-            </select>
-          </label>
-          <label className="text-xs font-bold text-zinc-300">
-            群聊上下文
-            <select value={groupThreadId} onChange={event => setGroupThreadId(event.target.value)} disabled={targetsLoading} className="mt-2 min-h-[44px] w-full rounded-lg border border-white/10 bg-[#11131a] px-3 text-sm font-normal text-zinc-200 outline-none focus:border-cyber-green/35 focus:ring-2 focus:ring-cyber-green/10 disabled:opacity-50">
-              <option value="">不指定群聊</option>
-              {targets.group_threads.map(item => <option key={item.group_thread_id} value={item.group_thread_id}>{item.name}</option>)}
-            </select>
-          </label>
-        </div>
-        <label className="mt-4 block text-xs font-bold text-zinc-300">
-          检索内容
-          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-            <input value={query} onChange={event => setQuery(event.target.value)} maxLength={4000} autoFocus placeholder="输入一个问题或事实关键词" className="min-h-[44px] min-w-0 flex-1 rounded-lg border border-cyber-green/12 bg-cyber-surface/70 px-3 text-sm font-normal text-cyber-green/85 outline-none placeholder:text-cyber-green/22 focus:border-cyber-green/42 focus:ring-2 focus:ring-cyber-green/10" />
-            <button type="submit" disabled={loading} className="inline-flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-lg border border-cyber-green/30 bg-cyber-green/10 px-5 text-sm font-bold text-cyber-green hover:bg-cyber-green/18 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/40 disabled:cursor-not-allowed disabled:opacity-45">
-              {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
-              {loading ? '检索中...' : '检索'}
-            </button>
+          <div>
+            <label className="mb-2 block text-xs font-medium text-foreground">角色上下文</label>
+            <Select
+              value={characterId || '__none__'}
+              onValueChange={value => setCharacterId(value === '__none__' ? '' : value)}
+              disabled={targetsLoading}
+            >
+              <SelectTrigger aria-label="角色上下文">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">不指定角色</SelectItem>
+                {targets.characters.map(item => (
+                  <SelectItem key={item.character_id} value={item.character_id}>
+                    {item.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-        </label>
+          <div>
+            <label className="mb-2 block text-xs font-medium text-foreground">群聊上下文</label>
+            <Select
+              value={groupThreadId || '__none__'}
+              onValueChange={value => setGroupThreadId(value === '__none__' ? '' : value)}
+              disabled={targetsLoading}
+            >
+              <SelectTrigger aria-label="群聊上下文">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">不指定群聊</SelectItem>
+                {targets.group_threads.map(item => (
+                  <SelectItem key={item.group_thread_id} value={item.group_thread_id}>
+                    {item.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <div>
+          <label htmlFor="knowledge-preview-query" className="mb-2 block text-xs font-medium text-foreground">
+            检索内容
+          </label>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Input
+              id="knowledge-preview-query"
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              maxLength={4000}
+              autoFocus
+              placeholder="输入一个问题或事实关键词"
+              className="min-w-0 flex-1"
+            />
+            <Button type="submit" disabled={loading} className="shrink-0">
+              {loading
+                ? <Loader2 className="animate-spin" aria-hidden="true" />
+                : <Search aria-hidden="true" />}
+              {loading ? '检索中...' : '检索'}
+            </Button>
+          </div>
+        </div>
       </form>
 
       {result && (
-        <section className="mt-5 border-t border-white/[0.06] pt-4" aria-live="polite">
+        <section className="border-t border-border pt-4" aria-live="polite">
           <div className="flex items-center justify-between gap-3">
-            <h3 className="text-xs font-bold tracking-wider text-zinc-300">命中结果</h3>
-            <span className="text-[10px] text-zinc-500">{(result.sources || []).length} 条</span>
+            <h3 className="font-archive-serif text-base font-semibold text-foreground">命中结果</h3>
+            <span className="font-archive-mono text-[10px] tabular-nums text-muted-foreground">
+              {(result.sources || []).length} 条
+            </span>
           </div>
           {(result.sources || []).length === 0 ? (
-            <div className="mt-3 rounded-lg border border-white/[0.07] px-4 py-8 text-center text-xs leading-5 text-zinc-500">当前绑定上下文中没有达到相似度阈值的已就绪内容。</div>
+            <div className="mt-3 border-y border-dashed border-border px-4 py-8 text-center text-xs leading-5 text-muted-foreground">
+              当前绑定上下文中没有达到相似度阈值的已就绪内容。
+            </div>
           ) : (
-            <div className="mt-3 space-y-2">
+            <div className="mt-3 divide-y divide-border border-y border-border">
               {result.sources.map(source => (
-                <article key={source.chunk_id} className="rounded-lg border border-white/[0.07] bg-white/[0.02] p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
+                <article key={source.chunk_id} className="py-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="truncate text-xs font-bold text-zinc-200/90">{source.document_name}</p>
-                      <p className="mt-0.5 truncate text-[10px] text-cyber-green/45">{source.knowledge_base_name}</p>
+                      <p className="break-words font-archive-serif text-sm font-semibold text-foreground">
+                        {source.document_name}
+                      </p>
+                      <p className="mt-0.5 break-words text-xs text-muted-foreground">
+                        {source.knowledge_base_name}
+                      </p>
                     </div>
-                    <span className="rounded-md border border-cyber-green/15 bg-cyber-green/[0.05] px-2 py-1 text-[10px] font-bold text-cyber-green/70">{Math.round(Number(source.similarity || 0) * 100)}%</span>
+                    <span className="rounded border border-border bg-muted/45 px-2 py-1 font-archive-mono text-[10px] font-medium tabular-nums text-foreground">
+                      {Math.round(Number(source.similarity || 0) * 100)}%
+                    </span>
                   </div>
-                  <p className="mt-3 whitespace-pre-wrap break-words text-xs leading-5 text-zinc-400/75">{source.excerpt}</p>
+                  <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-muted-foreground">
+                    {source.excerpt}
+                  </p>
                 </article>
               ))}
             </div>

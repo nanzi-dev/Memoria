@@ -1,6 +1,23 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, Check, ChevronLeft, ChevronRight, Upload, Download, RefreshCw } from 'lucide-react';
+import {
+  BookOpen,
+  Brain,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Fingerprint,
+  Handshake,
+  Loader2,
+  MessageSquare,
+  Power,
+  PowerOff,
+  RefreshCw,
+  Save,
+  Trash2,
+  Upload,
+} from 'lucide-react';
 import { characterAdmin } from '../api/memoria';
 import StepIdentity from '../components/editor/StepIdentity';
 import StepPersonality from '../components/editor/StepPersonality';
@@ -10,13 +27,16 @@ import StepInteraction from '../components/editor/StepInteraction';
 import { useDialog } from '../context/DialogContext';
 import { characterEditorPath } from '../utils/navigationState';
 import { createTimeoutController } from '../utils/timeoutController';
+import { useArchiveShell } from '@/archive/ArchiveShell';
+import ArchiveEditorWorkspace from '@/archive/ArchiveEditorWorkspace';
+import { Button } from '@/components/ui/button';
 
 const STEPS = [
-  { id: 'identity', label: '身份 Identity', Icon: null },
-  { id: 'personality', label: '性格 Personality', Icon: null },
-  { id: 'speech', label: '语言风格 Speech', Icon: null },
-  { id: 'background', label: '背景 Background', Icon: null },
-  { id: 'interaction', label: '交互规则 Rules', Icon: null },
+  { id: 'identity', label: '身份 Identity', description: '姓名、外貌与账户标识', Icon: Fingerprint },
+  { id: 'personality', label: '性格 Personality', description: '特质、价值观与禁忌', Icon: Brain },
+  { id: 'speech', label: '语言风格 Speech', description: '措辞、句式与角色语音', Icon: MessageSquare },
+  { id: 'background', label: '背景 Background', description: '往事、关系、秘密与目标', Icon: BookOpen },
+  { id: 'interaction', label: '交互规则 Rules', description: '互动边界与动作词库', Icon: Handshake },
 ];
 
 const SUPPORTED_I18N_LOCALES = ['zh-CN', 'en-US'];
@@ -126,6 +146,7 @@ export default function CharacterEditor() {
   const { characterId } = useParams();
   const navigate = useNavigate();
   const dialog = useDialog();
+  const { setPrimaryAction } = useArchiveShell();
   const fileInputRef = useRef(null);
   const navigationTimeoutRef = useRef(null);
   if (!navigationTimeoutRef.current) {
@@ -338,34 +359,39 @@ export default function CharacterEditor() {
     }
   }
 
+  const saveDisabled = saving || actionPending || loading
+    || Boolean(characterId && loadedCharacterId !== characterId);
+  const primaryAction = useMemo(() => (
+    <Button type="button" size="lg" onClick={handleSave} disabled={saveDisabled}>
+      {saving ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
+      {saving ? '保存中' : '保存角色'}
+    </Button>
+  ), [actionPending, characterId, formData, loadedCharacterId, loading, saving]);
+
+  useEffect(() => {
+    setPrimaryAction(primaryAction);
+    return () => setPrimaryAction(null);
+  }, [primaryAction, setPrimaryAction]);
+
   if (characterId && (loading || loadedCharacterId !== characterId) && !loadError) {
     return (
-      <div className="min-h-screen bg-cyber-bg flex items-center justify-center">
-        <Loader2 className="animate-spin text-cyber-green" size={32} />
+      <div className="flex min-h-[55vh] items-center justify-center text-muted-foreground" role="status">
+        <Loader2 className="h-7 w-7 animate-spin" aria-hidden="true" />
+        <span className="sr-only">正在加载角色档案</span>
       </div>
     );
   }
 
   if (loadError) {
     return (
-      <div className="min-h-dvh character-editor-page flex items-center justify-center px-4">
-        <div className="w-full max-w-md border border-red-400/30 bg-cyber-surface p-6 text-center">
-          <p className="font-mono text-sm text-red-300 break-words">{loadError}</p>
+      <div className="flex min-h-[55vh] items-center justify-center px-4">
+        <div className="w-full max-w-md border border-destructive/30 bg-card p-6 text-center" role="alert">
+          <p className="break-words text-sm text-destructive">{loadError}</p>
           <div className="mt-5 flex items-center justify-center gap-3">
-            <button
-              onClick={() => navigate('/')}
-              className="flex min-h-[40px] items-center gap-2 border border-cyber-green/20 px-3 font-mono text-sm text-cyber-green/70 hover:text-cyber-green"
-            >
-              <ArrowLeft size={16} />
-              Back
-            </button>
-            <button
-              onClick={() => setReloadVersion(version => version + 1)}
-              className="flex min-h-[40px] items-center gap-2 border border-cyber-green/40 bg-cyber-green/10 px-3 font-mono text-sm text-cyber-green hover:bg-cyber-green/20"
-            >
-              <RefreshCw size={16} />
-              Retry
-            </button>
+            <Button type="button" variant="outline" onClick={() => navigate('/')}>返回</Button>
+            <Button type="button" onClick={() => setReloadVersion(version => version + 1)}>
+              <RefreshCw aria-hidden="true" /> 重试
+            </Button>
           </div>
         </div>
       </div>
@@ -373,261 +399,233 @@ export default function CharacterEditor() {
   }
 
   const StepComponent = [StepIdentity, StepPersonality, StepSpeechStyle, StepBackground, StepInteraction][currentStep];
+  const currentStepMeta = STEPS[currentStep];
+  const displayName = formData.meta?.display_name || formData.meta?.name || '未命名角色';
+  const aliases = formData.meta?.aliases || [];
 
-  return (
-    <div className="min-h-dvh character-editor-page">
-      {/* Header */}
-      <div className="sticky top-0 z-20 bg-cyber-surface/90 backdrop-blur-xl border-b border-cyber-green/20 shadow-[0_10px_34px_rgba(0,0,0,0.22)]">
-        <div className="max-w-5xl mx-auto px-3 sm:px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-          <button
-            onClick={() => navigate('/')}
-            className="flex items-center gap-1 min-h-[40px] px-2 -ml-2 text-cyber-green/60 hover:text-cyber-green transition-colors font-mono text-sm"
-          >
-            <ArrowLeft size={16} />
-            Back
-          </button>
-          <h1 className="font-display text-base sm:text-lg text-cyber-green tracking-widest order-first basis-full text-center sm:order-none sm:basis-auto">
-            {characterId ? 'EDIT CHARACTER' : 'NEW CHARACTER'}
-          </h1>
-          <div className="flex items-center gap-2 overflow-x-auto max-w-full pb-0.5">
-            {characterId ? (
-              <button
-                onClick={handleExportFile}
-                className="flex items-center gap-1 min-h-[40px] px-3 py-1 text-xs font-mono text-cyber-green/70 hover:text-cyber-green border border-cyber-green/20 hover:border-cyber-green/40 rounded transition-colors"
-              >
-                <Download size={14} />
-                <span className="hidden sm:inline">Export JSON</span>
-              </button>
-            ) : (
-              <>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".json,application/json"
-                  onChange={handleImportFile}
-                  className="hidden"
-                />
-                <button
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-1 min-h-[40px] px-3 py-1 text-xs font-mono text-cyber-green/70 hover:text-cyber-green border border-cyber-green/20 hover:border-cyber-green/40 rounded transition-colors"
-                >
-                  <Upload size={14} />
-                  <span className="hidden sm:inline">Import JSON</span>
-                </button>
-              </>
-            )}
-            {characterId && (
-              <>
-                <button
-                  onClick={handleToggleActive}
-                  disabled={actionPending}
-                  className={`min-h-[40px] px-3 py-1 text-xs font-mono rounded transition-colors border ${
-                    isActive
-                      ? 'text-amber-400/70 hover:text-amber-400 border-amber-400/20 hover:border-amber-400/40'
-                      : 'text-green-400/70 hover:text-green-400 border-green-400/20 hover:border-green-400/40'
-                  } disabled:opacity-50`}
-                >
-                  {isActive ? 'Disable' : 'Enable'}
-                </button>
-                <button
-                  onClick={handleDelete}
-                  disabled={actionPending}
-                  className="min-h-[40px] px-3 py-1 text-xs font-mono text-red-400/60 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 rounded transition-colors disabled:opacity-50"
-                >
-                  Delete
-                </button>
-              </>
-            )}
-            <button
-              onClick={handleSave}
-              disabled={saving || actionPending}
-              className="flex items-center gap-1 min-h-[40px] px-4 py-1.5 bg-cyber-green/10 border border-cyber-green/30 text-cyber-green font-mono text-sm rounded hover:bg-cyber-green/20 transition-colors disabled:opacity-50"
-            >
-              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              Save
-            </button>
-          </div>
-        </div>
+  const notice = saveMessage ? (
+    <div
+      className={`mb-4 flex items-start gap-2 border px-3 py-3 text-sm ${
+        saveMessage.includes('Error')
+          ? 'border-destructive/30 bg-destructive/5 text-destructive'
+          : 'border-primary/30 bg-primary/5 text-foreground'
+      }`}
+      role={saveMessage.includes('Error') ? 'alert' : 'status'}
+      aria-live={saveMessage.includes('Error') ? 'assertive' : 'polite'}
+    >
+      {saveMessage.includes('Error')
+        ? <Trash2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+        : <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />}
+      <span>{saveMessage}</span>
+    </div>
+  ) : null;
 
-        {/* Step indicator */}
-        <div className="max-w-5xl mx-auto px-4 pb-3">
-          <div className="flex items-center justify-start lg:justify-between gap-3 overflow-x-auto pb-1">
-            {STEPS.map((step, idx) => (
-              <button
-                key={step.id}
-                onClick={() => setCurrentStep(idx)}
-              className={`shrink-0 flex items-center gap-2 min-h-[40px] px-3 py-1.5 rounded text-xs font-mono transition-all ${
-                  idx === currentStep
-                    ? 'bg-cyber-green/12 text-cyber-green border border-cyber-green/35 shadow-[0_0_18px_rgba(167,239,158,0.08)]'
-                    : idx < currentStep
-                    ? 'text-cyber-green/60 hover:text-cyber-green'
-                    : 'text-cyber-green/30'
-                }`}
-              >
-                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                  idx < currentStep ? 'bg-cyber-green/20 text-cyber-green' :
-                  idx === currentStep ? 'bg-cyber-green/25 text-cyber-green' :
-                  'bg-cyber-green/5 text-cyber-green/30'
-                }`}>
-                  {idx < currentStep ? <Check size={10} /> : idx + 1}
-                </span>
-                <span className="hidden sm:inline">{step.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+  const directory = (
+    <div className="p-3">
+      <div className="border-b border-border px-2 pb-3">
+        <p className="font-archive-mono text-[10px] uppercase text-muted-foreground">章节目录</p>
+        <p className="mt-1 truncate font-archive-serif text-base font-semibold text-foreground">{displayName}</p>
       </div>
-
-      {/* Save message */}
-      {saveMessage && (
-        <div className={`fixed top-16 left-1/2 -translate-x-1/2 z-30 max-w-[calc(100vw-2rem)] px-4 py-2 rounded font-mono text-sm text-center ${
-          saveMessage.includes('Error') ? 'bg-red-900/80 text-red-300' : 'bg-cyber-green/20 text-cyber-green'
-        }`}>
-          {saveMessage}
-        </div>
-      )}
-
-      {/* Form content - Paper folder style */}
-      <div className="relative z-10 max-w-4xl mx-auto px-3 sm:px-4 py-5 sm:py-8">
-        <div className="relative">
-          {/* Paper folder background */}
-          <div
-            className="rounded-lg shadow-2xl overflow-hidden"
-            style={{
-              background: 'linear-gradient(135deg, #3D3226 0%, #4A3B2C 30%, #3D3226 60%, #362B20 100%)',
-              border: '1px solid #5A4A38',
-              boxShadow: '0 20px 60px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05)',
-            }}
-          >
-            {/* Folder tab */}
-            <div
-              className="relative mx-3 sm:mx-8 -mt-0.5"
-              style={{
-                background: '#4A3B2C',
-                borderTopLeftRadius: 8,
-                borderTopRightRadius: 8,
-                border: '1px solid #5A4A38',
-                borderBottom: 'none',
-                padding: '8px 16px',
-                display: 'inline-block',
-              }}
-            >
-              <p className="text-center font-mono text-xs text-amber-800/80 tracking-wider">
-                ★ CHARACTER FILE ★
-              </p>
-            </div>
-
-            {/* Paper card */}
-            <div
-              className="mx-3 sm:mx-6 mb-4 sm:mb-6 rounded-sm"
-              style={{
-                background: 'linear-gradient(to bottom, #F5EDE0 0%, #EDE4D4 100%)',
-                border: '1px solid #C4B594',
-                boxShadow: '0 2px 12px rgba(0,0,0,0.3), inset 0 0 30px rgba(139,119,90,0.1)',
-              }}
-            >
-              {/* Card header */}
-              <div className="p-4 sm:p-6 pb-4 border-b" style={{ borderColor: '#C4B594' }}>
-                <div className="flex items-start sm:items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <h2 className="text-base sm:text-xl font-bold text-cyber-ink font-mono tracking-wide break-words">
-                      CHARACTER RESUME / PROFILE CARD
-                    </h2>
-                    <p className="text-xs text-amber-700/60 font-mono mt-1">
-                      CHARACTER RESUME / PROFILE CARD
-                    </p>
-                  </div>
-                  {/* Decorative compass/mark */}
-                  <div className="hidden sm:block text-cyber-ink/20 shrink-0">
-                    <svg width="40" height="40" viewBox="0 0 40 40">
-                      <circle cx="20" cy="20" r="18" fill="none" stroke="currentColor" strokeWidth="1" />
-                      <circle cx="20" cy="20" r="8" fill="none" stroke="currentColor" strokeWidth="0.5" />
-                      <line x1="20" y1="2" x2="20" y2="8" stroke="currentColor" strokeWidth="1" />
-                      <line x1="20" y1="32" x2="20" y2="38" stroke="currentColor" strokeWidth="1" />
-                      <line x1="2" y1="20" x2="8" y2="20" stroke="currentColor" strokeWidth="1" />
-                      <line x1="32" y1="20" x2="38" y2="20" stroke="currentColor" strokeWidth="1" />
-                      <polygon points="20,4 23,18 20,22 17,18" fill="currentColor" />
-                    </svg>
-                  </div>
-                </div>
-              </div>
-
-              {/* Form body */}
-              <div className="p-4 sm:p-6">
-                <StepComponent
-                  formData={formData}
-                  updateField={updateField}
-                  characterId={characterId}
-                  showAvatar
-                  showRelationships
-                  showVoice
-                />
-              </div>
-
-              {/* Card footer - status + stamp */}
-              <div className="p-4 sm:p-6 pt-4 border-t flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4" style={{ borderColor: '#C4B594' }}>
-                <div className="flex items-center gap-4">
-                  <div>
-                    <span className="text-[10px] text-amber-700/60 font-mono uppercase">最后更新</span>
-                    <p className="text-xs font-mono text-amber-700/80">
-                      {formData.meta?.last_updated || new Date().toISOString().split('T')[0]}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Red stamp */}
-                <div
-                  className="relative"
-                  style={{
-                    transform: 'rotate(-8deg)',
-                    border: isActive ? '2px solid #0B6E0B' : '2px solid #8B0000',
-                    borderRadius: 4,
-                    padding: '4px 12px',
-                    opacity: 0.6,
-                  }}
-                >
-                  <span className={`text-xs font-bold font-mono whitespace-nowrap ${isActive ? 'text-green-800/70' : 'text-red-900/70'}`}>
-                    {isActive ? '启用档案' : '禁用档案'}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Step navigation */}
-          <div className="flex items-center justify-between gap-2 mt-6">
+      <nav aria-label="角色编辑章节" className="mt-2 space-y-1">
+        {STEPS.map((step, index) => {
+          const Icon = step.Icon;
+          const active = index === currentStep;
+          const complete = index < currentStep;
+          return (
             <button
-              onClick={() => setCurrentStep(prev => Math.max(0, prev - 1))}
-              disabled={currentStep === 0}
-              className="flex items-center gap-1 min-h-[44px] px-3 sm:px-4 py-2 text-sm font-mono text-cyber-green/60 hover:text-cyber-green disabled:opacity-30 transition-colors"
+              key={step.id}
+              type="button"
+              onClick={() => setCurrentStep(index)}
+              aria-current={active ? 'step' : undefined}
+              className={`flex min-h-14 w-full items-center gap-3 rounded-md border px-3 py-2 text-left transition-colors ${
+                active
+                  ? 'border-primary/40 bg-primary/10 text-foreground'
+                  : 'border-transparent text-muted-foreground hover:border-border hover:bg-muted/35 hover:text-foreground'
+              }`}
             >
-              <ChevronLeft size={16} />
-              Previous
+              <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border ${
+                active || complete ? 'border-primary/35 bg-background text-primary' : 'border-border bg-background'
+              }`}>
+                {complete ? <Check className="h-4 w-4" aria-hidden="true" /> : <Icon className="h-4 w-4" aria-hidden="true" />}
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-medium">{step.label}</span>
+                <span className="mt-0.5 hidden truncate text-[10px] text-muted-foreground lg:block">{step.description}</span>
+              </span>
             </button>
-            <span className="text-xs font-mono text-cyber-green/40 whitespace-nowrap">
-              Step {currentStep + 1} of {STEPS.length}
-            </span>
-            {currentStep < STEPS.length - 1 ? (
-              <button
-                onClick={() => setCurrentStep(prev => Math.min(STEPS.length - 1, prev + 1))}
-                className="flex items-center gap-1 min-h-[44px] px-3 sm:px-4 py-2 text-sm font-mono text-cyber-green/60 hover:text-cyber-green transition-colors"
+          );
+        })}
+      </nav>
+
+      <div className="mt-4 border-t border-border pt-4">
+        <p className="px-2 text-[10px] uppercase text-muted-foreground">档案工具</p>
+        <div className="mt-2 grid gap-2">
+          {characterId ? (
+            <Button type="button" variant="outline" onClick={handleExportFile} className="w-full justify-start">
+              <Download aria-hidden="true" /> 导出 JSON
+            </Button>
+          ) : (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json,application/json"
+                onChange={handleImportFile}
+                className="hidden"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full justify-start"
               >
-                Next
-                <ChevronRight size={16} />
-              </button>
-            ) : (
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="flex items-center gap-1 min-h-[44px] px-4 sm:px-6 py-2 bg-cyber-green/10 border border-cyber-green/30 text-cyber-green font-mono text-sm rounded hover:bg-cyber-green/20 transition-colors"
+                <Upload aria-hidden="true" /> 导入 JSON
+              </Button>
+            </>
+          )}
+          {characterId && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleToggleActive}
+                disabled={actionPending}
+                className="w-full justify-start"
               >
-                {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                Finish & Save
-              </button>
-            )}
-          </div>
+                {isActive ? <PowerOff aria-hidden="true" /> : <Power aria-hidden="true" />}
+                {isActive ? '停用角色' : '启用角色'}
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={handleDelete}
+                disabled={actionPending}
+                className="w-full justify-start"
+              >
+                <Trash2 aria-hidden="true" /> 永久删除
+              </Button>
+            </>
+          )}
         </div>
       </div>
     </div>
+  );
+
+  const editor = (
+    <div className="min-w-0">
+      <div className="flex min-h-20 items-center gap-3 border-b border-border bg-muted/20 px-4 py-4 sm:px-6">
+        <span className="font-archive-mono text-xs tabular-nums text-muted-foreground">
+          {String(currentStep + 1).padStart(2, '0')}
+        </span>
+        <div className="min-w-0">
+          <h2 className="font-archive-serif text-lg font-semibold text-foreground">{currentStepMeta.label}</h2>
+          <p className="mt-1 text-xs text-muted-foreground">{currentStepMeta.description}</p>
+        </div>
+      </div>
+      <div className="min-h-[520px] min-w-0 p-4 font-archive-serif sm:p-6">
+        <StepComponent
+          formData={formData}
+          updateField={updateField}
+          characterId={characterId}
+          showAvatar
+          showRelationships
+          showVoice
+        />
+      </div>
+      <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-4 sm:px-6">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => setCurrentStep(prev => Math.max(0, prev - 1))}
+          disabled={currentStep === 0}
+        >
+          <ChevronLeft aria-hidden="true" /> 上一章
+        </Button>
+        <span className="font-archive-mono text-xs tabular-nums text-muted-foreground">
+          {currentStep + 1} / {STEPS.length}
+        </span>
+        {currentStep < STEPS.length - 1 ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setCurrentStep(prev => Math.min(STEPS.length - 1, prev + 1))}
+          >
+            下一章 <ChevronRight aria-hidden="true" />
+          </Button>
+        ) : (
+          <Button type="button" onClick={handleSave} disabled={saveDisabled}>
+            {saving ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
+            保存
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+
+  const summary = (
+    <div className="p-4">
+      <div className="flex items-start gap-3 border-b border-border pb-4">
+        <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted/35">
+          {formData.avatar_url ? (
+            <img src={formData.avatar_url} alt="" className="h-full w-full object-cover" />
+          ) : (
+            <Fingerprint className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
+          )}
+        </div>
+        <div className="min-w-0">
+          <h2 className="truncate font-archive-serif text-base font-semibold text-foreground">{displayName}</h2>
+          <p className="mt-1 break-all font-archive-mono text-[10px] text-muted-foreground">
+            {formData.character_id || '保存时自动生成 ID'}
+          </p>
+        </div>
+      </div>
+      <dl className="text-xs">
+        {[
+          ['状态', isActive ? '启用' : '停用', false],
+          ['版本', formData.version || '1.0.0', true],
+          ['当前章节', `${currentStep + 1} / ${STEPS.length}`, true],
+          ['姓名', formData.meta?.name || '未填写', false],
+          ['职业', formData.identity?.occupation || '未填写', false],
+          ['语言', formData.speech_style?.language || '未填写', true],
+          ['别名', aliases.length, true],
+          ['最后更新', formData.meta?.last_updated || '尚未保存', true],
+        ].map(([label, value, mono]) => (
+          <div key={label} className="grid grid-cols-[80px_minmax(0,1fr)] gap-3 border-b border-border py-3 last:border-b-0">
+            <dt className="text-muted-foreground">{label}</dt>
+            <dd className={`min-w-0 break-words text-right text-foreground ${mono ? 'font-archive-mono tabular-nums' : ''}`}>
+              {value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <div className="mt-4 border border-border bg-muted/25 p-3">
+        <p className="text-xs font-medium text-foreground">角色卡摘要</p>
+        <p className="mt-2 font-archive-serif text-sm leading-6 text-muted-foreground">
+          {formData.identity?.core_identity_summary
+            || formData.identity?.appearance
+            || '在身份章节写下角色的核心侧写。'}
+        </p>
+      </div>
+    </div>
+  );
+
+  const mobileAction = (
+    <Button type="button" size="lg" onClick={handleSave} disabled={saveDisabled} className="w-full">
+      {saving ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
+      {saving ? '保存中' : '保存角色'}
+    </Button>
+  );
+
+  return (
+    <ArchiveEditorWorkspace
+      indexLabel={characterId ? 'Character archive / edit' : 'Character archive / new'}
+      title={characterId ? '编辑角色档案' : '新建角色档案'}
+      description="按章节整理角色卡，并在右侧实时核对身份、版本与状态。"
+      directory={directory}
+      editor={editor}
+      summary={summary}
+      mobileAction={mobileAction}
+      notice={notice}
+    />
   );
 }

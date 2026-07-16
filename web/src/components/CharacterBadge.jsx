@@ -1,10 +1,37 @@
 import { useNavigate } from 'react-router-dom';
-import { memo, useMemo } from 'react';
-import Lanyard from './Lanyard';
+import { lazy, memo, Suspense, useMemo } from 'react';
+import './Lanyard.css';
 import {
   characterEditorPath,
   isActivationKey,
 } from '../utils/navigationState';
+
+const Lanyard = lazy(() => import('./Lanyard'));
+
+function LanyardFallback({ characterInfo, className = '' }) {
+  const { avatarUrl, name } = characterInfo;
+
+  return (
+    <div className={`lanyard-wrapper rounded-[28px] ${className}`} aria-hidden="true">
+      <div className="lanyard-preview">
+        <div className="lanyard-preview-band" />
+        <div className="lanyard-preview-card">
+          <div className="lanyard-preview-name">{name || 'UNNAMED'}</div>
+          <div className="lanyard-preview-rule" />
+          <div className="lanyard-preview-avatar">
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="" draggable="false" />
+            ) : (
+              <span>?</span>
+            )}
+          </div>
+          <div className="lanyard-preview-brand">MEMORIA</div>
+          <div className="lanyard-preview-tagline">Where memories become stories.</div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function CharacterBadge({ character, onClick, isActive = true }) {
   const navigate = useNavigate();
@@ -14,6 +41,9 @@ function CharacterBadge({ character, onClick, isActive = true }) {
     name: character.name || character.display_name || character.character_id,
     gender: character.gender || null,
   }), [character]);
+  const lanyardClassName = `transition-[filter,transform] duration-300 ${
+    isActive ? 'group-hover:scale-[1.01] group-hover:drop-shadow-[0_0_28px_rgba(167,239,158,0.18)]' : ''
+  }`;
 
   const handleClick = () => {
     if (onClick) onClick(character);
@@ -48,12 +78,12 @@ function CharacterBadge({ character, onClick, isActive = true }) {
         tabIndex={0}
         aria-label={`编辑角色 ${characterInfo.name}`}
       >
-        <Lanyard
-          characterInfo={characterInfo}
-          className={`transition-[filter,transform] duration-300 ${
-            isActive ? 'group-hover:scale-[1.01] group-hover:drop-shadow-[0_0_28px_rgba(167,239,158,0.18)]' : ''
-          }`}
-        />
+        <Suspense fallback={<LanyardFallback characterInfo={characterInfo} className={lanyardClassName} />}>
+          <Lanyard
+            characterInfo={characterInfo}
+            className={lanyardClassName}
+          />
+        </Suspense>
       </div>
     </div>
   );

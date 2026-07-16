@@ -1,7 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useUser } from '../context/UserContext';
-import { userApi } from '../api/memoria';
 import {
   AlertCircle,
   CalendarClock,
@@ -12,16 +10,40 @@ import {
   Link,
   Loader2,
   LogOut,
+  Mic,
   Pause,
   RotateCw,
+  Save,
   Sunrise,
   Upload,
   User,
-  X,
   Volume2,
-  Mic,
-  Save,
 } from 'lucide-react';
+
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs';
+import { userApi } from '../api/memoria';
+import { useUser } from '../context/UserContext';
 
 const GENDERS = [
   { value: 'unknown', label: '保密' },
@@ -93,6 +115,46 @@ function nextMorningLocal(date) {
   return worldDateTimeInput(target);
 }
 
+function PreferenceSwitch({
+  checked,
+  description,
+  disabled,
+  icon: Icon,
+  label,
+  onCheckedChange,
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onCheckedChange(!checked)}
+      disabled={disabled}
+      className="flex min-h-14 w-full min-w-0 items-center justify-between gap-3 rounded-lg border border-border bg-card/55 px-3 py-2 text-left transition-colors duration-200 hover:border-primary/40 hover:bg-accent disabled:cursor-not-allowed disabled:opacity-45"
+    >
+      <span className="flex min-w-0 items-center gap-3">
+        <Icon className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+        <span className="min-w-0">
+          <span className="block text-sm text-foreground">{label}</span>
+          <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">{description}</span>
+        </span>
+      </span>
+      <span
+        className={`relative h-7 w-12 shrink-0 rounded-md border transition-colors duration-200 ${
+          checked ? 'border-primary/60 bg-primary/25' : 'border-border bg-muted'
+        }`}
+        aria-hidden="true"
+      >
+        <span
+          className={`absolute top-1 h-5 w-5 rounded-sm transition-[left,background-color] duration-200 ${
+            checked ? 'left-6 bg-primary' : 'left-1 bg-muted-foreground'
+          }`}
+        />
+      </span>
+    </button>
+  );
+}
+
 export default function UserSettingsModal({ onClose }) {
   const navigate = useNavigate();
   const {
@@ -126,23 +188,13 @@ export default function UserSettingsModal({ onClose }) {
   const fileRef = useRef(null);
   const usernameRef = useRef(null);
 
-  // Per-field validation
   const [usernameError, setUsernameError] = useState(null);
 
-  // Auto-clear success after 4s
   useEffect(() => {
     if (!success) return;
     const t = setTimeout(() => setSuccess(null), 4000);
     return () => clearTimeout(t);
   }, [success]);
-
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
-  }, []);
 
   useEffect(() => {
     if (!worldClock) return;
@@ -195,7 +247,6 @@ export default function UserSettingsModal({ onClose }) {
       setApiError(err.message);
     } finally {
       setLoading(false);
-      // Reset file input so same file can be re-selected
       if (fileRef.current) fileRef.current.value = '';
     }
   };
@@ -318,472 +369,460 @@ export default function UserSettingsModal({ onClose }) {
   };
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-0 sm:p-4">
-      <div className="absolute inset-0 bg-black/75 backdrop-blur-sm" onClick={onClose} />
+    <Dialog open={true} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="flex h-dvh w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none border-0 p-0 sm:h-auto sm:max-h-[min(90dvh,800px)] sm:w-[calc(100%-2rem)] sm:max-w-2xl sm:rounded-lg sm:border">
+        <DialogHeader className="shrink-0 border-b border-border px-4 py-4 pr-16 sm:px-6 sm:py-5 sm:pr-16">
+          <DialogTitle>用户设置</DialogTitle>
+          <DialogDescription>
+            管理账户资料、世界时间和语音交互偏好。
+          </DialogDescription>
+        </DialogHeader>
 
-      <div
-        className="relative flex h-dvh w-full flex-col overflow-hidden border-cyber-green/20 bg-[#0d0d14] font-mono shadow-[0_0_60px_rgba(167,239,158,0.06)] sm:h-auto sm:max-h-[min(88dvh,760px)] sm:max-w-xl sm:rounded-lg sm:border"
-        role="dialog"
-        aria-modal="true"
-        aria-label="用户设置"
-      >
-        {/* Header */}
-        <div className="flex min-h-16 items-center justify-between border-b border-cyber-green/10 px-4 sm:px-5">
-          <h2 className="text-sm font-bold text-cyber-green">用户设置</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-11 w-11 items-center justify-center rounded-lg text-cyber-green/35 transition-colors hover:bg-cyber-green/5 hover:text-cyber-green/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-green/30"
-            aria-label="关闭"
+        {(apiError || success) && (
+          <div className="shrink-0 px-4 pt-3 sm:px-6">
+            {apiError ? (
+              <div
+                className="flex min-h-11 items-start gap-2 rounded-md border border-destructive/35 bg-destructive/10 px-3 py-2 text-sm leading-6 text-destructive"
+                role="alert"
+                aria-live="assertive"
+                aria-atomic="true"
+              >
+                <AlertCircle className="mt-1 h-4 w-4 shrink-0" aria-hidden="true" />
+                <span className="min-w-0 break-words">{apiError}</span>
+              </div>
+            ) : (
+              <div
+                className="flex min-h-11 items-center gap-2 rounded-md border border-primary/35 bg-primary/10 px-3 py-2 text-sm text-foreground"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                <span>{success}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        <Tabs
+          value={activeSection}
+          onValueChange={setActiveSection}
+          className="flex min-h-0 min-w-0 flex-1 flex-col"
+        >
+          <TabsList className="mx-4 mt-3 grid min-h-12 shrink-0 grid-cols-3 sm:mx-6" aria-label="设置分类">
+            <TabsTrigger value="account" className="min-h-11 min-w-0 gap-2 px-2">
+              <User className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="truncate">账户</span>
+            </TabsTrigger>
+            <TabsTrigger value="clock" className="min-h-11 min-w-0 gap-2 px-2">
+              <CalendarClock className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="truncate">世界时间</span>
+            </TabsTrigger>
+            <TabsTrigger value="speech" className="min-h-11 min-w-0 gap-2 px-2">
+              <Volume2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+              <span className="truncate">语音</span>
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent
+            value="account"
+            className="min-h-0 min-w-0 flex-1 space-y-5 overflow-x-hidden overflow-y-auto px-4 pb-6 pt-3 sm:px-6"
           >
-            <X size={18} />
-          </button>
-        </div>
+            <section className="rounded-lg border border-border bg-card/55 p-4">
+              <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
+                    {user?.role_summary?.avatar_url ? (
+                      <img
+                        src={user.role_summary.avatar_url}
+                        alt={`${user.role_summary.display_name}的扮演头像`}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <Contact className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs text-muted-foreground">扮演身份</div>
+                    <div className="mt-1 truncate text-sm font-medium text-foreground">
+                      {user?.role_summary?.display_name || user?.username || '未设置'}
+                    </div>
+                    <div className="mt-1 truncate font-archive-mono text-[10px] tabular-nums text-muted-foreground">
+                      {user?.role_summary?.node_id || '-'}
+                    </div>
+                  </div>
+                </div>
+                <Button type="button" size="lg" variant="outline" onClick={handleOpenPersona}>
+                  <Edit3 aria-hidden="true" />
+                  编辑
+                </Button>
+              </div>
+            </section>
 
-        <nav className="grid grid-cols-3 border-b border-white/[0.06] bg-black/15 px-3 sm:px-5" aria-label="设置分类">
-          {[
-            { id: 'account', label: '账户', icon: User },
-            { id: 'clock', label: '世界时间', icon: CalendarClock },
-            { id: 'speech', label: '语音', icon: Volume2 },
-          ].map(item => {
-            const Icon = item.icon;
-            const active = activeSection === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setActiveSection(item.id)}
-                aria-current={active ? 'page' : undefined}
-                className={`relative flex min-h-12 items-center justify-center gap-2 border-b-2 px-2 text-[11px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cyber-green/30 ${
-                  active
-                    ? 'border-cyber-green text-cyber-green'
-                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
-                }`}
-              >
-                <Icon size={14} />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="flex-1 space-y-5 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable] sm:px-5 sm:py-5">
-          <section className={`${activeSection === 'account' ? '' : 'hidden'} rounded-lg border border-cyan-300/15 bg-cyan-300/[0.035] px-4 py-4`}>
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-cyan-300/30 bg-[#0b0b0c]">
-                  {user?.role_summary?.avatar_url ? (
-                    <img
-                      src={user.role_summary.avatar_url}
-                      alt={`${user.role_summary.display_name}的扮演头像`}
-                      className="h-full w-full object-cover"
-                    />
+            <fieldset className="min-w-0 rounded-lg border border-border p-4">
+              <legend className="px-1 text-sm font-medium text-foreground">账户头像</legend>
+              <div className="mt-1 flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
+                <div className="group relative h-20 w-20 shrink-0 overflow-hidden rounded-md border border-border bg-muted">
+                  {user?.avatar_url ? (
+                    <img src={user.avatar_url} alt="" className="h-full w-full object-cover" />
                   ) : (
-                    <Contact size={21} className="text-cyan-200/35" />
+                    <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                      <User className="h-7 w-7" aria-hidden="true" />
+                    </div>
                   )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => fileRef.current?.click()}
+                    className="absolute inset-0 h-auto min-h-11 w-auto rounded-none bg-background/80 opacity-100 sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100"
+                    aria-label="上传头像"
+                  >
+                    <Upload aria-hidden="true" />
+                    <span className="sr-only">上传</span>
+                  </Button>
                 </div>
-                <div className="min-w-0">
-                  <div className="text-[9px] uppercase tracking-wider text-cyan-200/45">扮演身份</div>
-                  <div className="mt-1 truncate text-sm text-zinc-200">
-                    {user?.role_summary?.display_name || user?.username || '未设置'}
-                  </div>
-                  <div className="mt-0.5 truncate text-[9px] text-zinc-600">
-                    {user?.role_summary?.node_id || '-'}
-                  </div>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleOpenPersona}
-                className="flex min-h-[44px] shrink-0 items-center gap-2 rounded-lg border border-cyan-300/20 px-3 text-xs text-cyan-100/80 transition-colors hover:bg-cyan-300/10"
-              >
-                <Edit3 size={14} /> 编辑
-              </button>
-            </div>
-          </section>
-
-          {/* ── Avatar Section ── */}
-          <fieldset className={`${activeSection === 'account' ? '' : 'hidden'} rounded-lg border border-cyber-green/10 px-4 py-4`}>
-            <legend className="text-[10px] text-cyber-green/50 uppercase tracking-wider px-1.5">账户头像</legend>
-            <div className="flex flex-col items-center gap-3">
-              <div className="w-[72px] h-[72px] rounded-full overflow-hidden border-2 border-cyber-green/25 bg-[#0b0b0c] relative group">
-                {user?.avatar_url ? (
-                  <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center text-cyber-green/25">
-                    <User size={30} />
-                  </div>
-                )}
-                <button
-                  type="button"
-                  onClick={() => fileRef.current?.click()}
-                  className="absolute inset-0 flex cursor-pointer flex-col items-center justify-center gap-1 bg-black/55 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
-                  aria-label="上传头像"
-                >
-                  <Upload size={16} className="text-cyber-green" />
-                  <span className="text-[9px] text-cyber-green/70">上传</span>
-                </button>
-              </div>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp"
-                onChange={handleAvatarUpload}
-                className="hidden"
-              />
-              <p className="text-[9px] text-cyber-green/20">点击头像上传，支持 PNG / JPEG / WebP</p>
-
-              {/* Avatar URL input */}
-              <div className="flex gap-1.5 w-full">
-                <input
-                  type="text"
-                  value={avatarUrl}
-                  onChange={e => setAvatarUrl(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleAvatarUrl()}
-                  placeholder="或粘贴图片 URL 设置头像"
-                  className="flex-1 bg-[#0b0b0c] border border-cyber-green/15 rounded-lg px-3 py-2 text-[11px] text-zinc-300 placeholder:text-cyber-green/12 focus:outline-none focus:border-cyber-green/40 transition-colors"
-                />
-                <button
-                  type="button"
-                  onClick={handleAvatarUrl}
-                  disabled={!avatarUrl.trim() || loading}
-                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-cyber-green/20 bg-cyber-green/10 text-cyber-green transition-colors hover:bg-cyber-green/20 disabled:cursor-not-allowed disabled:opacity-25"
-                  aria-label="设置头像链接"
-                >
-                  <Link size={14} />
-                </button>
-              </div>
-            </div>
-          </fieldset>
-
-          {/* ── Profile Form ── */}
-          <form onSubmit={handleSaveProfile} className={`${activeSection === 'account' ? '' : 'hidden'} space-y-4`}>
-            <fieldset className="border border-cyber-green/10 rounded-lg px-4 py-4 space-y-4">
-              <legend className="text-[10px] text-cyber-green/50 uppercase tracking-wider px-1.5">资料</legend>
-
-              {/* Username */}
-              <div>
-                <label htmlFor="settings-username" className="text-[10px] text-cyber-green/50 uppercase tracking-wider mb-1.5 block">
-                  用户名 <span className="text-red-400/70">*</span>
-                </label>
-                <input
-                  ref={usernameRef}
-                  id="settings-username"
-                  type="text"
-                  value={username}
-                  onChange={e => setUsername(e.target.value)}
-                  autoComplete="username"
-                  aria-invalid={!!(submitted && usernameError)}
-                  className={`w-full bg-[#0b0b0c] border rounded-lg px-3 py-2.5 text-sm text-zinc-300 placeholder:text-cyber-green/12 focus:outline-none focus:border-cyber-green/40 transition-colors ${
-                    submitted && usernameError ? 'border-red-500/30' : 'border-cyber-green/15'
-                  }`}
-                />
-                {submitted && usernameError && (
-                  <p id="settings-username-err" className="text-[10px] text-red-400/70 mt-1 flex items-center gap-1" role="alert">
-                    <AlertCircle size={10} />{usernameError}
+                <div className="min-w-0 flex-1 space-y-2">
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/gif,image/webp"
+                    onChange={handleAvatarUpload}
+                    className="hidden"
+                  />
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    点击头像上传，支持 PNG / JPEG / GIF / WebP。
                   </p>
-                )}
-              </div>
-
-              {/* Gender */}
-              <div>
-                <label className="text-[10px] text-cyber-green/50 uppercase tracking-wider mb-1.5 block">性别</label>
-                <div className="grid grid-cols-3 overflow-hidden rounded-lg border border-cyber-green/15 bg-black/15">
-                  {GENDERS.map(g => (
-                    <button
-                      key={g.value}
+                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+                    <label htmlFor="settings-avatar-url" className="sr-only">头像图片 URL</label>
+                    <Input
+                      id="settings-avatar-url"
+                      type="text"
+                      value={avatarUrl}
+                      onChange={event => setAvatarUrl(event.target.value)}
+                      onKeyDown={event => event.key === 'Enter' && handleAvatarUrl()}
+                      placeholder="或粘贴图片 URL 设置头像"
+                      className="min-w-0 flex-1"
+                    />
+                    <Button
                       type="button"
-                      onClick={() => setGender(g.value)}
-                      aria-pressed={gender === g.value}
-                      className={`min-h-11 border-r border-cyber-green/10 px-3 text-xs transition-colors last:border-r-0 ${
-                        gender === g.value
-                          ? 'bg-cyber-green/10 text-cyber-green'
-                          : 'text-cyber-green/40 hover:bg-cyber-green/[0.04] hover:text-cyber-green/70'
-                      }`}
+                      size="lg"
+                      variant="secondary"
+                      onClick={handleAvatarUrl}
+                      disabled={!avatarUrl.trim() || loading}
                     >
-                      {g.label}
-                    </button>
-                  ))}
+                      <Link aria-hidden="true" />
+                      设置链接
+                    </Button>
+                  </div>
                 </div>
               </div>
             </fieldset>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-2.5 bg-cyber-green/10 hover:bg-cyber-green/[0.18] active:scale-[0.98] border border-cyber-green/20 rounded-lg text-sm font-bold text-cyber-green disabled:opacity-30 disabled:cursor-not-allowed disabled:active:scale-100 transition-all duration-200 flex items-center justify-center gap-2 min-h-[44px]"
-            >
-              {loading ? <Loader2 className="animate-spin" size={16} /> : <Edit3 size={14} />}
-              {loading ? '保存中...' : '保存资料'}
-            </button>
-          </form>
+            <form onSubmit={handleSaveProfile} className="space-y-4">
+              <fieldset className="space-y-4 rounded-lg border border-border p-4">
+                <legend className="px-1 text-sm font-medium text-foreground">资料</legend>
 
-          <fieldset
-            aria-busy={clockLoading}
-            className={`${activeSection === 'clock' ? '' : 'hidden'} space-y-4 rounded-lg border border-cyan-300/12 px-4 py-4`}
-          >
-            <legend className="text-[10px] text-cyan-200/50 uppercase tracking-wider px-1.5">世界时间</legend>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 border-b border-white/[0.06] pb-3 text-[10px]">
-              <div>
-                <div className="text-zinc-600">与现实偏移</div>
-                <div className="mt-1 tabular-nums text-amber-200/80">{formatOffset(worldClock?.real_offset_seconds)}</div>
+                <div className="space-y-2">
+                  <label htmlFor="settings-username" className="text-sm font-medium text-foreground">
+                    用户名 <span className="text-destructive" aria-hidden="true">*</span>
+                  </label>
+                  <Input
+                    ref={usernameRef}
+                    id="settings-username"
+                    type="text"
+                    value={username}
+                    onChange={event => setUsername(event.target.value)}
+                    autoComplete="username"
+                    aria-invalid={Boolean(submitted && usernameError)}
+                    aria-describedby={submitted && usernameError ? 'settings-username-err' : undefined}
+                    className={submitted && usernameError ? 'border-destructive focus-visible:ring-destructive' : undefined}
+                  />
+                  {submitted && usernameError && (
+                    <p
+                      id="settings-username-err"
+                      className="flex items-start gap-1.5 text-xs leading-5 text-destructive"
+                      role="alert"
+                    >
+                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      <span>{usernameError}</span>
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <label htmlFor="settings-gender" className="text-sm font-medium text-foreground">性别</label>
+                  <Select value={gender} onValueChange={setGender}>
+                    <SelectTrigger id="settings-gender" className="min-h-11">
+                      <SelectValue placeholder="选择性别" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {GENDERS.map(option => (
+                        <SelectItem key={option.value} value={option.value} className="min-h-11">
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </fieldset>
+
+              <Button type="submit" size="lg" className="w-full" disabled={loading}>
+                {loading ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Edit3 aria-hidden="true" />}
+                {loading ? '保存中...' : '保存资料'}
+              </Button>
+            </form>
+
+            <div className="space-y-3 border-t border-border pt-4">
+              <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 text-sm">
+                <span className="text-muted-foreground">用户 ID</span>
+                <code className="max-w-full break-all rounded bg-muted px-2 py-1 font-archive-mono text-xs tabular-nums text-foreground">
+                  {user?.user_id || '-'}
+                </code>
               </div>
-              <div>
-                <div className="text-zinc-600">当前流速</div>
-                <div className={`mt-1 tabular-nums ${Number(worldClock?.time_scale) === 0 ? 'text-amber-300' : 'text-cyan-200/75'}`}>
+              <Button
+                type="button"
+                size="lg"
+                variant="outline"
+                onClick={handleLogout}
+                className="w-full border-destructive/35 text-destructive hover:text-destructive"
+              >
+                <LogOut aria-hidden="true" />
+                退出登录
+              </Button>
+            </div>
+          </TabsContent>
+
+          <TabsContent
+            value="clock"
+            className="min-h-0 min-w-0 flex-1 space-y-5 overflow-x-hidden overflow-y-auto px-4 pb-6 pt-3 sm:px-6"
+          >
+            <div className="grid grid-cols-2 gap-3" aria-busy={clockLoading}>
+              <div className="rounded-lg border border-border bg-card/55 p-3">
+                <div className="text-xs text-muted-foreground">与现实偏移</div>
+                <div className="mt-2 break-words font-archive-mono text-sm tabular-nums text-primary">
+                  {formatOffset(worldClock?.real_offset_seconds)}
+                </div>
+              </div>
+              <div className="rounded-lg border border-border bg-card/55 p-3">
+                <div className="text-xs text-muted-foreground">当前流速</div>
+                <div className="mt-2 font-archive-mono text-sm tabular-nums text-primary">
                   {Number(worldClock?.time_scale) === 0 ? '已暂停' : `${worldClock?.time_scale ?? 1}x`}
                 </div>
               </div>
             </div>
-            {['error', 'offline', 'stale', 'conflict'].includes(clockStatus.state) && clockStatus.message && (
-              <div className="flex items-start gap-2 rounded-md border border-amber-300/15 bg-amber-300/[0.035] px-3 py-2.5 text-[10px] leading-4 text-amber-100/75" role="status">
-                <AlertCircle size={13} className="mt-0.5 shrink-0" />
-                <span>{clockStatus.message}</span>
+
+            {['error', 'offline', 'stale', 'conflict'].includes(clockStatus?.state) && clockStatus?.message && (
+              <div
+                className="flex items-start gap-2 rounded-md border border-primary/35 bg-primary/10 px-3 py-3 text-sm leading-6 text-foreground"
+                role="status"
+                aria-live="polite"
+              >
+                <AlertCircle className="mt-1 h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                <span className="min-w-0 break-words">{clockStatus.message}</span>
               </div>
             )}
 
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-[11px] text-zinc-300">
-                <ClockArrowUp size={13} className="text-cyan-200/60" />
+            <section className="space-y-3">
+              <h3 className="flex items-center gap-2 font-archive-serif text-base font-semibold text-foreground">
+                <ClockArrowUp className="h-4 w-4 text-primary" aria-hidden="true" />
                 时间流速
+              </h3>
+              <div className="grid grid-cols-5 overflow-hidden rounded-md border border-border bg-muted/35">
+                {[0, 1, 2, 5, 10].map(scale => {
+                  const selected = Number(worldClock?.time_scale) === scale;
+                  return (
+                    <Button
+                      key={scale}
+                      type="button"
+                      variant="ghost"
+                      onClick={() => handleScaleChange(scale)}
+                      disabled={clockLoading}
+                      className={`h-11 min-h-11 min-w-0 rounded-none border-r border-border px-1 font-archive-mono text-xs tabular-nums last:border-r-0 ${
+                        selected ? 'bg-primary/15 text-primary' : 'text-muted-foreground'
+                      }`}
+                      aria-pressed={selected}
+                      aria-label={scale === 0 ? '暂停世界时间' : `${scale}倍世界时间`}
+                    >
+                      {scale === 0 ? <Pause aria-hidden="true" /> : `${scale}x`}
+                    </Button>
+                  );
+                })}
               </div>
-            <div className="grid grid-cols-5 overflow-hidden rounded-md border border-white/10 bg-black/20">
-              {[0, 1, 2, 5, 10].map(scale => {
-                const selected = Number(worldClock?.time_scale) === scale;
-                return (
-                  <button
-                    key={scale}
-                    type="button"
-                    onClick={() => handleScaleChange(scale)}
-                    disabled={clockLoading}
-                    className={`flex min-h-[44px] min-w-0 items-center justify-center gap-1 border-r border-white/10 px-1 text-[10px] last:border-r-0 disabled:cursor-wait ${
-                      selected
-                        ? 'bg-cyan-300/12 text-cyan-100'
-                        : 'text-zinc-500 hover:bg-white/[0.03] hover:text-zinc-300'
-                    }`}
-                    aria-pressed={selected}
-                    aria-label={scale === 0 ? '暂停世界时间' : `${scale}倍世界时间`}
-                  >
-                    {scale === 0 ? <Pause size={11} /> : `${scale}x`}
-                  </button>
-                );
-              })}
-            </div>
-              <p className="text-[10px] leading-4 text-zinc-600">0x 暂停世界时间；高倍速会同步重算事件的预计现实触发时间。</p>
-            </div>
+              <p className="text-xs leading-5 text-muted-foreground">
+                0x 暂停世界时间；高倍速会同步重算事件的预计现实触发时间。
+              </p>
+            </section>
 
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 text-[11px] text-zinc-300">
-                <CalendarClock size={13} className="text-cyan-200/60" />
+            <section className="space-y-3">
+              <h3 className="flex items-center gap-2 font-archive-serif text-base font-semibold text-foreground">
+                <CalendarClock className="h-4 w-4 text-primary" aria-hidden="true" />
                 设置世界日期和时间
-              </div>
-              <div className="flex flex-col gap-2 sm:flex-row">
+              </h3>
+              <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
                 <label htmlFor="settings-world-datetime" className="sr-only">世界日期和时间</label>
-                <input
+                <Input
                   id="settings-world-datetime"
                   type="datetime-local"
                   value={worldDateTime}
                   onChange={event => setWorldDateTime(event.target.value)}
                   disabled={clockLoading}
-                  className="min-h-[44px] min-w-0 flex-1 rounded-md border border-cyan-300/15 bg-[#0b0b0c] px-3 text-xs text-zinc-300 outline-none focus:border-cyan-300/40 focus:ring-2 focus:ring-cyan-300/10 disabled:cursor-wait disabled:opacity-100 disabled:text-zinc-300"
+                  className="min-w-0 flex-1 font-archive-mono tabular-nums"
                 />
-                <button
+                <Button
                   type="button"
+                  size="lg"
+                  variant="secondary"
                   onClick={() => handleSetWorldTime()}
                   disabled={clockLoading || !worldDateTime}
-                  className="min-h-[44px] rounded-md border border-cyan-300/20 px-3 text-[11px] text-cyan-100/80 hover:bg-cyan-300/8 disabled:cursor-wait"
                 >
                   设置
-                </button>
+                </Button>
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                <button
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <Button
                   type="button"
+                  size="lg"
+                  variant="outline"
                   onClick={() => handleAdvance(3600, ' 1 小时')}
                   disabled={clockLoading}
-                  className="min-h-[44px] rounded-md border border-white/10 text-[10px] text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200 disabled:cursor-wait"
+                  className="font-archive-mono tabular-nums"
                 >
                   +1 小时
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  size="lg"
+                  variant="outline"
                   onClick={() => handleAdvance(86400, ' 1 天')}
                   disabled={clockLoading}
-                  className="min-h-[44px] rounded-md border border-white/10 text-[10px] text-zinc-400 hover:bg-white/[0.04] hover:text-zinc-200 disabled:cursor-wait"
+                  className="font-archive-mono tabular-nums"
                 >
                   +1 天
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
+                  size="lg"
+                  variant="outline"
                   onClick={handleNextMorning}
                   disabled={clockLoading}
-                  className="flex min-h-[44px] items-center justify-center gap-1 rounded-md border border-amber-300/15 text-[10px] text-amber-200/70 hover:bg-amber-300/[0.05] disabled:cursor-wait"
+                  className="font-archive-mono tabular-nums"
                 >
-                  <Sunrise size={12} /> 清晨 06:00
-                </button>
+                  <Sunrise aria-hidden="true" />
+                  清晨 06:00
+                </Button>
               </div>
-            </div>
+            </section>
 
-            <div className="border-t border-white/[0.06] pt-3">
-              <div className="text-[10px] text-zinc-600">下一计划事件</div>
+            <section className="rounded-lg border border-border bg-card/55 p-4">
+              <h3 className="text-sm font-medium text-muted-foreground">下一计划事件</h3>
               {worldClock?.next_event ? (
-                <div className="mt-1.5 space-y-1 text-[10px] leading-4 text-zinc-400">
-                  <div className="truncate text-zinc-300">{worldClock.next_event.event_name || worldClock.next_event.event_id}</div>
+                <div className="mt-2 min-w-0 space-y-1 break-words font-archive-mono text-xs leading-5 tabular-nums text-muted-foreground">
+                  <div className="truncate font-sans text-sm font-medium text-foreground">
+                    {worldClock.next_event.event_name || worldClock.next_event.event_id}
+                  </div>
                   <div>世界：{formatClockDate(worldClock.next_event.next_run_at)}</div>
-                  <div>现实：{worldClock.next_event.next_due_real_at ? formatClockDate(worldClock.next_event.next_due_real_at) : '世界时间已暂停'}</div>
-                  {worldClock.next_event.missed_count > 0 && <div className="text-amber-300/75">待补偿 {worldClock.next_event.missed_count} 次</div>}
+                  <div>
+                    现实：{worldClock.next_event.next_due_real_at
+                      ? formatClockDate(worldClock.next_event.next_due_real_at)
+                      : '世界时间已暂停'}
+                  </div>
+                  {worldClock.next_event.missed_count > 0 && (
+                    <div className="text-primary">待补偿 {worldClock.next_event.missed_count} 次</div>
+                  )}
                 </div>
               ) : (
-                <div className="mt-1 text-[10px] text-zinc-600">暂无已排期事件</div>
+                <div className="mt-2 font-archive-mono text-xs tabular-nums text-muted-foreground">
+                  暂无已排期事件
+                </div>
               )}
-            </div>
+            </section>
 
-            <div className="border-t border-white/[0.06] pt-3">
+            <section className="border-t border-border pt-4">
               {syncConfirming ? (
-                <div className="space-y-2 rounded-md border border-amber-300/15 bg-amber-300/[0.035] p-3">
-                  <div className="text-[11px] text-amber-100/80">{syncPreview(worldClock?.real_offset_seconds)}</div>
-                  <p className="text-[10px] leading-4 text-zinc-500">同步会重置世界日期和时间，并立即重算全部计划事件。</p>
-                  <div className="flex gap-2">
-                    <button
+                <div className="space-y-3 rounded-lg border border-primary/35 bg-primary/10 p-4">
+                  <div className="font-archive-mono text-sm tabular-nums text-foreground">
+                    {syncPreview(worldClock?.real_offset_seconds)}
+                  </div>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    同步会重置世界日期和时间，并立即重算全部计划事件。
+                  </p>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Button
                       type="button"
+                      size="lg"
                       onClick={handleClockSync}
                       disabled={clockLoading}
-                      className="flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded-md border border-amber-300/25 bg-amber-300/8 text-[11px] text-amber-100 disabled:cursor-wait"
+                      className="flex-1"
                     >
-                      {clockLoading ? <Loader2 size={14} className="animate-spin" /> : <RotateCw size={14} />}
+                      {clockLoading
+                        ? <Loader2 className="animate-spin" aria-hidden="true" />
+                        : <RotateCw aria-hidden="true" />}
                       确认同步
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                       type="button"
+                      size="lg"
+                      variant="outline"
                       onClick={() => setSyncConfirming(false)}
                       disabled={clockLoading}
-                      className="min-h-[44px] px-4 text-[11px] text-zinc-500 hover:text-zinc-300 disabled:cursor-wait"
                     >
                       取消
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ) : (
-                <button
+                <Button
                   type="button"
+                  size="lg"
+                  variant="outline"
                   onClick={() => setSyncConfirming(true)}
                   disabled={clockLoading}
-                  className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-md border border-amber-300/15 text-[11px] text-amber-200/70 hover:bg-amber-300/[0.04] disabled:cursor-wait"
+                  className="w-full border-primary/35 text-primary hover:text-primary"
                 >
-                  <RotateCw size={14} /> 同步至现实时间
-                </button>
+                  <RotateCw aria-hidden="true" />
+                  同步至现实时间
+                </Button>
               )}
-            </div>
-          </fieldset>
+            </section>
+          </TabsContent>
 
-          <fieldset className={`${activeSection === 'speech' ? '' : 'hidden'} space-y-4 rounded-lg border border-cyber-green/10 px-4 py-4`}>
-            <legend className="text-[10px] text-cyber-green/50 uppercase tracking-wider px-1.5">语音</legend>
-            <div className="space-y-2">
-              <button
-                type="button"
-                role="switch"
-                aria-checked={ttsAutoPlay}
-                onClick={() => setTtsAutoPlay(value => !value)}
+          <TabsContent
+            value="speech"
+            className="min-h-0 min-w-0 flex-1 space-y-5 overflow-x-hidden overflow-y-auto px-4 pb-6 pt-3 sm:px-6"
+          >
+            <section className="space-y-3">
+              <h3 className="font-archive-serif text-base font-semibold text-foreground">语音偏好</h3>
+              <PreferenceSwitch
+                checked={ttsAutoPlay}
+                onCheckedChange={setTtsAutoPlay}
                 disabled={speechLoading}
-                className="flex min-h-[52px] w-full items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-black/15 px-3 text-left transition-colors hover:border-cyber-green/20 hover:bg-cyber-green/[0.025] disabled:opacity-40"
-              >
-                <span className="flex min-w-0 items-center gap-3">
-                  <Volume2 size={16} className="shrink-0 text-cyber-green/60" />
-                  <span className="min-w-0">
-                    <span className="block text-[11px] text-zinc-300">自动播放回复</span>
-                    <span className="mt-0.5 block text-[9px] leading-4 text-zinc-600">仅播放当前收到的新回复</span>
-                  </span>
-                </span>
-                <span className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${
-                  ttsAutoPlay
-                    ? 'border-cyber-green/40 bg-cyber-green/20'
-                    : 'border-white/10 bg-white/[0.035]'
-                }`}>
-                  <span className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 rounded-full transition-all ${
-                    ttsAutoPlay ? 'left-6 bg-cyber-green' : 'left-1 bg-zinc-600'
-                  }`} />
-                </span>
-              </button>
+                icon={Volume2}
+                label="自动播放回复"
+                description="仅播放当前收到的新回复"
+              />
+              <PreferenceSwitch
+                checked={sttAutoSend}
+                onCheckedChange={setSttAutoSend}
+                disabled={speechLoading}
+                icon={Mic}
+                label="转写后自动发送"
+                description="录音完成后直接发送识别文本"
+              />
+            </section>
 
-              <button
-                type="button"
-                role="switch"
-                aria-checked={sttAutoSend}
-                onClick={() => setSttAutoSend(value => !value)}
-                disabled={speechLoading}
-                className="flex min-h-[52px] w-full items-center justify-between gap-3 rounded-lg border border-white/[0.06] bg-black/15 px-3 text-left transition-colors hover:border-cyber-green/20 hover:bg-cyber-green/[0.025] disabled:opacity-40"
-              >
-                <span className="flex min-w-0 items-center gap-3">
-                  <Mic size={16} className="shrink-0 text-cyan-200/60" />
-                  <span className="min-w-0">
-                    <span className="block text-[11px] text-zinc-300">转写后自动发送</span>
-                    <span className="mt-0.5 block text-[9px] leading-4 text-zinc-600">录音完成后直接发送识别文本</span>
-                  </span>
-                </span>
-                <span className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${
-                  sttAutoSend
-                    ? 'border-cyan-200/40 bg-cyan-200/15'
-                    : 'border-white/10 bg-white/[0.035]'
-                }`}>
-                  <span className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 rounded-full transition-all ${
-                    sttAutoSend ? 'left-6 bg-cyan-200' : 'left-1 bg-zinc-600'
-                  }`} />
-                </span>
-              </button>
-            </div>
-            <button
+            <Button
               type="button"
+              size="lg"
               onClick={handleSaveSpeechSettings}
               disabled={speechLoading}
-              className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-cyber-green/20 bg-cyber-green/10 text-xs font-bold text-cyber-green transition-colors hover:bg-cyber-green/[0.18] disabled:cursor-not-allowed disabled:opacity-35"
+              className="w-full"
             >
-              {speechLoading ? <Loader2 size={15} className="animate-spin" /> : <Save size={14} />}
+              {speechLoading ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
               {speechLoading ? '保存中...' : '保存语音偏好'}
-            </button>
-          </fieldset>
-
-          {/* ── Account Info & Logout ── */}
-          <div className={`${activeSection === 'account' ? '' : 'hidden'} space-y-3 border-t border-cyber-green/10 pt-2`}>
-            <div className="flex items-center justify-between text-[9px]">
-              <span className="text-cyber-green/20 uppercase">用户 ID</span>
-              <code className="text-cyber-green/35 bg-[#0b0b0c] px-2 py-0.5 rounded">{user?.user_id || '-'}</code>
-            </div>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg border border-red-500/15 py-2.5 text-xs text-red-400/70 transition-all duration-200 hover:border-red-500/25 hover:bg-red-500/5 hover:text-red-400 active:scale-[0.98]"
-            >
-              <LogOut size={14} />
-              退出登录
-            </button>
-          </div>
-        </div>
-
-        <div
-          data-settings-feedback
-          className="pointer-events-none absolute inset-x-0 top-[7.125rem] z-20 flex h-9 justify-center px-4 sm:px-5"
-        >
-          {apiError && (
-            <div
-              className="flex min-h-9 w-full max-w-md items-start gap-2 rounded-lg border border-red-400/20 bg-[#181014]/95 px-3 py-2 text-[11px] leading-4 text-red-300 shadow-[0_8px_28px_rgba(0,0,0,0.45)] backdrop-blur-md"
-              role="alert"
-            >
-              <AlertCircle size={14} className="mt-0.5 shrink-0" />
-              <span>{apiError}</span>
-            </div>
-          )}
-          {!apiError && success && (
-            <div
-              className="flex min-h-9 w-full max-w-md items-center gap-2 rounded-lg border border-emerald-300/20 bg-[#0f1814]/95 px-3 py-2 text-[11px] leading-4 text-emerald-300 shadow-[0_8px_28px_rgba(0,0,0,0.45)] backdrop-blur-md"
-              role="status"
-              aria-live="polite"
-            >
-              <Check size={14} className="shrink-0" />
-              <span>{success}</span>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
+            </Button>
+          </TabsContent>
+        </Tabs>
+      </DialogContent>
+    </Dialog>
   );
 }

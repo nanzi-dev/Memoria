@@ -92,7 +92,7 @@ function formatDate(value) {
 function JsonPreview({ value }) {
   if (value == null) return null;
   return (
-    <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded border border-cyber-green/10 bg-black/20 p-3 text-[10px] leading-5 text-cyber-green/60">
+    <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-muted/30 p-3 font-archive-mono text-[10px] tabular-nums leading-5 text-muted-foreground">
       {JSON.stringify(value, null, 2)}
     </pre>
   );
@@ -210,18 +210,18 @@ export default function EventOperationsPanel({ eventId, characterId }) {
   };
 
   return (
-    <section className="rounded-lg border border-cyber-green/15 bg-cyber-surface/40">
-      <div className="flex flex-col gap-3 border-b border-cyber-green/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+    <section className="rounded-md border border-border bg-muted/25">
+      <div className="flex flex-col gap-3 border-b border-border px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
         <div className="min-w-0">
-          <h2 className="flex items-center gap-2 font-mono text-sm text-cyber-green/70">
+          <h2 className="flex items-center gap-2 font-archive-mono text-sm text-foreground">
             <BarChart3 size={14} />
             运行工具
           </h2>
-          <p className="mt-1 break-words text-[10px] font-mono text-cyber-green/30">
+          <p className="mt-1 break-words text-[10px] font-archive-mono text-muted-foreground">
             {eventId}
           </p>
         </div>
-        <div className="grid grid-cols-3 rounded border border-cyber-green/15 p-0.5" role="tablist">
+        <div className="grid grid-cols-3 rounded-md border border-border p-0.5" role="tablist">
           {TABS.map(tab => {
             const Icon = tab.icon;
             return (
@@ -231,13 +231,13 @@ export default function EventOperationsPanel({ eventId, characterId }) {
                 role="tab"
                 aria-selected={activeTab === tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex min-h-[44px] items-center justify-center gap-1.5 px-3 text-[10px] font-mono transition-colors sm:min-h-0 sm:py-2 ${
+                className={`flex min-h-11 items-center justify-center gap-1.5 rounded-md px-3 text-[10px] font-archive-mono transition-colors ${
                   activeTab === tab.id
-                    ? 'bg-cyber-green/10 text-cyber-green'
-                    : 'text-cyber-green/35 hover:text-cyber-green/70'
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                <Icon size={13} />
+                <Icon size={13} aria-hidden="true" />
                 {tab.label}
               </button>
             );
@@ -247,7 +247,7 @@ export default function EventOperationsPanel({ eventId, characterId }) {
 
       {activeTab === 'simulate' && (
         <div className="space-y-5 p-4 sm:p-6">
-          <div className="flex items-start gap-2 border-l-2 border-sky-300/40 pl-3 text-[10px] font-mono text-sky-200/60">
+          <div className="flex items-start gap-2 border-l-2 border-primary/35 pl-3 text-[10px] font-archive-mono text-muted-foreground">
             <AlertCircle size={13} className="mt-0.5 shrink-0" />
             模拟只执行条件判定和效果规划，不写入数据库，不发送通知。
           </div>
@@ -267,22 +267,22 @@ export default function EventOperationsPanel({ eventId, characterId }) {
               ['session_duration_minutes', '会话时长（分钟）', 'number'],
               ['world_time', '世界时间 ISO', 'text'],
             ].map(([key, label, type]) => (
-              <label key={key} className="min-w-0 text-[10px] font-mono text-cyber-green/40">
+              <label key={key} className="min-w-0 text-[10px] font-archive-mono text-muted-foreground">
                 <span className="mb-1 block">{label}</span>
                 <input
                   type={type}
                   value={simulation[key]}
                   onChange={event => updateSimulation(key, event.target.value)}
-                  className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+                  className="min-h-11 w-full rounded border border-border bg-background px-3 text-xs text-primary focus:border-primary/40 focus:outline-none"
                 />
               </label>
             ))}
-            <label className="min-w-0 text-[10px] font-mono text-cyber-green/40">
+            <label className="min-w-0 text-[10px] font-archive-mono text-muted-foreground">
               <span className="mb-1 block">当前情绪</span>
               <select
                 value={simulation.current_mood}
                 onChange={event => updateSimulation('current_mood', event.target.value)}
-                className="min-h-[42px] w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+                className="min-h-11 w-full rounded border border-border bg-background px-3 text-xs text-primary focus:border-primary/40 focus:outline-none"
               >
                 {MOODS.map(mood => (
                   <option key={mood} value={mood}>{mood}</option>
@@ -292,28 +292,28 @@ export default function EventOperationsPanel({ eventId, characterId }) {
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <label className="text-[10px] font-mono text-cyber-green/40">
+            <label className="text-[10px] font-archive-mono text-muted-foreground">
               <span className="mb-1 block">玩家消息</span>
               <textarea
                 value={simulation.player_message}
                 onChange={event => updateSimulation('player_message', event.target.value)}
                 rows={3}
-                className="w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 py-2 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+                className="w-full rounded border border-border bg-background px-3 py-2 text-xs text-primary focus:border-primary/40 focus:outline-none"
               />
             </label>
-            <label className="text-[10px] font-mono text-cyber-green/40">
+            <label className="text-[10px] font-archive-mono text-muted-foreground">
               <span className="mb-1 block">NPC 回复</span>
               <textarea
                 value={simulation.npc_response}
                 onChange={event => updateSimulation('npc_response', event.target.value)}
                 rows={3}
-                className="w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 py-2 text-xs text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+                className="w-full rounded border border-border bg-background px-3 py-2 text-xs text-primary focus:border-primary/40 focus:outline-none"
               />
             </label>
           </div>
 
-          <details className="border-t border-cyber-green/10 pt-4">
-            <summary className="cursor-pointer text-[10px] font-mono text-cyber-green/45">
+          <details className="border-t border-border pt-4">
+            <summary className="cursor-pointer text-[10px] font-archive-mono text-muted-foreground">
               高级上下文 JSON
             </summary>
             <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -323,14 +323,14 @@ export default function EventOperationsPanel({ eventId, characterId }) {
                 ['event_history', '事件历史 JSON'],
                 ['event_data', '事件数据 JSON'],
               ].map(([key, label]) => (
-                <label key={key} className="min-w-0 text-[10px] font-mono text-cyber-green/40">
+                <label key={key} className="min-w-0 text-[10px] font-archive-mono text-muted-foreground">
                   <span className="mb-1 block">{label}</span>
                   <textarea
                     value={simulation[key]}
                     onChange={event => updateSimulation(key, event.target.value)}
                     rows={4}
                     spellCheck={false}
-                    className="w-full rounded border border-cyber-green/20 bg-cyber-surface px-3 py-2 text-[11px] text-cyber-green focus:border-cyber-green/50 focus:outline-none"
+                    className="w-full rounded border border-border bg-background px-3 py-2 text-[11px] text-primary focus:border-primary/40 focus:outline-none"
                   />
                 </label>
               ))}
@@ -342,35 +342,43 @@ export default function EventOperationsPanel({ eventId, characterId }) {
               type="button"
               onClick={handleSimulate}
               disabled={simulating || !simulation.character_id.trim()}
-              className="flex min-h-[44px] items-center justify-center gap-2 rounded border border-cyber-green/30 bg-cyber-green/10 px-5 text-xs font-mono text-cyber-green hover:bg-cyber-green/20 disabled:opacity-40"
+              className="flex min-h-11 items-center justify-center gap-2 rounded-md border border-primary/35 bg-primary/10 px-5 text-xs font-archive-mono text-primary hover:bg-primary/15 disabled:opacity-40"
             >
-              {simulating ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+              {simulating
+                ? <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+                : <Play size={14} aria-hidden="true" />}
               运行模拟
             </button>
             {simulationError && (
-              <p className="min-w-0 break-words text-xs font-mono text-red-300/80">{simulationError}</p>
+              <p
+                className="min-w-0 break-words text-xs font-archive-mono text-destructive"
+                role="alert"
+                aria-live="assertive"
+              >
+                {simulationError}
+              </p>
             )}
           </div>
 
           {simulationResult && (
-            <div className="space-y-4 border-t border-cyber-green/10 pt-5">
-              <div className="flex items-center gap-2 text-xs font-mono">
+            <div className="space-y-4 border-t border-border pt-5">
+              <div className="flex items-center gap-2 text-xs font-archive-mono">
                 {simulationResult.matched ? (
-                  <CheckCircle2 size={15} className="text-cyber-green" />
+                  <CheckCircle2 size={15} className="text-primary" />
                 ) : (
-                  <AlertCircle size={15} className="text-amber-300" />
+                  <AlertCircle size={15} className="text-primary" />
                 )}
-                <span className={simulationResult.matched ? 'text-cyber-green' : 'text-amber-200/80'}>
+                <span className={simulationResult.matched ? 'text-primary' : 'text-foreground'}>
                   {simulationResult.matched ? '条件命中' : '条件未命中'}
                 </span>
               </div>
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                 <div className="min-w-0">
-                  <p className="mb-2 text-[10px] font-mono text-cyber-green/35">条件判定轨迹</p>
+                  <p className="mb-2 text-[10px] font-archive-mono text-muted-foreground">条件判定轨迹</p>
                   <JsonPreview value={conditionTrace} />
                 </div>
                 <div className="min-w-0">
-                  <p className="mb-2 text-[10px] font-mono text-cyber-green/35">规划效果与状态变化</p>
+                  <p className="mb-2 text-[10px] font-archive-mono text-muted-foreground">规划效果与状态变化</p>
                   <JsonPreview value={simulationResult.planned_result || { effects: [] }} />
                 </div>
               </div>
@@ -382,13 +390,13 @@ export default function EventOperationsPanel({ eventId, characterId }) {
       {activeTab === 'schedule' && (
         <div className="p-4 sm:p-6">
           {runtimeLoading && !schedules.length ? (
-            <Loader2 className="mx-auto animate-spin text-cyber-green/60" size={24} />
+            <Loader2 className="mx-auto animate-spin text-muted-foreground" size={24} />
           ) : schedules.length === 0 ? (
-            <p className="text-xs font-mono text-cyber-green/35">该事件没有已注册调度。</p>
+            <p className="text-xs font-archive-mono text-muted-foreground">该事件没有已注册调度。</p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-left text-[10px] font-mono">
-                <thead className="border-b border-cyber-green/10 text-cyber-green/35">
+              <table className="w-full min-w-[720px] text-left text-[10px] font-archive-mono">
+                <thead className="border-b border-border text-muted-foreground">
                   <tr>
                     <th className="px-2 py-2 font-normal">角色</th>
                     <th className="px-2 py-2 font-normal">Cron</th>
@@ -399,7 +407,7 @@ export default function EventOperationsPanel({ eventId, characterId }) {
                     <th className="px-2 py-2 text-right font-normal">操作</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-cyber-green/5 text-cyber-green/60">
+                <tbody className="divide-y divide-border text-muted-foreground">
                   {schedules.map(schedule => {
                     const actionKey = `${schedule.event_id}:${schedule.character_id}`;
                     return (
@@ -409,7 +417,7 @@ export default function EventOperationsPanel({ eventId, characterId }) {
                         <td className="px-2 py-3">{schedule.status}</td>
                         <td className="px-2 py-3">{formatDate(schedule.next_run_at)}</td>
                         <td className="px-2 py-3">{formatDate(schedule.last_run_at)}</td>
-                        <td className="max-w-[220px] break-words px-2 py-3 text-red-300/60">
+                        <td className="max-w-[220px] break-words px-2 py-3 text-destructive">
                           {schedule.last_error || '—'}
                         </td>
                         <td className="px-2 py-3 text-right">
@@ -419,14 +427,14 @@ export default function EventOperationsPanel({ eventId, characterId }) {
                             disabled={scheduleAction === actionKey}
                             aria-label={schedule.status === 'paused' ? '恢复调度' : '暂停调度'}
                             title={schedule.status === 'paused' ? '恢复调度' : '暂停调度'}
-                            className="inline-flex h-11 w-11 items-center justify-center rounded border border-cyber-green/20 text-cyber-green/60 hover:border-cyber-green/40 hover:text-cyber-green disabled:opacity-40"
+                            className="inline-flex h-11 w-11 items-center justify-center rounded-md border border-border text-muted-foreground hover:border-primary/40 hover:text-primary disabled:opacity-40"
                           >
                             {scheduleAction === actionKey ? (
-                              <Loader2 size={14} className="animate-spin" />
+                              <Loader2 size={14} className="animate-spin" aria-hidden="true" />
                             ) : schedule.status === 'paused' ? (
-                              <RotateCcw size={14} />
+                              <RotateCcw size={14} aria-hidden="true" />
                             ) : (
-                              <Pause size={14} />
+                              <Pause size={14} aria-hidden="true" />
                             )}
                           </button>
                         </td>
@@ -438,7 +446,13 @@ export default function EventOperationsPanel({ eventId, characterId }) {
             </div>
           )}
           {runtimeError && (
-            <p className="mt-4 break-words text-xs font-mono text-red-300/80">{runtimeError}</p>
+            <p
+              className="mt-4 break-words text-xs font-archive-mono text-destructive"
+              role="alert"
+              aria-live="assertive"
+            >
+              {runtimeError}
+            </p>
           )}
         </div>
       )}
@@ -446,26 +460,26 @@ export default function EventOperationsPanel({ eventId, characterId }) {
       {activeTab === 'history' && (
         <div className="space-y-6 p-4 sm:p-6">
           {runtimeLoading && !metrics ? (
-            <Loader2 className="mx-auto animate-spin text-cyber-green/60" size={24} />
+            <Loader2 className="mx-auto animate-spin text-muted-foreground" size={24} />
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-px overflow-hidden rounded border border-cyber-green/10 bg-cyber-green/10 sm:grid-cols-4 lg:grid-cols-7">
+              <div className="grid grid-cols-2 gap-px overflow-hidden rounded border border-border bg-primary/10 sm:grid-cols-4 lg:grid-cols-7">
                 {METRIC_LABELS.map(([key, label]) => (
-                  <div key={key} className="min-w-0 bg-cyber-surface px-3 py-3">
-                    <p className="text-[9px] font-mono text-cyber-green/30">{label}</p>
-                    <p className="mt-1 break-words text-sm font-mono text-cyber-green/80">
+                  <div key={key} className="min-w-0 bg-background px-3 py-3">
+                    <p className="text-[9px] font-archive-mono text-muted-foreground">{label}</p>
+                    <p className="mt-1 break-words text-sm font-archive-mono text-foreground">
                       {metrics?.[key] ?? 0}
                     </p>
                   </div>
                 ))}
               </div>
-              <div className="grid grid-cols-1 gap-2 text-[10px] font-mono text-cyber-green/40 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-2 text-[10px] font-archive-mono text-muted-foreground sm:grid-cols-2">
                 <p>最近执行：{formatDate(metrics?.last_execution_at)}</p>
-                <p className="break-words text-red-300/60">最近错误：{metrics?.last_error || '—'}</p>
+                <p className="break-words text-destructive">最近错误：{metrics?.last_error || '—'}</p>
               </div>
-              <div className="overflow-x-auto border-t border-cyber-green/10 pt-4">
-                <table className="w-full min-w-[820px] text-left text-[10px] font-mono">
-                  <thead className="border-b border-cyber-green/10 text-cyber-green/35">
+              <div className="overflow-x-auto border-t border-border pt-4">
+                <table className="w-full min-w-[820px] text-left text-[10px] font-archive-mono">
+                  <thead className="border-b border-border text-muted-foreground">
                     <tr>
                       <th className="px-2 py-2 font-normal">执行 ID</th>
                       <th className="px-2 py-2 font-normal">角色</th>
@@ -477,7 +491,7 @@ export default function EventOperationsPanel({ eventId, characterId }) {
                       <th className="px-2 py-2 font-normal">错误</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-cyber-green/5 text-cyber-green/55">
+                  <tbody className="divide-y divide-border text-muted-foreground">
                     {executions.map(item => (
                       <tr key={item.execution_id}>
                         <td className="max-w-[180px] break-all px-2 py-3">{item.execution_id}</td>
@@ -487,7 +501,7 @@ export default function EventOperationsPanel({ eventId, characterId }) {
                         <td className="px-2 py-3">{item.status}</td>
                         <td className="px-2 py-3">{item.duration_ms ?? '—'}</td>
                         <td className="px-2 py-3">{formatDate(item.completed_at)}</td>
-                        <td className="max-w-[220px] break-words px-2 py-3 text-red-300/60">
+                        <td className="max-w-[220px] break-words px-2 py-3 text-destructive">
                           {item.error || '—'}
                         </td>
                       </tr>
@@ -495,7 +509,7 @@ export default function EventOperationsPanel({ eventId, characterId }) {
                   </tbody>
                 </table>
                 {!executions.length && (
-                  <p className="py-6 text-center text-xs font-mono text-cyber-green/30">
+                  <p className="py-6 text-center text-xs font-archive-mono text-muted-foreground">
                     暂无执行记录
                   </p>
                 )}
@@ -503,7 +517,13 @@ export default function EventOperationsPanel({ eventId, characterId }) {
             </>
           )}
           {runtimeError && (
-            <p className="break-words text-xs font-mono text-red-300/80">{runtimeError}</p>
+            <p
+              className="break-words text-xs font-archive-mono text-destructive"
+              role="alert"
+              aria-live="assertive"
+            >
+              {runtimeError}
+            </p>
           )}
         </div>
       )}

@@ -42,3 +42,105 @@
   box-shadow: 0 24px 46px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(167, 239, 158, 0.12);
   background: #f7f5ef;
 }
+
+.lanyard-preview {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: transparent;
+  pointer-events: none;
+}
+
+.lanyard-preview-band {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  width: 28px;
+  height: 190px;
+  transform: translateX(-50%) rotate(-4deg);
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(167, 239, 158, 0.22), rgba(255, 255, 255, 0.62), rgba(167, 239, 158, 0.16));
+  box-shadow: 0 0 18px rgba(167, 239, 158, 0.08);
+}
+
+.lanyard-preview-card {
+  position: relative;
+  display: flex;
+  width: 190px;
+  height: 268px;
+  flex-direction: column;
+  align-items: center;
+  padding: 38px 24px 20px;
+  overflow: hidden;
+  border: 1px solid #cfc9b8;
+  border-radius: 12px;
+  transform: translateY(56px) rotate(3deg);
+  background: #f7f5ef;
+  box-shadow: 0 24px 46px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(167, 239, 158, 0.12);
+  color: #1a1a1a;
+}
+
+.lanyard-preview-name {
+  width: 100%;
+  overflow: hidden;
+  color: #1a1a1a;
+  font-family: "Noto Sans SC", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 22px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lanyard-preview-rule {
+  width: 100%;
+  height: 1px;
+  margin-top: 5px;
+  background: #2d2a35;
+}
+
+.lanyard-preview-avatar {
+  display: flex;
+  width: 90px;
+  height: 90px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  margin-top: 18px;
+  overflow: hidden;
+  border: 1px solid #d5d5d5;
+  border-radius: 8px;
+  background: #e7e4dc;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+  color: #aaa69d;
+  font-family: system-ui, sans-serif;
+  font-size: 30px;
+}
+
+.lanyard-preview-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.lanyard-preview-brand {
+  margin-top: 20px;
+  color: #451717;
+  font-family: system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+}
+
+.lanyard-preview-tagline {
+  margin-top: 2px;
+  color: #8a8495;
+  font-family: system-ui, sans-serif;
+  font-size: 8px;
+  line-height: 12px;
+  white-space: nowrap;
+}

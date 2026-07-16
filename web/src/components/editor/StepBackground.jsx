@@ -1,5 +1,6 @@
 import TagInput from './TagInput';
-import { Plus, Trash2 } from 'lucide-react';
+import { BookOpen, Plus, Target, Trash2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 export default function StepBackground({ formData, updateField, showRelationships = true }) {
   const bg = formData.background || {};
@@ -47,14 +48,14 @@ export default function StepBackground({ formData, updateField, showRelationship
     updateField('background.secrets', (bg.secrets || []).filter((_, i) => i !== idx));
   }
 
-  const fieldStyle = "w-full px-2 py-1 text-sm font-mono text-cyber-ink bg-transparent border-b border-amber-300/50 focus:border-amber-500 focus:outline-none focus:bg-amber-50/50 transition-colors";
-  const labelStyle = "block text-[11px] text-amber-700/60 font-mono mb-1 uppercase tracking-wider";
+  const fieldStyle = 'min-h-11 w-full rounded-md border border-input bg-background px-3 font-archive-serif text-base text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring';
+  const labelStyle = 'mb-1.5 block font-archive-mono text-[11px] uppercase text-muted-foreground';
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2 mb-4">
-        <span className="text-lg text-cyber-ink/60">📖</span>
-        <h3 className="font-mono text-lg font-bold text-cyber-ink">背景故事 Background</h3>
+      <div className="mb-4 flex items-center gap-2">
+        <BookOpen className="h-5 w-5 text-primary" aria-hidden="true" />
+        <h3 className="font-archive-serif text-lg font-semibold text-foreground">背景故事 Background</h3>
       </div>
 
       {/* Story Bio */}
@@ -64,22 +65,22 @@ export default function StepBackground({ formData, updateField, showRelationship
           value={bg.story_bio || ''}
           onChange={(e) => updateField('background.story_bio', e.target.value)}
           rows={5}
-          className={`${fieldStyle} bg-amber-50/50 rounded-t resize-none`}
+          className={`${fieldStyle} resize-y py-2 leading-7`}
           placeholder="Describe the character's backstory..."
         />
       </div>
 
       {/* Key Events */}
       <div>
-        <div className="flex items-center justify-between mb-2">
+        <div className="mb-2 flex items-center justify-between">
           <label className={labelStyle}>关键事件 Key Events</label>
-          <button onClick={addKeyEvent} className="flex items-center gap-1 text-[10px] text-amber-700/60 hover:text-amber-700 font-mono">
-            <Plus size={12} /> Add
-          </button>
+          <Button type="button" variant="ghost" onClick={addKeyEvent}>
+            <Plus aria-hidden="true" /> 添加
+          </Button>
         </div>
         <div className="space-y-3">
           {(bg.key_events || []).map((event, idx) => (
-            <div key={idx} className="flex items-start gap-2 p-2 bg-amber-50/40 rounded border border-amber-300/20">
+            <div key={idx} className="flex items-start gap-2 rounded-md border border-border bg-muted/25 p-3">
               <div className="flex-1 space-y-2">
                 <input
                   type="text" value={event.event || ''}
@@ -92,17 +93,24 @@ export default function StepBackground({ formData, updateField, showRelationship
                   className={fieldStyle} placeholder="Description"
                 />
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-amber-700/40 font-mono">Weight:</span>
+                  <span className="font-archive-mono text-[10px] text-muted-foreground">Weight:</span>
                   <input
                     type="number" value={event.emotional_weight || 0}
                     onChange={(e) => updateKeyEvent(idx, 'emotional_weight', parseInt(e.target.value) || 0)}
-                    className="w-16 px-1 py-0.5 text-xs font-mono text-cyber-ink border-b border-amber-300/50 focus:outline-none bg-transparent"
+                    className="min-h-11 w-20 rounded-md border border-input bg-background px-2 font-archive-mono text-xs tabular-nums text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 </div>
               </div>
-              <button onClick={() => removeKeyEvent(idx)} className="text-amber-700/30 hover:text-red-600 transition-colors mt-1">
-                <Trash2 size={14} />
-              </button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => removeKeyEvent(idx)}
+                className="shrink-0 text-muted-foreground hover:text-destructive"
+                aria-label={`删除关键事件 ${idx + 1}`}
+              >
+                <Trash2 aria-hidden="true" />
+              </Button>
             </div>
           ))}
         </div>
@@ -110,29 +118,36 @@ export default function StepBackground({ formData, updateField, showRelationship
 
       {/* Relationships */}
       {showRelationships && <div>
-        <div className="flex items-center justify-between mb-2">
+        <div className="mb-2 flex items-center justify-between">
           <label className={labelStyle}>人物关系 Relationships</label>
-          <button onClick={addRelationship} className="flex items-center gap-1 text-[10px] text-amber-700/60 hover:text-amber-700 font-mono">
-            <Plus size={12} /> Add
-          </button>
+          <Button type="button" variant="ghost" onClick={addRelationship}>
+            <Plus aria-hidden="true" /> 添加
+          </Button>
         </div>
         <div className="space-y-3">
           {(bg.relationships || []).map((rel, idx) => (
-            <div key={idx} className="flex items-start gap-2 p-2 bg-amber-50/40 rounded border border-amber-300/20">
+            <div key={idx} className="flex items-start gap-2 rounded-md border border-border bg-muted/25 p-3">
               <div className="flex-1 space-y-2">
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <input type="text" value={rel.target || ''} onChange={(e) => updateRelationship(idx, 'target', e.target.value)} className={fieldStyle} placeholder="Target" />
                   <input type="text" value={rel.relationship_type || ''} onChange={(e) => updateRelationship(idx, 'relationship_type', e.target.value)} className={fieldStyle} placeholder="Type" />
                 </div>
                 <input type="text" value={rel.description || ''} onChange={(e) => updateRelationship(idx, 'description', e.target.value)} className={fieldStyle} placeholder="Description" />
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-amber-700/40 font-mono">Weight:</span>
-                  <input type="number" value={rel.emotional_weight || 0} onChange={(e) => updateRelationship(idx, 'emotional_weight', parseInt(e.target.value) || 0)} className="w-16 px-1 py-0.5 text-xs font-mono text-cyber-ink border-b border-amber-300/50 focus:outline-none bg-transparent" />
+                  <span className="font-archive-mono text-[10px] text-muted-foreground">Weight:</span>
+                  <input type="number" value={rel.emotional_weight || 0} onChange={(e) => updateRelationship(idx, 'emotional_weight', parseInt(e.target.value) || 0)} className="min-h-11 w-20 rounded-md border border-input bg-background px-2 font-archive-mono text-xs tabular-nums text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </div>
               </div>
-              <button onClick={() => removeRelationship(idx)} className="text-amber-700/30 hover:text-red-600 transition-colors mt-1">
-                <Trash2 size={14} />
-              </button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => removeRelationship(idx)}
+                className="shrink-0 text-muted-foreground hover:text-destructive"
+                aria-label={`删除人物关系 ${idx + 1}`}
+              >
+                <Trash2 aria-hidden="true" />
+              </Button>
             </div>
           ))}
         </div>
@@ -140,32 +155,39 @@ export default function StepBackground({ formData, updateField, showRelationship
 
       {/* Secrets */}
       <div>
-        <div className="flex items-center justify-between mb-2">
+        <div className="mb-2 flex items-center justify-between">
           <label className={labelStyle}>秘密 Secrets</label>
-          <button onClick={addSecret} className="flex items-center gap-1 text-[10px] text-amber-700/60 hover:text-amber-700 font-mono">
-            <Plus size={12} /> Add
-          </button>
+          <Button type="button" variant="ghost" onClick={addSecret}>
+            <Plus aria-hidden="true" /> 添加
+          </Button>
         </div>
         <div className="space-y-3">
           {(bg.secrets || []).map((sec, idx) => (
-            <div key={idx} className="flex items-start gap-2 p-2 bg-amber-50/40 rounded border border-amber-300/20">
+            <div key={idx} className="flex items-start gap-2 rounded-md border border-border bg-muted/25 p-3">
               <div className="flex-1 space-y-2">
                 <input type="text" value={sec.secret || ''} onChange={(e) => updateSecret(idx, 'secret', e.target.value)} className={fieldStyle} placeholder="Secret" />
                 <input type="text" value={sec.reveal_conditions || ''} onChange={(e) => updateSecret(idx, 'reveal_conditions', e.target.value)} className={fieldStyle} placeholder="Reveal conditions" />
               </div>
-              <button onClick={() => removeSecret(idx)} className="text-amber-700/30 hover:text-red-600 transition-colors mt-1">
-                <Trash2 size={14} />
-              </button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => removeSecret(idx)}
+                className="shrink-0 text-muted-foreground hover:text-destructive"
+                aria-label={`删除秘密 ${idx + 1}`}
+              >
+                <Trash2 aria-hidden="true" />
+              </Button>
             </div>
           ))}
         </div>
       </div>
 
       {/* Goals & Motivations */}
-      <div className="border-t pt-4" style={{ borderColor: '#C4B594' }}>
-        <div className="flex items-center gap-2 mb-4">
-          <span className="text-lg text-cyber-ink/60">🎯</span>
-          <h3 className="font-mono text-lg font-bold text-cyber-ink">目标与动机 Goals & Motivations</h3>
+      <div className="border-t border-border pt-4">
+        <div className="mb-4 flex items-center gap-2">
+          <Target className="h-5 w-5 text-primary" aria-hidden="true" />
+          <h3 className="font-archive-serif text-lg font-semibold text-foreground">目标与动机 Goals & Motivations</h3>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
