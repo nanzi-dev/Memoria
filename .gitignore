@@ -28,8 +28,7 @@ __pycache__/
 *.db
 *.sqlite
 *.sqlite3
-data/sqlite_db/
-data/chroma_db/
+data/
 web/dist/
 
 # =========================

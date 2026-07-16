@@ -34,7 +34,7 @@ from memoria.core.knowledge_vector_store import get_knowledge_vector_store
 from memoria.db import repository
 
 
-DEMO_USERNAME = "memoria_demo"
+DEMO_USERNAME = "nanzi"
 
 
 def _read_json(path: Path) -> Any:
@@ -255,7 +255,6 @@ def _seed_events(owner_user_id: str, events: list[EventDefinition]) -> None:
             description=event.description,
             priority=event.priority,
             exclusive_group=event.exclusive_group,
-            exclusive_scope=event.exclusive_scope,
             max_triggers_per_turn=event.max_triggers_per_turn,
             stop_processing=event.stop_processing,
             is_active=event.is_active,

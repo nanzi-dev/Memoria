@@ -3,7 +3,7 @@
   "title": "回声档案",
   "version": "1.0.0",
   "locale": "zh-CN",
-  "demo_username": "echo_archive_demo",
+  "demo_username": "nanzi",
   "player_character": "player_character.json",
   "player_relationship_token": "@player",
   "groups": [

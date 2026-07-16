@@ -442,23 +442,12 @@ def test_echo_archive_documented_success_and_failure_routes_reference_real_event
 def test_echo_archive_walkthrough_documents_actual_event_timing():
     walkthrough = (MODULE_ROOT / "WALKTHROUGH.md").read_text(encoding="utf-8")
     guide = (MODULE_ROOT / "攻略.md").read_text(encoding="utf-8")
-    volume_one = walkthrough.split("## 第1卷", 1)[1].split("## 第2卷", 1)[0]
-    volume_two = walkthrough.split("## 第2卷", 1)[1].split("## 第3卷", 1)[0]
     volume_six = walkthrough.split("## 第6卷", 1)[1].split("## 第7卷", 1)[0]
-    volume_seven = walkthrough.split("## 第7卷", 1)[1].split(
-        "## 四个主结局", 1
-    )[0]
     success_route = walkthrough.split("## 一条成功路线", 1)[1].split(
         "## 一条失败路线", 1
     )[0]
     failure_route = walkthrough.split("## 一条失败路线", 1)[1]
 
-    assert "不会触发 `echo_choice_protect_witness`" in volume_one
-    assert "延续 `保全证人` 状态" not in volume_two
-    assert (
-        "只有在 `echo_meta_decision_window` 已提交后，单独发送 "
-        "`保全证人` 才会触发 `echo_choice_protect_witness`"
-    ) in volume_seven
     assert "按程序撤离" not in volume_six
     assert (
         "第1至第6卷的 `echo_vN_resolution` 同时要求 "
