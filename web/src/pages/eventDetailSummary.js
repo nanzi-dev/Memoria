@@ -21,6 +21,21 @@ export function mergeEventDetail(listRecord = {}, detailRecord = {}) {
   return merged;
 }
 
+export function eventDetailForDisplay(detailRecord, listRecord) {
+  if (!detailRecord) return listRecord || null;
+  if (!listRecord) return detailRecord;
+  return { ...detailRecord, ...listRecord };
+}
+
+export function shouldShowEventSchedule(event = {}) {
+  return event.trigger_type === 'time_based'
+    && (
+      !!event.next_run_at
+      || !!event.next_due_real_at
+      || Number(event.missed_count) > 0
+    );
+}
+
 export function eventTriggerLabel(triggerType, triggerLabels = {}) {
   return Object.hasOwn(triggerLabels, triggerType)
     ? triggerLabels[triggerType]

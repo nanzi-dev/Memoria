@@ -100,6 +100,32 @@ test('event detail merge preserves schedule metadata from the list record', () =
   );
 });
 
+test('displayed event detail prefers refreshed list fields over stale detail fields', () => {
+  const staleDetail = {
+    event_id: 'scheduled-event',
+    event_name: '定时事件',
+    is_active: true,
+    next_run_at: '2046-03-12T08:30:00Z',
+    missed_count: 1,
+    effects: [{ effect_type: 'notify_player' }],
+  };
+  const refreshedListRecord = {
+    event_id: 'scheduled-event',
+    event_name: '定时事件',
+    is_active: false,
+    next_run_at: '2046-03-13T09:45:00Z',
+    missed_count: 4,
+  };
+
+  assert.deepEqual(
+    eventDetailSummary.eventDetailForDisplay?.(staleDetail, refreshedListRecord),
+    {
+      ...staleDetail,
+      ...refreshedListRecord,
+    },
+  );
+});
+
 test('dialogue count trigger description reads the count field', () => {
   assert.equal(
     eventDetailSummary.describeEventTrigger?.({
@@ -132,6 +158,39 @@ test('unknown and legacy trigger types use a neutral localized fallback', () => 
   );
 });
 
+test('schedule section only appears for time events with meaningful schedule metadata', () => {
+  assert.equal(
+    eventDetailSummary.shouldShowEventSchedule?.({
+      trigger_type: 'time_based',
+      next_run_at: null,
+      next_due_real_at: null,
+      missed_count: 0,
+    }),
+    false,
+  );
+  assert.equal(
+    eventDetailSummary.shouldShowEventSchedule?.({
+      trigger_type: 'time_based',
+      next_run_at: '2046-03-12T08:30:00Z',
+    }),
+    true,
+  );
+  assert.equal(
+    eventDetailSummary.shouldShowEventSchedule?.({
+      trigger_type: 'time_based',
+      missed_count: 2,
+    }),
+    true,
+  );
+  assert.equal(
+    eventDetailSummary.shouldShowEventSchedule?.({
+      trigger_type: 'dialogue_count',
+      next_run_at: '2046-03-12T08:30:00Z',
+    }),
+    false,
+  );
+});
+
 test('event detail panel omits raw configuration and empty placeholders', () => {
   assert.doesNotMatch(eventListSource, /function ArchiveValue/);
   assert.doesNotMatch(eventListSource, /function RecordFields/);
@@ -144,6 +203,7 @@ test('event detail panel omits raw configuration and empty placeholders', () => 
   assert.match(eventListSource, /event\.stop_processing &&/);
   assert.match(eventListSource, /Number\(event\.missed_count\) > 0/);
   assert.match(eventListSource, /event\.template_id &&/);
+  assert.doesNotMatch(eventListSource, /暂无可用排期/);
 });
 
 test('event detail panel keeps concise summaries and management actions', () => {

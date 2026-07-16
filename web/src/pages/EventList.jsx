@@ -46,9 +46,11 @@ import { useUser } from '@/context/UserContext';
 import { eventEditorPath } from '@/utils/navigationState';
 import {
   describeEventTrigger,
+  eventDetailForDisplay,
   eventEffectLabel,
   eventTriggerLabel,
   mergeEventDetail,
+  shouldShowEventSchedule,
   summarizeEventEffect,
 } from './eventDetailSummary';
 
@@ -322,7 +324,10 @@ export default function EventList() {
   const isAuthError = !!error && AUTH_ERROR_PATTERN.test(error);
   const isAuthBlocked = !user || isAuthError;
   const selectedSummary = events.find(event => event.event_id === selectedEventId) || null;
-  const eventDetail = selectedEvent?.event_id === selectedEventId ? selectedEvent : selectedSummary;
+  const eventDetail = eventDetailForDisplay(
+    selectedEvent?.event_id === selectedEventId ? selectedEvent : null,
+    selectedSummary,
+  );
   const openCreate = useCallback(() => navigate('/events/new'), [navigate]);
 
   const primaryAction = useMemo(() => (
@@ -654,11 +659,8 @@ function EventDetailPanel({
 }) {
   const TriggerIcon = TRIGGER_ICONS[event?.trigger_type] || Activity;
   const effects = Array.isArray(event?.effects) ? event.effects : [];
-  const isTimeBased = event?.trigger_type === 'time_based';
-  const hasScheduleDetails = !!event?.next_run_at
-    || !!event?.next_due_real_at
-    || Number(worldClock?.time_scale) === 0
-    || Number(event?.missed_count) > 0;
+  const showSchedule = shouldShowEventSchedule(event);
+  const worldClockPaused = Number(worldClock?.time_scale) === 0;
   const hasRunRecords = !!event?.last_triggered_at
     || !!event?.updated_at
     || !!event?.template_id
@@ -774,41 +776,37 @@ function EventDetailPanel({
             </dl>
           </ArchiveSection>
 
-          {isTimeBased && (
+          {showSchedule && (
             <ArchiveSection icon={CalendarClock} title="运行排期" index="02">
-              {hasScheduleDetails ? (
-                <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
-                  {event.next_run_at && (
-                    <DetailItem
-                      label="世界时间触发"
-                      value={formatScheduleTime(event.next_run_at)}
-                      mono
-                    />
-                  )}
-                  {(event.next_due_real_at || Number(worldClock?.time_scale) === 0) && (
-                    <DetailItem
-                      label="现实预计时间"
-                      value={event.next_due_real_at
-                        ? formatScheduleTime(event.next_due_real_at)
-                        : '世界时间已暂停'}
-                      mono
-                    />
-                  )}
-                  {Number(event.missed_count) > 0 && (
-                    <DetailItem
-                      label="合并漏触发"
-                      value={`${Number(event.missed_count)} 次`}
-                      mono
-                    />
-                  )}
-                </dl>
-              ) : (
-                <p className="text-sm text-muted-foreground">暂无可用排期。</p>
-              )}
+              <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+                {event.next_run_at && (
+                  <DetailItem
+                    label="世界时间触发"
+                    value={formatScheduleTime(event.next_run_at)}
+                    mono
+                  />
+                )}
+                {(event.next_due_real_at || (event.next_run_at && worldClockPaused)) && (
+                  <DetailItem
+                    label="现实预计时间"
+                    value={event.next_due_real_at
+                      ? formatScheduleTime(event.next_due_real_at)
+                      : '世界时间已暂停'}
+                    mono
+                  />
+                )}
+                {Number(event.missed_count) > 0 && (
+                  <DetailItem
+                    label="合并漏触发"
+                    value={`${Number(event.missed_count)} 次`}
+                    mono
+                  />
+                )}
+              </dl>
             </ArchiveSection>
           )}
 
-          <ArchiveSection icon={Network} title="执行效果" index={isTimeBased ? '03' : '02'}>
+          <ArchiveSection icon={Network} title="执行效果" index={showSchedule ? '03' : '02'}>
             {effects.length === 0 ? (
               <p className="text-sm text-muted-foreground">尚未配置执行效果。</p>
             ) : (
@@ -834,7 +832,7 @@ function EventDetailPanel({
             )}
           </ArchiveSection>
 
-          <ArchiveSection icon={Clock} title="运行记录" index={isTimeBased ? '04' : '03'} last>
+          <ArchiveSection icon={Clock} title="运行记录" index={showSchedule ? '04' : '03'} last>
             {hasRunRecords ? (
               <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
                 {event.last_triggered_at && (
