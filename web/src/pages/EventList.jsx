@@ -44,7 +44,13 @@ import { eventAdmin } from '@/api/memoria';
 import { useDialog } from '@/context/DialogContext';
 import { useUser } from '@/context/UserContext';
 import { eventEditorPath } from '@/utils/navigationState';
-import { eventEffectLabel, summarizeEventEffect } from './eventDetailSummary';
+import {
+  describeEventTrigger,
+  eventEffectLabel,
+  eventTriggerLabel,
+  mergeEventDetail,
+  summarizeEventEffect,
+} from './eventDetailSummary';
 
 const TRIGGER_TYPES = [
   { value: 'affinity_threshold', label: '好感度阈值', Icon: Heart },
@@ -125,36 +131,6 @@ function formatDateTime(value) {
     minute: '2-digit',
     hour12: false,
   }).format(date);
-}
-
-function describeTrigger(condition, fallbackType) {
-  const source = condition || {};
-  const type = source.trigger_type || fallbackType;
-  if (!type) return '未配置触发条件';
-  if (type === 'keyword_match' || type === 'npc_keyword_match') {
-    const keywords = Array.isArray(source.keywords) ? source.keywords.filter(Boolean) : [];
-    return keywords.length ? `关键词：${keywords.join('、')}` : '尚未配置关键词';
-  }
-  if (type === 'affinity_threshold' || type === 'trust_threshold' || type === 'dialogue_count') {
-    const comparison = {
-      gte: '大于等于',
-      lte: '小于等于',
-      gt: '大于',
-      lt: '小于',
-      eq: '等于',
-    }[source.comparison] || '达到';
-    return `${comparison} ${source.threshold ?? '未设置'}`;
-  }
-  if (type === 'mood_match') return `目标情绪：${source.mood || '未设置'}`;
-  if (type === 'time_based') return '按预定时间触发';
-  if (type === 'world_time_window') {
-    return `${source.time_window_start || '--:--'} 至 ${source.time_window_end || '--:--'}`;
-  }
-  if (type === 'event_history') return `关联事件：${source.event_id || '未设置'}`;
-  if (type === 'composite') {
-    return `${Array.isArray(source.sub_conditions) ? source.sub_conditions.length : 0} 个子条件`;
-  }
-  return TRIGGER_LABELS[type] || type;
 }
 
 function DetailItem({ label, value, mono = false }) {
@@ -239,9 +215,12 @@ export default function EventList() {
     try {
       const detail = await eventAdmin.get(eventId);
       if (detailRequestRef.current !== requestId) return;
-      setSelectedEvent(detail);
+      setSelectedEvent(prev => mergeEventDetail(
+        prev?.event_id === eventId ? prev : {},
+        detail,
+      ));
       setEvents(prev => prev.map(event => (
-        event.event_id === eventId ? { ...event, ...detail } : event
+        event.event_id === eventId ? mergeEventDetail(event, detail) : event
       )));
     } catch (e) {
       if (!soft && detailRequestRef.current === requestId) {
@@ -645,7 +624,7 @@ function EventDirectory({
                         {evt.event_id}
                       </span>
                       <span className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                        <span>{TRIGGER_LABELS[evt.trigger_type] || evt.trigger_type || '未知触发'}</span>
+                        <span>{eventTriggerLabel(evt.trigger_type, TRIGGER_LABELS)}</span>
                         <span className="font-archive-mono tabular-nums">
                           P{evt.priority || 0} · {evt.trigger_count || 0} 次
                         </span>
@@ -764,7 +743,7 @@ function EventDetailPanel({
             {[
               ['优先级', event.priority ?? 0],
               ['累计触发', event.trigger_count ?? 0],
-              ['触发类型', TRIGGER_LABELS[event.trigger_type] || event.trigger_type || '未知'],
+              ['触发类型', eventTriggerLabel(event.trigger_type, TRIGGER_LABELS)],
               ['单轮上限', event.max_triggers_per_turn ?? 3],
             ].map(([label, value]) => (
               <div key={label} className="min-w-0 px-3 py-4 sm:px-4">
@@ -778,7 +757,11 @@ function EventDetailPanel({
 
           <ArchiveSection icon={Zap} title="触发配置" index="01">
             <p className="mb-4 line-clamp-2 font-archive-mono text-sm tabular-nums leading-7 text-foreground">
-              {describeTrigger(event.trigger_condition, event.trigger_type)}
+              {describeEventTrigger(
+                event.trigger_condition,
+                event.trigger_type,
+                TRIGGER_LABELS,
+              )}
             </p>
             <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
               <DetailItem label="绑定角色" value={event.character_id || '全局事件'} mono />

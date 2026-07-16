@@ -6,6 +6,7 @@ import {
   eventEffectLabel,
   summarizeEventEffect,
 } from '../src/pages/eventDetailSummary.js';
+import * as eventDetailSummary from '../src/pages/eventDetailSummary.js';
 
 const eventListSource = await readFile(
   new URL('../src/pages/EventList.jsx', import.meta.url),
@@ -71,6 +72,64 @@ test('unknown effects use a generic execution summary', () => {
   assert.equal(summarizeEventEffect({
     effect_type: 'unknown_effect',
   }), '执行其他事件效果');
+});
+
+test('event detail merge preserves schedule metadata from the list record', () => {
+  const listRecord = {
+    event_id: 'scheduled-event',
+    next_run_at: '2046-03-12T08:30:00Z',
+    next_due_real_at: '2046-03-12T08:00:00Z',
+    missed_count: 3,
+  };
+  const detailRecord = {
+    event_id: 'scheduled-event',
+    event_name: '定时事件',
+    next_run_at: null,
+    next_due_real_at: null,
+    missed_count: 0,
+  };
+
+  assert.deepEqual(
+    eventDetailSummary.mergeEventDetail?.(listRecord, detailRecord),
+    {
+      ...detailRecord,
+      next_run_at: listRecord.next_run_at,
+      next_due_real_at: listRecord.next_due_real_at,
+      missed_count: listRecord.missed_count,
+    },
+  );
+});
+
+test('dialogue count trigger description reads the count field', () => {
+  assert.equal(
+    eventDetailSummary.describeEventTrigger?.({
+      trigger_type: 'dialogue_count',
+      comparison: 'gte',
+      count: 12,
+    }),
+    '大于等于 12',
+  );
+});
+
+test('unknown and legacy trigger types use a neutral localized fallback', () => {
+  const triggerLabels = { dialogue_count: '对话次数' };
+
+  assert.equal(
+    eventDetailSummary.eventTriggerLabel?.('item_acquired', triggerLabels),
+    '其他条件',
+  );
+  assert.equal(
+    eventDetailSummary.eventTriggerLabel?.('unknown_trigger', triggerLabels),
+    '其他条件',
+  );
+  assert.equal(
+    eventDetailSummary.describeEventTrigger?.(
+      { trigger_type: 'item_acquired' },
+      undefined,
+      triggerLabels,
+    ),
+    '其他条件',
+  );
 });
 
 test('event detail panel omits raw configuration and empty placeholders', () => {

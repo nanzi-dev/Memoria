@@ -11,6 +11,57 @@ const EFFECT_LABELS = {
   update_event_progress: '更新事件进度',
 };
 
+export function mergeEventDetail(listRecord = {}, detailRecord = {}) {
+  const merged = { ...listRecord, ...detailRecord };
+
+  for (const field of ['next_run_at', 'next_due_real_at', 'missed_count']) {
+    if (listRecord[field] != null) merged[field] = listRecord[field];
+  }
+
+  return merged;
+}
+
+export function eventTriggerLabel(triggerType, triggerLabels = {}) {
+  return Object.hasOwn(triggerLabels, triggerType)
+    ? triggerLabels[triggerType]
+    : '其他条件';
+}
+
+export function describeEventTrigger(condition, fallbackType, triggerLabels = {}) {
+  const source = condition || {};
+  const type = source.trigger_type || fallbackType;
+  if (!type) return '未配置触发条件';
+  if (type === 'keyword_match' || type === 'npc_keyword_match') {
+    const keywords = Array.isArray(source.keywords) ? source.keywords.filter(Boolean) : [];
+    return keywords.length ? `关键词：${keywords.join('、')}` : '尚未配置关键词';
+  }
+
+  const comparison = {
+    gte: '大于等于',
+    lte: '小于等于',
+    gt: '大于',
+    lt: '小于',
+    eq: '等于',
+  }[source.comparison] || '达到';
+
+  if (type === 'affinity_threshold' || type === 'trust_threshold') {
+    return `${comparison} ${source.threshold ?? '未设置'}`;
+  }
+  if (type === 'dialogue_count') {
+    return `${comparison} ${source.count ?? '未设置'}`;
+  }
+  if (type === 'mood_match') return `目标情绪：${source.mood || '未设置'}`;
+  if (type === 'time_based') return '按预定时间触发';
+  if (type === 'world_time_window') {
+    return `${source.time_window_start || '--:--'} 至 ${source.time_window_end || '--:--'}`;
+  }
+  if (type === 'event_history') return `关联事件：${source.event_id || '未设置'}`;
+  if (type === 'composite') {
+    return `${Array.isArray(source.sub_conditions) ? source.sub_conditions.length : 0} 个子条件`;
+  }
+  return eventTriggerLabel(type, triggerLabels);
+}
+
 export function eventEffectLabel(effectType) {
   return Object.hasOwn(EFFECT_LABELS, effectType)
     ? EFFECT_LABELS[effectType]
