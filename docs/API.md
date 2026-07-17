@@ -50,14 +50,13 @@ Content-Type: application/json
 {
   "character_id": "npc_luo_xiaohei",
   "player_id": "player_001",
-  "player_name": "旅行者",
+  "player_name": "小白",
   "locale": "zh-CN"
 }
 ```
 
 如果该玩家与角色已有活跃会话，接口会复用原会话并返回 `recovered: true` 与最近消息；否则创建空会话，开场白为空字符串。角色卡被禁用后不能创建新的单聊；已有历史仍可通过历史接口查看，继续发送消息会返回 400。
 
-`locale` 可选，支持 `zh-CN` 和 `en-US`，默认 `zh-CN`。语言会持久化到会话，并控制角色卡 i18n 合并、Prompt 输出语言和 STT 转写语言。
 
 **响应示例：**
 ```json
