@@ -21,8 +21,18 @@ from memoria.api import speech as speech_api
 from memoria.api import user as user_api
 from memoria.core.character_loader import normalize_character_data
 from memoria.core.character_schema import CharacterCard
-from memoria.core.config import configs
-from memoria.core.speech_provider import OpenAISpeechProvider, SpeechProviderError
+from memoria.core.config import Configs, configs
+from memoria.core.speech_provider import (
+    MiniMaxSpeechProvider,
+    OpenAICompatibleSpeechProvider,
+    ProviderSettings,
+    SpeechProviderError,
+    create_stt_provider,
+    create_tts_provider,
+    speech_provider_configuration,
+    stt_provider_settings,
+    tts_provider_settings,
+)
 from memoria.core.speech_service import SpeechService, SpeechServiceError
 from memoria.db import repository
 
@@ -99,8 +109,8 @@ class FakeSpeechProvider:
         self.consents.append((recording, kwargs))
         return {"id": "cons_1234"}
 
-    async def create_custom_voice(self, audio_sample, **kwargs):
-        self.voices.append((audio_sample, kwargs))
+    async def create_custom_voice(self, audio_sample=None, **kwargs):
+        self.voices.append((audio_sample or kwargs["reference_audio"], kwargs))
         return {"id": "voice_1234"}
 
 
@@ -229,154 +239,134 @@ async def test_speech_settings_http_api_persists_and_isolates_users(monkeypatch)
         assert isolated.json()["stt_auto_send"] is False
 
 
+def test_speech_provider_factories_split_stt_and_tts_configuration():
+    settings = Configs(
+        speech_tts_provider="minimax",
+        speech_tts_api_key=SecretStr("minimax-key"),
+        speech_stt_provider="openai_compatible",
+        speech_stt_api_key=SecretStr("asr-key"),
+    )
+
+    assert isinstance(create_tts_provider(settings), MiniMaxSpeechProvider)
+    assert isinstance(create_stt_provider(settings), OpenAICompatibleSpeechProvider)
+    assert tts_provider_settings(settings).api_key == "minimax-key"
+    assert stt_provider_settings(settings).api_key == "asr-key"
+    assert speech_provider_configuration(settings) == {
+        "provider": "minimax",
+        "provider_label": "MiniMax",
+        "builtin_voices": [
+            "male-qn-qingse",
+            "male-qn-jingying",
+            "male-qn-badao",
+            "male-qn-daxuesheng",
+            "female-shaonv",
+            "female-yujie",
+            "female-chengshu",
+            "female-tianmei",
+        ],
+        "default_builtin_voice": "female-shaonv",
+        "custom_voice_supported": True,
+    }
+
+
 @pytest.mark.asyncio
-async def test_provider_uses_official_speech_payloads(monkeypatch):
+async def test_minimax_provider_streams_sse_audio_and_retries_before_first_chunk():
     requests = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        body = await request.aread()
-        requests.append((request, body))
-        if request.url.path.endswith("/audio/transcriptions"):
-            return httpx.Response(200, json={"text": "hello"})
-        if request.url.path.endswith("/audio/speech"):
-            return httpx.Response(200, content=b"wav")
-        if request.url.path.endswith("/audio/voice_consents"):
-            return httpx.Response(200, json={"id": "cons_1"})
-        return httpx.Response(200, json={"id": "voice_1"})
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(503, json={"base_resp": {"status_msg": "busy"}})
+        return httpx.Response(
+            200,
+            content=(
+                b'data: {"data":{"audio":"52494646"}}\n\n'
+                b'data: {"data":{"audio":"0102"}}\n\n'
+                b'data: {"data":{"status":2}}\n\n'
+            ),
+        )
 
-    monkeypatch.setattr(configs, "speech_api_key", SecretStr("speech-key"))
+    settings = ProviderSettings(
+        provider="minimax",
+        api_key="minimax-key",
+        base_url="https://api.minimax.io/v1",
+        model="speech-2.8-turbo",
+        timeout_seconds=3,
+        max_retries=1,
+    )
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    provider = OpenAISpeechProvider(configs, client)
+    provider = MiniMaxSpeechProvider(settings, output_format="mp3", client=client)
+    chunks = [
+        chunk async for chunk in provider.synthesize_stream(
+            "你好，世界",
+            voice="female-shaonv",
+        )
+    ]
+    await client.aclose()
 
-    await provider.transcribe(
-        b"audio",
-        filename="clip.webm",
-        mime_type="audio/webm",
-        locale="en-US",
+    assert chunks == [b"RIFF", b"\x01\x02"]
+    assert len(requests) == 2
+    assert requests[1].headers["authorization"] == "Bearer minimax-key"
+    assert json.loads(requests[1].content) == {
+        "model": "speech-2.8-turbo",
+        "text": "你好，世界",
+        "stream": True,
+        "voice_setting": {
+            "voice_id": "female-shaonv",
+            "speed": 1.0,
+            "vol": 1.0,
+            "pitch": 0,
+        },
+        "audio_setting": {
+            "sample_rate": 32000,
+            "bitrate": 128000,
+            "format": "mp3",
+            "channel": 1,
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_minimax_provider_maps_auth_rate_limit_and_clone_ids():
+    requests = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/files/upload"):
+            return httpx.Response(200, json={"base_resp": {"status_code": 0}, "file": {"file_id": f"file-{len(requests)}"}})
+        return httpx.Response(200, json={"base_resp": {"status_code": 0}})
+
+    provider = MiniMaxSpeechProvider(
+        ProviderSettings("minimax", "key", "https://api.minimax.io/v1", "speech-2.8-turbo", 3, 0),
+        output_format="mp3",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
-    await provider.synthesize(
-        "Hello",
-        voice={"id": "voice_1234"},
-        instructions="Speak softly.",
-    )
-    await provider.create_voice_consent(
-        b"consent",
-        filename="consent.wav",
-        mime_type="audio/wav",
-        name="Consent",
+    result = await provider.create_custom_voice(
+        authorization_audio=b"consent",
+        authorization_filename="consent.wav",
+        authorization_mime_type="audio/wav",
+        reference_audio=b"sample",
+        reference_filename="sample.wav",
+        reference_mime_type="audio/wav",
+        reference_transcript="This is the reference sample.",
+        voice_id="memoria-voice-123",
+        name="Voice",
         locale="zh-CN",
     )
-    await provider.create_custom_voice(
-        b"sample",
-        filename="sample.wav",
-        mime_type="audio/wav",
-        name="Voice",
-        consent_id="cons_1",
-    )
-    await client.aclose()
+    await provider._client.aclose()
 
-    transcription_body = requests[0][1]
-    assert b'name="model"' in transcription_body
-    assert configs.speech_stt_model.encode() in transcription_body
-    assert b'name="language"' in transcription_body
-    assert b"\r\n\r\nen\r\n" in transcription_body
-    assert b'name="file"; filename="clip.webm"' in transcription_body
-
-    speech_payload = json.loads(requests[1][1])
-    assert speech_payload == {
-        "model": configs.speech_tts_model,
-        "input": "Hello",
-        "voice": {"id": "voice_1234"},
-        "response_format": "wav",
-        "instructions": "Speak softly.",
-    }
-    assert b'name="recording"; filename="consent.wav"' in requests[2][1]
-    assert b'name="language"' in requests[2][1]
-    assert b"zh-CN" in requests[2][1]
-    assert b'name="audio_sample"; filename="sample.wav"' in requests[3][1]
-    assert b'name="consent"' in requests[3][1]
-    assert b"cons_1" in requests[3][1]
-
-
-@pytest.mark.asyncio
-async def test_provider_maps_rate_limit_and_custom_voice_unavailable(monkeypatch):
-    monkeypatch.setattr(configs, "speech_api_key", SecretStr("speech-key"))
-
-    async def rate_limited(_request):
-        return httpx.Response(429, json={"error": {"message": "slow down"}})
-
-    client = httpx.AsyncClient(transport=httpx.MockTransport(rate_limited))
-    provider = OpenAISpeechProvider(configs, client)
-    with pytest.raises(SpeechProviderError, match="rate limit") as exc_info:
-        await provider.synthesize("hello", voice="alloy")
-    assert exc_info.value.category == "rate_limited"
-    await client.aclose()
-
-    async def forbidden(_request):
-        return httpx.Response(403, json={"error": {"message": "not eligible"}})
-
-    client = httpx.AsyncClient(transport=httpx.MockTransport(forbidden))
-    provider = OpenAISpeechProvider(configs, client)
-    with pytest.raises(SpeechProviderError) as exc_info:
-        await provider.create_voice_consent(
-            b"audio",
-            filename="clip.wav",
-            mime_type="audio/wav",
-            name="test",
-            locale="en-US",
-        )
-    assert exc_info.value.category == "unavailable"
-    await client.aclose()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("status_code", [401, 403, 404])
-async def test_provider_does_not_infer_custom_voice_unavailable_from_status(
-    monkeypatch,
-    status_code,
-):
-    monkeypatch.setattr(configs, "speech_api_key", SecretStr("speech-key"))
-
-    async def rejected(_request):
-        return httpx.Response(
-            status_code,
-            json={"error": {"message": "request rejected"}},
-        )
-
-    client = httpx.AsyncClient(transport=httpx.MockTransport(rejected))
-    provider = OpenAISpeechProvider(configs, client)
-    with pytest.raises(SpeechProviderError) as exc_info:
-        await provider.create_voice_consent(
-            b"audio",
-            filename="clip.wav",
-            mime_type="audio/wav",
-            name="test",
-            locale="en-US",
-        )
-    assert exc_info.value.category == "provider_failure"
-    await client.aclose()
-
-
-@pytest.mark.asyncio
-async def test_provider_wraps_successful_non_json_response(monkeypatch):
-    monkeypatch.setattr(configs, "speech_api_key", SecretStr("speech-key"))
-
-    async def invalid_json(_request):
-        return httpx.Response(200, text="not-json")
-
-    client = httpx.AsyncClient(transport=httpx.MockTransport(invalid_json))
-    provider = OpenAISpeechProvider(configs, client)
-    with pytest.raises(SpeechProviderError, match="invalid JSON") as exc_info:
-        await provider.create_custom_voice(
-            b"sample",
-            filename="sample.wav",
-            mime_type="audio/wav",
-            name="test",
-            consent_id="consent",
-        )
-    assert exc_info.value.category == "provider_failure"
-    assert exc_info.value.status_code == 502
-    await client.aclose()
+    assert result == {"id": "memoria-voice-123"}
+    assert [request.url.path for request in requests] == [
+        "/v1/files/upload",
+        "/v1/files/upload",
+        "/v1/voice_clone",
+    ]
+    clone_payload = json.loads(requests[-1].content)
+    assert clone_payload["file_id"] == "file-1"
+    assert clone_payload["text_validation"]
+    assert clone_payload["clone_prompt"]["prompt_audio"] == "file-2"
+    assert clone_payload["clone_prompt"]["prompt_text"] == "This is the reference sample."
+    assert clone_payload["voice_id"] == "memoria-voice-123"
 
 
 @pytest.mark.asyncio
@@ -454,7 +444,7 @@ async def test_tts_is_assistant_only_uses_custom_voice_and_cache_invalidates(mon
     assert first.cache_hit is False
     assert second.cache_hit is True
     assert len(provider.syntheses) == 1
-    assert provider.syntheses[0][1]["voice"] == {"id": "voice_custom"}
+    assert provider.syntheses[0][1]["voice"] == "voice_custom"
     assert provider.syntheses[0][1]["instructions"] == "Calm and measured."
 
     card.voice.tts_instructions = "Faster."
@@ -475,6 +465,32 @@ async def test_tts_is_assistant_only_uses_custom_voice_and_cache_invalidates(mon
             current_user_id=owner,
             mode="single",
         )
+
+
+@pytest.mark.asyncio
+async def test_tts_omits_bracketed_stage_directions(monkeypatch, tmp_path):
+    owner = f"speech_{uuid.uuid4().hex[:8]}"
+    character_id = f"character_{uuid.uuid4().hex[:8]}"
+    session_id = str(uuid.uuid4())
+    _save_card(owner, _character_card(character_id))
+    repository.create_session(session_id, character_id, owner, "Player")
+    message_id = repository.append_short_term_message(
+        session_id,
+        "assistant",
+        "（放下记录本）[抬眼]【停顿】(轻声) 这是需要朗读的台词。",
+    )
+    provider = FakeSpeechProvider()
+    monkeypatch.setattr(configs, "speech_storage_path", str(tmp_path))
+    service = SpeechService(configs, provider)
+
+    await service.message_audio(
+        session_id=session_id,
+        message_id=message_id,
+        current_user_id=owner,
+        mode="single",
+    )
+
+    assert provider.syntheses[0][0] == "这是需要朗读的台词。"
 
 
 @pytest.mark.asyncio
@@ -604,7 +620,6 @@ async def test_custom_voice_workflow_persists_aliases_and_unbinds_locally(monkey
     _save_card(owner, _character_card(character_id, voice="cedar"))
     provider = FakeSpeechProvider()
     monkeypatch.setattr(configs, "speech_storage_path", str(tmp_path))
-    monkeypatch.setattr(configs, "speech_api_key", SecretStr("speech-key"))
     service = SpeechService(configs, provider)
 
     consent_status = await service.upload_voice_consent(
@@ -615,13 +630,14 @@ async def test_custom_voice_workflow_persists_aliases_and_unbinds_locally(monkey
         filename="consent.wav",
         mime_type="audio/wav",
     )
-    assert consent_status["consent_id"] == "cons_1234"
+    assert consent_status["consent_id"]
     ready_status = await service.create_custom_voice(
         owner_user_id=owner,
         character_id=character_id,
         audio=_wav_bytes(),
         filename="sample.wav",
         mime_type="audio/wav",
+        reference_transcript="这是声音样本。",
     )
     assert ready_status["custom_voice_status"] == "ready"
     assert ready_status["custom_voice_id"] == "voice_1234"
@@ -638,6 +654,39 @@ async def test_custom_voice_workflow_persists_aliases_and_unbinds_locally(monkey
 
 
 @pytest.mark.asyncio
+async def test_custom_voice_requires_reference_transcript(monkeypatch, tmp_path):
+    owner = f"speech_{uuid.uuid4().hex[:8]}"
+    character_id = f"voice_{uuid.uuid4().hex[:8]}"
+    _save_card(owner, _character_card(character_id))
+    monkeypatch.setattr(configs, "speech_storage_path", str(tmp_path))
+    service = SpeechService(configs, FakeSpeechProvider())
+    await service.upload_voice_consent(
+        owner_user_id=owner,
+        character_id=character_id,
+        locale="en-US",
+        audio=_wav_bytes(),
+        filename="consent.wav",
+        mime_type="audio/wav",
+    )
+
+    with pytest.raises(
+        SpeechServiceError,
+        match="Reference audio transcript is required",
+    ) as exc_info:
+        await service.create_custom_voice(
+            owner_user_id=owner,
+            character_id=character_id,
+            audio=_wav_bytes(),
+            filename="sample.wav",
+            mime_type="audio/wav",
+            reference_transcript="   ",
+        )
+
+    assert exc_info.value.status_code == 400
+    assert not service.tts_provider.voices
+
+
+@pytest.mark.asyncio
 async def test_custom_voice_success_preserves_concurrent_character_edits(monkeypatch, tmp_path):
     class BlockingProvider(FakeSpeechProvider):
         def __init__(self):
@@ -645,8 +694,8 @@ async def test_custom_voice_success_preserves_concurrent_character_edits(monkeyp
             self.started = asyncio.Event()
             self.release = asyncio.Event()
 
-        async def create_custom_voice(self, audio_sample, **kwargs):
-            self.voices.append((audio_sample, kwargs))
+        async def create_custom_voice(self, **kwargs):
+            self.voices.append((kwargs["reference_audio"], kwargs))
             self.started.set()
             await self.release.wait()
             return {"id": "voice_reconfigured"}
@@ -673,6 +722,7 @@ async def test_custom_voice_success_preserves_concurrent_character_edits(monkeyp
             audio=_wav_bytes(),
             filename="sample.wav",
             mime_type="audio/wav",
+            reference_transcript="This is the voice sample.",
         )
     )
     await provider.started.wait()
@@ -702,7 +752,7 @@ async def test_custom_voice_success_preserves_concurrent_character_edits(monkeyp
 @pytest.mark.asyncio
 async def test_custom_voice_reconfiguration_failure_preserves_ready_voice(monkeypatch, tmp_path):
     class FailingVoiceProvider(FakeSpeechProvider):
-        async def create_custom_voice(self, audio_sample, **kwargs):
+        async def create_custom_voice(self, **kwargs):
             raise SpeechProviderError("provider_failure", "temporary failure", 502)
 
     owner = f"speech_{uuid.uuid4().hex[:8]}"
@@ -729,6 +779,7 @@ async def test_custom_voice_reconfiguration_failure_preserves_ready_voice(monkey
             audio=_wav_bytes(),
             filename="sample.wav",
             mime_type="audio/wav",
+            reference_transcript="这是声音样本。",
         )
 
     status = service.voice_status(owner, character_id)
@@ -741,7 +792,7 @@ async def test_custom_voice_reconfiguration_failure_preserves_ready_voice(monkey
 @pytest.mark.asyncio
 async def test_custom_voice_unavailable_persists_fallback_status(monkeypatch, tmp_path):
     class UnavailableProvider(FakeSpeechProvider):
-        async def create_voice_consent(self, recording, **kwargs):
+        async def create_custom_voice(self, **kwargs):
             raise SpeechProviderError("unavailable", "Not eligible", 503)
 
     owner = f"speech_{uuid.uuid4().hex[:8]}"
@@ -750,14 +801,22 @@ async def test_custom_voice_unavailable_persists_fallback_status(monkeypatch, tm
     monkeypatch.setattr(configs, "speech_storage_path", str(tmp_path))
     service = SpeechService(configs, UnavailableProvider())
 
+    await service.upload_voice_consent(
+        owner_user_id=owner,
+        character_id=character_id,
+        locale="en-US",
+        audio=_wav_bytes(),
+        filename="consent.wav",
+        mime_type="audio/wav",
+    )
     with pytest.raises(SpeechServiceError) as exc_info:
-        await service.upload_voice_consent(
+        await service.create_custom_voice(
             owner_user_id=owner,
             character_id=character_id,
-            locale="en-US",
             audio=_wav_bytes(),
-            filename="consent.wav",
+            filename="sample.wav",
             mime_type="audio/wav",
+            reference_transcript="This is the voice sample.",
         )
 
     assert exc_info.value.category == "unavailable"
@@ -770,38 +829,15 @@ async def test_custom_voice_unavailable_persists_fallback_status(monkeypatch, tm
 
 @pytest.mark.asyncio
 async def test_custom_voice_missing_provider_ids_persist_failed_workflow(monkeypatch, tmp_path):
-    class MissingConsentIdProvider(FakeSpeechProvider):
-        async def create_voice_consent(self, recording, **kwargs):
-            self.consents.append((recording, kwargs))
-            return {}
-
     class MissingVoiceIdProvider(FakeSpeechProvider):
-        async def create_custom_voice(self, audio_sample, **kwargs):
-            self.voices.append((audio_sample, kwargs))
+        async def create_custom_voice(self, **kwargs):
+            self.voices.append((kwargs["reference_audio"], kwargs))
             return {}
 
     owner = f"speech_{uuid.uuid4().hex[:8]}"
-    consent_character_id = f"consent_{uuid.uuid4().hex[:8]}"
     voice_character_id = f"voice_{uuid.uuid4().hex[:8]}"
-    _save_card(owner, _character_card(consent_character_id))
     _save_card(owner, _character_card(voice_character_id))
     monkeypatch.setattr(configs, "speech_storage_path", str(tmp_path))
-
-    consent_service = SpeechService(configs, MissingConsentIdProvider())
-    with pytest.raises(SpeechServiceError, match="consent ID") as consent_error:
-        await consent_service.upload_voice_consent(
-            owner_user_id=owner,
-            character_id=consent_character_id,
-            locale="en-US",
-            audio=_wav_bytes(),
-            filename="consent.wav",
-            mime_type="audio/wav",
-        )
-    assert consent_error.value.category == "provider_failure"
-    consent_status = consent_service.voice_status(owner, consent_character_id)
-    assert consent_status["custom_voice_status"] == "failed"
-    assert consent_status["error_category"] == "provider_failure"
-    assert consent_status["consent_id"] is None
 
     voice_service = SpeechService(configs, MissingVoiceIdProvider())
     await voice_service.upload_voice_consent(
@@ -819,12 +855,13 @@ async def test_custom_voice_missing_provider_ids_persist_failed_workflow(monkeyp
             audio=_wav_bytes(),
             filename="sample.wav",
             mime_type="audio/wav",
+            reference_transcript="这是声音样本。",
         )
     assert voice_error.value.category == "provider_failure"
     voice_status = voice_service.voice_status(owner, voice_character_id)
     assert voice_status["custom_voice_status"] == "failed"
     assert voice_status["error_category"] == "provider_failure"
-    assert voice_status["consent_id"] == "cons_1234"
+    assert voice_status["consent_id"]
 
 
 def test_repository_get_short_term_message_is_scoped_to_session():

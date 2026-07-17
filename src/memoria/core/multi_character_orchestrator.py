@@ -1168,7 +1168,11 @@ class MultiCharacterOrchestrator:
             turn_context=turn_context,
         )
         try:
-            raw = llm_client.call_light_task(prompt, allow_reasoning_fallback=False)
+            raw = llm_client.call_light_task(
+                prompt,
+                allow_reasoning_fallback=False,
+                max_attempts=1,
+            )
             decision = self._parse_dialogue_decision(raw)
             return self._validate_dialogue_decision(
                 decision,

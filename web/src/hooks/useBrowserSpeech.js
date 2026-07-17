@@ -19,6 +19,61 @@ function fileExtension(mimeType) {
   return 'webm';
 }
 
+function audioBufferToWavBlob(audioBuffer) {
+  const channelCount = Math.min(audioBuffer.numberOfChannels, 2);
+  const sampleCount = audioBuffer.length;
+  const bytesPerSample = 2;
+  const blockAlign = channelCount * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + sampleCount * blockAlign);
+  const view = new DataView(buffer);
+  const writeText = (offset, value) => {
+    for (let index = 0; index < value.length; index += 1) {
+      view.setUint8(offset + index, value.charCodeAt(index));
+    }
+  };
+
+  writeText(0, 'RIFF');
+  view.setUint32(4, 36 + sampleCount * blockAlign, true);
+  writeText(8, 'WAVE');
+  writeText(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channelCount, true);
+  view.setUint32(24, audioBuffer.sampleRate, true);
+  view.setUint32(28, audioBuffer.sampleRate * blockAlign, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, 16, true);
+  writeText(36, 'data');
+  view.setUint32(40, sampleCount * blockAlign, true);
+
+  const channels = Array.from(
+    { length: channelCount },
+    (_, index) => audioBuffer.getChannelData(index),
+  );
+  let offset = 44;
+  for (let sample = 0; sample < sampleCount; sample += 1) {
+    for (const channel of channels) {
+      const value = Math.max(-1, Math.min(1, channel[sample]));
+      view.setInt16(offset, value < 0 ? value * 0x8000 : value * 0x7fff, true);
+      offset += bytesPerSample;
+    }
+  }
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+async function convertToWav(blob) {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return blob;
+  const context = new AudioContextClass();
+  try {
+    const source = await blob.arrayBuffer();
+    const audioBuffer = await context.decodeAudioData(source);
+    return audioBufferToWavBlob(audioBuffer);
+  } finally {
+    await context.close?.();
+  }
+}
+
 function recorderErrorMessage(error) {
   if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') {
     return '麦克风权限被拒绝，请在浏览器设置中允许访问';
@@ -217,9 +272,13 @@ export default function useBrowserSpeech({ sessionId, mode, onTranscription } = 
     processAutoplayQueue();
   }, [mode, processAutoplayQueue, sessionId]);
 
-  const toggleAudio = useCallback(async (messageId) => {
-    if (!sessionId || !mode || messageId == null) return;
-    const descriptor = { mode, sessionId, messageId };
+  const toggleAudio = useCallback(async (
+    messageId,
+    targetSessionId = sessionId,
+    targetMode = mode,
+  ) => {
+    if (!targetSessionId || !targetMode || messageId == null) return;
+    const descriptor = { mode: targetMode, sessionId: targetSessionId, messageId };
     const active = activeAudioRef.current;
     const audio = audioRef.current;
     cancelAutoplayQueue();
@@ -240,10 +299,14 @@ export default function useBrowserSpeech({ sessionId, mode, onTranscription } = 
     await playDescriptor(descriptor);
   }, [cancelAutoplayQueue, mode, playDescriptor, releaseAudio, sessionId, setMessageAudioState]);
 
-  const retryAudio = useCallback((messageId) => {
-    if (!sessionId || !mode || messageId == null) return;
+  const retryAudio = useCallback((
+    messageId,
+    targetSessionId = sessionId,
+    targetMode = mode,
+  ) => {
+    if (!targetSessionId || !targetMode || messageId == null) return;
     cancelAutoplayQueue();
-    playDescriptor({ mode, sessionId, messageId });
+    playDescriptor({ mode: targetMode, sessionId: targetSessionId, messageId });
   }, [cancelAutoplayQueue, mode, playDescriptor, sessionId]);
 
   const stopAudio = useCallback(() => {
@@ -309,10 +372,11 @@ export default function useBrowserSpeech({ sessionId, mode, onTranscription } = 
         const controller = typeof AbortController === 'undefined' ? null : new AbortController();
         transcriptionAbortRef.current = controller;
         try {
+          const uploadBlob = await convertToWav(blob).catch(() => blob);
           const file = new File(
-            [blob],
-            `recording.${fileExtension(actualMime)}`,
-            { type: actualMime },
+            [uploadBlob],
+            `recording.${fileExtension(uploadBlob.type || actualMime)}`,
+            { type: uploadBlob.type || actualMime },
           );
           const result = await speechApi.transcribe(
             context.sessionId,
@@ -367,9 +431,19 @@ export default function useBrowserSpeech({ sessionId, mode, onTranscription } = 
     setSpeechStatus(current => current === 'error' ? 'idle' : current);
   }, []);
 
-  const getAudioState = useCallback((messageId) => {
-    if (!sessionId || !mode || messageId == null) return { status: 'idle', error: null };
-    return audioStates[audioKey({ mode, sessionId, messageId })]
+  const getAudioState = useCallback((
+    messageId,
+    targetSessionId = sessionId,
+    targetMode = mode,
+  ) => {
+    if (!targetSessionId || !targetMode || messageId == null) {
+      return { status: 'idle', error: null };
+    }
+    return audioStates[audioKey({
+      mode: targetMode,
+      sessionId: targetSessionId,
+      messageId,
+    })]
       || { status: 'idle', error: null };
   }, [audioStates, mode, sessionId]);
 

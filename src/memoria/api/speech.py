@@ -3,7 +3,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from memoria.api.upload_utils import read_upload_limited
 from memoria.api.user import require_current_user_id
@@ -66,9 +66,9 @@ async def _message_audio(
     session_id: str,
     message_id: int,
     current_user_id: str,
-) -> FileResponse:
+) -> FileResponse | StreamingResponse:
     try:
-        audio = await speech_service.message_audio(
+        audio = speech_service.prepare_message_audio(
             session_id=session_id,
             message_id=message_id,
             current_user_id=current_user_id,
@@ -77,16 +77,27 @@ async def _message_audio(
     except SpeechServiceError as exc:
         _raise_service_error(exc)
     output_format = speech_service.settings.speech_output_format
+    cache_hit = audio.cache_hit
+    headers = {
+        "Cache-Control": "private, max-age=86400",
+        "ETag": f'"{audio.cache_key}"',
+        "X-Speech-Cache": "HIT" if cache_hit else "MISS",
+        "X-AI-Generated-Audio": "true",
+    }
+    if not cache_hit:
+        return StreamingResponse(
+            speech_service.stream_message_audio(audio),
+            media_type=SPEECH_MEDIA_TYPES[output_format],
+            headers={
+                **headers,
+                "X-Accel-Buffering": "no",
+            },
+        )
     return FileResponse(
         audio.path,
         media_type=SPEECH_MEDIA_TYPES[output_format],
         filename=f"message-{message_id}.{output_format}",
-        headers={
-            "Cache-Control": "private, max-age=86400",
-            "ETag": f'"{audio.cache_key}"',
-            "X-Speech-Cache": "HIT" if audio.cache_hit else "MISS",
-            "X-AI-Generated-Audio": "true",
-        },
+        headers=headers,
     )
 
 
@@ -116,6 +127,11 @@ async def group_message_audio(
         message_id=message_id,
         current_user_id=current_user_id,
     )
+
+
+@router.get("/speech/configuration")
+def get_speech_configuration():
+    return speech_service.provider_configuration()
 
 
 @router.get("/admin/characters/{character_id}/voice")
@@ -160,6 +176,7 @@ async def upload_character_voice_consent(
 async def create_character_custom_voice(
     character_id: str,
     audio_sample: Annotated[UploadFile, File(...)],
+    reference_transcript: Annotated[str, Form(...)],
     name: Annotated[str | None, Form()] = None,
     current_user_id: str = Depends(require_current_user_id),
 ):
@@ -175,6 +192,7 @@ async def create_character_custom_voice(
             audio=audio,
             filename=audio_sample.filename or "sample.webm",
             mime_type=audio_sample.content_type or "application/octet-stream",
+            reference_transcript=reference_transcript,
             name=name,
         )
     except SpeechServiceError as exc:

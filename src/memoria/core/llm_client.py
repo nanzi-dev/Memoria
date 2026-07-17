@@ -295,7 +295,12 @@ def _build_http_client(base_url: str):
     return DefaultHttpxClient(**kwargs)
 
 
-def _create_openai_client(base_url: str, api_key: str):
+def _create_openai_client(
+    base_url: str,
+    api_key: str,
+    *,
+    timeout: float,
+):
     kwargs = {
         "base_url": base_url,
         "api_key": api_key,
@@ -306,7 +311,7 @@ def _create_openai_client(base_url: str, api_key: str):
         parameter.kind == inspect.Parameter.VAR_KEYWORD
         for parameter in parameters.values()
     ):
-        kwargs["timeout"] = configs.llm_timeout_seconds
+        kwargs["timeout"] = timeout
     if "max_retries" in parameters or any(
         parameter.kind == inspect.Parameter.VAR_KEYWORD
         for parameter in parameters.values()
@@ -320,6 +325,7 @@ def _get_client():
         _client = _create_openai_client(
             configs.llm_base_url,
             configs.llm_api_key.get_secret_value(),
+            timeout=configs.llm_timeout_seconds,
         )
     return _client
 
@@ -333,11 +339,13 @@ def _get_light_client():
             configs.llm_light_base_url,
             light_api_key,
             _resolve_http_proxy(configs.llm_light_base_url),
+            configs.llm_light_timeout_seconds,
         )
         if _light_client is None or _light_client_signature != signature:
             _light_client = _create_openai_client(
                 configs.llm_light_base_url,
                 light_api_key,
+                timeout=configs.llm_light_timeout_seconds,
             )
             _light_client_signature = signature
             logger.info("Light task client initialized: %s", configs.llm_light_base_url)
@@ -676,19 +684,28 @@ def _is_retryable_error(exc: Exception) -> bool:
     return False
 
 
-def _retry_call(fn, *args, **kwargs):
+def _retry_call(fn, *args, max_attempts: int = _MAX_RETRIES, **kwargs):
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be at least 1")
+
     last_err = None
-    for attempt in range(_MAX_RETRIES):
+    for attempt in range(max_attempts):
         try:
             return fn(*args, **kwargs)
         except Exception as e:
             last_err = e
-            if not _is_retryable_error(e) or attempt >= _MAX_RETRIES - 1:
+            if not _is_retryable_error(e) or attempt >= max_attempts - 1:
                 raise
-            if attempt < _MAX_RETRIES - 1:
+            if attempt < max_attempts - 1:
                 performance.increment("llm.retry")
                 delay = _BASE_DELAY * (2 ** attempt)
-                logger.warning("LLM重试 %d/%d (%.1fs后): %s", attempt + 1, _MAX_RETRIES, delay, e)
+                logger.warning(
+                    "LLM重试 %d/%d (%.1fs后): %s",
+                    attempt + 1,
+                    max_attempts,
+                    delay,
+                    e,
+                )
                 _time.sleep(delay)
     raise last_err
 
@@ -824,6 +841,7 @@ def call_light_task(
     prompt: str,
     allow_reasoning_fallback: bool = True,
     raise_on_error: bool = False,
+    max_attempts: int = _MAX_RETRIES,
 ) -> str:
     """
     使用轻量模型处理辅助任务（低成本）
@@ -834,7 +852,9 @@ def call_light_task(
     try:
         with tracing.start_span("llm.light_task", **{"llm.model": configs.light_model}):
             with performance.measure("llm.light_task"):
-                response = _retry_call(_get_light_client().chat.completions.create,
+                response = _retry_call(
+                    _get_light_client().chat.completions.create,
+                    max_attempts=max_attempts,
                     model = configs.light_model,
                     messages = [{"role": "user", "content": prompt}],
                     max_tokens = configs.light_task_max_output_tokens,

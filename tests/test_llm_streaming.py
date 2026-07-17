@@ -295,6 +295,29 @@ def test_retry_call_records_each_retry(monkeypatch):
     assert performance.snapshot()["counters"]["llm.retry"] == 2
 
 
+def test_retry_call_can_limit_attempts_to_one(monkeypatch):
+    from memoria.core import llm_client
+
+    attempts = 0
+
+    def fail():
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError("temporary")
+
+    monkeypatch.setattr(llm_client, "_is_retryable_error", lambda _exc: True)
+    monkeypatch.setattr(
+        llm_client._time,
+        "sleep",
+        lambda _delay: pytest.fail("single attempt must not sleep"),
+    )
+
+    with pytest.raises(RuntimeError, match="temporary"):
+        llm_client._retry_call(fail, max_attempts=1)
+
+    assert attempts == 1
+
+
 def test_create_openai_client_uses_configured_timeout_and_single_retry_layer(
     monkeypatch,
 ):
@@ -326,11 +349,48 @@ def test_create_openai_client_uses_configured_timeout_and_single_retry_layer(
     monkeypatch.setattr(llm_client, "_build_http_client", lambda _base_url: http_client)
     monkeypatch.setattr(llm_client.configs, "llm_timeout_seconds", 12.5)
 
-    client = llm_client._create_openai_client("https://llm.test/v1", "secret")
+    client = llm_client._create_openai_client(
+        "https://llm.test/v1",
+        "secret",
+        timeout=12.5,
+    )
 
     assert isinstance(client, FakeOpenAI)
     assert created["timeout"] == 12.5
     assert created["max_retries"] == 0
+
+
+def test_get_light_client_uses_light_timeout(monkeypatch):
+    from memoria.core import llm_client
+    from pydantic import SecretStr
+
+    created = {}
+
+    def fake_create(base_url, api_key, *, timeout):
+        created.update(
+            {
+                "base_url": base_url,
+                "api_key": api_key,
+                "timeout": timeout,
+            }
+        )
+        return object()
+
+    monkeypatch.setattr(llm_client.configs, "llm_light_base_url", "https://light.test/v1")
+    monkeypatch.setattr(llm_client.configs, "llm_light_api_key", SecretStr("light-key"))
+    monkeypatch.setattr(llm_client.configs, "llm_light_timeout_seconds", 9.5)
+    monkeypatch.setattr(llm_client, "_create_openai_client", fake_create)
+    monkeypatch.setattr(llm_client, "_resolve_http_proxy", lambda _base_url: None)
+    monkeypatch.setattr(llm_client, "_light_client", None)
+    monkeypatch.setattr(llm_client, "_light_client_signature", None)
+
+    llm_client._get_light_client()
+
+    assert created == {
+        "base_url": "https://light.test/v1",
+        "api_key": "light-key",
+        "timeout": 9.5,
+    }
 
 
 def test_call_light_task_uses_configured_output_limit(monkeypatch):
@@ -362,3 +422,29 @@ def test_call_light_task_uses_configured_output_limit(monkeypatch):
 
     assert llm_client.call_light_task("summarize") == "summary"
     assert called["max_tokens"] == 123
+
+
+def test_call_light_task_passes_max_attempts_to_retry_layer(monkeypatch):
+    from memoria.core import llm_client
+
+    retry_options = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="summary"))]
+            )
+
+    fake_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=FakeCompletions())
+    )
+
+    def fake_retry(fn, *args, **kwargs):
+        retry_options["max_attempts"] = kwargs.pop("max_attempts")
+        return fn(*args, **kwargs)
+
+    monkeypatch.setattr(llm_client, "_get_light_client", lambda: fake_client)
+    monkeypatch.setattr(llm_client, "_retry_call", fake_retry)
+
+    assert llm_client.call_light_task("summarize", max_attempts=1) == "summary"
+    assert retry_options["max_attempts"] == 1

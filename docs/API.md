@@ -1615,7 +1615,7 @@ Content-Type: application/json
 
 ## 语音 API
 
-本节接口均需要登录态。STT/TTS 使用独立的 `SPEECH_*` 配置；未设置 `SPEECH_API_KEY` 时返回 503。会话必须属于当前用户，且 `mode` 必须与单聊/群聊类型一致。
+本节接口均需要登录态。TTS 使用 `SPEECH_TTS_*` 配置，STT 使用独立的 `SPEECH_STT_*` 配置；对应服务未配置时返回 503。会话必须属于当前用户，且 `mode` 必须与单聊/群聊类型一致。
 
 ### 1. 语音转写
 
@@ -1644,9 +1644,17 @@ GET /api/v1/speech/single/sessions/{session_id}/messages/{message_id}/audio
 GET /api/v1/speech/group/sessions/{session_id}/messages/{message_id}/audio
 ```
 
-仅 assistant/角色消息可合成。响应是配置格式的音频文件，默认 WAV，并包含私有缓存、ETag、`X-Speech-Cache` 和 `X-AI-Generated-Audio` 响应头；生成文件缓存到 `SPEECH_STORAGE_PATH`。
+仅 assistant/角色消息可合成。缓存命中时直接返回已缓存的音频文件；未命中时以流式响应立即转发首段音频，并在生成完成后原子写入缓存。默认格式为 MP3，响应包含私有缓存、ETag、`X-Speech-Cache` 和 `X-AI-Generated-Audio` 响应头；生成文件缓存到 `SPEECH_STORAGE_PATH`。
 
-### 3. 角色声音
+### 3. 语音能力配置
+
+```http
+GET /api/v1/speech/configuration
+```
+
+返回当前部署的 TTS 厂商显示名称、可用内置音色、默认音色，以及是否支持自定义音色。前端应以此结果渲染语音设置，不应硬编码厂商或音色列表。
+
+### 4. 角色声音
 
 ```http
 GET    /api/v1/admin/characters/{character_id}/voice
@@ -1655,7 +1663,7 @@ POST   /api/v1/admin/characters/{character_id}/voice
 DELETE /api/v1/admin/characters/{character_id}/voice
 ```
 
-授权接口使用 multipart 字段 `locale`、`recording` 和可选 `name`；创建接口使用 `audio_sample` 和可选 `name`。自定义声音只对当前用户拥有的角色生效；供应商账户不支持 Custom Voices 时，角色仍可使用角色卡中的内置声音。
+授权接口使用 multipart 字段 `locale`、`recording` 和可选 `name`；创建接口使用 `audio_sample`、必填 `reference_transcript` 和可选 `name`。授权录音是创建自定义音色的前置条件，参考音频及其逐字文本会提交给 TTS 厂商完成复刻。自定义声音只对当前用户拥有的角色生效；供应商账户不支持 Custom Voices 时，角色仍可使用角色卡中的内置声音。
 
 ---
 

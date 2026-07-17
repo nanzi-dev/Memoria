@@ -44,6 +44,7 @@ class DialogueTurnRequest(BaseModel):
 # 响应模型
 # =========================
 class HistoryMessage(BaseModel):
+    session_id: str | None = None
     role: str
     content: str
     action: str | None = None

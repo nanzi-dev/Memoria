@@ -122,6 +122,7 @@ function normalizeDialogueMessage(message, options = {}) {
     created_at: message.created_at,
     world_created_at: message.world_created_at,
     message_id: message.message_id ?? message.id,
+    session_id: message.session_id,
   };
 }
 
@@ -408,8 +409,14 @@ function RelationshipDeltaLine({ affinityDelta = 0, trustDelta = 0 }) {
   );
 }
 
-function MessageAudioControl({ messageId, getAudioState, onToggle, onRetry }) {
-  const audioState = getAudioState(messageId);
+function MessageAudioControl({
+  messageId,
+  messageSessionId,
+  getAudioState,
+  onToggle,
+  onRetry,
+}) {
+  const audioState = getAudioState(messageId, messageSessionId);
   const status = audioState.status || 'idle';
   const isLoading = status === 'loading';
   const isPlaying = status === 'playing';
@@ -429,7 +436,11 @@ function MessageAudioControl({ messageId, getAudioState, onToggle, onRetry }) {
       type="button"
       variant="ghost"
       size="icon"
-      onClick={() => isError ? onRetry(messageId) : onToggle(messageId)}
+      onClick={() => (
+        isError
+          ? onRetry(messageId, messageSessionId)
+          : onToggle(messageId, messageSessionId)
+      )}
       disabled={isLoading}
       className={`mt-1 border border-border ${isError ? 'text-destructive' : 'text-muted-foreground hover:text-foreground'}`}
       aria-label={label}
@@ -608,6 +619,8 @@ export default function ChatRoom() {
 
   const pendingInitialSingleScrollRef = useRef(false);
 
+  const pendingInitialGroupScrollRef = useRef(false);
+
   const pendingHistoryScrollRef = useRef(null);
 
   const latestGroupMessageIdRef = useRef(0);
@@ -696,6 +709,7 @@ export default function ChatRoom() {
     groupPollInFlightRef.current = null;
     activeGroupThreadIdRef.current = null;
     activeGroupSessionIdRef.current = null;
+    pendingInitialGroupScrollRef.current = false;
     setGroupHistoryReady(false);
   }
 
@@ -1023,6 +1037,7 @@ export default function ChatRoom() {
   useEffect(() => {
 
     if (view !== 'single' && view !== 'group') return;
+    if (view === 'group' && !groupHistoryReady) return;
 
     if (skipAutoScrollRef.current) {
 
@@ -1033,17 +1048,21 @@ export default function ChatRoom() {
     }
 
     const isInitialSingleScroll = view === 'single' && pendingInitialSingleScrollRef.current;
+    const isInitialGroupScroll = view === 'group'
+      && pendingInitialGroupScrollRef.current;
+    const isInitialScroll = isInitialSingleScroll || isInitialGroupScroll;
     const frame = requestAnimationFrame(() => {
       bottomRef.current?.scrollIntoView({
-        behavior: isInitialSingleScroll ? 'auto' : 'smooth',
+        behavior: isInitialScroll ? 'auto' : 'smooth',
         block: 'end',
       });
       if (isInitialSingleScroll) pendingInitialSingleScrollRef.current = false;
+      if (isInitialGroupScroll) pendingInitialGroupScrollRef.current = false;
     });
 
     return () => cancelAnimationFrame(frame);
 
-  }, [messages, view]);
+  }, [messages, view, groupHistoryReady]);
 
   useEffect(() => { if (view === 'single' || view === 'group') inputRef.current?.focus(); }, [view]);
 
@@ -1281,6 +1300,7 @@ export default function ChatRoom() {
     activeGroupSessionIdRef.current = item.session_id;
 
     setGroupHistoryReady(false);
+    pendingInitialGroupScrollRef.current = true;
     setMessages([]);
     setGroupName(item.group_name || '');
     setParticipants(initialParticipants);
@@ -1607,6 +1627,7 @@ export default function ChatRoom() {
       setHistoryOffset(openingMessages.length);
       setHasMoreHistory(false);
       setGroupHistoryReady(true);
+      pendingInitialGroupScrollRef.current = true;
 
       setView('group');
 
@@ -2496,6 +2517,7 @@ export default function ChatRoom() {
                             {isLastParagraph && message.message_id != null && (
                               <MessageAudioControl
                                 messageId={message.message_id}
+                                messageSessionId={message.session_id}
                                 getAudioState={getAudioState}
                                 onToggle={toggleAudio}
                                 onRetry={retryAudio}

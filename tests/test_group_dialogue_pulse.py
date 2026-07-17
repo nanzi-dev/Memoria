@@ -656,10 +656,16 @@ def test_invalid_decision_json_uses_deterministic_fallback(monkeypatch):
 
     orchestrator = _orchestrator()
     fallback = _decision(action="wait", speaker_id=None, wait_for_player=True)
+    called = {}
+
+    def invalid_light_task(*args, **kwargs):
+        called.update(kwargs)
+        return "invalid"
+
     monkeypatch.setattr(
         multi_character_orchestrator.llm_client,
         "call_light_task",
-        lambda *args, **kwargs: "invalid",
+        invalid_light_task,
     )
     monkeypatch.setattr(
         orchestrator,
@@ -682,6 +688,7 @@ def test_invalid_decision_json_uses_deterministic_fallback(monkeypatch):
     )
 
     assert result == fallback
+    assert called["max_attempts"] == 1
 
 
 def test_pulse_redecides_after_each_message_and_can_reply_to_npc(monkeypatch):

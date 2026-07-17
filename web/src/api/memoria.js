@@ -325,9 +325,10 @@ export const characterAdmin = {
       body: formData,
     });
   },
-  createCustomVoice(characterId, audioSample, name = null) {
+  createCustomVoice(characterId, audioSample, referenceTranscript, name = null) {
     const formData = new FormData();
     formData.append('audio_sample', audioSample);
+    formData.append('reference_transcript', referenceTranscript);
     if (name?.trim()) formData.append('name', name.trim());
     return request(`/admin/characters/${pathSegment(characterId)}/voice`, {
       method: 'POST',
@@ -725,6 +726,9 @@ export const multiDialogue = {
 // Speech API
 // ═══════════════════════════════════════════════
 export const speechApi = {
+  getConfiguration() {
+    return request('/speech/configuration');
+  },
   transcribe(sessionId, mode, file, signal = undefined) {
     const formData = new FormData();
     formData.append('session_id', sessionId);

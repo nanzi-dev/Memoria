@@ -147,7 +147,7 @@ Memoria/
 │   │   ├── knowledge_vector_store.py # 知识向量存储
 │   │   ├── world_clock.py      # 用户世界时钟
 │   │   ├── locale.py           # 会话语言约束与 STT 语言映射
-│   │   ├── speech_provider.py  # OpenAI Speech HTTP 适配层
+│   │   ├── speech_provider.py  # MiniMax TTS / OpenAI-compatible STT 适配层
 │   │   ├── speech_service.py   # 语音鉴权、缓存与角色声音工作流
 │   │   ├── character_loader.py # 角色卡加载与缓存
 │   │   ├── character_schema.py # 角色卡数据模型
@@ -331,6 +331,7 @@ LLM_BASE_URL=https://api.deepseek.com/v1      # API 基础 URL
 LLM_API_KEY=your-api-key-here                  # API 密钥
 LLM_MODEL=deepseek-chat                        # 主对话模型
 LLM_TIMEOUT_SECONDS=45                         # 单次 LLM 请求超时
+LLM_LIGHT_TIMEOUT_SECONDS=12                   # 轻量任务单次请求超时
 MAX_OUTPUT_TOKENS=400                          # 主模型单次最大输出 token 数
 
 # 轻量任务专用 API（可选，留空则使用主 LLM）
@@ -339,12 +340,22 @@ LLM_LIGHT_API_KEY=                             # 轻量 API 密钥
 LLM_LIGHT_MODEL=                               # 轻量模型名称
 LIGHT_TASK_MAX_OUTPUT_TOKENS=400               # 轻量任务单次最大输出 token 数
 
-# ====== OpenAI Speech 配置（可选） ======
-SPEECH_API_KEY=                                # 语音服务 API 密钥
-SPEECH_BASE_URL=https://api.openai.com/v1
+# ====== Speech 配置（可选） ======
+# TTS 默认使用 MiniMax 流式合成；STT 使用独立 OpenAI-compatible 转写端点
+SPEECH_TTS_PROVIDER=minimax
+SPEECH_TTS_API_KEY=                            # MiniMax API 密钥
+SPEECH_TTS_BASE_URL=https://api.minimax.io/v1
+SPEECH_TTS_MODEL=speech-2.8-turbo
+SPEECH_TTS_TIMEOUT_SECONDS=30
+SPEECH_TTS_MAX_RETRIES=1
+SPEECH_TTS_DEFAULT_VOICE=female-shaonv
+SPEECH_STT_PROVIDER=openai_compatible
+SPEECH_STT_API_KEY=                            # ASR API 密钥
+SPEECH_STT_BASE_URL=https://api.openai.com/v1
 SPEECH_STT_MODEL=gpt-4o-mini-transcribe
-SPEECH_TTS_MODEL=gpt-4o-mini-tts
-SPEECH_OUTPUT_FORMAT=wav
+SPEECH_STT_TIMEOUT_SECONDS=30
+SPEECH_STT_MAX_RETRIES=1
+SPEECH_OUTPUT_FORMAT=mp3
 SPEECH_STORAGE_PATH=./data/speech
 
 # ====== 应用配置 ======
@@ -365,6 +376,8 @@ KNOWLEDGE_SIMILARITY_THRESHOLD=0.60            # 知识检索最低相似度
 ```
 
 运行时配置统一由 `src/memoria/core/config.py` 的 `Configs` 定义，并通过环境变量或仓库根目录 `.env` 注入；`config/settings.yaml` 仅是兼容性/参考标记。默认知识上传限制为 10 MiB、Top-K 为 4、相似度阈值为 0.60；分块目标为 200 token、重叠 36 token、硬上限 240 token。
+
+语音的 TTS 与 STT 分别配置。TTS 默认使用 MiniMax 的 T2A v2 流式响应：浏览器在收到首个音频分块后即可播放，完整 MP3 会原子写入 `SPEECH_STORAGE_PATH/cache` 供历史消息复播。STT 始终调用独立的 OpenAI-compatible `/audio/transcriptions` 端点，不会请求 MiniMax TTS 地址。角色 Custom Voice 需要先上传授权录音，再上传参考样本；成功后会持久化 MiniMax `voice_id`，失败时继续回退到角色的内置音色。旧的 `SPEECH_PROVIDER`、`SPEECH_API_KEY`、`SPEECH_BASE_URL` 和 `SPEECH_TIMEOUT_SECONDS` 仅作为迁移回退，并会发出弃用警告。
 
 Docker 部署文件统一存放在 `deploy/docker/`。运行时 `deploy/docker/docker-compose.yml` 会自动生成容器内 PostgreSQL 连接串；通常只需要通过 `deploy/docker/.env` 配置 `POSTGRES_*`、`LLM_*`、语音、端口和模型参数。后端直连端口默认绑定 `127.0.0.1`，显式设置 `API_BIND_HOST=0.0.0.0` 才会对所有网络接口开放。
 

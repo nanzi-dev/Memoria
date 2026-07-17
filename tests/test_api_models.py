@@ -231,8 +231,14 @@ class TestCodeReviewFixesAPI:
 
     def test_history_message_with_message_id(self):
         from memoria.api.dialogue import HistoryMessage
-        m = HistoryMessage(role="user", content="你好", message_id=42)
+        m = HistoryMessage(
+            role="user",
+            content="你好",
+            message_id=42,
+            session_id="session-42",
+        )
         assert m.message_id == 42
+        assert m.session_id == "session-42"
 
     def test_session_recovery_response(self):
         from memoria.api.dialogue import SessionRecoveryResponse, HistoryMessage

@@ -67,6 +67,39 @@ async def test_sse_bridge_wakes_consumer_for_later_worker_event():
 
 
 @pytest.mark.asyncio
+async def test_sse_bridge_emits_heartbeat_while_worker_is_blocked(monkeypatch):
+    from memoria.api import streaming
+
+    release_worker = threading.Event()
+    worker_done = threading.Event()
+    monkeypatch.setattr(streaming, "STREAM_HEARTBEAT_SECONDS", 0.01)
+
+    def worker(_event_sink):
+        try:
+            release_worker.wait()
+            return {"dialogue": "done"}
+        finally:
+            worker_done.set()
+
+    response = streaming.create_sse_response(
+        worker,
+        started_data={"request_id": "req-heartbeat"},
+    )
+    iterator = response.body_iterator.__aiter__()
+
+    try:
+        first = await asyncio.wait_for(iterator.__anext__(), timeout=1)
+        heartbeat = await asyncio.wait_for(iterator.__anext__(), timeout=1)
+    finally:
+        await iterator.aclose()
+        release_worker.set()
+        assert await asyncio.to_thread(worker_done.wait, 1)
+
+    assert first.startswith("event: turn_started\n")
+    assert heartbeat == ": keepalive\n\n"
+
+
+@pytest.mark.asyncio
 async def test_sse_bridge_keeps_write_fd_owned_by_worker_after_client_disconnect(
     monkeypatch,
 ):

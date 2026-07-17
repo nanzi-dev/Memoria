@@ -31,6 +31,7 @@ STREAM_EVENT_QUEUE_SIZE = _positive_int_env(
     "MEMORIA_STREAM_EVENT_QUEUE_SIZE",
     256,
 )
+STREAM_HEARTBEAT_SECONDS = 10
 _stream_slots = threading.BoundedSemaphore(STREAM_MAX_WORKERS)
 
 
@@ -87,7 +88,7 @@ def create_sse_response(
                 # response ended before the synchronous worker finished.
                 return
 
-        async def wait_for_events() -> None:
+        async def wait_for_events() -> bool:
             ready = loop.create_future()
 
             def mark_ready() -> None:
@@ -98,9 +99,11 @@ def create_sse_response(
                 loop.add_reader(read_fd, mark_ready)
             except (AttributeError, NotImplementedError):
                 await asyncio.sleep(0.005)
-                return
+                return True
             try:
-                await ready
+                await asyncio.wait_for(ready, timeout=STREAM_HEARTBEAT_SECONDS)
+            except asyncio.TimeoutError:
+                return False
             finally:
                 loop.remove_reader(read_fd)
 
@@ -109,6 +112,7 @@ def create_sse_response(
                     pass
             except BlockingIOError:
                 pass
+            return True
 
         def sink(event_type: str, payload: dict[str, Any]) -> None:
             enqueue((event_type, payload))
@@ -151,7 +155,9 @@ def create_sse_response(
         try:
             while True:
                 if event_queue.empty():
-                    await wait_for_events()
+                    received_event = await wait_for_events()
+                    if not received_event and event_queue.empty():
+                        yield ": keepalive\n\n"
                 while True:
                     try:
                         item = event_queue.get_nowait()

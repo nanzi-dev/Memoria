@@ -25,18 +25,42 @@ class Configs(BaseSettings):
     llm_model: str = "deepseek-chat"
     llm_light_model: str = ""
     llm_timeout_seconds: float = Field(default=45.0, gt=0, le=300)
+    llm_light_timeout_seconds: float = Field(default=12.0, gt=0, le=300)
     light_task_max_output_tokens: int = Field(default=400, ge=1, le=4096)
     
     # 轻量任务专用 LLM 配置（可选，留空则使用主 LLM）
     llm_light_base_url: str = ""
     llm_light_api_key: SecretStr = ""
 
-    # OpenAI Speech 配置（与角色对话模型独立）
+    # Speech 配置（与角色对话模型独立）
+    # speech_provider / speech_api_key / speech_base_url / speech_timeout_seconds
+    # remain as a deprecated compatibility fallback for pre-split deployments.
+    speech_provider: Literal["openai", "openai_compatible", "mimo", "minimax"] = "openai"
     speech_api_key: SecretStr = ""
     speech_base_url: str = "https://api.openai.com/v1"
+
+    # TTS defaults to MiniMax. MiniMax HTTP streaming requires MP3 output.
+    speech_tts_provider: Literal["minimax", "openai", "openai_compatible"] = "minimax"
+    speech_tts_api_key: SecretStr = ""
+    speech_tts_base_url: str = "https://api.minimax.io/v1"
+    speech_tts_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    speech_tts_max_retries: int = Field(default=1, ge=0, le=3)
+    speech_tts_default_voice: str = "female-shaonv"
+    speech_tts_builtin_voices: str = (
+        "male-qn-qingse,male-qn-jingying,male-qn-badao,"
+        "male-qn-daxuesheng,female-shaonv,female-yujie,"
+        "female-chengshu,female-tianmei"
+    )
+
+    # STT uses a separate OpenAI-compatible endpoint by default.
+    speech_stt_provider: Literal["openai", "openai_compatible"] = "openai_compatible"
+    speech_stt_api_key: SecretStr = ""
+    speech_stt_base_url: str = "https://api.openai.com/v1"
+    speech_stt_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    speech_stt_max_retries: int = Field(default=1, ge=0, le=3)
     speech_stt_model: str = "gpt-4o-mini-transcribe"
-    speech_tts_model: str = "gpt-4o-mini-tts"
-    speech_output_format: Literal["mp3", "opus", "aac", "flac", "wav", "pcm"] = "wav"
+    speech_tts_model: str = "speech-2.8-turbo"
+    speech_output_format: Literal["mp3", "opus", "aac", "flac", "wav", "pcm"] = "mp3"
     speech_storage_path: str = "./data/speech"
     speech_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
     speech_stt_upload_max_bytes: int = Field(default=25 * 1024 * 1024, ge=1024)

@@ -1,24 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertCircle, Loader2, MessageSquare, Mic, Upload, Volume2, X } from 'lucide-react';
-import { characterAdmin } from '../../api/memoria';
+import { characterAdmin, speechApi } from '../../api/memoria';
 import TagInput from './TagInput';
 
 const BUILTIN_VOICES = [
-  'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable',
+  'alloy', 'ash', 'ballad', 'cedar', 'coral', 'echo', 'fable',
   'marin', 'nova', 'onyx', 'sage', 'shimmer', 'verse',
 ];
 const MAX_VOICE_FILE_BYTES = 10 * 1024 * 1024;
-const VOICE_ACCEPT = 'audio/mpeg,audio/wav,audio/x-wav,audio/ogg,audio/aac,audio/flac,audio/webm,audio/mp4,.mp3,.wav,.ogg,.aac,.flac,.webm,.mp4,.m4a';
+const VOICE_ACCEPT = 'audio/mpeg,audio/wav,audio/x-wav,audio/m4a,audio/x-m4a,.mp3,.wav,.m4a';
 const ALLOWED_VOICE_TYPES = new Set([
-  'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/ogg',
-  'audio/aac', 'audio/flac', 'audio/webm', 'audio/mp4', 'video/mp4',
+  'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav', 'audio/m4a', 'audio/x-m4a',
 ]);
 
 function validateVoiceFile(file) {
   if (!file) return '请选择音频文件';
   if (file.size > MAX_VOICE_FILE_BYTES) return '音频文件不能超过 10 MiB';
   if (file.type && !ALLOWED_VOICE_TYPES.has(file.type.toLowerCase())) {
-    return '仅支持 MPEG、WAV、OGG、AAC、FLAC、WebM 或 MP4 音频';
+    return '仅支持 MP3、M4A 或 WAV 音频';
   }
   return null;
 }
@@ -37,11 +36,13 @@ export default function StepSpeechStyle({ formData, updateField, characterId = n
   const s = formData.speech_style || {};
   const voice = formData.voice || {};
   const [voiceStatus, setVoiceStatus] = useState(null);
+  const [speechConfiguration, setSpeechConfiguration] = useState(null);
   const [voiceError, setVoiceError] = useState('');
   const [voiceLoading, setVoiceLoading] = useState(false);
   const [consentLocale, setConsentLocale] = useState('zh-CN');
   const [consentName, setConsentName] = useState('');
   const [sampleName, setSampleName] = useState('');
+  const [referenceTranscript, setReferenceTranscript] = useState('');
   const [consentFile, setConsentFile] = useState(null);
   const [sampleFile, setSampleFile] = useState(null);
   const consentInputRef = useRef(null);
@@ -53,6 +54,32 @@ export default function StepSpeechStyle({ formData, updateField, characterId = n
     updateField('voice.customVoiceStatus', status?.custom_voice_status || 'unconfigured');
     if (status?.consent_locale) setConsentLocale(status.consent_locale);
   }, [updateField]);
+
+  useEffect(() => {
+    if (!showVoice) {
+      setSpeechConfiguration(null);
+      return undefined;
+    }
+    let cancelled = false;
+    speechApi.getConfiguration()
+      .then((configuration) => { if (!cancelled) setSpeechConfiguration(configuration); })
+      .catch(() => { if (!cancelled) setSpeechConfiguration(null); });
+    return () => { cancelled = true; };
+  }, [showVoice]);
+
+  useEffect(() => {
+    const builtinVoices = speechConfiguration?.builtin_voices;
+    const defaultVoice = speechConfiguration?.default_builtin_voice;
+    if (
+      showVoice
+      && Array.isArray(builtinVoices)
+      && builtinVoices.length
+      && defaultVoice
+      && !builtinVoices.includes(voice.builtinVoice)
+    ) {
+      updateField('voice.builtinVoice', defaultVoice);
+    }
+  }, [showVoice, speechConfiguration, updateField, voice.builtinVoice]);
 
   useEffect(() => {
     if (!showVoice || !characterId) {
@@ -95,12 +122,22 @@ export default function StepSpeechStyle({ formData, updateField, characterId = n
   async function createCustomVoice() {
     const validationError = validateVoiceFile(sampleFile);
     if (validationError) { setVoiceError(validationError); return; }
+    if (!referenceTranscript.trim()) {
+      setVoiceError('请填写声音样本对应的朗读文本');
+      return;
+    }
     setVoiceLoading(true);
     setVoiceError('');
     try {
-      const status = await characterAdmin.createCustomVoice(characterId, sampleFile, sampleName);
+      const status = await characterAdmin.createCustomVoice(
+        characterId,
+        sampleFile,
+        referenceTranscript.trim(),
+        sampleName,
+      );
       applyVoiceStatus(status);
       setSampleFile(null);
+      setReferenceTranscript('');
       if (sampleInputRef.current) sampleInputRef.current.value = '';
     } catch (error) {
       setVoiceError(error.message);
@@ -125,6 +162,16 @@ export default function StepSpeechStyle({ formData, updateField, characterId = n
   const customStatus = voiceStatus?.custom_voice_status || voice.customVoiceStatus || 'unconfigured';
   const speechConfigured = voiceStatus?.speech_configured !== false;
   const consentPhrase = voiceStatus?.consent_phrases?.[consentLocale] || '';
+  const builtinVoices = Array.isArray(speechConfiguration?.builtin_voices)
+    && speechConfiguration.builtin_voices.length
+    ? speechConfiguration.builtin_voices
+    : BUILTIN_VOICES;
+  const defaultBuiltinVoice = speechConfiguration?.default_builtin_voice || builtinVoices[0];
+  const selectedBuiltinVoice = builtinVoices.includes(voice.builtinVoice)
+    ? voice.builtinVoice
+    : defaultBuiltinVoice;
+  const customVoiceSupported = speechConfiguration?.custom_voice_supported === true;
+  const providerLabel = speechConfiguration?.provider_label || 'MiniMax';
 
   return (
     <div className="space-y-6">
@@ -181,15 +228,15 @@ export default function StepSpeechStyle({ formData, updateField, characterId = n
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
-              <label className="mb-1.5 block font-archive-mono text-[11px] uppercase text-muted-foreground">Built-in Voice</label>
-              <select value={voice.builtinVoice || 'alloy'} onChange={(e) => updateField('voice.builtinVoice', e.target.value)} className="min-h-11 w-full rounded-md border border-input bg-background px-3 font-archive-mono text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                {BUILTIN_VOICES.map(option => <option key={option} value={option}>{option}</option>)}
+              <label className="mb-1.5 block font-archive-mono text-[11px] uppercase text-muted-foreground">Built-in Voice · {providerLabel}</label>
+              <select value={selectedBuiltinVoice} onChange={(e) => updateField('voice.builtinVoice', e.target.value)} className="min-h-11 w-full rounded-md border border-input bg-background px-3 font-archive-mono text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                {builtinVoices.map(option => <option key={option} value={option}>{option}</option>)}
               </select>
             </div>
             <div className="flex items-end">
               <div className="flex min-h-[44px] w-full items-center justify-between rounded border border-border bg-muted/25 px-3 font-archive-mono text-xs text-muted-foreground">
                 <span>Custom Voice</span>
-                <span className="font-bold">{voiceLoading ? '同步中' : statusLabel(customStatus)}</span>
+                <span className="font-bold">{customVoiceSupported ? (voiceLoading ? '同步中' : statusLabel(customStatus)) : '当前厂商不支持'}</span>
               </div>
             </div>
           </div>
@@ -206,7 +253,14 @@ export default function StepSpeechStyle({ formData, updateField, characterId = n
             </div>
           )}
 
-          {characterId && !speechConfigured && (
+          {characterId && speechConfiguration && !customVoiceSupported && (
+            <div className="flex items-start gap-2 rounded border border-border bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground">
+              <AlertCircle size={14} className="mt-0.5 shrink-0" />
+              当前语音厂商不支持持久化 Custom Voice；将继续使用内置音色。
+            </div>
+          )}
+
+          {characterId && customVoiceSupported && !speechConfigured && (
             <div className="flex items-start gap-2 rounded border border-border bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground">
               <AlertCircle size={14} className="mt-0.5 shrink-0" />
               当前服务未配置 Custom Voice。内置语音与 TTS instructions 仍会作为回退方案保存。
@@ -221,7 +275,7 @@ export default function StepSpeechStyle({ formData, updateField, characterId = n
             </div>
           )}
 
-          {characterId && speechConfigured && (
+          {characterId && customVoiceSupported && speechConfigured && (
             <div className="space-y-5 rounded border border-border bg-muted/25 p-3 sm:p-4">
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
@@ -249,12 +303,13 @@ export default function StepSpeechStyle({ formData, updateField, characterId = n
                   <Volume2 size={15} className="text-muted-foreground" />
                   <h4 className="font-archive-mono text-sm font-bold text-muted-foreground">2. 声音样本 Voice Sample</h4>
                 </div>
-                <p className="font-archive-mono text-[11px] leading-5 text-muted-foreground">建议使用约 30 秒、环境安静、单人清晰朗读的音频。单个文件上限 10 MiB。</p>
+                <p className="font-archive-mono text-[11px] leading-5 text-muted-foreground">使用 8 秒以内、环境安静、单人清晰朗读的 MP3、M4A 或 WAV 音频。单个文件上限 10 MiB。</p>
                 <input type="text" value={sampleName} onChange={(e) => setSampleName(e.target.value)} placeholder="Voice name (optional)" className="w-full px-2 py-1.5 text-sm font-archive-mono text-foreground bg-transparent border-b border-border focus:border-border focus:outline-none" />
+                <textarea value={referenceTranscript} onChange={(e) => setReferenceTranscript(e.target.value)} rows={3} placeholder="填写此声音样本中朗读的原文" className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-archive-serif text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring" />
                 <input ref={sampleInputRef} type="file" accept={VOICE_ACCEPT} onChange={(e) => { setSampleFile(e.target.files?.[0] || null); setVoiceError(''); }} className="hidden" />
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <button type="button" onClick={() => sampleInputRef.current?.click()} disabled={voiceLoading} className="flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded border border-border bg-background/60 px-3 text-xs font-archive-mono text-muted-foreground disabled:opacity-40"><Upload size={14} />{sampleFile?.name || '选择声音样本'}</button>
-                  <button type="button" onClick={createCustomVoice} disabled={voiceLoading || !sampleFile || !voiceStatus?.consent_id} className="flex min-h-[44px] items-center justify-center gap-2 rounded border border-border bg-primary/10 px-4 text-xs font-bold font-archive-mono text-muted-foreground disabled:opacity-35">{voiceLoading ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}创建声音</button>
+                  <button type="button" onClick={createCustomVoice} disabled={voiceLoading || !sampleFile || !referenceTranscript.trim() || !voiceStatus?.consent_id} className="flex min-h-[44px] items-center justify-center gap-2 rounded border border-border bg-primary/10 px-4 text-xs font-bold font-archive-mono text-muted-foreground disabled:opacity-35">{voiceLoading ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}创建声音</button>
                 </div>
                 {!voiceStatus?.consent_id && <p className="font-archive-mono text-[11px] text-muted-foreground">请先上传有效的同意声明录音。</p>}
               </div>

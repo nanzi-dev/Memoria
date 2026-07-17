@@ -134,24 +134,29 @@ curl -X POST "https://api.deepseek.com/v1/chat/completions" \
 
 ### Q: 语音转写或播放返回 503
 
-语音服务与主对话模型使用独立配置。未设置 `SPEECH_API_KEY` 时，STT、TTS 和自定义声音接口会返回未配置错误；`LLM_API_KEY` 不会自动复用。
+语音服务与主对话模型使用独立配置。TTS 与 STT 也使用不同的连接配置；未设置对应的 API 密钥时，该能力会返回 503，`LLM_API_KEY` 不会自动复用。
 
 ```bash
-SPEECH_API_KEY=sk-xxx
-SPEECH_BASE_URL=https://api.openai.com/v1
+SPEECH_TTS_PROVIDER=minimax
+SPEECH_TTS_API_KEY=your-minimax-key
+SPEECH_TTS_BASE_URL=https://api.minimax.io/v1
+SPEECH_TTS_MODEL=speech-2.8-turbo
+SPEECH_TTS_DEFAULT_VOICE=female-shaonv
+SPEECH_STT_PROVIDER=openai_compatible
+SPEECH_STT_API_KEY=sk-xxx
+SPEECH_STT_BASE_URL=https://api.openai.com/v1
 SPEECH_STT_MODEL=gpt-4o-mini-transcribe
-SPEECH_TTS_MODEL=gpt-4o-mini-tts
-SPEECH_OUTPUT_FORMAT=wav
+SPEECH_OUTPUT_FORMAT=mp3
 SPEECH_STORAGE_PATH=./data/speech
 ```
 
 修改配置后重启后端。仍失败时检查：
 
-1. `SPEECH_BASE_URL` 是否提供 OpenAI 兼容的转写和语音合成端点。
+1. `SPEECH_STT_BASE_URL` 必须提供 OpenAI-compatible `/audio/transcriptions` 端点；TTS 不会复用这个地址。MiniMax TTS 使用 `SPEECH_TTS_BASE_URL` 的流式端点。
 2. 会话必须属于当前登录用户，且请求的 `mode` 必须与单聊或群聊会话类型一致。
 3. STT 文件只支持 MP3、MP4、MPEG、MPGA、M4A、WAV 和 WebM，并受上传大小限制。
 4. TTS 只允许合成 assistant/角色消息；生成文件写入 `SPEECH_STORAGE_PATH/cache`。
-5. Custom Voices 还要求供应商账户支持对应 API；不支持时可继续使用角色卡的内置声音。
+5. Custom Voice 需要先上传授权录音，再上传参考样本。MiniMax 创建成功后会保存角色的 `voice_id`；创建失败或仍在处理中时，系统会使用角色卡的内置音色。
 
 当前语言只支持 `zh-CN` 和 `en-US`。STT 语言来自会话 `locale`，恢复会话后不会自动改用浏览器当前语言。
 
