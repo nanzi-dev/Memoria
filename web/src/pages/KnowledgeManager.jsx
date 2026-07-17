@@ -57,6 +57,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { knowledgeApi } from '@/api/memoria';
 import { useDialog } from '@/context/DialogContext';
 import { useUser } from '@/context/UserContext';
+import { getKnowledgeSourceMatch } from './knowledgePreviewScore';
 
 const AUTH_ERROR_PATTERN = /认证|未登录|401|token/i;
 
@@ -1687,26 +1688,33 @@ function PreviewModal({ show, base, onClose }) {
             </div>
           ) : (
             <div className="mt-3 divide-y divide-border border-y border-border">
-              {result.sources.map(source => (
-                <article key={source.chunk_id} className="py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="break-words font-archive-serif text-sm font-semibold text-foreground">
-                        {source.document_name}
-                      </p>
-                      <p className="mt-0.5 break-words text-xs text-muted-foreground">
-                        {source.knowledge_base_name}
-                      </p>
+              {result.sources.map(source => {
+                const match = getKnowledgeSourceMatch(source);
+                return (
+                  <article key={source.chunk_id} className="py-4">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="break-words font-archive-serif text-sm font-semibold text-foreground">
+                          {source.document_name}
+                        </p>
+                        <p className="mt-0.5 break-words text-xs text-muted-foreground">
+                          {source.knowledge_base_name}
+                        </p>
+                      </div>
+                      <span
+                        className="rounded border border-border bg-muted/45 px-2 py-1 font-archive-mono text-[10px] font-medium tabular-nums text-foreground"
+                        aria-label={match.description}
+                        title={match.description}
+                      >
+                        {match.label} {match.percent}%
+                      </span>
                     </div>
-                    <span className="rounded border border-border bg-muted/45 px-2 py-1 font-archive-mono text-[10px] font-medium tabular-nums text-foreground">
-                      {Math.round(Number(source.similarity || 0) * 100)}%
-                    </span>
-                  </div>
-                  <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-muted-foreground">
-                    {source.excerpt}
-                  </p>
-                </article>
-              ))}
+                    <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6 text-muted-foreground">
+                      {source.excerpt}
+                    </p>
+                  </article>
+                );
+              })}
             </div>
           )}
         </section>

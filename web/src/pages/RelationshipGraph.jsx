@@ -18,6 +18,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -32,19 +42,25 @@ import { useUser } from '../context/UserContext';
 import { characterEditorPath } from '../utils/navigationState';
 import { createTimeoutController } from '../utils/timeoutController';
 import {
+  Check,
+  ChevronDown,
+  Focus,
   Link2,
+  ListFilter,
   Loader2,
   Maximize2,
+  Network,
   Plus,
   RefreshCw,
+  Search,
   Trash2,
   Users,
-  X,
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
 
 const RELATION_TYPE_STORAGE_KEY = 'memoria.relationshipTypes';
+const RELATION_FILTER_ALL = '__all_relationship_types__';
 const RELATION_TYPE_COLORS = [
   '#A7EF9E', '#EF4444', '#F59E0B', '#F97316', '#7C3AED',
   '#F472B6', '#94A3B8', '#38BDF8', '#22C55E', '#EAB308',
@@ -71,10 +87,6 @@ function relationTypeColor(value = '') {
 
 function normalizeRelationTypeName(value) {
   return String(value || '').trim();
-}
-
-function sanitizeMarkerId(type) {
-  return `arrow-${String(type || 'relation').replace(/[^a-zA-Z0-9_-]/g, '_')}-${hashRelationType(type)}`;
 }
 
 function loadRelationTypes() {
@@ -111,6 +123,10 @@ function getRelationColor(type, relationTypes) {
   return relationTypes.find(t => t.value === type)?.color || relationTypeColor(type);
 }
 
+function getRelationLabel(type, relationTypes) {
+  return relationTypes.find(t => t.value === type)?.label || type || '未分类关系';
+}
+
 function readArchiveGraphColors(element) {
   const scope = element?.closest('.archive-scope') || document.documentElement;
   const styles = window.getComputedStyle(scope);
@@ -120,6 +136,13 @@ function readArchiveGraphColors(element) {
     character: styles.getPropertyValue('--archive-graph-character').trim() || fallback,
     player: styles.getPropertyValue('--archive-graph-player').trim() || fallback,
     surface: styles.getPropertyValue('--archive-graph-surface').trim() || 'transparent',
+    wall: styles.getPropertyValue('--archive-graph-wall').trim() || 'transparent',
+    paper: styles.getPropertyValue('--archive-graph-paper').trim() || fallback,
+    paperMuted: styles.getPropertyValue('--archive-graph-paper-muted').trim() || fallback,
+    ink: styles.getPropertyValue('--archive-graph-ink').trim() || fallback,
+    pin: styles.getPropertyValue('--archive-graph-pin').trim() || fallback,
+    pinHighlight: styles.getPropertyValue('--archive-graph-pin-highlight').trim() || fallback,
+    ropeShadow: styles.getPropertyValue('--archive-graph-rope-shadow').trim() || fallback,
     inactive: destructive ? `hsl(${destructive})` : fallback,
   };
 }
@@ -128,7 +151,44 @@ function prefersReducedMotion() {
   return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 }
 
-const NODE_R = 36;
+const DESKTOP_NODE = {
+  cardWidth: 104,
+  cardHeight: 126,
+  imageSize: 88,
+  cardTop: -12,
+  imageTop: 2,
+  labelY: 108,
+  pinRadius: 7,
+  nameFontSize: 12,
+};
+
+const MOBILE_NODE = {
+  cardWidth: 88,
+  cardHeight: 108,
+  imageSize: 74,
+  cardTop: -10,
+  imageTop: 2,
+  labelY: 92,
+  pinRadius: 6,
+  nameFontSize: 11,
+};
+
+const FOCUS_LINKS_PER_NODE = 2;
+
+function getNodeLayout(width) {
+  return width < 640 ? MOBILE_NODE : DESKTOP_NODE;
+}
+
+function getNodeTilt(characterId, nodeType) {
+  if (nodeType === 'player') return 0;
+  return ((hashRelationType(characterId) % 7) - 3) * 0.75;
+}
+
+function truncateNodeName(value, maxLength = 9) {
+  const characters = Array.from(String(value || ''));
+  if (characters.length <= maxLength) return characters.join('');
+  return `${characters.slice(0, maxLength - 1).join('')}…`;
+}
 
 function getAffinityMagnitude(affinity = 0) {
   const value = Math.abs(Number(affinity) || 0);
@@ -136,11 +196,31 @@ function getAffinityMagnitude(affinity = 0) {
 }
 
 function getLinkWidth(edge) {
-  return 1.6 + (getAffinityMagnitude(edge.affinity) / 100) * 4.2;
+  return 2.4 + (getAffinityMagnitude(edge.affinity) / 100) * 4;
 }
 
 function getLinkHoverWidth(edge) {
-  return getLinkWidth(edge) + 1.4;
+  return getLinkWidth(edge) + 1.2;
+}
+
+function formatAffinity(affinity = 0) {
+  const value = Math.round(Number(affinity) || 0);
+  return value > 0 ? `+${value}` : String(value);
+}
+
+function getRelationshipLabelText(edge, relationTypes) {
+  const type = truncateNodeName(
+    getRelationLabel(edge.relationship_type, relationTypes),
+    9,
+  );
+  return `${type} · ${formatAffinity(edge.affinity)}`;
+}
+
+function getRelationshipLabelWidth(value) {
+  const textWidth = Array.from(String(value || '')).reduce((width, character) => (
+    width + (/[\u3000-\u9fff]/.test(character) ? 12 : 7)
+  ), 0);
+  return Math.min(156, Math.max(78, textWidth + 22));
 }
 
 function RelationTypePicker({
@@ -152,90 +232,401 @@ function RelationTypePicker({
   onAddType,
   onRemoveType,
 }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [creating, setCreating] = useState(false);
   const [newType, setNewType] = useState('');
+  const searchInputRef = useRef(null);
+  const newTypeInputRef = useRef(null);
+  const selectedItemRef = useRef(null);
+  const selectedType = relationTypes.find(type => type.value === value);
+  const selectedLabel = selectedType?.label || value || '选择关系类型';
+  const selectedColor = selectedType?.color || relationTypeColor(value);
+  const normalizedSearch = normalizeRelationTypeName(search).toLocaleLowerCase();
+  const filteredRelationTypes = relationTypes.filter(type => (
+    !normalizedSearch
+    || `${type.label} ${type.value}`.toLocaleLowerCase().includes(normalizedSearch)
+  ));
+  const selectedTypeIsUsed = selectedType
+    ? usedTypeValues.has(selectedType.value)
+    : false;
+
+  const handleOpenChange = (nextOpen) => {
+    setOpen(nextOpen);
+    if (!nextOpen) {
+      setSearch('');
+      setCreating(false);
+      setNewType('');
+    }
+  };
 
   const handleAdd = () => {
     const label = normalizeRelationTypeName(newType);
     if (!label) return;
     const nextType = onAddType(label);
     onChange(nextType.value);
-    setNewType('');
+    handleOpenChange(false);
+  };
+
+  const handleRemoveSelected = () => {
+    if (!selectedType || selectedTypeIsUsed) return;
+    const nextValue = relationTypes.find(type => type.value !== selectedType.value)?.value || '';
+    onRemoveType(selectedType.value);
+    onChange(nextValue);
   };
 
   return (
-    <div className="min-w-0 space-y-3">
-      <div className="flex flex-wrap gap-2">
-        {relationTypes.map(rt => {
-          const isUsed = usedTypeValues.has(rt.value);
-          const selected = value === rt.value;
-          return (
-            <div
-              key={rt.value}
-              className="group inline-flex min-h-11 max-w-full overflow-hidden rounded-md border bg-background/70 transition-colors duration-200"
-              style={{ borderColor: rt.color }}
+    <DropdownMenu open={open} onOpenChange={handleOpenChange}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          id={`${idPrefix}-type-trigger`}
+          type="button"
+          variant="outline"
+          aria-label={`关系类型，当前为${selectedLabel}`}
+          className="h-auto min-h-14 w-full justify-between whitespace-normal px-3 py-2 text-left"
+        >
+          <span className="flex min-w-0 items-center gap-3">
+            <span
+              className="h-3 w-3 shrink-0 rounded-sm border border-foreground/20"
+              style={{ backgroundColor: selectedColor }}
+              aria-hidden="true"
+            />
+            <span className="min-w-0">
+              <span className="block font-archive-mono text-[10px] font-medium text-muted-foreground">
+                当前关系
+              </span>
+              <span className="block break-words text-sm font-semibold text-foreground">
+                {selectedLabel}
+              </span>
+            </span>
+          </span>
+          <ChevronDown
+            className={`ml-3 shrink-0 text-muted-foreground transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+            aria-hidden="true"
+          />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="start"
+        sideOffset={6}
+        className="w-[var(--radix-dropdown-menu-trigger-width)] min-w-80 p-0"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          window.requestAnimationFrame(() => {
+            searchInputRef.current?.focus();
+            selectedItemRef.current?.scrollIntoView({ block: 'nearest' });
+          });
+        }}
+      >
+        <div className="border-b border-border p-2">
+          <DropdownMenuLabel className="px-1 pb-2 pt-0">
+            搜索关系类型
+          </DropdownMenuLabel>
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <Input
+              ref={searchInputRef}
+              id={`${idPrefix}-type-search`}
+              type="search"
+              value={search}
+              onChange={event => setSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Escape') event.stopPropagation();
+              }}
+              aria-label="搜索关系类型"
+              placeholder="输入名称筛选"
+              className="pl-9 font-archive-mono text-xs"
+            />
+          </div>
+        </div>
+
+        <div
+          id={`${idPrefix}-type-options`}
+          className="max-h-64 overflow-y-auto p-1"
+          aria-label="关系类型列表"
+        >
+          {filteredRelationTypes.length > 0 ? (
+            <DropdownMenuRadioGroup
+              value={value}
+              onValueChange={(nextValue) => {
+                onChange(nextValue);
+                handleOpenChange(false);
+              }}
             >
-              <Button
-                type="button"
-                onClick={() => onChange(rt.value)}
-                aria-pressed={selected}
-                variant="ghost"
-                className="h-11 min-h-11 min-w-0 rounded-none px-3 font-archive-mono text-xs"
-                style={selected ? { color: rt.color } : undefined}
+              {filteredRelationTypes.map(type => {
+                const selected = value === type.value;
+                return (
+                  <DropdownMenuRadioItem
+                    ref={selected ? selectedItemRef : undefined}
+                    key={type.value}
+                    value={type.value}
+                    className={`min-h-12 gap-3 pr-3 ${selected ? 'bg-accent/70 text-accent-foreground' : ''}`}
+                  >
+                    <span
+                      className="h-3 w-3 shrink-0 rounded-sm border border-foreground/20"
+                      style={{ backgroundColor: type.color }}
+                      aria-hidden="true"
+                    />
+                    <span className="min-w-0 flex-1 break-words font-archive-mono text-xs text-foreground">
+                      {type.label}
+                    </span>
+                    {selected && (
+                      <>
+                        <Check className="ml-auto text-primary" aria-hidden="true" />
+                        <span className="sr-only">当前关系</span>
+                      </>
+                    )}
+                  </DropdownMenuRadioItem>
+                );
+              })}
+            </DropdownMenuRadioGroup>
+          ) : (
+            <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+              没有匹配的关系类型
+            </p>
+          )}
+        </div>
+
+        <DropdownMenuSeparator className="m-0" />
+        <div className="p-1">
+          {!creating ? (
+            <DropdownMenuItem
+              onSelect={(event) => {
+                event.preventDefault();
+                setCreating(true);
+                window.requestAnimationFrame(() => newTypeInputRef.current?.focus());
+              }}
+            >
+              <Plus aria-hidden="true" />
+              新增关系类型
+            </DropdownMenuItem>
+          ) : (
+            <div className="space-y-2 p-2">
+              <label
+                htmlFor={`${idPrefix}-new-type`}
+                className="block text-xs font-medium text-foreground"
               >
-                <span
-                  className="h-2.5 w-2.5 shrink-0 rounded-sm"
-                  style={{ backgroundColor: rt.color }}
-                  aria-hidden="true"
+                新类型名称
+              </label>
+              <div className="flex min-w-0 gap-2">
+                <Input
+                  ref={newTypeInputRef}
+                  id={`${idPrefix}-new-type`}
+                  type="text"
+                  value={newType}
+                  onChange={event => setNewType(event.target.value)}
+                  onKeyDown={(event) => {
+                    event.stopPropagation();
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      handleAdd();
+                    }
+                    if (event.key === 'Escape') {
+                      setCreating(false);
+                      setNewType('');
+                      window.requestAnimationFrame(() => searchInputRef.current?.focus());
+                    }
+                  }}
+                  placeholder="如：同门、债主"
+                  className="min-w-0 flex-1 font-archive-mono text-xs"
                 />
-                <span className="truncate">{rt.label}</span>
-              </Button>
-              <Button
-                type="button"
-                disabled={isUsed}
-                aria-label={`删除关系类型 ${rt.label}`}
-                title={isUsed ? '已有关系正在使用，先修改或删除对应关系' : '删除类型'}
-                onClick={(e) => {
-                  const next = relationTypes.find(item => item.value !== rt.value)?.value || '';
-                  if (value === rt.value) onChange(next);
-                  onRemoveType(rt.value);
-                }}
-                variant="ghost"
-                size="icon"
-                className="h-11 min-h-11 rounded-none border-l border-border text-muted-foreground hover:text-destructive"
-              >
-                <X aria-hidden="true" />
-              </Button>
+                <Button
+                  type="button"
+                  onClick={handleAdd}
+                  disabled={!normalizeRelationTypeName(newType)}
+                  variant="secondary"
+                  className="shrink-0 px-3"
+                >
+                  <Plus aria-hidden="true" />
+                  添加
+                </Button>
+              </div>
             </div>
-          );
-        })}
-      </div>
-      <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-        <label htmlFor={`${idPrefix}-new-type`} className="sr-only">新增关系类型</label>
-        <Input
-          id={`${idPrefix}-new-type`}
-          type="text"
-          value={newType}
-          onChange={e => setNewType(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              handleAdd();
-            }
-          }}
-          placeholder="新增类型，如：同门、债主、守护者"
-          className="min-w-0 flex-1 font-archive-mono text-xs"
-        />
+          )}
+
+          {selectedType && (
+            <DropdownMenuItem
+              disabled={selectedTypeIsUsed}
+              onSelect={handleRemoveSelected}
+              className="text-destructive focus:text-destructive"
+              aria-label={selectedTypeIsUsed
+                ? `关系类型 ${selectedType.label} 正在使用，无法删除`
+                : `删除关系类型 ${selectedType.label}`}
+            >
+              <Trash2 aria-hidden="true" />
+              <span className="min-w-0 flex-1 break-words">
+                {selectedTypeIsUsed ? '当前类型正在使用，无法删除' : '删除当前类型'}
+              </span>
+            </DropdownMenuItem>
+          )}
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function RelationTypeFilter({
+  value,
+  onChange,
+  usedRelationTypes,
+  relationTypeCounts,
+  totalCount,
+}) {
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterSearch, setFilterSearch] = useState('');
+  const filterSearchInputRef = useRef(null);
+  const selectedFilterItemRef = useRef(null);
+  const selectedFilterValue = value || RELATION_FILTER_ALL;
+  const selectedType = usedRelationTypes.find(type => type.value === value);
+  const selectedLabel = selectedType?.label || value || '全部关系';
+  const normalizedFilterSearch = normalizeRelationTypeName(filterSearch).toLocaleLowerCase();
+  const filteredUsedRelationTypes = usedRelationTypes.filter(type => (
+    !normalizedFilterSearch
+    || `${type.label} ${type.value}`.toLocaleLowerCase().includes(normalizedFilterSearch)
+  ));
+
+  const handleFilterOpenChange = (nextOpen) => {
+    setFilterOpen(nextOpen);
+    if (!nextOpen) setFilterSearch('');
+  };
+
+  const handleFilterChange = (nextValue) => {
+    onChange(nextValue === RELATION_FILTER_ALL ? null : nextValue);
+    handleFilterOpenChange(false);
+  };
+
+  return (
+    <DropdownMenu open={filterOpen} onOpenChange={handleFilterOpenChange}>
+      <DropdownMenuTrigger asChild>
         <Button
           type="button"
-          onClick={handleAdd}
           size="lg"
-          variant="secondary"
-          className="shrink-0"
+          variant="outline"
+          className="max-w-52 bg-card/88 shadow-lg backdrop-blur-md"
+          aria-label={`筛选关系类型，当前为${selectedLabel}`}
+          title={`关系类型：${selectedLabel}`}
         >
-          <Plus aria-hidden="true" /> 新增
+          <ListFilter aria-hidden="true" />
+          {selectedType && (
+            <span
+              className="h-2.5 w-2.5 shrink-0 rounded-sm border border-foreground/20"
+              style={{ backgroundColor: selectedType.color }}
+              aria-hidden="true"
+            />
+          )}
+          <span className="max-w-28 truncate">{selectedLabel}</span>
+          <ChevronDown
+            className={`shrink-0 text-muted-foreground transition-transform duration-200 ${filterOpen ? 'rotate-180' : ''}`}
+            aria-hidden="true"
+          />
         </Button>
-      </div>
-    </div>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        sideOffset={6}
+        className="w-72 p-0"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          window.requestAnimationFrame(() => {
+            filterSearchInputRef.current?.focus();
+            selectedFilterItemRef.current?.scrollIntoView({ block: 'nearest' });
+          });
+        }}
+      >
+        <div className="border-b border-border p-2">
+          <DropdownMenuLabel className="px-1 pb-2 pt-0">
+            筛选关系类型
+          </DropdownMenuLabel>
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <Input
+              ref={filterSearchInputRef}
+              id="relationship-filter-search"
+              type="search"
+              value={filterSearch}
+              onChange={event => setFilterSearch(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== 'Escape') event.stopPropagation();
+              }}
+              aria-label="搜索关系筛选"
+              placeholder="输入名称筛选"
+              className="pl-9 font-archive-mono text-xs"
+            />
+          </div>
+        </div>
+
+        <DropdownMenuRadioGroup
+          value={selectedFilterValue}
+          onValueChange={handleFilterChange}
+        >
+          <div className="border-b border-border p-1">
+            <DropdownMenuRadioItem
+              ref={selectedFilterValue === RELATION_FILTER_ALL ? selectedFilterItemRef : undefined}
+              value={RELATION_FILTER_ALL}
+              className={`gap-2 pr-3 ${
+                selectedFilterValue === RELATION_FILTER_ALL
+                  ? 'bg-accent/70 text-accent-foreground'
+                  : ''
+              }`}
+            >
+              <Network className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+              <span className="min-w-0 flex-1">全部关系</span>
+              <span className="font-archive-mono text-xs tabular-nums text-muted-foreground">
+                {totalCount}
+              </span>
+              {selectedFilterValue === RELATION_FILTER_ALL && (
+                <Check className="text-primary" aria-hidden="true" />
+              )}
+            </DropdownMenuRadioItem>
+          </div>
+
+          <div
+            id="relationship-filter-options"
+            className="max-h-64 overflow-y-auto p-1"
+            aria-label="关系筛选列表"
+          >
+            {filteredUsedRelationTypes.length > 0 ? (
+              filteredUsedRelationTypes.map(type => {
+                const selected = selectedFilterValue === type.value;
+                return (
+                  <DropdownMenuRadioItem
+                    ref={selected ? selectedFilterItemRef : undefined}
+                    key={type.value}
+                    value={type.value}
+                    className={`min-h-12 gap-2 pr-3 ${
+                      selected ? 'bg-accent/70 text-accent-foreground' : ''
+                    }`}
+                  >
+                    <span
+                      className="h-2.5 w-7 shrink-0 rounded-sm border border-foreground/15 shadow-sm"
+                      style={{ backgroundColor: type.color }}
+                      aria-hidden="true"
+                    />
+                    <span className="min-w-0 flex-1 truncate" title={type.label}>
+                      {type.label}
+                    </span>
+                    <span className="font-archive-mono text-xs tabular-nums text-muted-foreground">
+                      {relationTypeCounts.get(type.value) || 0}
+                    </span>
+                    {selected && <Check className="text-primary" aria-hidden="true" />}
+                  </DropdownMenuRadioItem>
+                );
+              })
+            ) : (
+              <p className="px-3 py-6 text-center text-sm text-muted-foreground">
+                没有匹配的关系类型
+              </p>
+            )}
+          </div>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -317,7 +708,12 @@ function AddRelationModal({ characters, relationTypes, usedTypeValues, onAddType
           </div>
 
           <div className="min-w-0 space-y-2">
-            <span className="text-sm font-medium text-foreground">关系类型</span>
+            <label
+              htmlFor="add-relation-type-trigger"
+              className="text-sm font-medium text-foreground"
+            >
+              关系类型
+            </label>
             <RelationTypePicker
               idPrefix="add-relation"
               value={type}
@@ -381,6 +777,8 @@ function EditRelationModal({ edge, relationTypes, usedTypeValues, onAddType, onR
   const sourceName = edge.source?.display_name || edge.source?.name || edge.source;
   const targetName = edge.target?.display_name || edge.target?.name || edge.target;
   const isPlayerRelation = edge.source?.node_type === 'player' || edge.target?.node_type === 'player';
+  const currentTypeLabel = getRelationLabel(type, relationTypes);
+  const currentTypeColor = getRelationColor(type, relationTypes);
 
   const handleSubmit = (event) => {
     event.preventDefault();
@@ -402,12 +800,32 @@ function EditRelationModal({ edge, relationTypes, usedTypeValues, onAddType, onR
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="min-w-0 space-y-5">
-          <p className="break-words rounded-md border border-border bg-muted/45 px-3 py-3 text-sm text-foreground">
-            {sourceName} <span className="px-1 text-primary" aria-hidden="true">↔</span> {targetName}
-          </p>
+          <div className="flex min-w-0 flex-col gap-3 rounded-md border border-border bg-muted/45 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="min-w-0 break-words text-sm font-medium text-foreground">
+              {sourceName} <span className="px-1 text-primary" aria-hidden="true">↔</span> {targetName}
+            </p>
+            <div className="flex min-w-0 items-center gap-2 text-sm">
+              <span className="shrink-0 font-archive-mono text-[10px] text-muted-foreground">
+                当前关系
+              </span>
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-sm border border-foreground/20"
+                style={{ backgroundColor: currentTypeColor }}
+                aria-hidden="true"
+              />
+              <span className="min-w-0 break-words font-semibold text-foreground">
+                {currentTypeLabel}
+              </span>
+            </div>
+          </div>
 
           <div className="min-w-0 space-y-2">
-            <span className="text-sm font-medium text-foreground">关系类型</span>
+            <label
+              htmlFor="edit-relation-type-trigger"
+              className="text-sm font-medium text-foreground"
+            >
+              关系类型
+            </label>
             <RelationTypePicker
               idPrefix="edit-relation"
               value={type}
@@ -479,6 +897,7 @@ export default function RelationshipGraph() {
   const containerRef = useRef(null);
   const simulationRef = useRef(null);
   const zoomRef = useRef(null);
+  const viewControllerRef = useRef(null);
   const loadRequestRef = useRef(0);
   const centerTimeoutRef = useRef(null);
   const toastTimeoutRef = useRef(null);
@@ -494,7 +913,8 @@ export default function RelationshipGraph() {
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editEdge, setEditEdge] = useState(null);
-  const [activeRelationType, setActiveRelationType] = useState(null);
+  const [edgeDensity, setEdgeDensity] = useState('priority');
+  const [selectedRelationType, setSelectedRelationType] = useState(null);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
 
@@ -518,6 +938,15 @@ export default function RelationshipGraph() {
   useEffect(() => {
     localStorage.setItem(RELATION_TYPE_STORAGE_KEY, JSON.stringify(relationTypes));
   }, [relationTypes]);
+
+  useEffect(() => {
+    if (
+      selectedRelationType
+      && !network.edges.some(edge => edge.relationship_type === selectedRelationType)
+    ) {
+      setSelectedRelationType(null);
+    }
+  }, [network.edges, selectedRelationType]);
 
   useEffect(() => () => {
     centerTimeoutRef.current.cancel();
@@ -609,24 +1038,41 @@ export default function RelationshipGraph() {
     if (!network.nodes.length) return;
 
     const defs = svg.append('defs');
+    const nodeLayout = getNodeLayout(W);
+    const nodeCollisionRadius = (
+      Math.hypot(nodeLayout.cardWidth, nodeLayout.cardHeight) / 2
+    ) + (W < 640 ? 12 : 20);
 
-    // 箭头标记
-    const markerTypes = Array.from(new Set([
-      ...relationTypes.map(rt => rt.value),
-      ...network.edges.map(edge => edge.relationship_type),
-    ])).filter(Boolean);
-    markerTypes.forEach(type => {
-      defs.append('marker').attr('id', sanitizeMarkerId(type))
-        .attr('viewBox', '0 -5 10 10').attr('refX', 30).attr('refY', 0).attr('orient', 'auto')
-        .attr('markerWidth', 5).attr('markerHeight', 5)
-        .append('path').attr('d', 'M 0,-4 L 8,0 L 0,4').attr('fill', getRelationColor(type, relationTypes)).attr('opacity', 0.82);
-    });
+    const photoShadow = defs.append('filter')
+      .attr('id', 'archive-photo-shadow')
+      .attr('x', '-30%')
+      .attr('y', '-30%')
+      .attr('width', '160%')
+      .attr('height', '170%');
+    photoShadow.append('feDropShadow')
+      .attr('dx', 0)
+      .attr('dy', 4)
+      .attr('stdDeviation', 4)
+      .attr('flood-color', graphColors.ropeShadow)
+      .attr('flood-opacity', 0.38);
 
-    // 发光滤镜
-    const filter = defs.append('filter').attr('id', 'glow');
-    filter.append('feGaussianBlur').attr('stdDeviation', 3).attr('result', 'blur');
-    filter.append('feMerge').selectAll('feMergeNode').data(['blur', 'SourceGraphic'])
-      .join('feMergeNode').attr('in', d => d);
+    const photoHoverShadow = defs.append('filter')
+      .attr('id', 'archive-photo-shadow-hover')
+      .attr('x', '-35%')
+      .attr('y', '-35%')
+      .attr('width', '170%')
+      .attr('height', '180%');
+    photoHoverShadow.append('feDropShadow')
+      .attr('dx', 0)
+      .attr('dy', 6)
+      .attr('stdDeviation', 6)
+      .attr('flood-color', graphColors.ropeShadow)
+      .attr('flood-opacity', 0.52);
+
+    const inactivePhoto = defs.append('filter').attr('id', 'archive-inactive-photo');
+    inactivePhoto.append('feColorMatrix')
+      .attr('type', 'saturate')
+      .attr('values', 0.18);
 
     // 缩放
     const g = svg.append('g');
@@ -635,7 +1081,10 @@ export default function RelationshipGraph() {
     zoomRef.current = zoom;
 
     // 节点数据
-    const nodes = network.nodes.map(n => ({ ...n }));
+    const nodes = network.nodes.map(n => ({
+      ...n,
+      tilt: getNodeTilt(n.character_id, n.node_type),
+    }));
     const links = network.edges.map(e => ({
       source: nodes.find(n => n.character_id === e.source),
       target: nodes.find(n => n.character_id === e.target),
@@ -643,95 +1092,179 @@ export default function RelationshipGraph() {
       affinity: e.affinity,
       description: e.description,
     })).filter(l => l.source && l.target);
+    const priorityLinks = new Set();
+    nodes.forEach((nodeDatum) => {
+      links
+        .filter(link => (
+          link.source.character_id === nodeDatum.character_id
+          || link.target.character_id === nodeDatum.character_id
+        ))
+        .sort((left, right) => {
+          const affinityDelta = getAffinityMagnitude(right.affinity) - getAffinityMagnitude(left.affinity);
+          if (affinityDelta) return affinityDelta;
+          const leftKey = `${left.source.character_id}:${left.target.character_id}:${left.relationship_type}`;
+          const rightKey = `${right.source.character_id}:${right.target.character_id}:${right.relationship_type}`;
+          return leftKey.localeCompare(rightKey);
+        })
+        .slice(0, FOCUS_LINKS_PER_NODE)
+        .forEach(link => priorityLinks.add(link));
+    });
+
+    let currentEdgeDensity = edgeDensity;
+    let currentRelationType = selectedRelationType;
+    let lockedNode = null;
+
+    const isLinkVisible = link => (
+      !currentRelationType || link.relationship_type === currentRelationType
+    );
+    const isLinkProminent = link => (
+      isLinkVisible(link)
+      && (
+        Boolean(currentRelationType)
+        || currentEdgeDensity === 'all'
+        || priorityLinks.has(link)
+      )
+    );
+    const getDefaultRopeOpacity = (layer, link) => {
+      if (!isLinkVisible(link)) return 0;
+      if (currentRelationType) {
+        if (layer === 'shadow') return 0.32;
+        if (layer === 'fiber') return 0.22;
+        return 0.82;
+      }
+      if (currentEdgeDensity === 'all') {
+        if (layer === 'shadow') return 0.24;
+        if (layer === 'fiber') return 0.14;
+        return 0.62;
+      }
+      if (isLinkProminent(link)) {
+        if (layer === 'shadow') return 0.29;
+        if (layer === 'fiber') return 0.2;
+        return 0.76;
+      }
+      if (layer === 'shadow') return 0.025;
+      if (layer === 'fiber') return 0.012;
+      return 0.075;
+    };
 
     const simulation = d3.forceSimulation(nodes)
-      .force('link', d3.forceLink(links).id(d => d.character_id).distance(200).strength(0.3))
-      .force('charge', d3.forceManyBody().strength(-800))
+      .force('link', d3.forceLink(links).id(d => d.character_id).distance(W < 640 ? 190 : 245).strength(0.34))
+      .force('charge', d3.forceManyBody().strength(W < 640 ? -720 : -1050))
       .force('center', d3.forceCenter(W / 2, H / 2))
-      .force('collide', d3.forceCollide(NODE_R + 24))
+      .force('collide', d3.forceCollide(nodeCollisionRadius).strength(0.92))
       .force('x', d3.forceX(W / 2).strength(0.02))
       .force('y', d3.forceY(H / 2).strength(0.02));
     simulationRef.current = simulation;
 
-    const getEdgePath = d => {
+    const getEdgeGeometry = d => {
       const sx = d.source.x, sy = d.source.y;
       const tx = d.target.x, ty = d.target.y;
-      const dr = Math.sqrt((tx - sx) ** 2 + (ty - sy) ** 2);
-      return `M${sx},${sy}A${dr * 0.8},${dr * 0.8} 0 0,1 ${tx},${ty}`;
+      const distance = Math.hypot(tx - sx, ty - sy);
+      const sag = Math.min(58, 12 + distance * 0.09);
+      const verticalBow = Math.abs(tx - sx) < 42 ? Math.min(34, distance * 0.12) : 0;
+      const controlX = ((sx + tx) / 2) + verticalBow;
+      const controlY = ((sy + ty) / 2) + sag;
+      return {
+        path: `M${sx},${sy}Q${controlX},${controlY} ${tx},${ty}`,
+        labelX: (0.25 * sx) + (0.5 * controlX) + (0.25 * tx),
+        labelY: (0.25 * sy) + (0.5 * controlY) + (0.25 * ty),
+      };
     };
 
-    // ── 边：可见曲线 + 流动高光 + 透明命中区域 ──
+    // ── 绳线：阴影、实体色、纤维高光和透明命中区域 ──
     const linkGroup = g.append('g').attr('class', 'links');
-    const linkBase = linkGroup.append('g').attr('class', 'link-base').selectAll('path').data(links).join('path')
+    const ropeShadow = linkGroup.append('g').attr('class', 'rope-shadows').selectAll('path').data(links).join('path')
       .attr('fill', 'none')
+      .attr('class', 'rope-shadow')
+      .attr('stroke', graphColors.ropeShadow)
+      .attr('stroke-opacity', d => getDefaultRopeOpacity('shadow', d))
+      .attr('stroke-width', d => getLinkWidth(d) + 2)
+      .attr('stroke-linecap', 'round')
+      .attr('stroke-linejoin', 'round')
+      .attr('transform', 'translate(1.5 2)')
+      .attr('pointer-events', 'none');
+
+    const ropeBase = linkGroup.append('g').attr('class', 'rope-bases').selectAll('path').data(links).join('path')
+      .attr('fill', 'none')
+      .attr('class', 'rope-base')
       .attr('stroke', d => getRelationColor(d.relationship_type, relationTypes))
-      .attr('stroke-opacity', 0.48)
+      .attr('stroke-opacity', d => getDefaultRopeOpacity('base', d))
       .attr('stroke-width', getLinkWidth)
       .attr('stroke-linecap', 'round')
       .attr('stroke-linejoin', 'round')
-      .attr('marker-end', d => `url(#${sanitizeMarkerId(d.relationship_type)})`)
       .attr('pointer-events', 'none');
 
-    const linkFlow = linkGroup.append('g').attr('class', 'link-flow').selectAll('path').data(links).join('path')
+    const ropeFiber = linkGroup.append('g').attr('class', 'rope-fibers').selectAll('path').data(links).join('path')
       .attr('fill', 'none')
-      .attr('stroke', d => getRelationColor(d.relationship_type, relationTypes))
-      .attr('stroke-opacity', 0.72)
-      .attr('stroke-width', d => Math.max(1, getLinkWidth(d) * 0.42))
+      .attr('class', 'rope-fiber')
+      .attr('stroke', graphColors.pinHighlight)
+      .attr('stroke-opacity', d => getDefaultRopeOpacity('fiber', d))
+      .attr('stroke-width', d => Math.max(0.8, getLinkWidth(d) * 0.26))
       .attr('stroke-linecap', 'round')
-      .attr('stroke-dasharray', '2 12')
-      .attr('stroke-dashoffset', 0)
-      .attr('filter', 'url(#glow)')
+      .attr('stroke-dasharray', '1 4')
       .attr('pointer-events', 'none');
 
-    const linkHit = linkGroup.append('g').attr('class', 'link-hit').selectAll('path').data(links).join('path')
+    const linkHit = linkGroup.append('g').attr('class', 'rope-hits').selectAll('path').data(links).join('path')
       .attr('fill', 'none')
+      .attr('class', 'rope-hit')
       .attr('stroke', 'transparent')
-      .attr('stroke-width', d => Math.max(18, getLinkWidth(d) + 14))
+      .attr('stroke-width', d => Math.max(22, getLinkWidth(d) + 16))
       .attr('stroke-linecap', 'round')
       .attr('pointer-events', 'stroke')
+      .attr('tabindex', 0)
+      .attr('focusable', true)
+      .attr('role', 'button')
+      .attr('aria-label', d => (
+        `编辑 ${d.source.display_name || d.source.name} 与 ${d.target.display_name || d.target.name} 的${d.relationship_type || ''}关系`
+      ))
       .style('cursor', 'pointer');
 
-    let flowStopped = false;
-    const animateFlow = () => {
-      if (flowStopped) return;
-      linkFlow
-        .attr('stroke-dashoffset', 0)
-        .transition()
-        .duration(1200)
-        .ease(d3.easeLinear)
-        .attr('stroke-dashoffset', -28)
-        .on('end', () => {
-          if (!flowStopped) animateFlow();
-        });
-    };
+    const relationshipLabel = g.append('g')
+      .attr('class', 'relationship-labels')
+      .selectAll('g')
+      .data(links)
+      .join('g')
+      .attr('class', 'relationship-label')
+      .attr('opacity', 0)
+      .attr('pointer-events', 'none');
 
-    if (!reduceMotion) animateFlow();
+    relationshipLabel.append('rect')
+      .attr('x', d => -getRelationshipLabelWidth(getRelationshipLabelText(d, relationTypes)) / 2)
+      .attr('y', -12)
+      .attr('width', d => getRelationshipLabelWidth(getRelationshipLabelText(d, relationTypes)))
+      .attr('height', 24)
+      .attr('rx', 2)
+      .attr('fill', graphColors.paper)
+      .attr('stroke', d => getRelationColor(d.relationship_type, relationTypes))
+      .attr('stroke-width', 1.1)
+      .attr('stroke-opacity', 0.82);
 
-    // 边交互
-    linkHit.on('mouseenter', function(event, d) {
-      setActiveRelationType(d.relationship_type || null);
-      linkBase
-        .attr('stroke-opacity', l => l === d ? 0.8 : 0.1)
-        .attr('stroke-width', l => l === d ? getLinkHoverWidth(l) : getLinkWidth(l));
-      linkFlow
-        .attr('stroke-opacity', l => l === d ? 0.95 : 0.04)
-        .attr('stroke-width', l => l === d ? Math.max(1.6, getLinkHoverWidth(l) * 0.48) : Math.max(1, getLinkWidth(l) * 0.32));
-    }).on('mouseleave', function() {
-      setActiveRelationType(null);
-      linkBase.attr('stroke-opacity', 0.48).attr('stroke-width', getLinkWidth);
-      linkFlow
-        .attr('stroke-opacity', 0.72)
-        .attr('stroke-width', d => Math.max(1, getLinkWidth(d) * 0.42));
-    }).on('click', (event, d) => {
-      event.stopPropagation();
-      setEditEdge(d);
-    });
+    relationshipLabel.append('text')
+      .text(d => getRelationshipLabelText(d, relationTypes))
+      .attr('text-anchor', 'middle')
+      .attr('y', 4)
+      .attr('fill', graphColors.ink)
+      .attr('font-family', 'Noto Sans SC, Microsoft YaHei, PingFang SC, system-ui, sans-serif')
+      .attr('font-size', '11px')
+      .attr('font-weight', '700');
 
-    // ── 节点 ──
+    relationshipLabel.append('title').text(d => (
+      `${getRelationLabel(d.relationship_type, relationTypes)} · ${formatAffinity(d.affinity)}`
+    ));
+
+    // ── 方形档案照片节点 ──
     const nodeGroup = g.append('g').attr('class', 'nodes');
     const node = nodeGroup.selectAll('g').data(nodes).join('g')
       .attr('opacity', 0)
+      .attr('class', 'archive-photo-node')
       .attr('cursor', 'pointer')
+      .attr('tabindex', 0)
+      .attr('focusable', true)
+      .attr('role', 'button')
+      .attr('aria-pressed', 'false')
+      .attr('aria-label', d => (
+        `${d.node_type === 'player' ? '玩家' : '角色'} ${d.display_name || d.name}，按空格聚焦关系，按回车打开档案`
+      ))
       .call(d3.drag()
         .on('start', (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
         .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
@@ -747,112 +1280,413 @@ export default function RelationshipGraph() {
       .ease(d3.easeCubicOut)
       .attr('opacity', 1);
 
-    // 光晕
-    node.append('circle').attr('r', NODE_R + 10).attr('fill', d => (
-      d.node_type === 'player' ? graphColors.player : graphColors.character
-    ))
-      .attr('opacity', 0).attr('class', 'node-halo').attr('filter', 'url(#glow)');
-
-    // 头像裁剪定义（在 defs 中定义，避免重复id冲突）
+    // 方形头像裁剪定义
     nodes.forEach(function(d) {
       const clipId = 'clip-' + d.character_id.replace(/[^a-zA-Z0-9]/g, '_');
       if (defs.select('#' + clipId).empty()) {
         defs.append('clipPath').attr('id', clipId)
-          .append('circle').attr('r', NODE_R - 2);
+          .append('rect')
+          .attr('x', -nodeLayout.imageSize / 2)
+          .attr('y', nodeLayout.imageTop)
+          .attr('width', nodeLayout.imageSize)
+          .attr('height', nodeLayout.imageSize)
+          .attr('rx', 1.5);
       }
     });
 
-    // 节点：头像或首字母
+    // 照片卡、头像和姓名纸条
     node.each(function(d) {
-      const g = d3.select(this);
+      const nodeElement = d3.select(this);
       const clipId = 'clip-' + d.character_id.replace(/[^a-zA-Z0-9]/g, '_');
-      // 圆形底色
-      g.append('circle').attr('r', NODE_R - 2).attr('fill', graphColors.surface).attr('pointer-events', 'none');
+      const accentColor = d.node_type === 'player'
+        ? graphColors.player
+        : (d.is_active ? graphColors.character : graphColors.inactive);
+      nodeElement.append('rect')
+        .attr('class', 'node-hit-target')
+        .attr('x', -nodeLayout.cardWidth / 2)
+        .attr('y', nodeLayout.cardTop)
+        .attr('width', nodeLayout.cardWidth)
+        .attr('height', nodeLayout.cardHeight)
+        .attr('rx', 2)
+        .attr('fill', 'transparent')
+        .attr('pointer-events', 'all');
+      const card = nodeElement.append('g')
+        .attr('class', 'photo-card')
+        .attr('filter', 'url(#archive-photo-shadow)');
+
+      card.append('rect')
+        .attr('class', 'photo-mount')
+        .attr('x', -nodeLayout.cardWidth / 2)
+        .attr('y', nodeLayout.cardTop)
+        .attr('width', nodeLayout.cardWidth)
+        .attr('height', nodeLayout.cardHeight)
+        .attr('rx', 2)
+        .attr('fill', graphColors.paper)
+        .attr('stroke', accentColor)
+        .attr('stroke-width', d.is_active ? 1.2 : 1.8)
+        .attr('stroke-opacity', d.is_active ? 0.72 : 0.9)
+        .attr('pointer-events', 'none');
+
+      card.append('rect')
+        .attr('x', -nodeLayout.imageSize / 2)
+        .attr('y', nodeLayout.imageTop)
+        .attr('width', nodeLayout.imageSize)
+        .attr('height', nodeLayout.imageSize)
+        .attr('rx', 1.5)
+        .attr('fill', graphColors.surface)
+        .attr('stroke', graphColors.ropeShadow)
+        .attr('stroke-width', 0.8)
+        .attr('stroke-opacity', 0.4)
+        .attr('pointer-events', 'none');
+
       if (d.avatar_url) {
-        g.append('image')
+        card.append('image')
           .attr('href', d.avatar_url)
-          .attr('x', -(NODE_R - 2)).attr('y', -(NODE_R - 2))
-          .attr('width', (NODE_R - 2) * 2).attr('height', (NODE_R - 2) * 2)
+          .attr('x', -nodeLayout.imageSize / 2)
+          .attr('y', nodeLayout.imageTop)
+          .attr('width', nodeLayout.imageSize)
+          .attr('height', nodeLayout.imageSize)
           .attr('clip-path', 'url(#' + clipId + ')')
           .attr('preserveAspectRatio', 'xMidYMid slice')
+          .attr('filter', d.is_active ? null : 'url(#archive-inactive-photo)')
+          .attr('opacity', d.is_active ? 1 : 0.56)
           .attr('pointer-events', 'none');
       } else {
-        g.append('text')
+        card.append('text')
           .text((d.name || d.display_name || d.character_id).charAt(0))
-          .attr('text-anchor', 'middle').attr('dy', '0.35em')
-          .attr('fill', d.node_type === 'player' ? graphColors.player : graphColors.character)
+          .attr('text-anchor', 'middle')
+          .attr('y', nodeLayout.imageTop + (nodeLayout.imageSize / 2))
+          .attr('dy', '0.35em')
+          .attr('fill', accentColor)
           .attr('font-family', 'Noto Sans SC, Microsoft YaHei, PingFang SC, system-ui, sans-serif')
-          .attr('font-size', '18px').attr('font-weight', 'bold')
+          .attr('font-size', W < 640 ? '24px' : '28px')
+          .attr('font-weight', '700')
           .attr('pointer-events', 'none');
       }
+
+      card.append('rect')
+        .attr('x', -nodeLayout.imageSize / 2)
+        .attr('y', nodeLayout.labelY - 13)
+        .attr('width', nodeLayout.imageSize)
+        .attr('height', 20)
+        .attr('rx', 1)
+        .attr('fill', graphColors.paperMuted)
+        .attr('opacity', 0.72)
+        .attr('pointer-events', 'none');
+
+      card.append('text')
+        .text(truncateNodeName(d.name || d.display_name || d.character_id, W < 640 ? 8 : 10))
+        .attr('text-anchor', 'middle')
+        .attr('y', nodeLayout.labelY)
+        .attr('fill', graphColors.ink)
+        .attr('font-family', 'Noto Sans SC, Microsoft YaHei, PingFang SC, system-ui, sans-serif')
+        .attr('font-size', `${nodeLayout.nameFontSize}px`)
+        .attr('font-weight', '600')
+        .attr('pointer-events', 'none');
+
+      if (d.node_type === 'player') {
+        const badgeWidth = W < 640 ? 27 : 30;
+        card.append('rect')
+          .attr('x', (nodeLayout.cardWidth / 2) - badgeWidth - 5)
+          .attr('y', nodeLayout.cardTop + 6)
+          .attr('width', badgeWidth)
+          .attr('height', 15)
+          .attr('rx', 2)
+          .attr('fill', graphColors.paperMuted)
+          .attr('stroke', graphColors.player)
+          .attr('stroke-width', 0.8)
+          .attr('pointer-events', 'none');
+        card.append('text')
+          .text('玩家')
+          .attr('x', (nodeLayout.cardWidth / 2) - (badgeWidth / 2) - 5)
+          .attr('y', nodeLayout.cardTop + 17)
+          .attr('text-anchor', 'middle')
+          .attr('fill', graphColors.player)
+          .attr('font-size', '9px')
+          .attr('font-weight', '700')
+          .attr('font-family', 'Noto Sans SC, Microsoft YaHei, PingFang SC, system-ui, sans-serif')
+          .attr('pointer-events', 'none');
+      }
+
+      const pinColor = d.node_type === 'player'
+        ? graphColors.player
+        : (d.is_active ? graphColors.pin : graphColors.inactive);
+      const pin = nodeElement.append('g')
+        .attr('class', 'pushpin')
+        .attr('pointer-events', 'none');
+      pin.append('line')
+        .attr('x1', 0)
+        .attr('y1', 2)
+        .attr('x2', 0)
+        .attr('y2', 10)
+        .attr('stroke', graphColors.ropeShadow)
+        .attr('stroke-width', 2)
+        .attr('stroke-linecap', 'round')
+        .attr('opacity', 0.7);
+      pin.append('circle')
+        .attr('cx', 1.6)
+        .attr('cy', 2)
+        .attr('r', nodeLayout.pinRadius + 1.4)
+        .attr('fill', graphColors.ropeShadow)
+        .attr('opacity', 0.34);
+      pin.append('circle')
+        .attr('class', 'pin-head')
+        .attr('r', nodeLayout.pinRadius)
+        .attr('fill', pinColor)
+        .attr('stroke', graphColors.pinHighlight)
+        .attr('stroke-width', 1.2);
+      pin.append('circle')
+        .attr('cx', -2)
+        .attr('cy', -2)
+        .attr('r', Math.max(1.5, nodeLayout.pinRadius * 0.28))
+        .attr('fill', graphColors.pinHighlight)
+        .attr('opacity', 0.78);
+
+      nodeElement.append('title').text(
+        `${d.node_type === 'player' ? '玩家' : '角色'}：${d.display_name || d.name}`
+      );
     });
 
-    // 主体圆（描边）
-    node.append('circle').attr('r', NODE_R)
-      .attr('fill', 'none')
-      .attr('stroke', d => (
-        d.node_type === 'player'
-          ? graphColors.player
-          : (d.is_active ? graphColors.character : graphColors.inactive)
-      ))
-      .attr('stroke-width', d => d.is_active ? 2.4 : 2.8)
-      .attr('stroke-opacity', 0.9);
+    const isIncidentTo = (link, nodeDatum) => (
+      link.source.character_id === nodeDatum.character_id
+      || link.target.character_id === nodeDatum.character_id
+    );
 
-    // 装饰虚线环
-    node.append('circle').attr('r', NODE_R - 4).attr('fill', 'none')
-      .attr('stroke', d => d.node_type === 'player' ? graphColors.player : graphColors.character)
-      .attr('stroke-opacity', 0.26).attr('stroke-width', 1)
-      .attr('stroke-dasharray', '3 6');
+    const syncLinkInteractivity = () => {
+      linkHit
+        .attr('pointer-events', link => isLinkVisible(link) ? 'stroke' : 'none')
+        .attr('tabindex', link => isLinkVisible(link) ? 0 : -1)
+        .attr('focusable', link => isLinkVisible(link) ? 'true' : 'false')
+        .attr('aria-hidden', link => isLinkVisible(link) ? null : 'true')
+        .style('cursor', link => isLinkVisible(link) ? 'pointer' : 'default')
+        .filter(link => !isLinkVisible(link))
+        .each(function blurHiddenLink() {
+          if (document.activeElement === this) this.blur();
+        });
+    };
 
-    const playerBadge = node.filter(d => d.node_type === 'player');
-    playerBadge.append('rect')
-      .attr('x', -19).attr('y', -NODE_R - 19)
-      .attr('width', 38).attr('height', 16).attr('rx', 4)
-      .attr('fill', graphColors.surface).attr('stroke', graphColors.player).attr('stroke-opacity', 0.55);
-    playerBadge.append('text')
-      .text('玩家')
-      .attr('text-anchor', 'middle').attr('dy', -NODE_R - 8)
-      .attr('fill', graphColors.player).attr('font-size', '9px').attr('font-weight', '700')
-      .attr('font-family', 'Noto Sans SC, Microsoft YaHei, PingFang SC, system-ui, sans-serif')
-      .attr('pointer-events', 'none');
+    const resetRopes = () => {
+      ropeShadow
+        .attr('stroke-opacity', link => getDefaultRopeOpacity('shadow', link))
+        .attr('stroke-width', link => getLinkWidth(link) + 2);
+      ropeBase
+        .attr('stroke-opacity', link => getDefaultRopeOpacity('base', link))
+        .attr('stroke-width', getLinkWidth);
+      ropeFiber
+        .attr('stroke-opacity', link => getDefaultRopeOpacity('fiber', link))
+        .attr('stroke-width', link => Math.max(0.8, getLinkWidth(link) * 0.26));
+    };
 
-    // 名称
-    node.append('text')
-      .text(d => d.name || d.display_name || d.character_id)
-      .attr('text-anchor', 'middle').attr('dy', NODE_R + 18)
-      .attr('fill', d => d.node_type === 'player' ? graphColors.player : graphColors.character)
-      .attr('font-family', 'Noto Sans SC, Microsoft YaHei, PingFang SC, system-ui, sans-serif')
-      .attr('font-size', '14px').attr('font-weight', '500')
-      .attr('opacity', 0.92).attr('pointer-events', 'none');
+    const restoreDefaultView = () => {
+      const connectedNodeIds = new Set();
+      if (currentRelationType) {
+        links.filter(isLinkVisible).forEach((link) => {
+          connectedNodeIds.add(link.source.character_id);
+          connectedNodeIds.add(link.target.character_id);
+        });
+      }
+      node
+        .attr('opacity', nodeDatum => (
+          !currentRelationType || connectedNodeIds.has(nodeDatum.character_id) ? 1 : 0.16
+        ))
+        .attr('aria-pressed', nodeDatum => (
+          lockedNode?.character_id === nodeDatum.character_id ? 'true' : 'false'
+        ));
+      node.select('.photo-card').attr('filter', 'url(#archive-photo-shadow)');
+      node.select('.photo-mount')
+        .attr('stroke-opacity', nodeDatum => nodeDatum.is_active ? 0.72 : 0.9)
+        .attr('stroke-width', nodeDatum => nodeDatum.is_active ? 1.2 : 1.8);
+      relationshipLabel.attr('opacity', 0);
+      resetRopes();
+      syncLinkInteractivity();
+    };
 
-    // 悬停高亮
-    node.on('mouseenter', (event, d) => {
-      node.select('.node-halo').attr('opacity', n => n.character_id === d.character_id ? 0.25 : 0);
-      linkBase
-        .attr('stroke-opacity', l => (l.source.character_id === d.character_id || l.target.character_id === d.character_id) ? 0.8 : 0.04)
-        .attr('stroke-width', l => (l.source.character_id === d.character_id || l.target.character_id === d.character_id)
-          ? getLinkHoverWidth(l) : Math.max(0.8, getLinkWidth(l) * 0.55));
-      linkFlow
-        .attr('stroke-opacity', l => (l.source.character_id === d.character_id || l.target.character_id === d.character_id) ? 0.95 : 0.03)
-        .attr('stroke-width', l => (l.source.character_id === d.character_id || l.target.character_id === d.character_id)
-          ? Math.max(1.6, getLinkHoverWidth(l) * 0.48) : Math.max(0.8, getLinkWidth(l) * 0.24));
+    const applyNodeFocus = (focusedNode) => {
+      const incidentLinks = new Set(
+        links.filter(link => isLinkVisible(link) && isIncidentTo(link, focusedNode)),
+      );
+      const connectedNodeIds = new Set([focusedNode.character_id]);
+      incidentLinks.forEach((link) => {
+        connectedNodeIds.add(link.source.character_id);
+        connectedNodeIds.add(link.target.character_id);
+      });
+
+      node
+        .attr('opacity', nodeDatum => connectedNodeIds.has(nodeDatum.character_id) ? 1 : 0.16)
+        .attr('aria-pressed', nodeDatum => (
+          lockedNode?.character_id === nodeDatum.character_id ? 'true' : 'false'
+        ));
+      node.select('.photo-card')
+        .attr('filter', nodeDatum => (
+          nodeDatum.character_id === focusedNode.character_id
+            ? 'url(#archive-photo-shadow-hover)'
+            : 'url(#archive-photo-shadow)'
+        ));
+      node.select('.photo-mount')
+        .attr('stroke-opacity', nodeDatum => (
+          nodeDatum.character_id === focusedNode.character_id
+            ? 1
+            : (connectedNodeIds.has(nodeDatum.character_id) ? 0.78 : 0.28)
+        ))
+        .attr('stroke-width', nodeDatum => (
+          nodeDatum.character_id === focusedNode.character_id ? 2.2 : 1.2
+        ));
+      ropeShadow
+        .attr('stroke-opacity', link => (
+          !isLinkVisible(link) ? 0 : (incidentLinks.has(link) ? 0.48 : 0.012)
+        ))
+        .attr('stroke-width', link => (
+          incidentLinks.has(link) ? getLinkHoverWidth(link) + 2 : getLinkWidth(link) + 2
+        ));
+      ropeBase
+        .attr('stroke-opacity', link => (
+          !isLinkVisible(link) ? 0 : (incidentLinks.has(link) ? 1 : 0.02)
+        ))
+        .attr('stroke-width', link => (
+          incidentLinks.has(link) ? getLinkHoverWidth(link) : getLinkWidth(link)
+        ));
+      ropeFiber
+        .attr('stroke-opacity', link => (
+          !isLinkVisible(link) ? 0 : (incidentLinks.has(link) ? 0.36 : 0.004)
+        ))
+        .attr('stroke-width', link => Math.max(0.8, (
+          incidentLinks.has(link) ? getLinkHoverWidth(link) : getLinkWidth(link)
+        ) * 0.26));
+      relationshipLabel.attr('opacity', link => incidentLinks.has(link) ? 1 : 0);
+    };
+
+    const highlightRope = (focusedLink) => {
+      const endpointIds = new Set([
+        focusedLink.source.character_id,
+        focusedLink.target.character_id,
+      ]);
+      node.attr('opacity', nodeDatum => endpointIds.has(nodeDatum.character_id) ? 1 : 0.16);
+      node.select('.photo-card')
+        .attr('filter', nodeDatum => (
+          endpointIds.has(nodeDatum.character_id)
+            ? 'url(#archive-photo-shadow-hover)'
+            : 'url(#archive-photo-shadow)'
+        ));
+      node.select('.photo-mount')
+        .attr('stroke-opacity', nodeDatum => endpointIds.has(nodeDatum.character_id) ? 1 : 0.28)
+        .attr('stroke-width', nodeDatum => endpointIds.has(nodeDatum.character_id) ? 2 : 1.2);
+      ropeShadow
+        .attr('stroke-opacity', link => (
+          !isLinkVisible(link) ? 0 : (link === focusedLink ? 0.5 : 0.012)
+        ))
+        .attr('stroke-width', link => (
+          link === focusedLink ? getLinkHoverWidth(link) + 2 : getLinkWidth(link) + 2
+        ));
+      ropeBase
+        .attr('stroke-opacity', link => (
+          !isLinkVisible(link) ? 0 : (link === focusedLink ? 1 : 0.02)
+        ))
+        .attr('stroke-width', link => (
+          link === focusedLink ? getLinkHoverWidth(link) : getLinkWidth(link)
+        ));
+      ropeFiber
+        .attr('stroke-opacity', link => (
+          !isLinkVisible(link) ? 0 : (link === focusedLink ? 0.38 : 0.004)
+        ))
+        .attr('stroke-width', link => Math.max(0.8, (
+          link === focusedLink ? getLinkHoverWidth(link) : getLinkWidth(link)
+        ) * 0.26));
+      relationshipLabel.attr('opacity', link => link === focusedLink ? 1 : 0);
+    };
+
+    const restoreLockedOrDefault = () => {
+      if (lockedNode) applyNodeFocus(lockedNode);
+      else restoreDefaultView();
+    };
+
+    const toggleNodeLock = (nodeDatum) => {
+      lockedNode = lockedNode?.character_id === nodeDatum.character_id ? null : nodeDatum;
+      restoreLockedOrDefault();
+    };
+
+    linkHit
+      .on('mouseenter focus', (event, link) => highlightRope(link))
+      .on('mouseleave blur', restoreLockedOrDefault)
+      .on('click', (event, link) => {
+        event.stopPropagation();
+        setEditEdge(link);
+      })
+      .on('keydown', (event, link) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        event.stopPropagation();
+        setEditEdge(link);
+      });
+
+    node
+      .on('mouseenter focus', (event, nodeDatum) => applyNodeFocus(nodeDatum))
+      .on('mouseleave blur', restoreLockedOrDefault)
+      .on('click', (event, nodeDatum) => {
+        if (event.defaultPrevented) return;
+        event.stopPropagation();
+        toggleNodeLock(nodeDatum);
+      })
+      .on('keydown', (event, nodeDatum) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          event.stopPropagation();
+          navigate(
+            nodeDatum.node_type === 'player'
+              ? '/persona'
+              : characterEditorPath(nodeDatum.character_id),
+          );
+          return;
+        }
+        if (event.key === ' ') {
+          event.preventDefault();
+          event.stopPropagation();
+          toggleNodeLock(nodeDatum);
+          return;
+        }
+        if (event.key === 'Escape' && lockedNode) {
+          event.preventDefault();
+          event.stopPropagation();
+          lockedNode = null;
+          restoreDefaultView();
+        }
+      });
+
+    svg.on('click', () => {
+      lockedNode = null;
+      restoreDefaultView();
+      setEditEdge(null);
     });
-    node.on('mouseleave', () => {
-      node.select('.node-halo').attr('opacity', 0);
-      linkBase.attr('stroke-opacity', 0.48).attr('stroke-width', getLinkWidth);
-      linkFlow
-        .attr('stroke-opacity', 0.72)
-        .attr('stroke-width', d => Math.max(1, getLinkWidth(d) * 0.42));
-    });
 
-    svg.on('click', () => { setEditEdge(null); });
+    const viewController = {
+      update({ density, relationType }) {
+        currentEdgeDensity = density;
+        currentRelationType = relationType;
+        if (
+          lockedNode
+          && !links.some(link => isLinkVisible(link) && isIncidentTo(link, lockedNode))
+        ) {
+          lockedNode = null;
+        }
+        restoreLockedOrDefault();
+      },
+    };
+    viewControllerRef.current = viewController;
+    restoreDefaultView();
 
     // tick
     simulation.on('tick', () => {
-      linkBase.attr('d', getEdgePath);
-      linkFlow.attr('d', getEdgePath);
-      linkHit.attr('d', getEdgePath);
-      node.attr('transform', d => `translate(${d.x},${d.y})`);
+      links.forEach((link) => {
+        link.geometry = getEdgeGeometry(link);
+      });
+      ropeShadow.attr('d', link => link.geometry.path);
+      ropeBase.attr('d', link => link.geometry.path);
+      ropeFiber.attr('d', link => link.geometry.path);
+      linkHit.attr('d', link => link.geometry.path);
+      relationshipLabel.attr(
+        'transform',
+        link => `translate(${link.geometry.labelX},${link.geometry.labelY})`,
+      );
+      node.attr('transform', d => `translate(${d.x},${d.y}) rotate(${d.tilt})`);
     });
 
     // 初始居中
@@ -869,13 +1703,18 @@ export default function RelationshipGraph() {
     }, 1200);
 
     return () => {
-      flowStopped = true;
-      linkFlow.interrupt();
-      setActiveRelationType(null);
+      if (viewControllerRef.current === viewController) viewControllerRef.current = null;
       simulation.stop();
       centerTimeoutRef.current.cancel();
     };
   }, [graphSize.height, graphSize.width, network, navigate, relationTypes, theme]);
+
+  useEffect(() => {
+    viewControllerRef.current?.update({
+      density: edgeDensity,
+      relationType: selectedRelationType,
+    });
+  }, [edgeDensity, selectedRelationType]);
 
   // ── 操作 ──
   const showToast = (msg) => {
@@ -965,10 +1804,16 @@ export default function RelationshipGraph() {
   };
 
   const usedTypeValues = new Set(network.edges.map(edge => edge.relationship_type).filter(Boolean));
+  const usedRelationTypes = relationTypes.filter(type => usedTypeValues.has(type.value));
+  const relationTypeCounts = network.edges.reduce((counts, edge) => {
+    const type = edge.relationship_type;
+    if (type) counts.set(type, (counts.get(type) || 0) + 1);
+    return counts;
+  }, new Map());
   const isAuthError = !!error && /认证|未登录|401|token/i.test(error);
 
   return (
-    <section className="relative h-[calc(100dvh-4rem)] min-h-[32rem] min-w-0 select-none overflow-hidden bg-[hsl(var(--archive-graph-surface))] text-foreground">
+    <section className="archive-clue-wall relative h-[calc(100dvh-4rem)] min-h-[32rem] min-w-0 select-none overflow-hidden text-foreground">
       {toast && (
         <div
           role="status"
@@ -1010,7 +1855,7 @@ export default function RelationshipGraph() {
             <Users className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
             <div className="min-w-0">
               <h1 className="truncate font-archive-serif text-base font-semibold text-foreground sm:text-lg">
-                关系档案图
+                关系调查墙
               </h1>
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 font-archive-mono text-[10px] text-muted-foreground">
                 <span><span className="tabular-nums text-foreground">{characters.length}</span> 个节点</span>
@@ -1020,7 +1865,44 @@ export default function RelationshipGraph() {
           </div>
         </div>
 
-        <div className="pointer-events-auto flex shrink-0 gap-2">
+        <div className="pointer-events-auto flex shrink-0 items-center gap-2">
+          <div
+            className="flex items-center rounded-md border border-border bg-card/88 p-1 shadow-lg backdrop-blur-md"
+            role="group"
+            aria-label="关系显示密度"
+          >
+            <Button
+              type="button"
+              size="sm"
+              variant={edgeDensity === 'priority' ? 'secondary' : 'ghost'}
+              onClick={() => setEdgeDensity('priority')}
+              aria-pressed={edgeDensity === 'priority'}
+              title={`突出每个角色最强的 ${FOCUS_LINKS_PER_NODE} 条关系`}
+            >
+              <Focus aria-hidden="true" />
+              重点
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={edgeDensity === 'all' ? 'secondary' : 'ghost'}
+              onClick={() => setEdgeDensity('all')}
+              aria-pressed={edgeDensity === 'all'}
+              title="提高全部关系的可见度"
+            >
+              <Network aria-hidden="true" />
+              全部
+            </Button>
+          </div>
+
+          <RelationTypeFilter
+            value={selectedRelationType}
+            onChange={setSelectedRelationType}
+            usedRelationTypes={usedRelationTypes}
+            relationTypeCounts={relationTypeCounts}
+            totalCount={network.edges.length}
+          />
+
           <Button
             type="button"
             size="lg"
@@ -1096,7 +1978,7 @@ export default function RelationshipGraph() {
           ref={svgRef}
           className="h-full w-full"
           role="img"
-          aria-label="角色与玩家之间的关系档案图"
+          aria-label="由方形角色照片、图钉和彩色绳线组成的关系调查墙"
         />
       </div>
 
@@ -1112,33 +1994,6 @@ export default function RelationshipGraph() {
             <Button type="button" size="icon" variant="outline" onClick={zoomReset} title="重置" aria-label="重置关系图缩放">
               <Maximize2 aria-hidden="true" />
             </Button>
-          </div>
-
-          <div className="absolute bottom-3 left-3 right-[4.5rem] z-20 max-h-36 overflow-y-auto overscroll-contain rounded-lg border border-border bg-card/88 p-2 shadow-lg backdrop-blur-md sm:bottom-5 sm:left-5 sm:right-24 sm:max-h-28 sm:p-3 lg:right-auto lg:w-[min(48rem,calc(100%-7.5rem))]">
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(7rem,1fr))] gap-1 font-archive-mono text-[10px]">
-              {relationTypes.map(rt => {
-                const active = activeRelationType === rt.value;
-                const dimmed = activeRelationType && !active;
-                return (
-                  <div
-                    key={rt.value}
-                    className={[
-                      'flex min-h-8 min-w-0 items-center gap-2 rounded-md border px-2 py-1.5 transition-colors duration-200',
-                      active ? 'bg-accent text-accent-foreground' : 'border-transparent text-muted-foreground',
-                      dimmed ? 'opacity-35' : 'opacity-100',
-                    ].join(' ')}
-                    style={active ? { borderColor: rt.color } : undefined}
-                  >
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-sm"
-                      style={{ backgroundColor: rt.color }}
-                      aria-hidden="true"
-                    />
-                    <span className="truncate" title={rt.label}>{rt.label}</span>
-                  </div>
-                );
-              })}
-            </div>
           </div>
         </>
       )}
