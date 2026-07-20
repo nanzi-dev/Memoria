@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { speechApi } from '../api/memoria';
+import { speechApi } from '../api/memoria.js';
 
 const MAX_RECORDING_MS = 60_000;
 const MIME_CANDIDATES = [
@@ -10,6 +10,29 @@ const MIME_CANDIDATES = [
 
 function audioKey({ mode, sessionId, messageId }) {
   return `${mode}:${sessionId}:${messageId}`;
+}
+
+export function uniqueAutoplayDescriptors(
+  messageIds,
+  targetSessionId,
+  targetMode,
+  seenKeys,
+) {
+  if (!targetSessionId || !targetMode) return [];
+  const ids = Array.isArray(messageIds) ? messageIds : [messageIds];
+  const descriptors = [];
+  ids.filter(id => id != null).forEach(messageId => {
+    const descriptor = {
+      mode: targetMode,
+      sessionId: targetSessionId,
+      messageId,
+    };
+    const key = audioKey(descriptor);
+    if (seenKeys.has(key)) return;
+    seenKeys.add(key);
+    descriptors.push(descriptor);
+  });
+  return descriptors;
 }
 
 function fileExtension(mimeType) {
@@ -105,6 +128,7 @@ export default function useBrowserSpeech({ sessionId, mode, onTranscription } = 
   const audioAbortRef = useRef(null);
   const playbackResolverRef = useRef(null);
   const autoplayQueueRef = useRef([]);
+  const autoplaySeenKeysRef = useRef(new Set());
   const autoplayGenerationRef = useRef(0);
   const autoplayRunningRef = useRef(null);
 
@@ -260,15 +284,14 @@ export default function useBrowserSpeech({ sessionId, mode, onTranscription } = 
   }, [playDescriptor]);
 
   const enqueueAutoplay = useCallback((messageIds, targetSessionId = sessionId, targetMode = mode) => {
-    if (!targetSessionId || !targetMode) return;
-    const ids = Array.isArray(messageIds) ? messageIds : [messageIds];
-    ids.filter(id => id != null).forEach(messageId => {
-      autoplayQueueRef.current.push({
-        mode: targetMode,
-        sessionId: targetSessionId,
-        messageId,
-      });
-    });
+    const descriptors = uniqueAutoplayDescriptors(
+      messageIds,
+      targetSessionId,
+      targetMode,
+      autoplaySeenKeysRef.current,
+    );
+    if (!descriptors.length) return;
+    autoplayQueueRef.current.push(...descriptors);
     processAutoplayQueue();
   }, [mode, processAutoplayQueue, sessionId]);
 

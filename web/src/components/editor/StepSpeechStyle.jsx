@@ -42,7 +42,6 @@ export default function StepSpeechStyle({ formData, updateField, characterId = n
   const [consentLocale, setConsentLocale] = useState('zh-CN');
   const [consentName, setConsentName] = useState('');
   const [sampleName, setSampleName] = useState('');
-  const [referenceTranscript, setReferenceTranscript] = useState('');
   const [consentFile, setConsentFile] = useState(null);
   const [sampleFile, setSampleFile] = useState(null);
   const consentInputRef = useRef(null);
@@ -122,22 +121,16 @@ export default function StepSpeechStyle({ formData, updateField, characterId = n
   async function createCustomVoice() {
     const validationError = validateVoiceFile(sampleFile);
     if (validationError) { setVoiceError(validationError); return; }
-    if (!referenceTranscript.trim()) {
-      setVoiceError('请填写声音样本对应的朗读文本');
-      return;
-    }
     setVoiceLoading(true);
     setVoiceError('');
     try {
       const status = await characterAdmin.createCustomVoice(
         characterId,
         sampleFile,
-        referenceTranscript.trim(),
         sampleName,
       );
       applyVoiceStatus(status);
       setSampleFile(null);
-      setReferenceTranscript('');
       if (sampleInputRef.current) sampleInputRef.current.value = '';
     } catch (error) {
       setVoiceError(error.message);
@@ -172,6 +165,9 @@ export default function StepSpeechStyle({ formData, updateField, characterId = n
     : defaultBuiltinVoice;
   const customVoiceSupported = speechConfiguration?.custom_voice_supported === true;
   const providerLabel = speechConfiguration?.provider_label || 'MiniMax';
+  const ttsInstructionsSupported = Boolean(
+    speechConfiguration && speechConfiguration.provider !== 'minimax',
+  );
 
   return (
     <div className="space-y-6">
@@ -241,10 +237,12 @@ export default function StepSpeechStyle({ formData, updateField, characterId = n
             </div>
           </div>
 
-          <div>
-            <label className="mb-1.5 block font-archive-mono text-[11px] uppercase text-muted-foreground">TTS Instructions</label>
-            <textarea value={voice.ttsInstructions || ''} onChange={(e) => updateField('voice.ttsInstructions', e.target.value)} rows={3} className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-archive-serif text-base leading-7 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring" placeholder="Describe pace, tone, emotion, and delivery..." />
-          </div>
+          {ttsInstructionsSupported && (
+            <div>
+              <label className="mb-1.5 block font-archive-mono text-[11px] uppercase text-muted-foreground">TTS Instructions</label>
+              <textarea value={voice.ttsInstructions || ''} onChange={(e) => updateField('voice.ttsInstructions', e.target.value)} rows={3} className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-archive-serif text-base leading-7 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring" placeholder="Describe pace, tone, emotion, and delivery..." />
+            </div>
+          )}
 
           {!characterId && (
             <div className="flex items-start gap-2 rounded border border-border bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground">
@@ -263,7 +261,7 @@ export default function StepSpeechStyle({ formData, updateField, characterId = n
           {characterId && customVoiceSupported && !speechConfigured && (
             <div className="flex items-start gap-2 rounded border border-border bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground">
               <AlertCircle size={14} className="mt-0.5 shrink-0" />
-              当前服务未配置 Custom Voice。内置语音与 TTS instructions 仍会作为回退方案保存。
+              当前服务未配置 Custom Voice。将继续使用内置音色。
             </div>
           )}
 
@@ -303,13 +301,12 @@ export default function StepSpeechStyle({ formData, updateField, characterId = n
                   <Volume2 size={15} className="text-muted-foreground" />
                   <h4 className="font-archive-mono text-sm font-bold text-muted-foreground">2. 声音样本 Voice Sample</h4>
                 </div>
-                <p className="font-archive-mono text-[11px] leading-5 text-muted-foreground">使用 8 秒以内、环境安静、单人清晰朗读的 MP3、M4A 或 WAV 音频。单个文件上限 10 MiB。</p>
+                <p className="font-archive-mono text-[11px] leading-5 text-muted-foreground">使用 10 秒至 5 分钟、环境安静、单人清晰朗读的 MP3、M4A 或 WAV 音频。单个文件上限 10 MiB。</p>
                 <input type="text" value={sampleName} onChange={(e) => setSampleName(e.target.value)} placeholder="Voice name (optional)" className="w-full px-2 py-1.5 text-sm font-archive-mono text-foreground bg-transparent border-b border-border focus:border-border focus:outline-none" />
-                <textarea value={referenceTranscript} onChange={(e) => setReferenceTranscript(e.target.value)} rows={3} placeholder="填写此声音样本中朗读的原文" className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-archive-serif text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring" />
                 <input ref={sampleInputRef} type="file" accept={VOICE_ACCEPT} onChange={(e) => { setSampleFile(e.target.files?.[0] || null); setVoiceError(''); }} className="hidden" />
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <button type="button" onClick={() => sampleInputRef.current?.click()} disabled={voiceLoading} className="flex min-h-[44px] flex-1 items-center justify-center gap-2 rounded border border-border bg-background/60 px-3 text-xs font-archive-mono text-muted-foreground disabled:opacity-40"><Upload size={14} />{sampleFile?.name || '选择声音样本'}</button>
-                  <button type="button" onClick={createCustomVoice} disabled={voiceLoading || !sampleFile || !referenceTranscript.trim() || !voiceStatus?.consent_id} className="flex min-h-[44px] items-center justify-center gap-2 rounded border border-border bg-primary/10 px-4 text-xs font-bold font-archive-mono text-muted-foreground disabled:opacity-35">{voiceLoading ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}创建声音</button>
+                  <button type="button" onClick={createCustomVoice} disabled={voiceLoading || !sampleFile || !voiceStatus?.consent_id} className="flex min-h-[44px] items-center justify-center gap-2 rounded border border-border bg-primary/10 px-4 text-xs font-bold font-archive-mono text-muted-foreground disabled:opacity-35">{voiceLoading ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}创建声音</button>
                 </div>
                 {!voiceStatus?.consent_id && <p className="font-archive-mono text-[11px] text-muted-foreground">请先上传有效的同意声明录音。</p>}
               </div>

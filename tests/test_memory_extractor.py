@@ -279,8 +279,9 @@ class TestMemoryExtractor:
 
         called = {}
 
-        def fake_call_light_task(prompt, allow_reasoning_fallback=True):
+        def fake_call_light_task(prompt, allow_reasoning_fallback=True, **kwargs):
             called["allow_reasoning_fallback"] = allow_reasoning_fallback
+            called.update(kwargs)
             return "摘要：玩家表示任务尚未完成，NPC提醒玩家继续处理任务。"
 
         monkeypatch.setattr(memory_extractor, "call_light_task", fake_call_light_task)
@@ -291,6 +292,9 @@ class TestMemoryExtractor:
         ])
 
         assert called["allow_reasoning_fallback"] is False
+        assert called["task_name"] == "session_summary"
+        assert called["max_tokens"] == 180
+        assert called["max_attempts"] == 2
         assert result == "玩家表示任务尚未完成，NPC提醒玩家继续处理任务。"
 
     def test_player_memory_uses_only_recent_player_messages(self, monkeypatch):
@@ -298,9 +302,10 @@ class TestMemoryExtractor:
 
         called = {}
 
-        def fake_call_light_task(prompt, allow_reasoning_fallback=True):
+        def fake_call_light_task(prompt, allow_reasoning_fallback=True, **kwargs):
             called["prompt"] = prompt
             called["allow_reasoning_fallback"] = allow_reasoning_fallback
+            called.update(kwargs)
             return "玩家长期偏好茉莉花茶"
 
         monkeypatch.setattr(memory_extractor, "call_light_task", fake_call_light_task)
@@ -317,6 +322,9 @@ class TestMemoryExtractor:
 
         assert result == "玩家长期偏好茉莉花茶"
         assert called["allow_reasoning_fallback"] is False
+        assert called["task_name"] == "checkpoint_memory"
+        assert called["max_tokens"] == 100
+        assert called["max_attempts"] == 2
         assert "SYSTEM SECRET" not in called["prompt"]
         assert "RAG SECRET" not in called["prompt"]
         assert "玩家消息 0" not in called["prompt"]
@@ -408,10 +416,45 @@ class TestLLMClient:
         assert r["dialogue"] == "……"
         assert r["trust_delta"] == 0
 
-    def test_retry_as_json(self):
-        from memoria.core.llm_client import _retry_as_json
-        r = _retry_as_json('{"broken json', "deepseek-chat")
-        assert r is None
+    def test_json_repair_provider_call_is_removed(self):
+        from memoria.core import llm_client
+
+        assert not hasattr(llm_client, "_retry_as_json")
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "你好",
+            "好的",
+            "你今天怎么样？",
+            "甲接下来准备做什么？",
+        ],
+    )
+    def test_memory_gate_rejects_low_value_messages(self, message):
+        from memoria.core.memory_extractor import is_memory_worthy_candidate
+
+        assert not is_memory_worthy_candidate([
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": "回应"},
+        ])
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "我喜欢茉莉花茶",
+            "我住在杭州",
+            "我周末会带蛋糕来",
+            "我计划明天去图书馆",
+            "我答应帮你调查",
+            "我请你们",
+        ],
+    )
+    def test_memory_gate_accepts_facts_preferences_and_commitments(self, message):
+        from memoria.core.memory_extractor import is_memory_worthy_candidate
+
+        assert is_memory_worthy_candidate([
+            {"role": "user", "content": message},
+        ])
 
     def test_lazy_init(self):
         from memoria.core.llm_client import _get_client, _MAX_RETRIES

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 REAL_COOLDOWN = timedelta(minutes=2)
 WORLD_COOLDOWN = timedelta(minutes=20)
-DAILY_AUTONOMOUS_MESSAGE_LIMIT = 24
+DAILY_AUTONOMOUS_MESSAGE_LIMIT = 12
 MAX_PULSE_MESSAGES = 1
 
 

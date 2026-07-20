@@ -106,7 +106,7 @@ def test_worker_loop_stops_via_event_after_processing():
 def test_checkpoint_memory_lease_covers_full_llm_retry_budget():
     lease_seconds = checkpoint_memory_lease_seconds(45.0)
 
-    assert lease_seconds >= (45 * 3) + 1 + 2 + 15
+    assert lease_seconds >= 45 + 15
 
 
 def test_checkpoint_memory_provider_failure_retries_job(monkeypatch):
@@ -257,12 +257,15 @@ def test_checkpoint_memory_handler_extracts_snapshot_and_records_claim(
         },
     )
     extracted = []
+    extraction_options = []
     claims = []
     monkeypatch.setattr(
         background_jobs,
         "extract_player_memory",
-        lambda snapshot, **_kwargs: (
-            extracted.append(snapshot) or "玩家会带茉莉花茶"
+        lambda snapshot, **kwargs: (
+            extracted.append(snapshot)
+            or extraction_options.append(kwargs)
+            or "玩家会带茉莉花茶"
         ),
     )
     monkeypatch.setattr(
@@ -276,6 +279,10 @@ def test_checkpoint_memory_handler_extracts_snapshot_and_records_claim(
     assert worker.run_once()
 
     assert extracted == [history]
+    assert extraction_options == [{
+        "raise_on_error": True,
+        "max_attempts": 1,
+    }]
     assert claims == [{
         "owner_user_id": "player-1",
         "scope_type": scope_type,

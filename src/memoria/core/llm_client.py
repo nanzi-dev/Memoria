@@ -226,7 +226,11 @@ def _consume_role_stream(
     raw_parts = []
     dialogue_stream = _DialogueJsonStream()
     ttft_recorded = False
+    usage = None
     for chunk in response:
+        chunk_usage = getattr(chunk, "usage", None)
+        if chunk_usage is not None:
+            usage = chunk_usage
         choices = getattr(chunk, "choices", None) or []
         if not choices:
             continue
@@ -245,6 +249,7 @@ def _consume_role_stream(
                 )
                 ttft_recorded = True
             on_dialogue_delta(dialogue_delta)
+    _record_provider_usage(usage, task_name="role_turn")
     return "".join(raw_parts), dialogue_stream.authoritative_dialogue
 
 
@@ -262,6 +267,47 @@ def _finalize_role_turn_result(result, streamed_dialogue: str | None):
 _client = None
 _light_client = None
 _light_client_signature = None
+_response_format_unsupported: set[tuple[str, str]] = set()
+
+
+def _metric_segment(value: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(value or "unknown"))[:80]
+
+
+def _record_llm_call(*, kind: str, task_name: str, model: str) -> None:
+    task = _metric_segment(task_name)
+    model_name = _metric_segment(model)
+    performance.increment("llm.calls.total")
+    performance.increment(f"llm.calls.{kind}")
+    performance.increment(f"llm.calls.task.{task}")
+    performance.increment(f"llm.calls.model.{model_name}")
+    performance.increment(f"llm.calls.task_model.{task}.{model_name}")
+
+
+def _usage_value(usage, name: str) -> int | None:
+    if usage is None:
+        return None
+    value = usage.get(name) if isinstance(usage, dict) else getattr(usage, name, None)
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _record_provider_usage(usage, *, task_name: str) -> None:
+    task = _metric_segment(task_name)
+    for field in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        value = _usage_value(usage, field)
+        if value is not None:
+            performance.observe(f"llm.tokens.{field}", value)
+            performance.observe(f"llm.tokens.{task}.{field}", value)
+
+
+def _has_dedicated_light_client() -> bool:
+    return bool(
+        configs.llm_light_base_url
+        and configs.llm_light_api_key.get_secret_value()
+    )
 
 
 def _resolve_http_proxy(base_url: str) -> str | None:
@@ -562,9 +608,6 @@ def _local_role_turn_fallback(raw_text: str, default_action: str = "neutral") ->
     }
 
 
-# =========================
-# JSON 修复请求（二次纠错）
-# =========================
 def _emit_debug(debug_sink: DebugSink | None, title: str, payload) -> None:
     if debug_sink is None:
         return
@@ -574,68 +617,6 @@ def _emit_debug(debug_sink: DebugSink | None, title: str, payload) -> None:
         + "\n"
         + json.dumps(payload, ensure_ascii=False, indent=2, default=str)
     )
-
-
-def _retry_as_json(
-    raw_text: str,
-    model: str,
-    debug: bool = False,
-    debug_sink: DebugSink | None = None,
-) -> Optional[dict]:
-    """
-    当解析失败时，将模型输出重新转换为标准 JSON
-    （将任务从“生成+格式”转为“纯格式转换”，成功率更高）
-    """
-    fix_prompt = f"""
-请将以下内容转换为严格 JSON 格式。
-
-要求：
-- 只输出 JSON
-- 不要添加任何解释
-- 不要 Markdown
-- 保持原始 dialogue 内容不变
-
-JSON 结构如下：
-{{
-  "dialogue": "...",
-  "action": "neutral",
-  "affinity_delta": 0,
-  "mood_after": "平静",
-  "memory_worth_keeping": null
-}}
-
-原始内容：
-{raw_text}
-    """.strip()
-
-    try:
-        request_payload = {
-            "model": model,
-            "messages": [{"role": "user", "content": fix_prompt}],
-            "max_tokens": 300,
-            "temperature": 0.2,
-        }
-        if debug:
-            _emit_debug(debug_sink, "json_repair.request", request_payload)
-
-        with tracing.start_span("llm.json_repair", **{"llm.model": model}):
-            with performance.measure("llm.json_repair"):
-                response = _retry_call(_get_client().chat.completions.create,
-                    model = model,
-                    messages = request_payload["messages"],
-                    max_tokens = 300,
-                    temperature = 0.2,
-                )
-        
-        fix_text = response.choices[0].message.content or ""
-        if debug:
-            _emit_debug(debug_sink, "json_repair.raw_response", {"content": fix_text})
-        return _extract_json(fix_text)
-    except Exception:
-        logger.warning("json修复请求失败",exc_info = True)
-        return None
-    
-    
 # =========================
 # 最终兜底策略（保证系统不崩）
 # =========================
@@ -724,27 +705,31 @@ def call_role_turn(
     """
     调用 LLM 生成 Role 一轮对话
 
-    三层容错：
+    两层容错：
     1. 正常 JSON 输出解析
-    2. 二次修复请求
-    3. 文本兜底返回
+    2. 本地 JSON-ish / 文本兜底返回
     """
     
     model = model or configs.llm_model
+    task_name = "role_turn"
     messages = [{"role": "system", "content": system_prompt}] + history
+    response_format_key = (configs.llm_base_url, model)
+    supports_response_format = response_format_key not in _response_format_unsupported
     request_payload = {
         "model": model,
         "messages": messages,
         "max_tokens": configs.max_output_tokens,
         "temperature": 0.8,
-        "response_format": {"type": "json_object"},
     }
+    if supports_response_format:
+        request_payload["response_format"] = {"type": "json_object"}
+    else:
+        performance.increment("llm.calls_avoided.response_format_probe")
     if on_dialogue_delta is not None:
         request_payload["stream"] = True
-    performance.observe(
-        "llm.prompt_chars",
-        sum(len(str(message.get("content") or "")) for message in messages),
-    )
+    prompt_chars = sum(len(str(message.get("content") or "")) for message in messages)
+    performance.observe("llm.prompt_chars", prompt_chars)
+    performance.observe("llm.prompt_chars.role_turn", prompt_chars)
     if debug:
         _emit_debug(debug_sink, "role_turn.request", request_payload)
     
@@ -753,17 +738,28 @@ def call_role_turn(
     # =========================
     streamed_dialogue = None
     response_format_unsupported = False
-    with tracing.start_span("llm.role_turn", **{"llm.model": model, "llm.response_format": "json_object"}):
+    response_format_name = "json_object" if supports_response_format else "none"
+    with tracing.start_span("llm.role_turn", **{"llm.model": model, "llm.response_format": response_format_name}):
         with performance.measure("llm.role_turn"):
             request_started_at = perf_counter()
+            _record_llm_call(kind="role", task_name=task_name, model=model)
             try:
                 response = _retry_call(
                     _get_client().chat.completions.create,
                     **request_payload,
                 )
             except BadRequestError:
-                response_format_unsupported = True
+                performance.increment("llm.calls.failed")
+                if supports_response_format:
+                    response_format_unsupported = True
+                    _response_format_unsupported.add(response_format_key)
+                else:
+                    raise
+            except Exception:
+                performance.increment("llm.calls.failed")
+                raise
             else:
+                performance.increment("llm.calls.succeeded")
                 if on_dialogue_delta is not None:
                     raw_text, streamed_dialogue = _consume_role_stream(
                         response,
@@ -783,10 +779,16 @@ def call_role_turn(
         with tracing.start_span("llm.role_turn", **{"llm.model": model, "llm.response_format": "none"}):
             with performance.measure("llm.role_turn"):
                 request_started_at = perf_counter()
-                response = _retry_call(
-                    _get_client().chat.completions.create,
-                    **fallback_request,
-                )
+                _record_llm_call(kind="role", task_name=task_name, model=model)
+                try:
+                    response = _retry_call(
+                        _get_client().chat.completions.create,
+                        **fallback_request,
+                    )
+                except Exception:
+                    performance.increment("llm.calls.failed")
+                    raise
+                performance.increment("llm.calls.succeeded")
                 if on_dialogue_delta is not None:
                     raw_text, streamed_dialogue = _consume_role_stream(
                         response,
@@ -796,7 +798,9 @@ def call_role_turn(
     
     if on_dialogue_delta is None:
         raw_text = response.choices[0].message.content or ""
+        _record_provider_usage(getattr(response, "usage", None), task_name=task_name)
     performance.observe("llm.output_chars", len(raw_text))
+    performance.observe("llm.output_chars.role_turn", len(raw_text))
     if debug:
         _emit_debug(debug_sink, "role_turn.raw_response", {"content": raw_text})
     
@@ -810,22 +814,12 @@ def call_role_turn(
             _emit_debug(debug_sink, "role_turn.parsed_response", result)
         return result
     
-    logger.warning("首次 JSON 解析失败，尝试修复")
-    
     # =========================
-    # 3. 修复重试
+    # 3. 本地兜底返回
     # =========================
-    performance.increment("llm.json_repair")
-    result = _retry_as_json(raw_text, model, debug=debug, debug_sink=debug_sink)
-    if result is not None:
-        result = _finalize_role_turn_result(result, streamed_dialogue)
-        if debug:
-            _emit_debug(debug_sink, "role_turn.parsed_response", result)
-        return result
-    
-    # =========================
-    # 4. 兜底返回
-    # =========================
+    logger.warning("LLM JSON 解析失败，使用本地兜底")
+    performance.increment("llm.calls_avoided.json_repair")
+    performance.increment("llm.local_fallback")
     result = _finalize_role_turn_result(
         _plain_text_fallback(raw_text),
         streamed_dialogue,
@@ -841,25 +835,45 @@ def call_light_task(
     prompt: str,
     allow_reasoning_fallback: bool = True,
     raise_on_error: bool = False,
-    max_attempts: int = _MAX_RETRIES,
+    task_name: str = "light_task",
+    max_tokens: int | None = None,
+    max_attempts: int = 2,
 ) -> str:
     """
     使用轻量模型处理辅助任务（低成本）
     """
     
-    logger.debug(f"Calling light model: {configs.light_model}")
+    model = configs.light_model
+    task = _metric_segment(task_name)
+    output_limit = max_tokens or configs.light_task_max_output_tokens
+    prompt_chars = len(prompt)
+    logger.debug("Calling light model: %s, task=%s", model, task_name)
+    performance.observe("llm.prompt_chars", prompt_chars)
+    performance.observe(f"llm.prompt_chars.{task}", prompt_chars)
+    if not _has_dedicated_light_client():
+        performance.increment("llm.light.fallback_to_main")
     
     try:
-        with tracing.start_span("llm.light_task", **{"llm.model": configs.light_model}):
+        with tracing.start_span(
+            "llm.light_task",
+            **{"llm.model": model, "llm.task": task_name},
+        ):
             with performance.measure("llm.light_task"):
-                response = _retry_call(
-                    _get_light_client().chat.completions.create,
-                    max_attempts=max_attempts,
-                    model = configs.light_model,
-                    messages = [{"role": "user", "content": prompt}],
-                    max_tokens = configs.light_task_max_output_tokens,
-                    temperature = 0.3,
-                )
+                _record_llm_call(kind="light", task_name=task_name, model=model)
+                try:
+                    response = _retry_call(
+                        _get_light_client().chat.completions.create,
+                        max_attempts=max_attempts,
+                        model=model,
+                        messages=[{"role": "user", "content": prompt}],
+                        max_tokens=output_limit,
+                        temperature=0.3,
+                    )
+                except Exception:
+                    performance.increment("llm.calls.failed")
+                    raise
+        performance.increment("llm.calls.succeeded")
+        _record_provider_usage(getattr(response, "usage", None), task_name=task_name)
         
         if not response.choices:
             logger.warning("No choices in LLM response")
@@ -879,6 +893,8 @@ def call_light_task(
                 return ""
         
         result = content.strip()
+        performance.observe("llm.output_chars", len(result))
+        performance.observe(f"llm.output_chars.{task}", len(result))
         logger.debug(f"Light task completed, result length: {len(result)}")
         
         return result

@@ -109,7 +109,10 @@ messages:
 {json.dumps(messages, ensure_ascii=False)}
     """.strip()
 
-    raw = llm_client.call_light_task(prompt)
+    raw = llm_client.call_light_task(
+        prompt,
+        task_name="quality_score",
+    )
     parsed = _extract_json(raw)
     if not isinstance(parsed, dict):
         return fallback

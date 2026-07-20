@@ -110,7 +110,7 @@ class FakeSpeechProvider:
         return {"id": "cons_1234"}
 
     async def create_custom_voice(self, audio_sample=None, **kwargs):
-        self.voices.append((audio_sample or kwargs["reference_audio"], kwargs))
+        self.voices.append((audio_sample or kwargs["audio"], kwargs))
         return {"id": "voice_1234"}
 
 
@@ -282,7 +282,7 @@ async def test_minimax_provider_streams_sse_audio_and_retries_before_first_chunk
             content=(
                 b'data: {"data":{"audio":"52494646"}}\n\n'
                 b'data: {"data":{"audio":"0102"}}\n\n'
-                b'data: {"data":{"status":2}}\n\n'
+                b'data: {"data":{"audio":"4944332d66756c6c","status":2}}\n\n'
             ),
         )
 
@@ -327,13 +327,48 @@ async def test_minimax_provider_streams_sse_audio_and_retries_before_first_chunk
 
 
 @pytest.mark.asyncio
+async def test_minimax_provider_keeps_final_audio_when_no_chunks_precede_it():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=b'data: {"data":{"audio":"4944332d66756c6c","status":2}}\n\n',
+        )
+
+    settings = ProviderSettings(
+        provider="minimax",
+        api_key="minimax-key",
+        base_url="https://api.minimax.io/v1",
+        model="speech-2.8-turbo",
+        timeout_seconds=3,
+        max_retries=0,
+    )
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = MiniMaxSpeechProvider(settings, output_format="mp3", client=client)
+    chunks = [
+        chunk async for chunk in provider.synthesize_stream(
+            "你好，世界",
+            voice="female-shaonv",
+        )
+    ]
+    await client.aclose()
+
+    assert chunks == [b"ID3-full"]
+
+
+@pytest.mark.asyncio
 async def test_minimax_provider_maps_auth_rate_limit_and_clone_ids():
     requests = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         if request.url.path.endswith("/files/upload"):
-            return httpx.Response(200, json={"base_resp": {"status_code": 0}, "file": {"file_id": f"file-{len(requests)}"}})
+            return httpx.Response(
+                200,
+                json={
+                    "base_resp": {"status_code": 0},
+                    "file": {"file_id": 421801411330340},
+                },
+            )
         return httpx.Response(200, json={"base_resp": {"status_code": 0}})
 
     provider = MiniMaxSpeechProvider(
@@ -342,13 +377,9 @@ async def test_minimax_provider_maps_auth_rate_limit_and_clone_ids():
         client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
     result = await provider.create_custom_voice(
-        authorization_audio=b"consent",
-        authorization_filename="consent.wav",
-        authorization_mime_type="audio/wav",
-        reference_audio=b"sample",
-        reference_filename="sample.wav",
-        reference_mime_type="audio/wav",
-        reference_transcript="This is the reference sample.",
+        audio=b"sample",
+        filename="sample.wav",
+        mime_type="audio/wav",
         voice_id="memoria-voice-123",
         name="Voice",
         locale="zh-CN",
@@ -358,15 +389,66 @@ async def test_minimax_provider_maps_auth_rate_limit_and_clone_ids():
     assert result == {"id": "memoria-voice-123"}
     assert [request.url.path for request in requests] == [
         "/v1/files/upload",
-        "/v1/files/upload",
         "/v1/voice_clone",
     ]
     clone_payload = json.loads(requests[-1].content)
-    assert clone_payload["file_id"] == "file-1"
-    assert clone_payload["text_validation"]
-    assert clone_payload["clone_prompt"]["prompt_audio"] == "file-2"
-    assert clone_payload["clone_prompt"]["prompt_text"] == "This is the reference sample."
+    assert clone_payload["file_id"] == 421801411330340
+    assert isinstance(clone_payload["file_id"], int)
     assert clone_payload["voice_id"] == "memoria-voice-123"
+    assert "model" not in clone_payload
+    assert "text_validation" not in clone_payload
+    assert "clone_prompt" not in clone_payload
+    assert b"voice_clone" in requests[0].content
+
+
+@pytest.mark.asyncio
+async def test_minimax_clone_invalid_params_maps_to_client_error():
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/files/upload"):
+            return httpx.Response(
+                200,
+                json={
+                    "base_resp": {"status_code": 0},
+                    "file": {"file_id": 421801411330340},
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "base_resp": {
+                    "status_code": 1004,
+                    "status_msg": "invalid params",
+                }
+            },
+        )
+
+    provider = MiniMaxSpeechProvider(
+        ProviderSettings(
+            "minimax",
+            "key",
+            "https://api.minimax.io/v1",
+            "speech-2.8-turbo",
+            3,
+            0,
+        ),
+        output_format="mp3",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with pytest.raises(SpeechProviderError) as exc_info:
+        await provider.create_custom_voice(
+            audio=b"sample",
+            filename="sample.wav",
+            mime_type="audio/wav",
+            voice_id="memoria-voice-123",
+            name="Voice",
+            locale="zh-CN",
+        )
+    await provider._client.aclose()
+
+    assert exc_info.value.category == "invalid_input"
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.message == "invalid params"
 
 
 @pytest.mark.asyncio
@@ -654,7 +736,7 @@ async def test_custom_voice_workflow_persists_aliases_and_unbinds_locally(monkey
 
 
 @pytest.mark.asyncio
-async def test_custom_voice_requires_reference_transcript(monkeypatch, tmp_path):
+async def test_custom_voice_does_not_require_reference_transcript(monkeypatch, tmp_path):
     owner = f"speech_{uuid.uuid4().hex[:8]}"
     character_id = f"voice_{uuid.uuid4().hex[:8]}"
     _save_card(owner, _character_card(character_id))
@@ -669,21 +751,16 @@ async def test_custom_voice_requires_reference_transcript(monkeypatch, tmp_path)
         mime_type="audio/wav",
     )
 
-    with pytest.raises(
-        SpeechServiceError,
-        match="Reference audio transcript is required",
-    ) as exc_info:
-        await service.create_custom_voice(
-            owner_user_id=owner,
-            character_id=character_id,
-            audio=_wav_bytes(),
-            filename="sample.wav",
-            mime_type="audio/wav",
-            reference_transcript="   ",
-        )
+    await service.create_custom_voice(
+        owner_user_id=owner,
+        character_id=character_id,
+        audio=_wav_bytes(),
+        filename="sample.wav",
+        mime_type="audio/wav",
+        reference_transcript="   ",
+    )
 
-    assert exc_info.value.status_code == 400
-    assert not service.tts_provider.voices
+    assert service.tts_provider.voices[0][0] == _wav_bytes()
 
 
 @pytest.mark.asyncio
@@ -695,7 +772,7 @@ async def test_custom_voice_success_preserves_concurrent_character_edits(monkeyp
             self.release = asyncio.Event()
 
         async def create_custom_voice(self, **kwargs):
-            self.voices.append((kwargs["reference_audio"], kwargs))
+            self.voices.append((kwargs["audio"], kwargs))
             self.started.set()
             await self.release.wait()
             return {"id": "voice_reconfigured"}
@@ -831,7 +908,7 @@ async def test_custom_voice_unavailable_persists_fallback_status(monkeypatch, tm
 async def test_custom_voice_missing_provider_ids_persist_failed_workflow(monkeypatch, tmp_path):
     class MissingVoiceIdProvider(FakeSpeechProvider):
         async def create_custom_voice(self, **kwargs):
-            self.voices.append((kwargs["reference_audio"], kwargs))
+            self.voices.append((kwargs["audio"], kwargs))
             return {}
 
     owner = f"speech_{uuid.uuid4().hex[:8]}"

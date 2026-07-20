@@ -16,15 +16,21 @@ def test_performance_snapshot_separates_metric_kinds():
     performance.reset()
     performance.record("dialogue.turn.total", 12)
     performance.increment("llm.retry")
+    performance.increment("llm.calls.total", 2)
+    performance.increment("llm.calls_avoided.memory_gate", 3)
     performance.observe("llm.prompt_chars", 450)
+    performance.observe("llm.tokens.total_tokens", 120)
 
     data = performance.snapshot()
 
     assert data["durations"]["dialogue.turn.total"]["count"] == 1
     assert data["durations"]["dialogue.turn.total"]["p95_ms"] == 12
     assert data["counters"]["llm.retry"] == 1
+    assert data["counters"]["llm.calls.total"] == 2
+    assert data["counters"]["llm.calls_avoided.memory_gate"] == 3
     assert data["observations"]["llm.prompt_chars"]["count"] == 1
     assert data["observations"]["llm.prompt_chars"]["max"] == 450
+    assert data["observations"]["llm.tokens.total_tokens"]["max"] == 120
 
 
 def test_performance_reset_clears_all_metric_kinds():

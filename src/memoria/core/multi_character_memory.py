@@ -11,7 +11,7 @@
 import json
 import logging
 
-from memoria.core import llm_client, memory_extractor, relationship_context
+from memoria.core import llm_client, memory_extractor, performance, relationship_context
 from memoria.core.memory_extractor import clean_summary_text
 from memoria.db import repository
 
@@ -197,7 +197,11 @@ def _extract_character_specific_memories(
 """
     
     try:
-        response = llm_client.call_light_task(prompt)
+        response = llm_client.call_light_task(
+            prompt,
+            task_name="character_memory",
+            max_tokens=180,
+        )
         memories = json.loads(response)
         
         if isinstance(memories, list):
@@ -304,7 +308,12 @@ def extract_dialogue_pulse_memories(
 }}
 """
     try:
-        raw = llm_client.call_light_task(prompt, allow_reasoning_fallback=False)
+        raw = llm_client.call_light_task(
+            prompt,
+            allow_reasoning_fallback=False,
+            task_name="group_pulse_memory",
+            max_tokens=220,
+        )
         payload = _parse_json_object_response(raw)
     except Exception as exc:
         logger.error("群聊脉冲记忆提取失败: %s", exc)
@@ -457,7 +466,12 @@ JSON 格式：
 """
 
     try:
-        response = llm_client.call_light_task(prompt, allow_reasoning_fallback=False)
+        response = llm_client.call_light_task(
+            prompt,
+            allow_reasoning_fallback=False,
+            task_name="character_impressions",
+            max_tokens=180,
+        )
         rows = _parse_json_array_response(response)
     except Exception as e:
         logger.error(f"角色间印象提取失败: {e}")
@@ -596,6 +610,23 @@ def process_character_impressions(
         recent_messages=recent_messages,
         character_ids=character_ids,
     )
+
+    return save_extracted_character_impressions(
+        session_id=session_id,
+        impressions=impressions,
+        player_id=player_id,
+    )
+
+
+def save_extracted_character_impressions(
+    *,
+    session_id: str,
+    impressions: list[dict],
+    player_id: str,
+) -> int:
+    """保存已经提取并校验过的角色间印象。"""
+    if not player_id:
+        raise ValueError("player_id is required for character impression processing")
 
     saved_count = 0
     for item in impressions:
@@ -745,7 +776,12 @@ def generate_multi_character_summary(
 """
     
     try:
-        summary = llm_client.call_light_task(prompt, allow_reasoning_fallback=False)
+        summary = llm_client.call_light_task(
+            prompt,
+            allow_reasoning_fallback=False,
+            task_name="group_summary",
+            max_tokens=180,
+        )
         summary = clean_summary_text(summary) or ""
         logger.info(f"生成多角色会话摘要: session={session_id}, length={len(summary)}")
         return summary
@@ -753,6 +789,103 @@ def generate_multi_character_summary(
     except Exception as e:
         logger.error(f"生成摘要失败: {e}")
         return f"多角色对话（{len(messages)}条消息）"
+
+
+def generate_multi_character_insights(
+    *,
+    session_id: str,
+    summary_messages: list[dict],
+    impression_messages: list[dict],
+    character_names: dict[str, str],
+    player_name: str,
+) -> dict:
+    """一次轻量调用生成群聊摘要和角色间印象。"""
+    if not summary_messages:
+        return {"summary": "", "character_impressions": []}
+
+    character_ids = list(character_names)
+    participants_str = "、".join(character_names.values())
+
+    def format_dialogue(messages: list[dict]) -> str:
+        lines = []
+        for message in messages:
+            content = str(message.get("content") or "").strip()
+            if not content:
+                continue
+            if message.get("role") == "user":
+                lines.append(f"{player_name}: {content}")
+                continue
+            character_id = message.get("character_id")
+            if message.get("role") == "assistant" and character_id:
+                name = character_names.get(character_id, str(character_id))
+                lines.append(f"{name}: {content}")
+        return "\n".join(lines)
+
+    summary_dialogue = format_dialogue(summary_messages)
+    impression_dialogue = format_dialogue(impression_messages)
+    prompt = f"""
+分析以下多角色群聊，一次返回会话摘要和角色间主观印象。
+
+参与者：{player_name}（玩家）、{participants_str}
+参与角色ID：{json.dumps(character_ids, ensure_ascii=False)}
+
+用于摘要的对话或分段摘要：
+{summary_dialogue}
+
+用于判断角色印象的最近对话：
+{impression_dialogue}
+
+要求：
+- summary 用 2-3 句话客观概括主要话题、事件、决定和互动氛围
+- summary 不要使用“本次对话”等元叙述
+- character_impressions 只记录一个角色对另一个角色形成或改变的主观判断
+- impression 必须体现认为、信任、警惕、欣赏、怀疑等主观态度，不能只是复述事件
+- observer_id 和 target_id 必须来自参与角色ID，且不能相同
+- importance 为 0.0 到 1.0；没有值得记录的印象时返回空数组
+- 不要记录玩家个人信息
+- 只返回合法 JSON 对象，不使用 Markdown 或解释文字
+
+格式：
+{{
+  "summary": "摘要",
+  "character_impressions": [
+    {{
+      "observer_id": "角色A",
+      "target_id": "角色B",
+      "impression": "角色A认为角色B在压力下很可靠",
+      "importance": 0.7
+    }}
+  ]
+}}
+"""
+    try:
+        raw = llm_client.call_light_task(
+            prompt,
+            allow_reasoning_fallback=False,
+            task_name="group_session_insights",
+            max_tokens=260,
+        )
+        payload = _parse_json_object_response(raw)
+    except Exception as exc:
+        logger.error("群聊摘要与印象生成失败: session=%s, error=%s", session_id, exc)
+        payload = {}
+
+    performance.increment("llm.calls_avoided.group_end_task_merge")
+    summary = clean_summary_text(payload.get("summary")) or ""
+    impressions = _normalize_character_impression_rows(
+        payload.get("character_impressions", []),
+        character_ids,
+    )
+    logger.info(
+        "生成群聊摘要与印象: session=%s, summary_length=%d, impressions=%d",
+        session_id,
+        len(summary),
+        len(impressions),
+    )
+    return {
+        "summary": summary,
+        "character_impressions": impressions,
+    }
 
 
 def save_multi_character_summary(

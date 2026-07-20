@@ -779,7 +779,7 @@ def test_pulse_redecides_after_each_message_and_can_reply_to_npc(monkeypatch):
     monkeypatch.setattr(orchestrator, "_generate_character_response", generate)
 
     responses = orchestrator.run_dialogue_pulse(
-        trigger_source="player",
+        trigger_source="event",
         trigger_text="怎么行动？",
         trigger_message_id=1,
         max_messages=5,
@@ -788,7 +788,7 @@ def test_pulse_redecides_after_each_message_and_can_reply_to_npc(monkeypatch):
 
     assert [response["character_id"] for response in responses] == ["c1", "c2", "c1"]
     assert generated == [
-        {"character_id": "c1", "target": 1, "trigger_source": "player"},
+        {"character_id": "c1", "target": 1, "trigger_source": "event"},
         {"character_id": "c2", "target": 2, "trigger_source": "npc_follow_up"},
         {"character_id": "c1", "target": 3, "trigger_source": "npc_follow_up"},
     ]
@@ -855,7 +855,7 @@ def test_pulse_persists_each_reply_once_for_next_decision(monkeypatch):
     monkeypatch.setattr(orchestrator, "_generate_character_response", generate)
 
     responses = orchestrator.run_dialogue_pulse(
-        trigger_source="player",
+        trigger_source="event",
         trigger_text="怎么行动？",
         trigger_message_id=player_message_id,
         max_messages=3,
@@ -998,7 +998,7 @@ def test_pulse_stops_on_wait_or_wait_for_player(
     )
 
     responses = orchestrator.run_dialogue_pulse(
-        trigger_source="player",
+        trigger_source="event",
         trigger_text="继续",
         trigger_message_id=1,
         max_messages=3,
@@ -1088,7 +1088,7 @@ def test_pulse_suppresses_duplicate_from_recent_history(monkeypatch):
     )
 
     responses = orchestrator.run_dialogue_pulse(
-        trigger_source="player",
+        trigger_source="event",
         trigger_text="继续",
         max_messages=1,
         persist_state=False,
@@ -1097,6 +1097,56 @@ def test_pulse_suppresses_duplicate_from_recent_history(monkeypatch):
     )
 
     assert responses == []
+    assert orchestrator.last_pulse_state["waiting_for_player"] is True
+
+
+def test_player_pulse_avoids_decision_model_and_rotates_speakers(monkeypatch):
+    from memoria.core import multi_character_orchestrator, performance
+
+    orchestrator = _orchestrator()
+    generated = []
+    monkeypatch.setattr(
+        multi_character_orchestrator.repository,
+        "get_multi_character_thread_history",
+        lambda *args, **kwargs: [
+            {"message_id": 1, "role": "user", "content": "制定行动计划"}
+        ],
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_decide_dialogue_action",
+        lambda **kwargs: pytest.fail("player pulse must not call decision LLM"),
+    )
+
+    def generate(character_id, _player_message, **kwargs):
+        generated.append(character_id)
+        return {
+            "message_id": len(generated) + 1,
+            "character_id": character_id,
+            "character_name": "甲" if character_id == "c1" else "乙",
+            "dialogue": f"{character_id} 的方案",
+            "reply_to_message_id": kwargs["decision"].reply_to_message_id,
+        }
+
+    monkeypatch.setattr(orchestrator, "_generate_character_response", generate)
+    performance.reset()
+
+    responses = orchestrator.run_dialogue_pulse(
+        trigger_source="player",
+        trigger_text="制定行动计划",
+        trigger_message_id=1,
+        max_messages=2,
+        persist_state=False,
+        persist_messages=False,
+        clock_snapshot=SimpleNamespace(
+            world_now=SimpleNamespace(isoformat=lambda: "now")
+        ),
+    )
+
+    assert [response["character_id"] for response in responses] == ["c1", "c2"]
+    assert performance.snapshot()["counters"][
+        "llm.calls_avoided.group_dialogue_decision"
+    ] == 2
     assert orchestrator.last_pulse_state["waiting_for_player"] is True
 
 

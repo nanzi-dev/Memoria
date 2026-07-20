@@ -8,6 +8,23 @@ from memoria.core.llm_client import call_light_task
 
 logger = logging.getLogger(__name__)
 
+MEMORY_FIRST_PERSON_MARKERS = (
+    "我", "我们", "俺", "本人",
+    " i ", "i'm", "i am", "i've", "my ", "we ", "we're",
+)
+MEMORY_FACT_MARKERS = (
+    "喜欢", "讨厌", "偏好", "爱", "不喜欢", "名字", "叫", "来自", "住在",
+    "工作", "职业", "生日", "家人", "朋友", "有一个", "没有", "曾经",
+    "会", "请", "准备", "计划", "打算", "决定", "答应", "承诺", "邀请",
+    "希望", "想要", "担心", "害怕", "开心", "难过", "感觉",
+    "like", "love", "prefer", "hate", "live", "work", "plan", "decide",
+    "promise", "will ", "going to", "afraid", "worried", "feel",
+)
+TRIVIAL_MEMORY_MESSAGES = {
+    "好", "好的", "行", "可以", "嗯", "恩", "哦", "噢", "知道了", "明白了",
+    "谢谢", "感谢", "你好", "嗨", "再见", "拜拜", "ok", "okay", "yes", "no",
+}
+
 SUMMARY_PROMPT_TEMPLATE = """请阅读以下这段游戏NPC与玩家的对话，用1-3句话概括这次对话中发生的关键事情（比如玩家做了什么承诺、送了什么礼物、透露了什么个人信息、关系发生了什么变化等）。
 
 **重要提示**：
@@ -54,6 +71,30 @@ PLAYER_MEMORY_PROMPT_TEMPLATE = """只根据下面这些玩家本人说过的话
 结果："""
 
 
+def is_memory_worthy_candidate(
+    history: list[dict],
+    *,
+    max_messages: int = 6,
+) -> bool:
+    """Cheaply reject turns that cannot contain a useful player fact."""
+    player_messages = [
+        str(message.get("content") or "").strip()
+        for message in history
+        if message.get("role") == "user" and str(message.get("content") or "").strip()
+    ][-max_messages:]
+    for message in player_messages:
+        normalized = re.sub(r"\s+", " ", message).strip().lower()
+        stripped = re.sub(r"[^\w\u4e00-\u9fff]+", "", normalized)
+        if not stripped or stripped in TRIVIAL_MEMORY_MESSAGES:
+            continue
+        padded = f" {normalized} "
+        has_first_person = any(marker in padded for marker in MEMORY_FIRST_PERSON_MARKERS)
+        has_fact = any(marker in normalized for marker in MEMORY_FACT_MARKERS)
+        if has_first_person and has_fact:
+            return True
+    return False
+
+
 def clean_summary_text(raw_text: str | None) -> str | None:
     """只保留可写入 session_summary 的最终摘要文本。"""
     text = str(raw_text or "").strip()
@@ -78,6 +119,7 @@ def extract_player_memory(
     max_messages: int = 6,
     *,
     raise_on_error: bool = False,
+    max_attempts: int = 2,
 ) -> str | None:
     """Extract one stable player fact without assistant, system, or RAG content."""
     player_messages = [
@@ -96,9 +138,18 @@ def extract_player_memory(
                 prompt,
                 allow_reasoning_fallback=False,
                 raise_on_error=True,
+                task_name="checkpoint_memory",
+                max_tokens=100,
+                max_attempts=max_attempts,
             )
         else:
-            result = call_light_task(prompt, allow_reasoning_fallback=False)
+            result = call_light_task(
+                prompt,
+                allow_reasoning_fallback=False,
+                task_name="checkpoint_memory",
+                max_tokens=100,
+                max_attempts=max_attempts,
+            )
     except Exception as exc:
         if raise_on_error:
             raise
@@ -141,5 +192,11 @@ def summarize_session(history: list[dict]) -> str | None:
     )
     
     prompt = SUMMARY_PROMPT_TEMPLATE.format(transcript=transcript)
-    result = call_light_task(prompt, allow_reasoning_fallback=False)
+    result = call_light_task(
+        prompt,
+        allow_reasoning_fallback=False,
+        task_name="session_summary",
+        max_tokens=180,
+        max_attempts=2,
+    )
     return clean_summary_text(result)

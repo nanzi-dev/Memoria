@@ -23,8 +23,8 @@ SUPPORTED_CHECKPOINT_JOB_TYPES = frozenset(
         "group_checkpoint_memory",
     }
 )
-_LLM_MAX_ATTEMPTS = 3
-_LLM_RETRY_BACKOFF_SECONDS = 1 + 2
+_LLM_MAX_ATTEMPTS = 1
+_LLM_RETRY_BACKOFF_SECONDS = 0
 _CHECKPOINT_LEASE_MARGIN_SECONDS = 15
 
 
@@ -134,7 +134,11 @@ class BackgroundJobWorker:
 
 def _process_checkpoint_memory(payload: dict[str, Any]) -> None:
     history = payload["history"]
-    fact_text = extract_player_memory(history, raise_on_error=True)
+    fact_text = extract_player_memory(
+        history,
+        raise_on_error=True,
+        max_attempts=1,
+    )
     if not fact_text:
         return
     session_id = payload["session_id"]

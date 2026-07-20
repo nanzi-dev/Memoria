@@ -428,7 +428,7 @@ class SpeechService:
             "message_id": message_id,
             "text_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
             "provider": tts_provider_settings(self.settings).provider,
-            "provider_contract_version": 3,
+            "provider_contract_version": 4,
             "model": self.settings.speech_tts_model,
             "voice": voice,
             "instructions": instructions,
@@ -541,9 +541,7 @@ class SpeechService:
     ) -> dict:
         card, _ = self._owned_character(owner_user_id, character_id)
         self.validate_custom_voice_upload(audio, mime_type)
-        reference_transcript = reference_transcript.strip()
-        if not reference_transcript:
-            raise SpeechServiceError(400, "Reference audio transcript is required")
+        del reference_transcript
         workflow = self._read_workflow(owner_user_id, character_id)
         consent_filename = str(workflow.get("consent_filename") or "")
         consent_path = self._workflow_dir(owner_user_id, character_id) / consent_filename
@@ -576,13 +574,9 @@ class SpeechService:
                     503,
                 )
             result = await create_voice(
-                authorization_audio=consent_path.read_bytes(),
-                authorization_filename=consent_path.name,
-                authorization_mime_type=self._mime_type_for_path(consent_path),
-                reference_audio=audio,
-                reference_filename=sample_path.name,
-                reference_mime_type=mime_type,
-                reference_transcript=reference_transcript,
+                audio=audio,
+                filename=sample_path.name,
+                mime_type=mime_type,
                 voice_id=self._new_voice_id(character_id),
                 name=(name or card.meta.display_name).strip(),
                 locale=str(workflow.get("consent_locale") or "zh-CN"),
@@ -740,22 +734,10 @@ class SpeechService:
         return path
 
     @staticmethod
-    def _mime_type_for_path(path: Path) -> str:
-        return {
-            ".aac": "audio/aac",
-            ".flac": "audio/flac",
-            ".m4a": "audio/m4a",
-            ".mp3": "audio/mpeg",
-            ".mp4": "audio/mp4",
-            ".ogg": "audio/ogg",
-            ".wav": "audio/wav",
-            ".webm": "audio/webm",
-        }.get(path.suffix.lower(), "application/octet-stream")
-
-    @staticmethod
     def _new_voice_id(character_id: str) -> str:
+        # Keep generated IDs compact while staying inside MiniMax's 8-256 character range.
         normalized = re.sub(r"[^a-zA-Z0-9_-]+", "-", character_id).strip("-")
-        return f"memoria-{normalized[:24] or 'voice'}-{secrets.token_hex(6)}"
+        return f"memoria-{normalized[:11] or 'voice'}-{secrets.token_hex(6)}"
 
 
 def _read_chunks(path: Path, chunk_size: int = 64 * 1024):

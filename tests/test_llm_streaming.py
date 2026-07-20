@@ -27,7 +27,12 @@ def _non_stream_client(content, calls):
                     SimpleNamespace(
                         message=SimpleNamespace(content=content),
                     )
-                ]
+                ],
+                usage=SimpleNamespace(
+                    prompt_tokens=12,
+                    completion_tokens=7,
+                    total_tokens=19,
+                ),
             )
 
     return SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
@@ -212,30 +217,79 @@ def test_call_role_turn_records_repair_and_response_format_fallback(monkeypatch)
     )
     monkeypatch.setattr(llm_client, "BadRequestError", UnsupportedResponseFormat)
     monkeypatch.setattr(llm_client, "_get_client", lambda: fake_client)
-    monkeypatch.setattr(
-        llm_client,
-        "_retry_as_json",
-        lambda *args, **kwargs: {
-            "dialogue": "repaired",
-            "action": "idle",
-            "affinity_delta": 0,
-        },
-    )
+    llm_client._response_format_unsupported.clear()
     performance.reset()
 
-    result = llm_client.call_role_turn(
-        "system",
-        [{"role": "user", "content": "hello"}],
-        on_dialogue_delta=lambda _delta: None,
-    )
+    try:
+        result = llm_client.call_role_turn(
+            "system",
+            [{"role": "user", "content": "hello"}],
+            on_dialogue_delta=lambda _delta: None,
+        )
+        second_result = llm_client.call_role_turn(
+            "system",
+            [{"role": "user", "content": "again"}],
+            on_dialogue_delta=lambda _delta: None,
+        )
+    finally:
+        llm_client._response_format_unsupported.clear()
 
-    assert result["dialogue"] == "repaired"
+    assert result["dialogue"] == "not json"
+    assert second_result["dialogue"] == "not json"
     assert calls[0]["stream"] is True
     assert calls[1]["stream"] is True
     assert "response_format" not in calls[1]
+    assert "response_format" not in calls[2]
     counters = performance.snapshot()["counters"]
     assert counters["llm.response_format_fallback"] == 1
-    assert counters["llm.json_repair"] == 1
+    assert counters["llm.calls_avoided.response_format_probe"] == 1
+    assert counters["llm.calls_avoided.json_repair"] == 2
+    assert counters["llm.local_fallback"] == 2
+
+
+def test_call_light_task_uses_task_budget_and_records_usage(monkeypatch):
+    from memoria.core import llm_client, performance
+
+    calls = []
+    fake_client = _non_stream_client("done", calls)
+    monkeypatch.setattr(llm_client, "_get_light_client", lambda: fake_client)
+    monkeypatch.setattr(llm_client, "_has_dedicated_light_client", lambda: True)
+    performance.reset()
+
+    result = llm_client.call_light_task(
+        "summarize",
+        task_name="test_summary",
+        max_tokens=123,
+    )
+
+    assert result == "done"
+    assert calls[0]["max_tokens"] == 123
+    metrics = performance.snapshot()
+    assert metrics["counters"]["llm.calls.total"] == 1
+    assert metrics["counters"]["llm.calls.light"] == 1
+    assert metrics["counters"]["llm.calls.task.test_summary"] == 1
+    assert metrics["observations"]["llm.tokens.prompt_tokens"]["max"] == 12
+    assert (
+        metrics["observations"]["llm.tokens.test_summary.total_tokens"]["max"]
+        == 19
+    )
+
+
+def test_call_light_task_defaults_to_two_attempts(monkeypatch):
+    from memoria.core import llm_client
+
+    seen = {}
+
+    def fake_retry_call(func, max_attempts, **kwargs):
+        seen["max_attempts"] = max_attempts
+        return func(**kwargs)
+
+    calls = []
+    monkeypatch.setattr(llm_client, "_get_light_client", lambda: _non_stream_client("ok", calls))
+    monkeypatch.setattr(llm_client, "_retry_call", fake_retry_call)
+
+    assert llm_client.call_light_task("task") == "ok"
+    assert seen["max_attempts"] == 2
 
 
 def test_call_role_turn_does_not_restart_after_stream_has_emitted(monkeypatch):

@@ -27,7 +27,7 @@ def test_ordinary_pulse_due_enforces_pause_cooldowns_and_daily_budget():
         "last_autonomous_pulse_at": (now - timedelta(minutes=3)).isoformat(),
         "last_autonomous_world_at": (now - timedelta(minutes=21)).isoformat(),
         "daily_message_date": now.date().isoformat(),
-        "daily_message_count": 23,
+        "daily_message_count": 11,
     }
 
     assert group_dialogue_runtime._ordinary_pulse_due(state, _snapshot(now)) is True
@@ -47,7 +47,7 @@ def test_ordinary_pulse_due_enforces_pause_cooldowns_and_daily_budget():
         _snapshot(now),
     ) is False
     assert group_dialogue_runtime._ordinary_pulse_due(
-        {**state, "daily_message_count": 24},
+        {**state, "daily_message_count": 12},
         _snapshot(now),
     ) is False
 

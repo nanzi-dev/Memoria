@@ -13,7 +13,7 @@ import uuid
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
-from memoria.core import character_loader, orchestrator, world_clock
+from memoria.core import character_loader, orchestrator, performance, world_clock
 from memoria.core.memory_extractor import summarize_session
 from memoria.core.locale import DEFAULT_LOCALE, Locale
 from memoria.api.user import require_current_user_id
@@ -302,6 +302,15 @@ def _generate_session_summary(session_id: str) -> None:
 
     history = repository.get_short_term_history(session_id, limit_turns=1000)
     if len(history) <= SUMMARY_MIN_MESSAGE_COUNT:
+        return
+    existing_summary = repository.get_session_summary(session_id)
+    if (
+        existing_summary
+        and existing_summary.get("summary_status") == "completed"
+        and str(existing_summary.get("summary_text") or "").strip()
+        and existing_summary.get("message_count") == len(history)
+    ):
+        performance.increment("llm.calls_avoided.summary_reuse")
         return
 
     try:

@@ -663,6 +663,7 @@ class TestDialogueTurn:
 
         monkeypatch.setattr(orchestrator.repository, "list_event_definitions", fail_list_event_definitions)
 
+        orchestrator.performance.reset()
         result = orchestrator.run_dialogue_turn(
             "sid",
             "你好",
@@ -683,23 +684,13 @@ class TestDialogueTurn:
         assert saved_messages == [("sid", "user", "你好"), ("sid", "assistant", "你好")]
         assert extracted_histories == []
         assert saved_claims == []
-        assert queued_jobs == [{
-            "job_type": "single_checkpoint_memory",
-            "dedupe_key": (
-                "single_checkpoint_memory:sid:"
-                f"{orchestrator.configs.long_term_memory_interval_turns}"
-            ),
-            "payload": {
-                "owner_user_id": "player",
-                "scope_type": "character",
-                "scope_id": "char",
-                "session_id": "sid",
-                "history": [
-                    {"role": "user", "content": "你好"},
-                    {"role": "assistant", "content": "你好"},
-                ],
-            },
-        }]
+        assert queued_jobs == []
+        assert (
+            orchestrator.performance.snapshot()["counters"][
+                "llm.calls_avoided.memory_gate"
+            ]
+            == 1
+        )
         assert legacy_writes == []
 
     def test_single_dialogue_prompt_uses_graph_and_cross_mode_memories(self, monkeypatch):
@@ -1487,7 +1478,7 @@ def test_unpersisted_group_pulse_loads_base_history_once(monkeypatch):
     )
 
     responses = orchestrator.run_dialogue_pulse(
-        trigger_source="player",
+        trigger_source="event",
         trigger_text="制定计划",
         max_messages=3,
         persist_state=False,

@@ -32,6 +32,7 @@ from memoria.core.config import configs
 from memoria.core.event_schema import EventTriggerResult
 from memoria.core.knowledge_retriever import retrieve_knowledge
 from memoria.core.locale import DEFAULT_LOCALE, Locale
+from memoria.core.memory_extractor import is_memory_worthy_candidate
 from memoria.core.output_safety import DialogueSafetyStream, safety_check
 from memoria.core.speaking_strategy import HybridStrategy
 from memoria.db import repository
@@ -776,6 +777,13 @@ class MultiCharacterOrchestrator:
             }
             for message in messages
         )
+        history = history[-history_limit:]
+        if not is_memory_worthy_candidate(
+            history,
+            max_messages=checkpoint_interval,
+        ):
+            performance.increment("llm.calls_avoided.memory_gate")
+            return []
         return [{
             "job_type": "group_checkpoint_memory",
             "dedupe_key": (
@@ -786,7 +794,7 @@ class MultiCharacterOrchestrator:
                 "scope_type": scope_type,
                 "scope_id": scope_id,
                 "session_id": self.session_id,
-                "history": history[-history_limit:],
+                "history": history,
             },
         }]
 
@@ -980,15 +988,29 @@ class MultiCharacterOrchestrator:
                     *(staged_history or []),
                     *staged_messages,
                 ]
-            decision = self._decide_dialogue_action(
-                history=history,
-                trigger_source=trigger_source,
-                trigger_text=trigger_text or "",
-                trigger_message_id=trigger_message_id,
-                initial_speaker_id=initial_speaker_id if step == 0 else None,
-                previous_responses=responses,
-                turn_context=turn_context,
-            )
+            if trigger_source == "player":
+                decision = self._fallback_dialogue_decision(
+                    history=history,
+                    trigger_text=trigger_text or "",
+                    trigger_message_id=trigger_message_id,
+                    initial_speaker_id=initial_speaker_id if step == 0 else None,
+                    previous_responses=responses,
+                    turn_context=turn_context,
+                    force_speak=True,
+                )
+                if step == max_messages - 1:
+                    decision = decision.model_copy(update={"wait_for_player": True})
+                performance.increment("llm.calls_avoided.group_dialogue_decision")
+            else:
+                decision = self._decide_dialogue_action(
+                    history=history,
+                    trigger_source=trigger_source,
+                    trigger_text=trigger_text or "",
+                    trigger_message_id=trigger_message_id,
+                    initial_speaker_id=initial_speaker_id if step == 0 else None,
+                    previous_responses=responses,
+                    turn_context=turn_context,
+                )
             decisions.append(decision)
             if decision.action == "wait":
                 break
@@ -1171,6 +1193,8 @@ class MultiCharacterOrchestrator:
             raw = llm_client.call_light_task(
                 prompt,
                 allow_reasoning_fallback=False,
+                task_name="group_dialogue_decision",
+                max_tokens=120,
                 max_attempts=1,
             )
             decision = self._parse_dialogue_decision(raw)
@@ -1347,17 +1371,32 @@ class MultiCharacterOrchestrator:
         initial_speaker_id: str | None,
         previous_responses: list[dict],
         turn_context: GroupTurnContext | None = None,
+        force_speak: bool = False,
     ) -> DialogueDecision:
         latest = history[-1] if history else {}
-        if previous_responses:
+        if previous_responses and not force_speak:
             latest_text = str(latest.get("content") or "")
             mentioned = self._find_mentioned_character_ids(latest_text)
             continuation_cues = ("?", "？", "但是", "不过", "为什么", "你呢", "怎么看", "反对", "不对")
             if not mentioned and not any(cue in latest_text for cue in continuation_cues):
                 return DialogueDecision(action="wait", wait_for_player=True, stop_reason="no_natural_follow_up")
 
+        target = latest
+        if force_speak and trigger_message_id is not None:
+            target = next(
+                (
+                    message
+                    for message in reversed(history)
+                    if message.get("message_id") == trigger_message_id
+                ),
+                latest,
+            )
         context = {
-            "player_message": str(latest.get("content") or trigger_text),
+            "player_message": (
+                trigger_text
+                if force_speak
+                else str(latest.get("content") or trigger_text)
+            ),
             "last_speaker_id": latest.get("character_id") or self.last_speaker_id,
             "character_relationships": (
                 turn_context.character_relationships
@@ -1368,19 +1407,37 @@ class MultiCharacterOrchestrator:
         }
         speaker_id = initial_speaker_id if initial_speaker_id in self.character_ids else None
         if not speaker_id:
-            speaker_id = self.speaking_strategy.select_speaker(
-                self.participants,
-                self.character_cards,
-                context,
-            )
-        target_id = latest.get("message_id") or trigger_message_id
+            spoken_ids = {
+                response.get("character_id")
+                for response in previous_responses
+                if response.get("character_id")
+            }
+            candidates = [
+                participant
+                for participant in self.participants
+                if participant.get("character_id") not in spoken_ids
+            ] or self.participants
+            strategy = getattr(self, "speaking_strategy", None)
+            if strategy is not None:
+                speaker_id = strategy.select_speaker(
+                    candidates,
+                    self.character_cards,
+                    context,
+                )
+            else:
+                speaker_id = (
+                    candidates[0].get("character_id")
+                    if candidates
+                    else None
+                )
+        target_id = target.get("message_id") or trigger_message_id
         return DialogueDecision(
             action="speak",
             speaker_id=speaker_id,
             reply_to_message_id=target_id,
-            reply_to_character_id=latest.get("character_id"),
-            intent="answer" if latest.get("role") == "user" else "agree",
-            topic=str(latest.get("topic") or trigger_text or "")[:120] or None,
+            reply_to_character_id=target.get("character_id"),
+            intent="answer" if target.get("role") == "user" else "agree",
+            topic=str(target.get("topic") or trigger_text or "")[:120] or None,
         )
 
 

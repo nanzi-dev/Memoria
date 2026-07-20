@@ -26,6 +26,7 @@ from memoria.core.config import configs
 from memoria.core import event_runtime, relationship_context
 from memoria.core.knowledge_retriever import retrieve_knowledge
 from memoria.core.locale import DEFAULT_LOCALE, Locale
+from memoria.core.memory_extractor import is_memory_worthy_candidate
 from memoria.core.output_safety import (
     DialogueSafetyStream,
     safety_check as _safety_check,
@@ -973,19 +974,26 @@ def _run_dialogue_turn(
                     {"role": "user", "content": player_message},
                     {"role": "assistant", "content": dialogue},
                 ])
-                background_jobs.append({
-                    "job_type": "single_checkpoint_memory",
-                    "dedupe_key": (
-                        f"single_checkpoint_memory:{session_id}:{checkpoint_turn}"
-                    ),
-                    "payload": {
-                        "owner_user_id": player_id,
-                        "scope_type": "character",
-                        "scope_id": character_id,
-                        "session_id": session_id,
-                        "history": checkpoint_history[-checkpoint_interval * 2:],
-                    },
-                })
+                checkpoint_history = checkpoint_history[-checkpoint_interval * 2:]
+                if is_memory_worthy_candidate(
+                    checkpoint_history,
+                    max_messages=checkpoint_interval,
+                ):
+                    background_jobs.append({
+                        "job_type": "single_checkpoint_memory",
+                        "dedupe_key": (
+                            f"single_checkpoint_memory:{session_id}:{checkpoint_turn}"
+                        ),
+                        "payload": {
+                            "owner_user_id": player_id,
+                            "scope_type": "character",
+                            "scope_id": character_id,
+                            "session_id": session_id,
+                            "history": checkpoint_history,
+                        },
+                    })
+                else:
+                    performance.increment("llm.calls_avoided.memory_gate")
             turn = {
                 "session_id": session_id,
                 "request_id": request_id,

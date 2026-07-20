@@ -337,3 +337,85 @@ def test_generate_session_summary_saves_completed_non_empty_summary(monkeypatch)
         "message_count": 7,
         "summary_status": "completed",
     }
+
+
+def test_generate_session_summary_reuses_exact_completed_summary(monkeypatch):
+    from memoria.api import dialogue
+
+    history = [{"role": "user", "content": f"消息 {i}"} for i in range(7)]
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_session",
+        lambda session_id: {
+            "session_id": session_id,
+            "character_id": "char-1",
+            "player_id": "player-1",
+        },
+    )
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_short_term_history",
+        lambda session_id, limit_turns=1000: history,
+    )
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_session_summary",
+        lambda session_id: {
+            "summary_status": "completed",
+            "summary_text": "已有摘要",
+            "message_count": len(history),
+        },
+    )
+    monkeypatch.setattr(
+        dialogue,
+        "summarize_session",
+        lambda messages: pytest.fail("exact summary should be reused"),
+    )
+    dialogue.performance.reset()
+
+    dialogue._generate_session_summary("session-1")
+
+    assert dialogue.performance.snapshot()["counters"][
+        "llm.calls_avoided.summary_reuse"
+    ] == 1
+
+
+def test_generate_session_summary_regenerates_stale_summary(monkeypatch):
+    from memoria.api import dialogue
+
+    saved = {}
+    history = [{"role": "user", "content": f"消息 {i}"} for i in range(7)]
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_session",
+        lambda session_id: {
+            "session_id": session_id,
+            "character_id": "char-1",
+            "player_id": "player-1",
+        },
+    )
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_short_term_history",
+        lambda session_id, limit_turns=1000: history,
+    )
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_session_summary",
+        lambda session_id: {
+            "summary_status": "completed",
+            "summary_text": "旧摘要",
+            "message_count": len(history) - 1,
+        },
+    )
+    monkeypatch.setattr(dialogue, "summarize_session", lambda messages: "新摘要")
+    monkeypatch.setattr(
+        dialogue.repository,
+        "save_session_summary",
+        lambda **kwargs: saved.update(kwargs),
+    )
+
+    dialogue._generate_session_summary("session-1")
+
+    assert saved["summary_text"] == "新摘要"
+    assert saved["message_count"] == len(history)

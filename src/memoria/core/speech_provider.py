@@ -76,13 +76,9 @@ class VoiceCloningProvider(Protocol):
     async def create_custom_voice(
         self,
         *,
-        authorization_audio: bytes,
-        authorization_filename: str,
-        authorization_mime_type: str,
-        reference_audio: bytes,
-        reference_filename: str,
-        reference_mime_type: str,
-        reference_transcript: str,
+        audio: bytes,
+        filename: str,
+        mime_type: str,
         voice_id: str,
         name: str,
         locale: str,
@@ -278,6 +274,7 @@ class MiniMaxSpeechProvider:
     async def _request_stream(self, payload: dict[str, Any]) -> AsyncIterator[bytes]:
         client = self._client
         owns_client = client is None
+        yielded_audio = False
         if client is None:
             client = httpx.AsyncClient(timeout=self.settings.timeout_seconds)
         try:
@@ -295,14 +292,25 @@ class MiniMaxSpeechProvider:
                     audio_hex = _minimax_audio_hex(payload)
                     if not audio_hex:
                         continue
+                    data = payload.get("data")
+                    is_final = (
+                        isinstance(data, dict)
+                        and str(data.get("status")) == "2"
+                    )
+                    # MiniMax may repeat the complete MP3 in the final event
+                    # after already sending its incremental audio chunks.
+                    if is_final and yielded_audio:
+                        continue
                     try:
-                        yield bytes.fromhex(audio_hex)
+                        audio = bytes.fromhex(audio_hex)
                     except ValueError as exc:
                         raise SpeechProviderError(
                             "provider_failure",
                             "MiniMax returned invalid audio data",
                             502,
                         ) from exc
+                    yielded_audio = True
+                    yield audio
         except SpeechProviderError:
             raise
         except httpx.TimeoutException as exc:
@@ -326,36 +334,24 @@ class MiniMaxSpeechProvider:
     async def create_custom_voice(
         self,
         *,
-        authorization_audio: bytes,
-        authorization_filename: str,
-        authorization_mime_type: str,
-        reference_audio: bytes,
-        reference_filename: str,
-        reference_mime_type: str,
-        reference_transcript: str,
+        audio: bytes,
+        filename: str,
+        mime_type: str,
         voice_id: str,
         name: str,
         locale: str,
     ) -> dict[str, str]:
-        del name
-        prompt_text = reference_transcript.strip()
-        if not prompt_text:
-            raise SpeechProviderError(
-                "invalid_input",
-                "A transcript is required for the reference audio",
-                400,
-            )
+        del name, locale
         source_file_id = await self._upload_clone_file(
-            authorization_audio,
-            filename=authorization_filename,
-            mime_type=authorization_mime_type,
+            audio,
+            filename=filename,
+            mime_type=mime_type,
             purpose="voice_clone",
         )
-        prompt_file_id = await self._upload_clone_file(
-            reference_audio,
-            filename=reference_filename,
-            mime_type=reference_mime_type,
-            purpose="prompt_audio",
+        logger.info(
+            "MiniMax voice_clone request: voice_id=%s file_id=%s",
+            voice_id,
+            source_file_id,
         )
         response = await self._request_json(
             "POST",
@@ -363,11 +359,6 @@ class MiniMaxSpeechProvider:
             {
                 "file_id": source_file_id,
                 "voice_id": voice_id,
-                "text_validation": CONSENT_PHRASES[locale],
-                "clone_prompt": {
-                    "prompt_audio": prompt_file_id,
-                    "prompt_text": prompt_text,
-                },
                 "need_noise_reduction": True,
                 "need_volume_normalization": True,
             },
@@ -382,7 +373,7 @@ class MiniMaxSpeechProvider:
         filename: str,
         mime_type: str,
         purpose: str,
-    ) -> str:
+    ) -> int:
         response = await self._request_json(
             "POST",
             "/files/upload",
@@ -391,13 +382,18 @@ class MiniMaxSpeechProvider:
         )
         _raise_minimax_response_error(response)
         file_data = response.get("file")
-        if not isinstance(file_data, dict) or not file_data.get("file_id"):
+        raw_file_id = file_data.get("file_id") if isinstance(file_data, dict) else None
+        try:
+            file_id = int(raw_file_id)
+        except (TypeError, ValueError):
+            file_id = 0
+        if file_id <= 0:
             raise SpeechProviderError(
                 "provider_failure",
                 "MiniMax did not return an uploaded file ID",
                 502,
             )
-        return str(file_data["file_id"])
+        return file_id
 
     async def _request_json(
         self,
@@ -547,11 +543,19 @@ def _raise_minimax_response_error(payload: dict[str, Any]) -> None:
     if status_code in {None, 0, "0"}:
         return
     message = str(base_resp.get("status_msg") or "MiniMax request failed")
+    logger.warning(
+        "MiniMax request failed: status_code=%s status_msg=%s",
+        status_code,
+        message,
+    )
     if str(status_code) in {"2049"}:
         raise SpeechProviderError("provider_failure", "MiniMax rejected the API key", 502)
     if str(status_code) in {"2038"}:
         raise SpeechProviderError("unavailable", "MiniMax voice cloning is unavailable", 503)
-    if str(status_code) in {"2037", "2039", "2042", "2048", "20132"}:
+    if (
+        str(status_code) in {"2037", "2039", "2042", "2048", "20132"}
+        or "invalid param" in message.lower()
+    ):
         raise SpeechProviderError("invalid_input", message, 400)
     raise SpeechProviderError("provider_failure", message, 502)
 

@@ -176,7 +176,7 @@ async def upload_character_voice_consent(
 async def create_character_custom_voice(
     character_id: str,
     audio_sample: Annotated[UploadFile, File(...)],
-    reference_transcript: Annotated[str, Form(...)],
+    reference_transcript: Annotated[str | None, Form()] = None,
     name: Annotated[str | None, Form()] = None,
     current_user_id: str = Depends(require_current_user_id),
 ):
@@ -192,7 +192,7 @@ async def create_character_custom_voice(
             audio=audio,
             filename=audio_sample.filename or "sample.webm",
             mime_type=audio_sample.content_type or "application/octet-stream",
-            reference_transcript=reference_transcript,
+            reference_transcript=reference_transcript or "",
             name=name,
         )
     except SpeechServiceError as exc:

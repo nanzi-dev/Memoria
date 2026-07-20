@@ -325,10 +325,9 @@ export const characterAdmin = {
       body: formData,
     });
   },
-  createCustomVoice(characterId, audioSample, referenceTranscript, name = null) {
+  createCustomVoice(characterId, audioSample, name = null) {
     const formData = new FormData();
     formData.append('audio_sample', audioSample);
-    formData.append('reference_transcript', referenceTranscript);
     if (name?.trim()) formData.append('name', name.trim());
     return request(`/admin/characters/${pathSegment(characterId)}/voice`, {
       method: 'POST',

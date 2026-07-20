@@ -10,7 +10,7 @@ from typing import Optional
 import logging
 import uuid
 
-from memoria.core import multi_character_memory
+from memoria.core import multi_character_memory, performance
 from memoria.core.locale import DEFAULT_LOCALE, Locale
 from memoria.core.multi_character_orchestrator import (
     start_multi_character_session,
@@ -217,21 +217,22 @@ def _require_active_session_participants(session_id: str) -> list[dict]:
     return participants
 
 
-def _generate_bounded_session_summary(
+def _generate_bounded_session_insights(
     session_id: str,
     messages: list[dict],
     character_names: dict[str, str],
     player_name: str,
-) -> str:
-    """长会话先分块摘要，再合并为最终群聊摘要。"""
+) -> dict:
+    """长会话先分块摘要，最终一次调用合并摘要并提取印象。"""
     chunks = _chunk_messages(messages)
     if len(chunks) <= 1:
-        return multi_character_memory.generate_multi_character_summary(
+        return multi_character_memory.generate_multi_character_insights(
             session_id=session_id,
-            messages=messages,
+            summary_messages=messages,
+            impression_messages=messages,
             character_names=character_names,
             player_name=player_name,
-        ).strip()
+        )
 
     chunk_summaries = []
     for index, chunk in enumerate(chunks, start=1):
@@ -245,7 +246,7 @@ def _generate_bounded_session_summary(
             chunk_summaries.append(summary)
 
     if not chunk_summaries:
-        return ""
+        return {"summary": "", "character_impressions": []}
 
     summary_character_id = next(iter(character_names), "summary")
     merge_messages = [
@@ -256,12 +257,13 @@ def _generate_bounded_session_summary(
         }
         for index, summary in enumerate(chunk_summaries, start=1)
     ]
-    return multi_character_memory.generate_multi_character_summary(
+    return multi_character_memory.generate_multi_character_insights(
         session_id=session_id,
-        messages=merge_messages,
+        summary_messages=merge_messages,
+        impression_messages=messages[-SUMMARY_CHUNK_MESSAGE_LIMIT:],
         character_names=character_names,
         player_name=player_name,
-    ).strip()
+    )
 
 
 def _save_session_summary_on_end(session_id: str, session: dict) -> None:
@@ -276,14 +278,6 @@ def _save_session_summary_on_end(session_id: str, session: dict) -> None:
         session["player_id"],
         character_ids
     )
-    existing_summary = repository.get_session_summary(session_id)
-    has_completed_summary = False
-    if existing_summary and existing_summary.get("summary_status") == "completed":
-        summary_text = str(existing_summary.get("summary_text") or "").strip()
-        if summary_text:
-            has_completed_summary = True
-            logger.info(f"多角色会话摘要已存在，跳过重复保存摘要: session={session_id}")
-
     messages = repository.get_multi_character_history(
         session_id,
         limit_messages=None,
@@ -294,39 +288,45 @@ def _save_session_summary_on_end(session_id: str, session: dict) -> None:
         logger.info(f"多角色会话有效消息不超过 {SUMMARY_MIN_MESSAGE_COUNT} 条，跳过摘要保存: session={session_id}")
         return
 
+    existing_summary = repository.get_session_summary(session_id)
+    if (
+        existing_summary
+        and existing_summary.get("summary_status") == "completed"
+        and str(existing_summary.get("summary_text") or "").strip()
+        and existing_summary.get("message_count") == len(meaningful_messages)
+    ):
+        performance.increment("llm.calls_avoided.summary_reuse")
+        logger.info(f"多角色会话摘要与印象已处理，跳过重复生成: session={session_id}")
+        return
+
     character_names = {
         p["character_id"]: p.get("display_name") or p.get("name") or p["character_id"]
         for p in participants
         if p.get("character_id")
     }
-    if not has_completed_summary:
-        summary = _generate_bounded_session_summary(
+    insights = _generate_bounded_session_insights(
+        session_id=session_id,
+        messages=meaningful_messages,
+        character_names=character_names,
+        player_name=session.get("player_name") or "玩家",
+    )
+    summary = str(insights.get("summary") or "").strip()
+    if not summary:
+        logger.info(f"多角色会话摘要为空，跳过保存: session={session_id}")
+    else:
+        multi_character_memory.save_multi_character_summary(
             session_id=session_id,
-            messages=meaningful_messages,
-            character_names=character_names,
-            player_name=session.get("player_name") or "玩家",
-        )
-        summary = str(summary or "").strip()
-        if not summary:
-            logger.info(f"多角色会话摘要为空，跳过保存: session={session_id}")
-        else:
-            multi_character_memory.save_multi_character_summary(
-                session_id=session_id,
-                character_ids=character_ids,
-                player_id=session["player_id"],
-                summary_text=summary,
-                message_count=len(meaningful_messages),
-            )
-
-    try:
-        multi_character_memory.process_character_impressions(
-            session_id=session_id,
-            recent_messages=meaningful_messages,
             character_ids=character_ids,
             player_id=session["player_id"],
+            summary_text=summary,
+            message_count=len(meaningful_messages),
         )
-    except Exception as e:
-        logger.error(f"多角色会话角色间印象提取失败: session={session_id}, error={e}", exc_info=True)
+
+    multi_character_memory.save_extracted_character_impressions(
+        session_id=session_id,
+        impressions=insights.get("character_impressions", []),
+        player_id=session["player_id"],
+    )
 
 
 def _count_meaningful_multi_messages(session_id: str) -> int:
