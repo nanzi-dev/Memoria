@@ -176,6 +176,10 @@ class TestCodeReviewFixesAPI:
             username="tester",
             password="password1",
         ).gender == "unknown"
+        assert RegisterRequest(
+            username="tester",
+            password="password1",
+        ).admin_bootstrap_token is None
         with pytest.raises(ValidationError):
             RegisterRequest(
                 username="tester",

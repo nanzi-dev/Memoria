@@ -118,11 +118,24 @@ curl -X POST "https://api.deepseek.com/v1/chat/completions" \
 
 ---
 
-### Q: 为什么第一个注册用户是管理员
+### Q: 如何初始化第一个管理员
 
-当数据库中还没有管理员时，首个成功注册的用户会自动获得管理员权限，后续注册用户默认为普通用户。这用于初始化全新实例，但公开部署时也意味着抢先注册风险。
+普通注册始终创建普通用户。先在服务环境中设置高熵 `ADMIN_BOOTSTRAP_TOKEN`，再向注册接口额外提交同值的 `admin_bootstrap_token`：
 
-首次启动应保持服务只监听回环地址或位于受控内网，先由部署者私下创建初始账户，再开放反向代理或公网入口。默认 Docker 后端直连端口绑定到 `127.0.0.1`；只有明确需要远程直连时才设置 `API_BIND_HOST`。
+```bash
+curl -c memoria-admin.cookies \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"replace-with-a-strong-password1","admin_bootstrap_token":"replace-with-your-bootstrap-token"}' \
+  http://127.0.0.1:8080/api/v1/user/register
+```
+
+管理员初始化名额只能占用一次。凭据错误或服务未配置时返回 403；已有管理员或名额已使用时返回 409。普通 Web 注册界面不接收该凭据。初始化成功后，数据库中的一次性占位记录会永久阻止再次初始化。直接部署可取消该环境变量；当前 Docker Compose 配置要求 `ADMIN_BOOTSTRAP_TOKEN` 保持非空，可将其轮换为新的高熵随机值并继续妥善保管。
+
+---
+
+### Q: 知识检索预览为什么没有显示上一条查询结果
+
+知识管理页同一时间只保留一条活动预览请求。重复提交、切换知识库、关闭预览弹窗或离开页面时，前端会取消旧请求并忽略其结果，避免较慢的旧响应覆盖当前查询。这属于预期行为；需要对比两次查询时，应等待当前请求完成后再提交下一条。
 
 ---
 
@@ -286,7 +299,8 @@ PYTHONPATH=src uvicorn memoria.main:app --host 127.0.0.1 --port 8001
 ```bash
 cd deploy/docker
 cp .env.example .env
-# 编辑 .env，填入 LLM_API_KEY，并设置高强度且唯一的 POSTGRES_PASSWORD（必填）
+# 编辑 .env，填入 LLM_API_KEY，并设置高强度且唯一的
+# POSTGRES_PASSWORD 和 ADMIN_BOOTSTRAP_TOKEN（必填）
 docker compose up
 ```
 
@@ -296,7 +310,7 @@ docker compose up
 - API 文档：http://127.0.0.1:8080/docs
 - 后端直连：http://127.0.0.1:8001
 
-后端直连端口默认只绑定 `127.0.0.1`。需要从其他主机访问时，可在 `deploy/docker/.env` 中显式设置 `API_BIND_HOST=0.0.0.0`，并同时配置防火墙、HTTPS 反向代理和安全 Cookie。直接运行 Uvicorn 时也建议默认使用 `--host 127.0.0.1`。
+后端直连端口默认只绑定 `127.0.0.1`。Compose 默认设置 `FORWARDED_ALLOW_IPS=*`，内置 Nginx 会用连接端的 `$remote_addr` 覆盖客户端自带的 `X-Forwarded-For`，使匿名请求按真实客户端 IP 限流。需要从其他主机访问时，可在 `deploy/docker/.env` 中显式设置 `API_BIND_HOST=0.0.0.0`，并同时把 `FORWARDED_ALLOW_IPS` 收紧到可信代理 IP 或网段，配置防火墙、HTTPS 反向代理和安全 Cookie。直接运行 Uvicorn 时也建议默认使用 `--host 127.0.0.1`。
 
 如果首次向量检索较慢，通常是容器正在下载嵌入模型。已有本地模型时可在 `.env` 中设置：
 
@@ -364,6 +378,8 @@ sqlite3 data/sqlite_db/memoria.db \
 触发了写操作速率限制（60 次/60 秒）。登录请求优先按认证用户限流，未登录或 token 无效时按客户端 IP 限流；`X-Player-ID` 不会作为可信限流依据。计数器使用线程锁和单调时钟，并周期清理过期 key。
 
 当前额度只在单个应用进程内共享；多 worker 或多实例部署不会形成全局限额。生产环境需要在反向代理或 Redis 等集中式存储上实现统一限流。
+
+Docker Compose 部署依赖 Uvicorn 的可信代理配置解析 Nginx 设置的转发头。默认 `FORWARDED_ALLOW_IPS=*` 仅适用于后端端口不直接暴露公网的拓扑；直接开放后端端口时必须限制为实际代理地址，否则客户端可伪造转发头绕过按 IP 的限流。
 
 ### Q: 启动时出现配置警告
 

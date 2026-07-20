@@ -163,7 +163,7 @@ def test_ended_thread_creates_carrier_session_and_persists_notification(monkeypa
             self.last_pulse_state = {}
 
         def run_dialogue_pulse(self, **kwargs):
-            assert kwargs["max_messages"] == 3
+            assert kwargs["max_messages"] == 1
             assert kwargs["extract_memory"] is False
             assert kwargs["persist_state"] is False
             assert kwargs["persist_messages"] is False

@@ -28,6 +28,7 @@
     - [环境要求](#环境要求)
     - [Docker 一键部署](#docker-一键部署)
     - [安装步骤](#安装步骤)
+  - [完整演示模块](#完整演示模块)
   - [文档导航](#文档导航)
   - [环境变量](#环境变量)
   - [运行测试](#运行测试)
@@ -128,7 +129,7 @@ Memoria/
 │   │   ├── speech.py           # STT、TTS 与角色自定义声音 API
 │   │   ├── developer.py        # 回放、性能指标、质量评分等开发者 API
 │   │   └── user.py             # 用户注册、登录、资料和头像 API
-│   ├── characters_demo/             # 角色卡 JSON 配置文件
+│   ├── characters/              # 角色卡 JSON 配置文件
 │   │   ├── npc_luo_xiaohei.json
 │   │   ├── npc_wuxian.json
 │   │   └── ...
@@ -177,7 +178,10 @@ Memoria/
 ├── scripts/                    # 工具脚本
 │   ├── chat.sh                 # CLI 聊天启动脚本
 │   ├── cli_chat.py             # 命令行对话工具
+│   ├── seed_graytide_demo.py    # 灰潮港演示模块播种脚本
 │   └── run_tests.sh            # 测试执行脚本
+├── examples/                   # 可播种的完整故事模块
+│   └── graytide/               # 灰潮港角色、事件、关系、知识与评测数据
 ├── web/                        # React + Vite 前端
 │   ├── src/pages/              # Home、ChatRoom、CharacterEditor、PersonaEditor、EventList、EventEditor、RelationshipGraph、KnowledgeManager
 │   ├── src/components/         # 通用组件与编辑器步骤组件
@@ -211,7 +215,8 @@ Memoria/
 ```bash
 cd deploy/docker
 cp .env.example .env
-# 编辑 .env，填入 LLM_API_KEY，并设置高强度且唯一的 POSTGRES_PASSWORD（必填）
+# 编辑 .env，填入 LLM_API_KEY，并设置高强度且唯一的
+# POSTGRES_PASSWORD 和 ADMIN_BOOTSTRAP_TOKEN（必填）
 docker compose up
 ```
 
@@ -220,6 +225,15 @@ docker compose up
 - Web 应用：http://127.0.0.1:8080
 - API 文档：http://127.0.0.1:8080/docs
 - 后端健康检查：http://127.0.0.1:8080/health
+
+首次启动后，通过 API 使用 `.env` 中的 `ADMIN_BOOTSTRAP_TOKEN` 创建唯一的初始管理员。普通 Web 注册不会提交该凭据，因此始终创建普通用户：
+
+```bash
+curl -c memoria-admin.cookies \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"replace-with-a-strong-password1","admin_bootstrap_token":"replace-with-your-bootstrap-token"}' \
+  http://127.0.0.1:8080/api/v1/user/register
+```
 
 Compose 默认使用 PostgreSQL，并通过 Docker volume 持久化数据库、ChromaDB 和模型缓存。本地 `models/` 会以只读方式挂载到容器；如需使用本地嵌入模型，在 `.env` 中设置：
 
@@ -307,12 +321,25 @@ npm run dev
 
 ---
 
+## 完整演示模块
+
+`examples/graytide/` 提供“灰潮港：第十三声钟鸣”完整故事模块，包含玩家角色卡、8 个 NPC、关系网络、事件、4 个知识库、调查群聊和检索评测问题。后端配置完成后可播种到独立的 `memoria_demo` 普通用户：
+
+```bash
+python scripts/seed_graytide_demo.py --password '<choose-a-strong-password>'
+```
+
+只创建结构和知识文档队列、不加载本地嵌入模型时使用 `--skip-knowledge-index`；需要清理并重建该模块时使用 `--reset-module`。播种脚本不会创建或占用系统管理员名额。完整调查路线见 [Graytide README](examples/graytide/README.md) 和 [WALKTHROUGH](examples/graytide/WALKTHROUGH.md)。
+
+---
+
 ## 文档导航
 
 | 文档 | 内容 |
 |------|------|
 | [API 文档](docs/API.md) | 完整 REST API 参考（对话/角色卡/事件/关系/多角色/知识库/语音/用户/系统管理），含请求/响应示例 |
-| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（39 张表）、记忆、知识检索与语音架构、角色卡开发规范 |
+| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（40 张表）、记忆、知识检索与语音架构、角色卡开发规范 |
+| [知识检索评测](docs/KNOWLEDGE_RETRIEVAL_EVALUATION.md) | 检索基线、嵌入模型对比和 Graytide 场景级评测夹具 |
 | [开发路线图](docs/ROADMAP.md) | 已完成功能和未来规划 |
 | [故障排查](docs/FAQ.md) | 常见问题解决方案、调试技巧、性能优化建议 |
 | [贡献指南](docs/CONTRIBUTING.md) | 如何贡献代码、Commit 规范、代码审查标准 |
@@ -360,6 +387,8 @@ SPEECH_STORAGE_PATH=./data/speech
 DATABASE_PATH=./data/sqlite_db/memoria.db      # SQLite 数据库文件路径（默认开发模式）
 DATABASE_URL=                                  # PostgreSQL 连接串；留空时使用 SQLite
 AUTH_COOKIE_SECURE=false                       # 本地 HTTP 为 false；HTTPS 部署必须设为 true
+ADMIN_BOOTSTRAP_TOKEN=                         # 一次性初始化管理员的高熵凭据
+FORWARDED_ALLOW_IPS=127.0.0.1                  # Uvicorn 信任的反向代理 IP；Docker 模式默认 *
 SHORT_TERM_MEMORY_TURNS=8                      # 短期记忆轮数
 LONG_TERM_MEMORY_INTERVAL_TURNS=5              # 每隔多少个玩家回合保存一次长期记忆
 WORLD_CLOCK_SCHEDULER_INTERVAL_SECONDS=30      # 世界时钟调度扫描间隔
@@ -377,7 +406,7 @@ KNOWLEDGE_SIMILARITY_THRESHOLD=0.60            # 知识检索最低相似度
 
 语音的 TTS 与 STT 分别配置。TTS 默认使用 MiniMax 的 T2A v2 流式响应：浏览器在收到首个音频分块后即可播放，完整 MP3 会原子写入 `SPEECH_STORAGE_PATH/cache` 供历史消息复播。STT 始终调用独立的 OpenAI-compatible `/audio/transcriptions` 端点，不会请求 MiniMax TTS 地址。角色 Custom Voice 需要先上传授权录音，再上传参考样本；成功后会持久化 MiniMax `voice_id`，失败时继续回退到角色的内置音色。旧的 `SPEECH_PROVIDER`、`SPEECH_API_KEY`、`SPEECH_BASE_URL` 和 `SPEECH_TIMEOUT_SECONDS` 仅作为迁移回退，并会发出弃用警告。
 
-Docker 部署文件统一存放在 `deploy/docker/`。运行时 `deploy/docker/docker-compose.yml` 会自动生成容器内 PostgreSQL 连接串；通常只需要通过 `deploy/docker/.env` 配置 `POSTGRES_*`、`LLM_*`、语音、端口和模型参数。后端直连端口默认绑定 `127.0.0.1`，显式设置 `API_BIND_HOST=0.0.0.0` 才会对所有网络接口开放。
+Docker 部署文件统一存放在 `deploy/docker/`。运行时 `deploy/docker/docker-compose.yml` 会自动生成容器内 PostgreSQL 连接串；通常只需要通过 `deploy/docker/.env` 配置 `POSTGRES_*`、`LLM_*`、`ADMIN_BOOTSTRAP_TOKEN`、语音、端口和模型参数。后端直连端口默认绑定 `127.0.0.1`，显式设置 `API_BIND_HOST=0.0.0.0` 才会对所有网络接口开放。Compose 默认设置 `FORWARDED_ALLOW_IPS=*`，以便后端从 Nginx 转发头取得真实客户端 IP；若后端端口直接对公网开放，必须把该值收紧到可信代理 IP 或网段。
 
 ---
 

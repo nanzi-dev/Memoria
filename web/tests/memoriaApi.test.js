@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { dialogue, multiDialogue, userApi } from '../src/api/memoria.js';
+import { dialogue, knowledgeApi, multiDialogue, userApi } from '../src/api/memoria.js';
 
 function streamResponse(text, chunkSizes = [1]) {
   const bytes = new TextEncoder().encode(text);
@@ -63,6 +63,36 @@ test('new dialogue sessions always use Chinese', async () => {
     character_ids: ['npc-one', 'npc-two'],
     locale: 'zh-CN',
   });
+});
+
+test('knowledge preview forwards abort signals', async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  const controller = new AbortController();
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return {
+      ok: true,
+      json: async () => ({ sources: [] }),
+    };
+  };
+
+  try {
+    await knowledgeApi.preview(
+      {
+        query: 'harbor',
+        knowledge_base_id: 'kb-graytide',
+      },
+      { signal: controller.signal },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/api/v1/knowledge/preview');
+  assert.equal(calls[0].options.signal, controller.signal);
+  assert.equal(calls[0].options.method, 'POST');
 });
 
 test('dialogue APIs include caller request IDs for idempotent retries', async () => {

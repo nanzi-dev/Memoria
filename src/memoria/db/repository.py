@@ -10,6 +10,7 @@
 
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 import logging
 import sqlite3
@@ -35,6 +36,16 @@ from difflib import SequenceMatcher
 logger = logging.getLogger(__name__)
 
 _UNSET = object()
+_AUTH_TOKEN_DIGEST_PREFIX = "sha256:"
+
+
+class AdminBootstrapUnavailable(RuntimeError):
+    """管理员初始化名额已被占用。"""
+
+
+def _auth_token_storage_key(token: str) -> str:
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return f"{_AUTH_TOKEN_DIGEST_PREFIX}{digest}"
 
 try:
     import psycopg
@@ -337,6 +348,12 @@ CREATE TABLE IF NOT EXISTS auth_token (
     created_at      TEXT NOT NULL,
     expires_at      TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(user_id)
+);
+
+CREATE TABLE IF NOT EXISTS system_bootstrap_claim (
+    claim_key       TEXT PRIMARY KEY,
+    claimed_by_user_id TEXT NOT NULL,
+    claimed_at      TEXT NOT NULL
 );
 
 -- =========================
@@ -10463,20 +10480,40 @@ def _insert_default_user_character_card(
     )
 
 
-def create_user(user_id: str, username: str, password_hash: str, gender: str = "unknown"):
+def create_user(
+    user_id: str,
+    username: str,
+    password_hash: str,
+    gender: str = "unknown",
+    *,
+    bootstrap_admin: bool = False,
+) -> bool:
     """创建新用户"""
     now = _now()
     with get_conn() as conn:
+        is_admin = False
+        if bootstrap_admin:
+            claimed = conn.execute(
+                """
+                INSERT INTO system_bootstrap_claim
+                (claim_key, claimed_by_user_id, claimed_at)
+                SELECT 'admin', ?, ?
+                WHERE NOT EXISTS (SELECT 1 FROM users WHERE is_admin = 1)
+                ON CONFLICT (claim_key) DO NOTHING
+                """,
+                (user_id, now),
+            )
+            if claimed.rowcount != 1:
+                raise AdminBootstrapUnavailable("管理员已完成初始化")
+            is_admin = True
+
         conn.execute(
             """
             INSERT INTO users
             (user_id, username, password_hash, is_admin, gender, created_at, updated_at)
-            SELECT ?, ?, ?,
-                   CASE WHEN EXISTS (SELECT 1 FROM users WHERE is_admin = 1)
-                        THEN 0 ELSE 1 END,
-                   ?, ?, ?
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (user_id, username, password_hash, gender, now, now),
+            (user_id, username, password_hash, int(is_admin), gender, now, now),
         )
         _insert_default_user_character_card(
             conn,
@@ -10485,6 +10522,7 @@ def create_user(user_id: str, username: str, password_hash: str, gender: str = "
             gender=gender,
             now=now,
         )
+    return is_admin
 
 
 def get_user_character_card(user_id: str) -> dict | None:
@@ -10646,13 +10684,14 @@ def update_user_speech_settings(
 
 def create_auth_token(token: str, user_id: str, expires_at: str):
     """持久化登录 token。"""
+    storage_key = _auth_token_storage_key(token)
     with get_conn() as conn:
         conn.execute(
             """
             INSERT OR REPLACE INTO auth_token (token, user_id, created_at, expires_at)
             VALUES (?, ?, ?, ?)
             """,
-            (token, user_id, _now(), expires_at),
+            (storage_key, user_id, _now(), expires_at),
         )
 
 
@@ -10661,21 +10700,42 @@ def get_user_id_for_auth_token(token: str) -> str | None:
     if not token:
         return None
     now = _now()
+    storage_key = _auth_token_storage_key(token)
     with get_conn() as conn:
         row = conn.execute(
             """
-            SELECT user_id FROM auth_token
-            WHERE token = ? AND expires_at > ?
+            SELECT token, user_id, created_at, expires_at
+            FROM auth_token
+            WHERE token IN (?, ?) AND expires_at > ?
+            ORDER BY CASE WHEN token = ? THEN 0 ELSE 1 END
+            LIMIT 1
             """,
-            (token, now),
+            (storage_key, token, now, storage_key),
         ).fetchone()
         if row:
+            if row["token"] == token:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO auth_token
+                    (token, user_id, created_at, expires_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (storage_key, row["user_id"], row["created_at"], row["expires_at"]),
+                )
+                conn.execute("DELETE FROM auth_token WHERE token = ?", (token,))
             return row["user_id"]
-        conn.execute("DELETE FROM auth_token WHERE token = ? OR expires_at <= ?", (token, now))
+        conn.execute(
+            "DELETE FROM auth_token WHERE token IN (?, ?) OR expires_at <= ?",
+            (storage_key, token, now),
+        )
     return None
 
 
 def delete_auth_token(token: str):
     """删除登录 token。"""
+    storage_key = _auth_token_storage_key(token)
     with get_conn() as conn:
-        conn.execute("DELETE FROM auth_token WHERE token = ?", (token,))
+        conn.execute(
+            "DELETE FROM auth_token WHERE token IN (?, ?)",
+            (storage_key, token),
+        )

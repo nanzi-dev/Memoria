@@ -182,6 +182,7 @@ class RegisterRequest(BaseModel):
     username: str
     password: str
     gender: Literal["male", "female", "unknown"] = "unknown"
+    admin_bootstrap_token: str | None = Field(default=None, min_length=1, max_length=512)
 
 class LoginRequest(BaseModel):
     username: str
@@ -388,6 +389,16 @@ def _raise_clock_http_error(exc: ValueError) -> None:
 def register(req: RegisterRequest, response: Response):
     _validate_username(req.username)
     _validate_password(req.password)
+
+    bootstrap_admin = req.admin_bootstrap_token is not None
+    if bootstrap_admin:
+        configured_token = configs.admin_bootstrap_token.get_secret_value()
+        if not configured_token or not hmac.compare_digest(
+            req.admin_bootstrap_token.encode("utf-8"),
+            configured_token.encode("utf-8"),
+        ):
+            raise HTTPException(403, "管理员初始化凭据无效")
+
     if repository.get_user_by_username(req.username):
         raise HTTPException(409, "用户名已存在")
 
@@ -396,7 +407,16 @@ def register(req: RegisterRequest, response: Response):
     while repository.get_user_by_id(uid):
         uid = _gen_user_id()
 
-    repository.create_user(uid, req.username, _hash_password(req.password), req.gender)
+    try:
+        repository.create_user(
+            uid,
+            req.username,
+            _hash_password(req.password),
+            req.gender,
+            bootstrap_admin=bootstrap_admin,
+        )
+    except repository.AdminBootstrapUnavailable as exc:
+        raise HTTPException(409, "管理员已完成初始化") from exc
     token = _gen_token()
     _store_auth_token(token, uid)
     _set_auth_cookie(response, token)

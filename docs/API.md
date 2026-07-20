@@ -1602,11 +1602,21 @@ Content-Type: application/json
       "document_name": "地理.md",
       "chunk_id": "chunk-uuid",
       "excerpt": "北境首都是白塔城……",
-      "similarity": 0.79
+      "similarity": 0.79,
+      "vector_similarity": 0.79,
+      "keyword_score": 0.85,
+      "hybrid_score": 0.91,
+      "source_metadata": {
+        "heading_path": ["北境地理", "首都"]
+      }
     }
   ]
 }
 ```
+
+`similarity` 保留为向量相似度兼容字段；`vector_similarity`、`keyword_score` 和 `hybrid_score` 分别表示向量通道、词法通道和最终综合排序分数。新前端优先展示 `hybrid_score`，旧响应缺少该字段时才回退到词法或向量分数。
+
+Web 管理页在重复提交、切换知识库、关闭弹窗或组件卸载时会取消上一条预览请求，并忽略已过期响应，避免旧结果覆盖当前查询。仓库内 Web API 客户端可通过标准 `AbortSignal` 传递取消信号。
 
 上传和粘贴文档后，前端会对选中知识库中的 `queued/processing` 文档轮询详情。服务启动也会恢复排队中或被中断的任务；处理异常会落为 `failed`，不会永久停留在“处理中”。
 
@@ -1668,7 +1678,7 @@ DELETE /api/v1/admin/characters/{character_id}/voice
 
 ## 用户 API
 
-用户接口用于 Web 前端登录态、账户资料、玩家角色卡、语音偏好、世界时钟和头像管理。登录成功后服务端会同时返回 token 并写入 `memoria-token` HttpOnly Cookie；通用 API 客户端支持 Bearer、查询参数或 Cookie，仓库内 Web 前端只使用 Cookie。
+用户接口用于 Web 前端登录态、账户资料、玩家角色卡、语音偏好、世界时钟和头像管理。登录成功后服务端会写入 `memoria-token` HttpOnly Cookie，响应体不返回原始 token；通用 API 客户端支持 Bearer、查询参数或 Cookie，仓库内 Web 前端只使用 Cookie。
 
 ### 1. 注册
 ```http
@@ -1682,20 +1692,40 @@ Content-Type: application/json
 }
 ```
 
-用户名长度 2-20，只能包含字母、数字、中文、下划线和连字符。密码至少 8 位，且必须包含字母和数字。
+用户名长度 2-20，只能包含字母、数字、中文、下划线和连字符。密码至少 8 位，且必须包含字母和数字。普通注册始终创建普通用户。仅部署者初始化管理员时额外提交可选字段 `admin_bootstrap_token`，其值必须与服务端 `ADMIN_BOOTSTRAP_TOKEN` 一致；该名额只能使用一次。
+
+**初始化管理员请求：**
+
+```json
+{
+  "username": "admin",
+  "password": "replace-with-a-strong-password1",
+  "gender": "unknown",
+  "admin_bootstrap_token": "the-deployment-bootstrap-secret"
+}
+```
+
+| 场景 | 状态码 | 说明 |
+|------|--------|------|
+| 普通注册或首次有效管理员初始化 | 200 | 写入登录 Cookie 并返回用户资料 |
+| 初始化凭据无效或服务未配置 | 403 | 不访问用户创建流程 |
+| 管理员名额已占用或已有管理员 | 409 | 不创建新用户 |
+| 用户名已存在 | 409 | 不覆盖现有用户 |
 
 **响应示例：**
 ```json
 {
-  "token": "token-value",
   "user": {
     "user_id": "usr_ab12cd34",
     "username": "旅行者",
+    "is_admin": false,
     "gender": "unknown",
     "avatar_url": null
   }
 }
 ```
+
+登录态通过响应中的 `memoria-token` HttpOnly Cookie 建立，响应体不返回原始 token。Cookie 默认有效 30 天，使用 `HttpOnly`、`SameSite=Lax` 和根路径；HTTPS 部署必须设置 `AUTH_COOKIE_SECURE=true`。
 
 ### 2. 登录
 ```http
@@ -1996,7 +2026,7 @@ Authorization: Bearer token-value
 
 ### 4. 速率限制（Rate Limiting）
 
-所有 `/api/*` 写操作（非 GET/HEAD/OPTIONS）均受速率限制保护。服务端优先使用认证 token 解析出的用户 ID 作为限流 key，未登录或 token 无效时退回客户端 IP；不会信任客户端传入的 `X-Player-ID`。计数器使用单调时钟和线程锁，并周期清理过期 key。
+所有 `/api/*` 写操作（非 GET/HEAD/OPTIONS）均受速率限制保护。服务端优先使用认证 token 解析出的用户 ID 作为限流 key，未登录或 token 无效时退回客户端 IP；不会信任客户端传入的 `X-Player-ID`。反向代理部署必须配置 Uvicorn 的可信代理地址，使 `request.client.host` 来自受信任的转发链。计数器使用单调时钟和线程锁，并周期清理过期 key。
 
 | 项目       | 值                    |
 |------------|-----------------------|
@@ -2007,6 +2037,8 @@ Authorization: Bearer token-value
 | 超限响应码 | HTTP 429             |
 
 当前限流器保存在单个应用进程内；多 worker 或多实例部署不会共享额度，生产环境需要外部集中式限流器才能获得全局配额。
+
+Docker Compose 默认设置 `FORWARDED_ALLOW_IPS=*`，仅适用于后端端口不直接暴露公网的内置 Nginx 拓扑。若设置 `API_BIND_HOST=0.0.0.0` 直接开放后端端口，必须将 `FORWARDED_ALLOW_IPS` 收紧到实际可信代理 IP 或网段。
 
 **超限响应示例：**
 ```json

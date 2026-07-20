@@ -1548,6 +1548,7 @@ function PasteDocumentModal({ show, base, onClose, onSuccess }) {
 }
 
 function PreviewModal({ show, base, onClose }) {
+  const previewRequestRef = useRef(null);
   const [query, setQuery] = useState('');
   const [characterId, setCharacterId] = useState('');
   const [groupThreadId, setGroupThreadId] = useState('');
@@ -1558,6 +1559,9 @@ function PreviewModal({ show, base, onClose }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    previewRequestRef.current?.abort();
+    previewRequestRef.current = null;
+    setLoading(false);
     if (!show) return;
     setQuery('');
     setCharacterId('');
@@ -1572,6 +1576,11 @@ function PreviewModal({ show, base, onClose }) {
       }))
       .catch(err => setError(err.message || '检索上下文加载失败'))
       .finally(() => setTargetsLoading(false));
+
+    return () => {
+      previewRequestRef.current?.abort();
+      previewRequestRef.current = null;
+    };
   }, [show, base?.knowledge_base_id]);
 
   async function handleSubmit(event) {
@@ -1580,6 +1589,9 @@ function PreviewModal({ show, base, onClose }) {
       setError('请输入检索内容');
       return;
     }
+    previewRequestRef.current?.abort();
+    const controller = new AbortController();
+    previewRequestRef.current = controller;
     setLoading(true);
     setError('');
     setResult(null);
@@ -1589,12 +1601,21 @@ function PreviewModal({ show, base, onClose }) {
         character_id: characterId || null,
         group_thread_id: groupThreadId || null,
         knowledge_base_id: base.knowledge_base_id,
+      }, {
+        signal: controller.signal,
       });
-      setResult(response);
+      if (previewRequestRef.current === controller) {
+        setResult(response);
+      }
     } catch (err) {
-      setError(err.message || '检索预览失败');
+      if (err.name !== 'AbortError' && previewRequestRef.current === controller) {
+        setError(err.message || '检索预览失败');
+      }
     } finally {
-      setLoading(false);
+      if (previewRequestRef.current === controller) {
+        previewRequestRef.current = null;
+        setLoading(false);
+      }
     }
   }
 

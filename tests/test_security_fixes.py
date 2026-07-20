@@ -455,6 +455,173 @@ def test_get_current_user_id_reads_persistent_token_before_memory(monkeypatch):
     assert user.get_current_user_id("token") == "usr_db"
 
 
+def test_admin_bootstrap_is_explicit_and_single_use(monkeypatch, tmp_path):
+    from memoria.db import repository
+
+    monkeypatch.setattr(repository.configs, "database_url", "")
+    monkeypatch.setattr(repository.configs, "database_path", str(tmp_path / "bootstrap.db"))
+    repository.init_db()
+
+    assert repository.create_user(
+        "usr_regular",
+        "regular",
+        "hash",
+    ) is False
+    assert repository.get_user_by_id("usr_regular")["is_admin"] == 0
+
+    assert repository.create_user(
+        "usr_admin",
+        "admin",
+        "hash",
+        bootstrap_admin=True,
+    ) is True
+    assert repository.get_user_by_id("usr_admin")["is_admin"] == 1
+
+    with pytest.raises(repository.AdminBootstrapUnavailable):
+        repository.create_user(
+            "usr_second_admin",
+            "second_admin",
+            "hash",
+            bootstrap_admin=True,
+        )
+    assert repository.get_user_by_id("usr_second_admin") is None
+
+
+def test_register_rejects_invalid_admin_bootstrap_token(monkeypatch):
+    from memoria.api import user
+
+    monkeypatch.setattr(user.configs, "admin_bootstrap_token", SecretStr("正确-token"))
+    monkeypatch.setattr(
+        user.repository,
+        "get_user_by_username",
+        lambda username: pytest.fail("invalid bootstrap must be rejected before database access"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        user.register(
+            user.RegisterRequest(
+                username="admin",
+                password="password1",
+                admin_bootstrap_token="错误-token",
+            ),
+            Response(),
+        )
+
+    assert exc_info.value.status_code == 403
+
+
+def test_register_reports_consumed_admin_bootstrap(monkeypatch):
+    from memoria.api import user
+
+    monkeypatch.setattr(user.configs, "admin_bootstrap_token", SecretStr("correct-token"))
+    monkeypatch.setattr(user.repository, "get_user_by_username", lambda username: None)
+    monkeypatch.setattr(user.repository, "get_user_by_id", lambda user_id: None)
+    monkeypatch.setattr(user, "_gen_user_id", lambda: "usr_admin")
+    monkeypatch.setattr(user, "_hash_password", lambda password: "hash")
+    monkeypatch.setattr(
+        user.repository,
+        "create_user",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            user.repository.AdminBootstrapUnavailable()
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        user.register(
+            user.RegisterRequest(
+                username="admin",
+                password="password1",
+                admin_bootstrap_token="correct-token",
+            ),
+            Response(),
+        )
+
+    assert exc_info.value.status_code == 409
+
+
+def test_auth_tokens_are_stored_as_digests(monkeypatch, tmp_path):
+    from memoria.db import repository
+
+    monkeypatch.setattr(repository.configs, "database_url", "")
+    monkeypatch.setattr(repository.configs, "database_path", str(tmp_path / "tokens.db"))
+    repository.init_db()
+    repository.create_user("usr_token", "token_user", "hash")
+
+    raw_token = "raw-secret-token"
+    repository.create_auth_token(raw_token, "usr_token", "9999-01-01T00:00:00+00:00")
+
+    with repository.get_conn() as conn:
+        rows = conn.execute("SELECT token FROM auth_token").fetchall()
+
+    assert [row["token"] for row in rows] == [
+        repository._auth_token_storage_key(raw_token)
+    ]
+    assert repository.get_user_id_for_auth_token(raw_token) == "usr_token"
+
+
+def test_legacy_plaintext_auth_token_is_migrated_on_read(monkeypatch, tmp_path):
+    from memoria.db import repository
+
+    monkeypatch.setattr(repository.configs, "database_url", "")
+    monkeypatch.setattr(repository.configs, "database_path", str(tmp_path / "legacy_token.db"))
+    repository.init_db()
+    repository.create_user("usr_legacy", "legacy_user", "hash")
+
+    raw_token = "legacy-plaintext-token"
+    with repository.get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO auth_token (token, user_id, created_at, expires_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                raw_token,
+                "usr_legacy",
+                "2026-01-01T00:00:00+00:00",
+                "9999-01-01T00:00:00+00:00",
+            ),
+        )
+
+    assert repository.get_user_id_for_auth_token(raw_token) == "usr_legacy"
+
+    with repository.get_conn() as conn:
+        rows = conn.execute("SELECT token FROM auth_token").fetchall()
+    assert [row["token"] for row in rows] == [
+        repository._auth_token_storage_key(raw_token)
+    ]
+
+
+def test_delete_auth_token_removes_digest_and_legacy_keys(monkeypatch, tmp_path):
+    from memoria.db import repository
+
+    monkeypatch.setattr(repository.configs, "database_url", "")
+    monkeypatch.setattr(repository.configs, "database_path", str(tmp_path / "delete_token.db"))
+    repository.init_db()
+    repository.create_user("usr_logout", "logout_user", "hash")
+
+    raw_token = "logout-token"
+    repository.create_auth_token(raw_token, "usr_logout", "9999-01-01T00:00:00+00:00")
+    with repository.get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO auth_token (token, user_id, created_at, expires_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                raw_token,
+                "usr_logout",
+                "2026-01-01T00:00:00+00:00",
+                "9999-01-01T00:00:00+00:00",
+            ),
+        )
+
+    repository.delete_auth_token(raw_token)
+
+    with repository.get_conn() as conn:
+        count = conn.execute("SELECT COUNT(*) AS count FROM auth_token").fetchone()["count"]
+    assert count == 0
+
+
 def test_call_light_task_uses_light_client(monkeypatch):
     from memoria.core import llm_client
 

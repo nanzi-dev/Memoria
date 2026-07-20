@@ -68,7 +68,10 @@ Memoria/
 ├── scripts/                    # 工具脚本
 │   ├── cli_chat.py             # 命令行对话工具
 │   ├── chat.sh                 # CLI 快捷启动
+│   ├── seed_graytide_demo.py    # 灰潮港完整故事模块播种脚本
 │   └── run_tests.sh            # 测试执行
+├── examples/                   # 可播种故事模块
+│   └── graytide/               # 角色、事件、关系、知识与检索评测数据
 ├── web/                        # React + Vite 前端
 │   ├── src/pages/              # Home、ChatRoom、CharacterEditor、PersonaEditor、EventList、EventEditor、RelationshipGraph、KnowledgeManager
 │   ├── src/components/         # 通用组件与编辑器步骤组件
@@ -93,11 +96,11 @@ Memoria/
 
 通用 API 客户端可以通过 Bearer token 或 `memoria-token` HttpOnly Cookie 认证；仓库内 Web 前端只发送 HttpOnly Cookie，不把 token 持久化到 `localStorage`。
 
-全新数据库中不存在管理员时，首个成功注册的用户会自动成为管理员，后续注册用户默认为普通用户。因此初次部署应先保持服务只监听回环地址或受控内网，由部署者私下创建初始账户后再开放入口。
+普通注册始终创建普通用户。部署者可配置高熵 `ADMIN_BOOTSTRAP_TOKEN`，并在一次注册请求中提交 `admin_bootstrap_token`，以事务方式占用唯一的管理员初始化名额；凭据使用恒定时间比较，凭据无效返回 403，名额已占用或数据库已有管理员时返回 409。名额占用与管理员用户创建位于同一数据库事务，任一步失败都会回滚。
 
 运行时配置由 `src/memoria/core/config.py` 的 Pydantic Settings 从环境变量和仓库根目录 `.env` 读取。`config/settings.yaml` 仅是兼容性/参考标记，当前服务不从该文件加载配置。
 
-API 写操作通过速率限制中间件保护（60 请求 / 60 秒窗口）。限流 key 优先使用认证 token 解析出的用户 ID，未登录或 token 无效时退回客户端 IP，不信任客户端传入的 `X-Player-ID`。计数器使用单调时钟和线程锁，并周期清理过期 key。限流状态保存在单个应用进程内，多 worker 或多实例部署需要外部集中式限流器才能共享额度。
+API 写操作通过速率限制中间件保护（60 请求 / 60 秒窗口）。限流 key 优先使用认证 token 解析出的用户 ID，未登录或 token 无效时退回客户端 IP，不信任客户端传入的 `X-Player-ID`。Docker Compose 通过 `FORWARDED_ALLOW_IPS` 让 Uvicorn 只从可信代理链解析客户端地址；默认 `*` 仅适用于后端端口不直接暴露公网的 Compose 拓扑。计数器使用单调时钟和线程锁，并周期清理过期 key。限流状态保存在单个应用进程内，多 worker 或多实例部署需要外部集中式限流器才能共享额度。
 
 ### 应用生命周期
 
@@ -245,9 +248,9 @@ RAG 召回 (ChromaDB)            ← 余弦相似度搜索
   → 成功标记 ready；任一阶段失败则清理部分数据并标记 failed
 ```
 
-Web 管理页在选中知识库存在 `queued` 或 `processing` 文档时每 1.5 秒静默刷新详情；页面隐藏时暂停轮询。服务启动时会扫描未完成文档：`queued` 任务重新排队，进程中断遗留的 `processing` 任务按原状态原子接管并恢复。嵌入模型或向量存储初始化失败也会持久化为 `failed` 和错误信息，不会永久停留在“处理中”；用户可通过重试接口重新排队。
+Web 管理页在选中知识库存在 `queued` 或 `processing` 文档时每 1.5 秒静默刷新详情；页面隐藏时暂停轮询。检索预览使用 `AbortController` 管理单一活动请求，重复提交、切换知识库、关闭弹窗或卸载组件都会取消旧请求，且只有当前请求可以更新结果、错误与加载状态。服务启动时会扫描未完成文档：`queued` 任务重新排队，进程中断遗留的 `processing` 任务按原状态原子接管并恢复。嵌入模型或向量存储初始化失败也会持久化为 `failed` 和错误信息，不会永久停留在“处理中”；用户可通过重试接口重新排队。
 
-单聊与群聊每轮会组合当前消息和必要的最近上下文作为查询，向量召回后叠加词法相关性排序，默认最多返回 4 个知识块，相似度阈值为 0.60。上传文件最大 10 MiB；默认分块目标、重叠和硬上限分别为 200、36、240 token。注入内容被明确标记为低于系统约束、关系图谱、世界时钟和运行状态的外部事实，文档中的命令或提示词不会被执行。API 响应通过 `knowledge_sources` 返回知识库、文档、片段、摘要和相似度，便于前端展示来源。
+单聊与群聊每轮会组合当前消息和必要的最近上下文作为查询，向量召回后叠加词法相关性排序，默认最多返回 4 个知识块，相似度阈值为 0.60。来源同时暴露 `vector_similarity`、`keyword_score` 和最终 `hybrid_score`，前端以综合排序分数为主并保留通道分数供诊断。上传文件最大 10 MiB；默认分块目标、重叠和硬上限分别为 200、36、240 token。注入内容被明确标记为低于系统约束、关系图谱、世界时钟和运行状态的外部事实，文档中的命令或提示词不会被执行。API 响应通过 `knowledge_sources` 返回知识库、文档、片段、摘要和检索分数，便于前端展示来源。
 
 ### 多语言与语音架构
 
@@ -287,11 +290,11 @@ Web 端的角色编辑器只编辑基础角色卡，不提供 `Default` / `zh-CN
 
 ## 数据库设计
 
-Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=postgresql://...` 切换 PostgreSQL。当前 schema 初始化后共有 39 张应用表和 40 个显式索引（不计 SQLite 内部表和自动索引）。
+Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=postgresql://...` 切换 PostgreSQL。当前 schema 初始化后共有 40 张应用表和 40 个显式索引（不计 SQLite 内部表和自动索引）。
 
 ### 1. users（用户表）
 
-存储 Web 前端用户登录资料和头像。登录 token 持久化在 `auth_token` 表；进程内 `_tokens` 仅保留给旧测试/开发进程兼容。
+存储 Web 前端用户登录资料和头像。登录 token 的 SHA-256 摘要持久化在 `auth_token` 表；旧明文 token 会在首次认证时自动迁移。进程内 `_tokens` 仅保留给旧测试/开发进程兼容。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -335,17 +338,29 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ### 3. auth_token（认证 token 表）
 
-存储用户登录态 token，支持服务重启后继续识别有效登录态。
+存储用户登录态 token 的不可逆摘要，支持服务重启后继续识别有效登录态。客户端仍持有原始 bearer token 或 HttpOnly Cookie；数据库仅保存带 `sha256:` 前缀的 SHA-256 摘要。
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| token | TEXT PRIMARY KEY | 登录 token |
+| token | TEXT PRIMARY KEY | `sha256:<digest>` 形式的登录 token 摘要 |
 | user_id | TEXT NOT NULL | 用户 ID（外键）|
 | created_at | TEXT NOT NULL | 创建时间 |
 | expires_at | TEXT NOT NULL | 过期时间 |
 
 **外键：** `FOREIGN KEY (user_id) REFERENCES users(user_id)`
 **索引：** `idx_auth_token_user ON auth_token(user_id, expires_at)`
+
+---
+
+### 3a. system_bootstrap_claim（系统初始化占位表）
+
+保存一次性管理员初始化名额。`claim_key='admin'` 的主键约束与用户插入位于同一事务内，避免 SQLite 或 PostgreSQL 并发注册产生多个初始管理员。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| claim_key | TEXT PRIMARY KEY | 初始化名额名称，当前为 `admin` |
+| claimed_by_user_id | TEXT NOT NULL | 占用名额的管理员用户 ID |
+| claimed_at | TEXT NOT NULL | 占用时间 |
 
 ---
 

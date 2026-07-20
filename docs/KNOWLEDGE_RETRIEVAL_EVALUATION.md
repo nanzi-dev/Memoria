@@ -63,3 +63,21 @@
 
 在满足这些条件前，继续使用当前模型、结构化分块和 SQL 词法 + Chroma 向量混合
 检索，避免以全局向量迁移换取当前用户不可见的指标变化。
+
+## 2026-07-18 Graytide 场景级评测夹具
+
+`examples/graytide/` 提供独立的完整故事模块，其中 `retrieval_eval.json` 包含 12 条调查问题，用于覆盖全局、角色和群聊线程三种知识绑定。该夹具同时验证角色、关系、事件、知识文档与固定群聊清单能够共同播种，不替代上面的 45 问检索准确性基线。
+
+播种完整索引：
+
+```bash
+python scripts/seed_graytide_demo.py --password '<choose-a-strong-password>'
+```
+
+只校验模块结构、幂等播种、隔离清理和评测数据一致性：
+
+```bash
+.venv/bin/pytest -q tests/test_graytide_demo.py tests/test_story_module.py
+```
+
+评测问题与调查路线分别见 `examples/graytide/retrieval_eval.json` 和 `examples/graytide/WALKTHROUGH.md`。记录新的线上检索指标时，应同时注明嵌入模型、数据库内容版本、是否重建向量集合以及绑定上下文，避免与固定基线混用。

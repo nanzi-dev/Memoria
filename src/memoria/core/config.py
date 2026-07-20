@@ -72,6 +72,7 @@ class Configs(BaseSettings):
     database_path: str = "./data/sqlite_db/memoria.db"
     database_url: str = ""
     auth_cookie_secure: bool = False
+    admin_bootstrap_token: SecretStr = ""
     short_term_memory_turns: int = Field(default = 8, ge = 1, le = 50)
     long_term_memory_interval_turns: int = Field(default = 5, ge = 1, le = 50)
     max_output_tokens: int = Field(default = 400, ge = 1, le = 4096)

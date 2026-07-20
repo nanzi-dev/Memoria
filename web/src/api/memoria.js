@@ -532,8 +532,9 @@ export const knowledgeApi = {
   retryDocument(documentId) {
     return request(`/knowledge/documents/${pathSegment(documentId)}/retry`, { method: 'POST' });
   },
-  preview(data) {
+  preview(data, options = {}) {
     return request('/knowledge/preview', {
+      ...options,
       method: 'POST',
       body: JSON.stringify(data),
     });

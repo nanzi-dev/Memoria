@@ -1,0 +1,82 @@
+[
+  {
+    "id": "graytide_eval_01",
+    "question": "灰潮警报响起时，普通市民应该沿什么标记撤离？",
+    "expected_facts": ["蓝灯标记", "前往高处"],
+    "expected_documents": ["city_and_geography.md"]
+  },
+  {
+    "id": "graytide_eval_02",
+    "question": "第七码头为什么在官方地图上没有编号？",
+    "expected_facts": ["《临时封港附则》", "从公开图纸抹除"],
+    "expected_documents": ["history_and_law.md"]
+  },
+  {
+    "id": "graytide_eval_03",
+    "question": "第十三声钟鸣发生前十一分钟发生了什么？",
+    "expected_facts": ["阿特拉斯记忆匣被封锁", "人为维护指令"],
+    "expected_documents": ["case_timeline.md", "evidence_ledger.md"]
+  },
+  {
+    "id": "graytide_eval_04",
+    "question": "哪三项证据能把钟塔异常与废弃泵站联系起来？",
+    "expected_facts": ["零号货单", "蓝色冷凝液", "逆向棘轮订货凭证"],
+    "expected_documents": ["evidence_ledger.md"]
+  },
+  {
+    "id": "graytide_eval_05",
+    "question": "潮汐工会和港务议会对封港分别持什么态度？",
+    "expected_facts": ["工会反对长期封锁", "议会强调秩序与贸易"],
+    "expected_documents": ["factions.md"]
+  },
+  {
+    "id": "graytide_eval_06",
+    "question": "塞拉斯的公开说法与私下行动有什么矛盾？",
+    "expected_facts": ["公开否认第七码头仍在运作", "私下批准冷凝液运输"],
+    "expected_documents": ["private_dossiers.md"]
+  },
+  {
+    "id": "graytide_eval_07",
+    "question": "主钟没有敲击时，城市为什么仍可能听见钟声？",
+    "expected_facts": ["地下传动轴", "逆向棘轮", "共振钟管"],
+    "expected_documents": ["clocktower_engineering.md"]
+  },
+  {
+    "id": "graytide_eval_08",
+    "question": "银雾咳嗽是否会在人群中传播，最可能的暴露源是什么？",
+    "expected_facts": ["不会人际传播", "未经中和的以太冷凝液"],
+    "expected_documents": ["aether_medicine.md"]
+  },
+  {
+    "id": "graytide_eval_09",
+    "question": "谁最早收到三短一长的异常报码？",
+    "expected_facts": ["诺娅·芬奇", "钟鸣前二十三分钟"],
+    "expected_documents": ["case_timeline.md"]
+  },
+  {
+    "id": "graytide_eval_10",
+    "question": "调查组目前不能据此直接断定塞拉斯就是幕后者，原因是什么？",
+    "expected_facts": ["采购经由工业代理", "批准可能被冒用", "证据链仍缺执行者"],
+    "expected_documents": ["evidence_ledger.md", "private_dossiers.md"]
+  },
+  {
+    "id": "graytide_eval_11",
+    "question": "联合调查组为什么需要岑澜参与第十三声钟鸣调查？",
+    "expected_facts": [
+      "参与过第七共振支路复测",
+      "持有半枚测绘牌和蓝线航图",
+      "能连接旧测绘符号、现实地形和证物保管链"
+    ],
+    "expected_documents": ["case_timeline.md", "private_dossiers.md"]
+  },
+  {
+    "id": "graytide_eval_12",
+    "question": "岑澜的半枚测绘牌和蓝线航图能证明什么，又不能证明什么？",
+    "expected_facts": [
+      "第七支路历史路径仍然存在",
+      "复测记录被改写",
+      "不能证明当夜实际操作者"
+    ],
+    "expected_documents": ["evidence_ledger.md", "history_and_law.md"]
+  }
+]

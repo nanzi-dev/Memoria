@@ -73,6 +73,21 @@ def test_postgres_auth_token_replace_becomes_upsert():
     assert "expires_at = EXCLUDED.expires_at" in converted
 
 
+def test_postgres_admin_bootstrap_claim_keeps_conflict_guard():
+    sql = """
+        INSERT INTO system_bootstrap_claim
+        (claim_key, claimed_by_user_id, claimed_at)
+        SELECT 'admin', ?, ?
+        WHERE NOT EXISTS (SELECT 1 FROM users WHERE is_admin = 1)
+        ON CONFLICT (claim_key) DO NOTHING
+    """
+
+    converted = repository._prepare_postgres_sql(sql)
+
+    assert "SELECT 'admin', %s, %s" in converted
+    assert "ON CONFLICT (claim_key) DO NOTHING" in converted
+
+
 def test_postgres_mode_is_enabled_only_for_database_url(monkeypatch):
     monkeypatch.setattr(repository.configs, "database_url", "")
     assert repository._is_postgres_enabled() is False
