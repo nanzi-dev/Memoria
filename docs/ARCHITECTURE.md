@@ -50,13 +50,28 @@ Memoria/
 │   │   ├── domain_events.py                  # 领域事件账本与剧情状态投影
 │   │   ├── fact_claims.py                    # 事实声明写入与状态维护
 │   │   ├── fact_claim_policy.py              # 事实声明规范化与冲突策略
+│   │   ├── output_safety.py  # 完整回复与流式增量输出安全过滤
+│   │   ├── csrf.py           # Cookie 会话双提交 CSRF
 │   │   ├── performance.py      # 开发者性能采样
 │   │   ├── replay.py           # 会话回放构建
 │   │   ├── quality_scorer.py   # 对话质量评分
 │   │   ├── tracing.py          # OpenTelemetry 可选追踪封装
 │   │   └── speaking_strategy.py             # 智能/混合发言选择策略
 │   ├── db/                     # 数据持久化层
-│   │   └── repository.py       # SQLite / PostgreSQL 数据库操作
+│   │   └── repository/         # SQLite / PostgreSQL 持久化包
+│   │       ├── __init__.py     # 兼容 facade：`from memoria.db import repository`
+│   │       ├── _common.py      # 连接、schema 初始化、共享工具
+│   │       ├── users.py        # 用户与 auth_token
+│   │       ├── characters.py   # 角色卡
+│   │       ├── sessions_and_messages.py  # 会话、短期消息、对话轮次
+│   │       ├── events.py       # 事件定义、调度、触发
+│   │       ├── relationships.py
+│   │       ├── multi_session.py
+│   │       ├── knowledge.py
+│   │       ├── state_and_memory.py
+│   │       ├── fact_claims.py
+│   │       ├── story.py / domain_events.py
+│   │       ├── world_clock.py / background_jobs.py
 │   └── main.py                 # FastAPI 应用入口
 ├── tests/                      # 测试（pytest）
 ├── data/                       # 运行时数据
@@ -94,13 +109,48 @@ Memoria/
 - `GET /ready` — 数据库就绪检查，失败返回 503 和 `{"status": "not_ready", "database": "unavailable"}`；具体异常只写入服务端日志
 - `POST /admin/log-level?level=DEBUG` — 动态调整日志级别，仅限系统管理员
 
-通用 API 客户端可以通过 Bearer token 或 `memoria-token` HttpOnly Cookie 认证；仓库内 Web 前端只发送 HttpOnly Cookie，不把 token 持久化到 `localStorage`。
+通用 API 客户端可以通过 `Authorization: Bearer <token>` 或 `memoria-token` HttpOnly Cookie 认证；仓库内 Web 前端只使用 Cookie 登录态，不把 token 持久化到 `localStorage`。
+
+### 认证 Cookie 与 CSRF
+
+浏览器登录/注册成功后，服务端写入两枚 Cookie（有效期默认 30 天，`SameSite=Lax`，路径 `/`）：
+
+| Cookie | 属性 | 用途 |
+|--------|------|------|
+| `memoria-token` | HttpOnly | 会话认证，脚本不可读 |
+| `memoria-csrf` | 非 HttpOnly（前端可读） | 双提交 CSRF 校验 |
+
+对携带 `memoria-token` 的 **Cookie 会话写请求**（`POST`/`PUT`/`PATCH`/`DELETE` 等，路径以 `/api/` 开头），中间件要求请求头 `X-CSRF-Token` 与 `memoria-csrf` Cookie 值一致（`hmac.compare_digest`）；否则返回 `403`，`detail` 为「CSRF 校验失败」。
+
+豁免与例外：
+
+- 安全方法：`GET` / `HEAD` / `OPTIONS` / `TRACE`
+- 认证引导：`POST /api/v1/user/login`、`POST /api/v1/user/register`（凭 body 凭证建立会话）
+- 使用 `Authorization: Bearer ...` 的客户端（非 Cookie 会话，不校验 CSRF）
+- 未携带 `memoria-token` 的请求（无 Cookie 会话面）
+
+生命周期：注册/登录时 `set_csrf_cookie`；`GET /api/v1/user/me` 会 `ensure_csrf_cookie`（已有则续写，没有则签发）；退出登录同时清除 `memoria-token` 与 `memoria-csrf`。仓库前端 `web/src/api/memoria.js` 在 `credentials: 'include'` 下自动从可读 Cookie 附加 `X-CSRF-Token`。
+
+Cookie 的 `Secure` 标志由 `AUTH_COOKIE_SECURE` 控制；`MEMORIA_ENV=production` 时配置校验会强制启用 Secure Cookie。本地 HTTP 开发应保持 `AUTH_COOKIE_SECURE=false`。
+
+### 输出安全
+
+`core/output_safety.py` 在单聊/群聊编排中过滤可能破坏沉浸感或泄露提示词的模型输出：
+
+- 完整回复：`safety_check()` 对整段对话文本做风险模式匹配，命中后替换为固定兜底句
+- 流式增量：`DialogueSafetyStream` 在 SSE `dialogue_delta` 路径上缓冲可能构成风险前缀的后缀，安全前缀再下发，避免拆词绕过
+
+风险模式覆盖中英文 AI 身份声明、指令注入/忽略系统提示、常见 jailbreak 标记等；正常角色扮演对白应尽量避免误伤。
+
+### 管理员初始化与配置
 
 普通注册始终创建普通用户。部署者可配置高熵 `ADMIN_BOOTSTRAP_TOKEN`，并在一次注册请求中提交 `admin_bootstrap_token`，以事务方式占用唯一的管理员初始化名额；凭据使用恒定时间比较，凭据无效返回 403，名额已占用或数据库已有管理员时返回 409。名额占用与管理员用户创建位于同一数据库事务，任一步失败都会回滚。
 
 运行时配置由 `src/memoria/core/config.py` 的 Pydantic Settings 从环境变量和仓库根目录 `.env` 读取。`config/settings.yaml` 仅是兼容性/参考标记，当前服务不从该文件加载配置。
 
-API 写操作通过速率限制中间件保护（60 请求 / 60 秒窗口）。限流 key 优先使用认证 token 解析出的用户 ID，未登录或 token 无效时退回客户端 IP，不信任客户端传入的 `X-Player-ID`。Docker Compose 通过 `FORWARDED_ALLOW_IPS` 让 Uvicorn 只从可信代理链解析客户端地址；默认 `*` 仅适用于后端端口不直接暴露公网的 Compose 拓扑。计数器使用单调时钟和线程锁，并周期清理过期 key。限流状态保存在单个应用进程内，多 worker 或多实例部署需要外部集中式限流器才能共享额度。
+### 速率限制
+
+API 写操作通过速率限制中间件保护（默认 60 请求 / 60 秒窗口，读取 `configs.rate_limit_*`）。限流 key 优先使用认证 token 解析出的用户 ID，未登录或 token 无效时退回客户端 IP，不信任客户端传入的 `X-Player-ID`。Docker Compose 通过 `FORWARDED_ALLOW_IPS` 让 Uvicorn 只从可信代理链解析客户端地址；默认 `*` 仅适用于后端端口不直接暴露公网的 Compose 拓扑。计数器使用单调时钟和线程锁，并周期清理过期 key。限流状态保存在单个应用进程内，多 worker 或多实例部署需要外部集中式限流器才能共享额度。
 
 ### 应用生命周期
 
@@ -1244,7 +1294,8 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 9. **事务一致性、幂等与恢复** — `dialogue_turn` 为单聊和群聊轮次保存请求幂等结果与租约；群聊脉冲消息/状态/通知、事件定义/调度分别原子提交；`event_trigger_guard` 串行化 once/cooldown 副作用，`event_exclusive_group_guard` 串行化互斥事件选择；`background_job`、`knowledge_vector_cleanup`、`group_dialogue_state` 和事件执行表保存可恢复任务状态、幂等结果与租约
 10. **轻量迁移** — 启动时为旧库补齐角色、会话、事件、认证、世界时钟、通知收件箱、关系修订和知识库相关结构；`owner_user_id` 相关主键重建不做旧数据迁移，升级前需要删除旧 SQLite 数据库或手动重建表
 11. **完整索引覆盖** — 40 个显式索引覆盖常用查询、领域事件投影、对话幂等、后台任务、调度和恢复路径
-12. **可迁移性** — Repository 层适配 SQLite/PostgreSQL 占位符、自增主键和少量 UPSERT 差异
+12. **可迁移性** — `db/repository` 包适配 SQLite/PostgreSQL 占位符、自增主键和少量 UPSERT 差异；对外保持 `from memoria.db import repository` 的 facade，并对 monkeypatch 同步到各领域子模块，便于测试与渐进拆分
+13. **认证与输出边界** — Cookie 会话写路径强制 CSRF 双提交；Bearer 客户端与登录/注册引导路径豁免；模型输出经 `output_safety` 过滤后再返回 REST 或 SSE
 
 ## 角色卡规范
 
@@ -1384,6 +1435,6 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 | 嵌入模型 | all-MiniLM-L6-v2 | ~80MB，HuggingFace 下载 |
 | LLM 客户端 | OpenAI SDK | 兼容接口，支持多供应商 |
 | Speech 客户端 | OpenAI 兼容 HTTP API | STT、TTS 与可选 Custom Voices |
-| 前端 | React 18 + Vite + Tailwind CSS | Cookie 登录态、对话与管理界面 |
+| 前端 | React 18 + Vite + Tailwind CSS | Cookie 登录态 + CSRF 自动头、对话与管理界面 |
 | 包管理 | pip + pyproject.toml | 可选 dev 依赖组 |
 | 测试 | pytest + pytest-asyncio | 直接调用 handler、模型校验和数据库回归测试 |

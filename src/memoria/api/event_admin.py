@@ -209,7 +209,7 @@ class ScheduleRunResponse(BaseModel):
 class EventSimulationRequest(BaseModel):
     character_id: Optional[str] = None
     session_id: Optional[str] = None
-    player_message: str = ""
+    player_message: str = Field(default="", max_length=8000)
     npc_response: Optional[str] = None
     current_affinity: Optional[float] = None
     current_trust: Optional[float] = None

@@ -1404,6 +1404,11 @@ class MultiCharacterOrchestrator:
                 else self._load_all_relationships()
             ),
             "previous_responses": previous_responses,
+            "history": history,
+            "selection_seed": (
+                f"{self.session_id}:{trigger_message_id or target.get('message_id') or ''}:"
+                f"{len(previous_responses)}"
+            ),
         }
         speaker_id = initial_speaker_id if initial_speaker_id in self.character_ids else None
         if not speaker_id:

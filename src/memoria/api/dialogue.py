@@ -36,7 +36,7 @@ class SessionStartRequest(BaseModel):
     
 class DialogueTurnRequest(BaseModel):
     session_id: str
-    player_message: str
+    player_message: str = Field(..., max_length=8000)
     request_id: str | None = None
     
 

@@ -31,6 +31,7 @@ from memoria.api.user import (
     router as user_router,
 )
 from memoria.core.config import configs
+from memoria.core.csrf import validate_csrf
 from memoria.core.background_jobs import (
     BackgroundJobWorker,
     checkpoint_memory_lease_seconds,
@@ -79,17 +80,20 @@ def _validate_config():
 _request_counts: dict[str, list[float]] = {}
 _request_counts_lock = threading.Lock()
 _last_rate_limit_cleanup = 0.0
-_RATE_LIMIT_WINDOW = 60.0   # 60 seconds
-_RATE_LIMIT_MAX = 60        # max 60 requests per window
+# 进程内限流：多 worker/多实例各自独立；生产建议在网关层叠加分布式限流。
+_RATE_LIMIT_WINDOW = float(configs.rate_limit_window_seconds)
+_RATE_LIMIT_MAX = int(configs.rate_limit_max_requests)
 
 def _check_rate_limit(player_id: str) -> bool:
     """检查指定限流 key 是否允许请求。"""
     global _last_rate_limit_cleanup
 
     now = time.monotonic()
-    cutoff = now - _RATE_LIMIT_WINDOW
+    window = float(configs.rate_limit_window_seconds)
+    limit = int(configs.rate_limit_max_requests)
+    cutoff = now - window
     with _request_counts_lock:
-        if now - _last_rate_limit_cleanup >= _RATE_LIMIT_WINDOW:
+        if now - _last_rate_limit_cleanup >= window:
             for key, timestamps in list(_request_counts.items()):
                 timestamps[:] = [timestamp for timestamp in timestamps if timestamp > cutoff]
                 if not timestamps:
@@ -98,7 +102,7 @@ def _check_rate_limit(player_id: str) -> bool:
 
         timestamps = _request_counts.setdefault(player_id, [])
         timestamps[:] = [timestamp for timestamp in timestamps if timestamp > cutoff]
-        if len(timestamps) >= _RATE_LIMIT_MAX:
+        if len(timestamps) >= limit:
             return False
         timestamps.append(now)
         return True
@@ -275,6 +279,19 @@ async def set_log_level(level: str = "INFO", _current_user_id: str = Depends(req
     return {"log_level": level}
 
 
+
+# =========================
+# CSRF 防护（Cookie 会话双提交）
+# =========================
+@app.middleware("http")
+async def csrf_middleware(request: Request, call_next):
+    """Cookie 登录态写请求要求 X-CSRF-Token 与 CSRF Cookie 一致。"""
+    blocked = validate_csrf(request)
+    if blocked is not None:
+        return blocked
+    return await call_next(request)
+
+
 # =========================
 # 速率限制中间件
 # =========================
@@ -287,7 +304,7 @@ async def rate_limit_middleware(request: Request, call_next):
         if not _check_rate_limit(rate_limit_key):
             return JSONResponse(
                 status_code=429,
-                content={"error": "请求过于频繁，请稍后再试", "retry_after": _RATE_LIMIT_WINDOW}
+                content={"error": "请求过于频繁，请稍后再试", "retry_after": float(configs.rate_limit_window_seconds)}
             )
     return await call_next(request)
 

@@ -1150,6 +1150,44 @@ def test_player_pulse_avoids_decision_model_and_rotates_speakers(monkeypatch):
     assert orchestrator.last_pulse_state["waiting_for_player"] is True
 
 
+def test_player_fallback_prefers_character_with_matching_expertise():
+    from memoria.core.speaking_strategy import HybridStrategy
+
+    orchestrator = _orchestrator()
+    orchestrator.participants = [
+        {"character_id": "c1", "message_count": 30},
+        {"character_id": "c2", "message_count": 0},
+    ]
+    orchestrator.character_cards["c1"].identity = SimpleNamespace(
+        occupation="医生",
+        core_identity_summary="擅长急救和伤口处理",
+        social_status="",
+    )
+    orchestrator.character_cards["c2"].identity = SimpleNamespace(
+        occupation="战士",
+        core_identity_summary="擅长正面战斗",
+        social_status="",
+    )
+    orchestrator.speaking_strategy = HybridStrategy()
+
+    decision = orchestrator._fallback_dialogue_decision(
+        history=[
+            {
+                "message_id": 10,
+                "role": "user",
+                "content": "有人受伤了，谁来急救和包扎？",
+            }
+        ],
+        trigger_text="有人受伤了，谁来急救和包扎？",
+        trigger_message_id=10,
+        initial_speaker_id=None,
+        previous_responses=[],
+        force_speak=True,
+    )
+
+    assert decision.speaker_id == "c1"
+
+
 def test_dialogue_pulse_memory_secret_is_not_broadcast(monkeypatch):
     from memoria.core import memory_extractor, multi_character_memory
 

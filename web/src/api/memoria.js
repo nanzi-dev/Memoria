@@ -3,6 +3,31 @@
  */
 const API_BASE = '/api/v1';
 
+const CSRF_COOKIE_NAME = 'memoria-csrf';
+const CSRF_HEADER_NAME = 'X-CSRF-Token';
+
+function readCookie(name) {
+  if (typeof document === 'undefined') return '';
+  const encoded = encodeURIComponent(name);
+  const parts = document.cookie ? document.cookie.split('; ') : [];
+  for (const part of parts) {
+    if (part.startsWith(`${encoded}=`) || part.startsWith(`${name}=`)) {
+      return decodeURIComponent(part.slice(part.indexOf('=') + 1));
+    }
+  }
+  return '';
+}
+
+function withCsrfHeaders(headers = {}) {
+  const next = { ...headers };
+  const csrf = readCookie(CSRF_COOKIE_NAME);
+  if (csrf && !next[CSRF_HEADER_NAME]) {
+    next[CSRF_HEADER_NAME] = csrf;
+  }
+  return next;
+}
+
+
 function pathSegment(value) {
   return encodeURIComponent(String(value));
 }
@@ -40,7 +65,7 @@ async function throwResponseError(resp) {
 }
 
 async function request(url, options = {}) {
-  const headers = { ...options.headers };
+  const headers = withCsrfHeaders({ ...options.headers });
   if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
   }
@@ -83,11 +108,12 @@ function streamEventError(data) {
     || 'Stream request failed';
   const error = new Error(message);
   error.body = data;
+  if (data?.status_code != null) error.status = data.status_code;
   return error;
 }
 
 async function requestStream(url, options = {}, onEvent = undefined) {
-  const headers = { ...options.headers };
+  const headers = withCsrfHeaders({ ...options.headers });
   if (options.body && !(options.body instanceof FormData) && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json';
   }
@@ -151,7 +177,7 @@ async function requestBlob(url, options = {}) {
   const resp = await fetch(`${API_BASE}${url}`, {
     ...options,
     credentials: 'include',
-    headers: { ...options.headers },
+    headers: withCsrfHeaders({ ...options.headers }),
   });
   if (!resp.ok) await throwResponseError(resp);
   return resp.blob();

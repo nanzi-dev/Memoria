@@ -107,14 +107,30 @@ curl -X POST "https://api.deepseek.com/v1/chat/completions" \
 
 ### Q: 浏览器登录后仍然显示未登录
 
-仓库内 Web 前端只使用服务端写入的 `memoria-token` HttpOnly Cookie，不从响应 token 构造 Bearer 头，也不把 token 保存到 `localStorage`。排查时确认：
+仓库内 Web 前端只使用服务端写入的 Cookie 登录态：`memoria-token`（HttpOnly）与 `memoria-csrf`（可读），不从响应体构造 Bearer 头，也不把 token 保存到 `localStorage`。排查时确认：
 
-1. 前端请求使用 `credentials: include`，API 与 Web 的域名、端口和反向代理 Cookie 转发配置正确。
-2. 本地 HTTP 开发使用 `AUTH_COOKIE_SECURE=false`；HTTPS 部署必须设置为 `true`。
-3. 浏览器未阻止当前站点 Cookie，登录响应中存在 `Set-Cookie`。
+1. 前端请求使用 `credentials: 'include'`，API 与 Web 的域名、端口和反向代理 Cookie 转发配置正确。
+2. 本地 HTTP 开发使用 `AUTH_COOKIE_SECURE=false`；`MEMORIA_ENV=production` 会强制 Secure Cookie，HTTPS 部署必须可写 Secure Cookie。
+3. 浏览器未阻止当前站点 Cookie，登录响应中存在 `Set-Cookie`（应同时看到 `memoria-token` 与 `memoria-csrf`）。
 4. 旧版前端保存过的 `localStorage` token 会在启动时清理，不应再依赖该值恢复登录。
 
-脚本或第三方 API 客户端仍可使用 `Authorization: Bearer <token>` 或 Cookie；Cookie-only 约束只针对仓库内浏览器客户端。
+脚本或第三方 API 客户端仍可使用 `Authorization: Bearer <token>` 或 Cookie；Cookie-only 约束只针对仓库内浏览器客户端。Bearer 客户端不需要 CSRF 头。
+
+---
+
+### Q: 写接口返回 403「CSRF 校验失败」
+
+Cookie 会话对 `/api/*` 的写方法（非 GET/HEAD/OPTIONS）要求请求头 `X-CSRF-Token` 与 Cookie `memoria-csrf` 完全一致。
+
+排查：
+
+1. 登录后浏览器是否同时持有 `memoria-token` 与 `memoria-csrf`；可先请求 `GET /api/v1/user/me` 让服务端 `ensure` CSRF Cookie。
+2. 写请求是否带 `X-CSRF-Token`（值等于 `memoria-csrf`）。仓库前端 `web/src/api/memoria.js` 已自动附加；自建客户端需自行实现双提交。
+3. 请求是否 `credentials: 'include'`，且前后端同源或反向代理正确转发 Cookie。
+4. 是否误用了跨站页面发起写请求；`SameSite=Lax` 下跨站 POST 不会带 Cookie。
+5. 若使用 `Authorization: Bearer ...`，中间件会豁免 CSRF，此时 403 更可能来自权限或其他业务校验。
+
+登录与注册路径本身不校验 CSRF。
 
 ---
 

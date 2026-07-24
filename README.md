@@ -1,6 +1,6 @@
 # Memoria - 角色模拟系统
 
-一个基于大语言模型的沉浸式角色扮演对话系统，支持动态记忆管理、外部知识库 RAG、情感状态追踪、事件系统、中英双语会话和语音交互。
+一个基于大语言模型的沉浸式角色扮演对话系统，支持动态记忆管理、外部知识库 RAG、情感状态追踪、事件系统、语音交互。
 
 [![GitHub stars](https://img.shields.io/github/stars/nanzi-dev/Memoria?style=social)](https://github.com/nanzi-dev/Memoria)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -93,7 +93,7 @@
 - **事件模拟**：管理 API 可在不执行、不写入副作用的情况下评估事件条件并预览计划结果
 
 ### 沉浸感保护
-- **AI 身份检测**：自动识别并过滤可能破坏沉浸感的输出
+- **AI 身份检测**：`output_safety` 对完整回复与 SSE 增量做风险模式过滤，命中后替换为安全兜底句
 - **角色一致性**：严格约束模型输出，确保始终保持角色人设
 - **三层容错机制**：JSON 解析、修复重试、文本兜底
 
@@ -103,7 +103,7 @@
 - **JSON 强制输出**：支持结构化输出的模型可获得更好的稳定性
 
 ### Web 前端
-- **登录与用户资料**：支持用户注册、登录、资料编辑和头像设置；浏览器登录态只使用 HttpOnly Cookie，不把 token 持久化到 `localStorage`
+- **登录与用户资料**：支持用户注册、登录、资料编辑和头像设置；浏览器登录态使用 `memoria-token`（HttpOnly）与 `memoria-csrf`（可读）双 Cookie，写请求自动带 `X-CSRF-Token`，不把 token 持久化到 `localStorage`
 - **玩家角色卡**：独立编辑玩家名称、头像、身份、外观、性格、背景和目标，并从下一条单聊或群聊消息开始参与 Prompt 与关系图谱
 - **角色卡编辑器**：分步编辑角色身份、性格、语言风格、背景和交互规则
 - **会话体验**：支持单角色对话、会话恢复、多角色群聊、会话语言选择、录音转写和角色语音播放；好感度/信任度变化只在当前会话新回复上展示，历史加载消息不回放旧变化提示
@@ -159,9 +159,18 @@ Memoria/
 │   │   ├── group_dialogue_runtime.py         # 逻辑群聊自主/事件脉冲运行时
 │   │   ├── background_jobs.py                # 持久化 checkpoint 记忆任务工作器
 │   │   ├── domain_events.py                  # 领域事件账本与剧情状态投影
+│   │   ├── fact_claims.py / fact_claim_policy.py  # 事实声明与冲突策略
+│   │   ├── output_safety.py                # 完整回复与流式增量输出安全过滤
+│   │   ├── csrf.py                         # Cookie 会话双提交 CSRF
 │   │   └── speaking_strategy.py             # 发言策略系统
 │   ├── db/                     # 数据持久化层
-│   │   └── repository.py       # SQLite / PostgreSQL 数据库操作
+│   │   └── repository/         # SQLite / PostgreSQL 持久化包（facade + 领域子模块）
+│   │       ├── __init__.py     # 兼容 facade：`from memoria.db import repository`
+│   │       ├── _common.py      # 连接、schema、共享工具
+│   │       ├── users.py / characters.py / sessions_and_messages.py
+│   │       ├── events.py / relationships.py / multi_session.py
+│   │       ├── knowledge.py / state_and_memory.py / fact_claims.py
+│   │       ├── story.py / domain_events.py / world_clock.py / background_jobs.py
 │   └── main.py                 # 应用入口
 ├── tests/                      # pytest 测试（核心、API、安全、知识库、世界时钟等）
 ├── docs/                       # 项目文档
@@ -420,14 +429,16 @@ pip install -e ".[dev]"
 bash scripts/run_tests.sh
 
 PYTHONPATH=src pytest tests/test_core.py -v              # 核心模块
-PYTHONPATH=src pytest tests/test_repository.py -v        # 数据库层
+PYTHONPATH=src pytest tests/test_repository.py -v        # 数据库层（repository 包）
 PYTHONPATH=src pytest tests/test_events.py -v            # 事件系统
 PYTHONPATH=src pytest tests/test_memory_extractor.py -v  # 记忆/提示
 PYTHONPATH=src pytest tests/test_multi_dialogue_api.py -v # 多角色 API
+PYTHONPATH=src pytest tests/test_csrf.py -v              # Cookie CSRF 双提交
+PYTHONPATH=src pytest tests/test_output_safety.py -v     # 输出安全过滤
 PYTHONPATH=src pytest tests/test_system.py -v            # 系统端点与限流
 ```
 
-当前测试集合以 `pytest --collect-only -q` 为准，覆盖核心编排、持久化、事件、单聊/群聊 API、安全、知识库、语音、向量存储、世界时钟和系统端点。前端测试由 `npm test` 收集。
+当前测试集合以 `pytest --collect-only -q` 为准，覆盖核心编排、`db/repository` 包、事件、单聊/群聊 API、CSRF、输出安全、知识库、语音、向量存储、世界时钟和系统端点。前端测试由 `npm test` 收集。
 
 ---
 

@@ -827,3 +827,48 @@ async def test_read_upload_limited_reads_once_and_rejects_oversize():
 
     assert exc_info.value.status_code == 413
     assert upload.read_sizes == [6]
+
+
+def test_production_forces_auth_cookie_secure(monkeypatch):
+    from memoria.core import config as config_module
+
+    monkeypatch.setenv("MEMORIA_ENV", "production")
+    monkeypatch.delenv("AUTH_COOKIE_SECURE", raising=False)
+    config_module.get_config.cache_clear()
+    try:
+        cfg = config_module.get_config()
+        assert cfg.memoria_env == "production"
+        assert cfg.auth_cookie_secure is True
+    finally:
+        config_module.get_config.cache_clear()
+
+
+def test_production_disables_in_memory_token_fallback(monkeypatch):
+    from memoria.api import user
+    from memoria.core.config import configs
+
+    user._tokens.clear()
+    user._tokens["legacy-token"] = "usr_mem"
+    monkeypatch.setattr(user.repository, "get_user_id_for_auth_token", lambda token: None)
+    monkeypatch.setattr(configs, "memoria_env", "production")
+
+    assert user.get_current_user_id("legacy-token") is None
+
+    monkeypatch.setattr(configs, "memoria_env", "development")
+    assert user.get_current_user_id("legacy-token") == "usr_mem"
+    user._tokens.clear()
+
+
+def test_development_keeps_auth_cookie_secure_default_false(monkeypatch):
+    from memoria.core import config as config_module
+
+    monkeypatch.setenv("MEMORIA_ENV", "development")
+    monkeypatch.delenv("AUTH_COOKIE_SECURE", raising=False)
+    config_module.get_config.cache_clear()
+    try:
+        cfg = config_module.get_config()
+        assert cfg.memoria_env == "development"
+        assert cfg.auth_cookie_secure is False
+    finally:
+        config_module.get_config.cache_clear()
+

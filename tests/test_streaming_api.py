@@ -416,6 +416,53 @@ async def test_dialogue_stream_converts_worker_exception_to_error_event(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_dialogue_stream_maps_conflict_to_409_error_event(monkeypatch):
+    from memoria.api import dialogue
+    from memoria.db.repository import DialogueTurnConflictError
+
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_session",
+        lambda session_id: {
+            "session_id": session_id,
+            "character_id": "char-1",
+            "player_id": "player-1",
+            "status": "active",
+        },
+    )
+    monkeypatch.setattr(
+        dialogue.repository,
+        "is_character_card_active",
+        lambda owner_user_id, character_id: True,
+    )
+
+    def fake_turn(*args, **kwargs):
+        raise DialogueTurnConflictError("该会话已有消息正在处理中")
+
+    monkeypatch.setattr(dialogue.orchestrator, "run_dialogue_turn", fake_turn)
+
+    response = await dialogue.dialogue_turn_stream(
+        dialogue.DialogueTurnRequest(
+            session_id="session-1",
+            player_message="你好",
+            request_id="req-conflict",
+        ),
+        current_user_id="player-1",
+    )
+    events = _parse_sse(await _response_text(response))
+
+    assert [event_type for event_type, _ in events] == [
+        "turn_started",
+        "error",
+    ]
+    error = events[-1][1]
+    assert error["error_type"] == "DialogueTurnConflictError"
+    assert error["status_code"] == 409
+    assert error["detail"] == "该会话已有消息正在处理中"
+
+
+
+@pytest.mark.asyncio
 async def test_multi_dialogue_stream_returns_authoritative_group_shape(monkeypatch):
     from memoria.api import multi_dialogue
 

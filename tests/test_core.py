@@ -465,6 +465,99 @@ class TestSpeakingStrategies:
         speaker = strategy.select_speaker(participants, cards, context)
         assert speaker == "char_a"
 
+    def test_smart_strategy_prefers_topic_expertise_over_frequency(self):
+        from memoria.core.speaking_strategy import SmartSelectionStrategy
+
+        strategy = SmartSelectionStrategy()
+        participants = [
+            {"character_id": "doctor", "speak_frequency": 0.5, "message_count": 40},
+            {"character_id": "warrior", "speak_frequency": 1.5, "message_count": 0},
+        ]
+        cards = self._make_mock_cards()
+        cards["doctor"] = MagicMock()
+        cards["doctor"].meta = cards["char_a"].meta
+        cards["doctor"].identity = type(
+            "Identity",
+            (),
+            {
+                "occupation": "急诊医生",
+                "core_identity_summary": "擅长创伤急救和药物治疗",
+                "social_status": "",
+            },
+        )()
+        cards["warrior"] = MagicMock()
+        cards["warrior"].meta = cards["char_b"].meta
+        cards["warrior"].identity = type(
+            "Identity",
+            (),
+            {
+                "occupation": "战士",
+                "core_identity_summary": "负责正面战斗",
+                "social_status": "",
+            },
+        )()
+
+        selected = strategy.select_speaker(
+            participants,
+            cards,
+            {
+                "player_message": "有人受伤了，需要马上急救和包扎伤口",
+                "last_speaker_id": None,
+                "selection_seed": "medical-turn",
+            },
+        )
+
+        assert selected == "doctor"
+
+    def test_smart_strategy_balances_recent_messages_after_long_session(self):
+        from memoria.core.speaking_strategy import SmartSelectionStrategy
+
+        strategy = SmartSelectionStrategy()
+        participants = [
+            {"character_id": "char_a", "speak_frequency": 1.0, "message_count": 25},
+            {"character_id": "char_b", "speak_frequency": 1.0, "message_count": 25},
+        ]
+        cards = self._make_mock_cards()
+        history = [
+            {"role": "assistant", "character_id": "char_a", "content": str(index)}
+            for index in range(3)
+        ]
+
+        selected = strategy.select_speaker(
+            participants,
+            cards,
+            {
+                "player_message": "继续",
+                "last_speaker_id": None,
+                "history": history,
+                "selection_seed": "long-session",
+            },
+        )
+
+        assert selected == "char_b"
+
+    def test_smart_strategy_is_stable_for_same_turn(self):
+        from memoria.core.speaking_strategy import SmartSelectionStrategy
+
+        strategy = SmartSelectionStrategy()
+        participants = [
+            {"character_id": "char_a", "speak_frequency": 1.0, "message_count": 12},
+            {"character_id": "char_b", "speak_frequency": 1.0, "message_count": 12},
+        ]
+        cards = self._make_mock_cards()
+        context = {
+            "player_message": "继续讨论计划",
+            "last_speaker_id": None,
+            "selection_seed": "stable-turn",
+        }
+
+        selected = {
+            strategy.select_speaker(participants, cards, context)
+            for _ in range(20)
+        }
+
+        assert len(selected) == 1
+
     def test_smart_strategy_custom_relationship_type(self):
         """测试自定义关系类型通过亲密度影响发言选择"""
         from memoria.core.speaking_strategy import SmartSelectionStrategy

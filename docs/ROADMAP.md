@@ -11,7 +11,7 @@
 - [x] LLM 调用适配层（OpenAI 兼容接口，支持 DeepSeek/Kimi/Qwen）
 - [x] Prompt 组装器（角色设定 + 记忆上下文 + 状态注入）
 - [x] 单角色对话编排器 (Orchestrator)
-- [x] 沉浸感保护（AI 身份检测、角色一致性约束）
+- [x] 沉浸感保护（AI 身份检测、角色一致性约束；后续由 `output_safety` 统一完整/流式过滤）
 - [x] 三层容错机制（JSON 解析 → 修复重试 → 文本兜底）
 - [x] FastAPI RESTful API + 自动生成 OpenAPI 文档
 
@@ -54,7 +54,7 @@
 
 **目标：** 提升系统健壮性，为生产环境做准备。
 
-**当前进度：** 测试集合持续扩展；记忆去重、重试、对话轮次幂等、认证限流、显式管理员初始化、token 摘要存储、健康检查、懒加载、会话恢复、用户资源隔离、关系图谱修订过滤、知识文档恢复、PostgreSQL 兼容和 API/安全回归测试已上线。
+**当前进度：** 测试集合持续扩展；记忆去重、重试、对话轮次幂等、认证限流、Cookie CSRF 双提交、输出安全过滤、repository 包拆分、显式管理员初始化、token 摘要存储、健康检查、懒加载、会话恢复、用户资源隔离、关系图谱修订过滤、知识文档恢复、PostgreSQL 兼容和 API/安全回归测试已上线。
 
 - [x] 单元测试覆盖（覆盖 schema、repository、编排器、事件、API、安全、知识库、语音、向量存储、世界时钟、开发者体验和 PostgreSQL 兼容；实时数量以 `pytest --collect-only -q` 为准）
 - [x] 单聊/群聊轮次幂等（客户端 `request_id`、租约、完成结果和错误持久化，安全处理重复提交）
@@ -65,6 +65,9 @@
 - [x] LLM 调用重试机制（指数退避 3 次，base_delay=1s，max 7s）
 - [x] 请求速率限制（60s 窗口 60 次；认证用户优先、未登录回退 IP；线程安全、单调时钟和过期 key 清理；额度为单进程）
 - [x] 认证加固（普通注册不提权、一次性管理员初始化、登录 token SHA-256 摘要存储与旧明文自动迁移）
+- [x] Cookie CSRF 双提交（`memoria-csrf` + `X-CSRF-Token`；Bearer 与 login/register 豁免）
+- [x] 输出安全过滤加强（`output_safety` 完整回复 + 流式 `DialogueSafetyStream`）
+- [x] Repository 包拆分（`db/repository/` 领域子模块 + 兼容 facade / monkeypatch 同步）
 - [x] 可信代理限流链（Docker Nginx 覆盖客户端 X-Forwarded-For；后端直连公网时要求收紧 FORWARDED_ALLOW_IPS）
 - [x] 结构化日志（LOG_LEVEL 环境变量控制）+ 动态调整（POST /admin/log-level）
 - [x] 健康检查端点（`/health` 存活 + `/ready` 数据库就绪）
@@ -86,7 +89,7 @@
 - [x] 用户登录/注册与资料设置（含用户头像）
 - [x] 响应式设计（桌面端与移动端布局）
 - [x] 知识库管理工作台（汇总、搜索、筛选、列表/详情分栏、创建/绑定、文档上传或粘贴、状态轮询、失败重试、检索预览与旧请求取消）
-- [x] Cookie-only 浏览器登录态（HttpOnly Cookie，不持久化 Bearer token）
+- [x] Cookie-only 浏览器登录态（`memoria-token` HttpOnly + `memoria-csrf` 可读；写请求 CSRF；不持久化 Bearer token）
 - [x] 中英会话切换与语音交互（录音转写、自动发送、角色语音播放）
 - [x] 用户设置分区与世界时钟（账户/世界时间/语音，IANA 时区、暂停、同步、设置、推进和 `0/1/2/5/10` 倍速）
 
@@ -137,7 +140,7 @@
 
 ## 测试覆盖
 
-当前测试覆盖角色与事件模型、Repository、单聊/群聊编排、SSE、群聊脉冲、后台任务、关系图谱、知识库 API 与文档处理恢复、语音、安全边界、向量存储、世界时钟、系统端点、开发者体验和 PostgreSQL 兼容。实时数量以 `pytest --collect-only -q` 为准；前端测试由 `npm test` 收集。
+当前测试覆盖角色与事件模型、`db/repository` 包、单聊/群聊编排、SSE、群聊脉冲、后台任务、关系图谱、知识库 API 与文档处理恢复、语音、CSRF、输出安全、向量存储、世界时钟、系统端点、开发者体验和 PostgreSQL 兼容。实时数量以 `pytest --collect-only -q` 为准；前端测试由 `npm test` 收集。
 
 ## 版本规划
 

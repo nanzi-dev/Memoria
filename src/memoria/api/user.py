@@ -9,7 +9,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Header, Response, Cookie, Depends, Query
+from fastapi import APIRouter, HTTPException, UploadFile, File, Header, Request, Response, Cookie, Depends, Query
 from pydantic import BaseModel, Field, StrictInt
 from starlette.concurrency import run_in_threadpool
 
@@ -17,6 +17,11 @@ from memoria.api.avatar_fetcher import download_remote_image
 from memoria.api.avatar_image import avatar_data_url, normalize_avatar_image
 from memoria.api.upload_utils import read_upload_limited
 from memoria.core.config import configs
+from memoria.core.csrf import (
+    clear_csrf_cookie,
+    ensure_csrf_cookie,
+    set_csrf_cookie,
+)
 from memoria.core import world_clock
 from memoria.db import repository
 
@@ -150,6 +155,9 @@ def get_current_user_id(token: str) -> str | None:
             return uid
     except Exception:
         pass
+    # 进程内 dict 仅兼容旧测试/开发；生产必须走持久化 auth token。
+    if configs.memoria_env == "production":
+        return None
     return _tokens.get(token)
 
 
@@ -420,6 +428,7 @@ def register(req: RegisterRequest, response: Response):
     token = _gen_token()
     _store_auth_token(token, uid)
     _set_auth_cookie(response, token)
+    set_csrf_cookie(response)
     user = repository.get_user_by_id(uid)
     return AuthResponse(user=_build_user_response(user))
 
@@ -439,6 +448,7 @@ def login(req: LoginRequest, response: Response):
     token = _gen_token()
     _store_auth_token(token, user["user_id"])
     _set_auth_cookie(response, token)
+    set_csrf_cookie(response)
     return AuthResponse(user=_build_user_response(user))
 
 
@@ -458,6 +468,7 @@ def logout(
     except HTTPException:
         pass
     response.delete_cookie(AUTH_COOKIE_NAME, path="/")
+    clear_csrf_cookie(response)
     return OperationResponse(success=True, message="已退出登录")
 
 
@@ -466,11 +477,14 @@ def logout(
 # =========================
 @router.get("/user/me", response_model=UserResponse)
 def get_me(
+    request: Request,
+    response: Response,
     uid: str = Depends(require_current_user_id),
 ):
     user = repository.get_user_by_id(uid)
     if not user:
         raise HTTPException(404, "用户不存在")
+    ensure_csrf_cookie(request, response)
     return _build_user_response(user)
 
 

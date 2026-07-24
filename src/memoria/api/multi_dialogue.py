@@ -55,7 +55,7 @@ class StartMultiSessionResponse(BaseModel):
 class MultiDialogueTurnRequest(BaseModel):
     """多角色对话轮次请求"""
     session_id: str = Field(..., description="会话ID")
-    player_message: str = Field(..., description="玩家消息")
+    player_message: str = Field(..., description="玩家消息", max_length=8000)
     discussion_mode: bool = Field(
         True,
         description="是否启用群聊接话，普通群聊默认启用"

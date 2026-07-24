@@ -164,11 +164,12 @@ docs: 更新 API 文档中的事件系统说明
 
 - 源代码放在 `src/memoria/` 下
 - API 端点放在 `src/memoria/api/`
-- 核心逻辑放在 `src/memoria/core/`
-- 数据库操作放在 `src/memoria/db/`
+- 核心逻辑放在 `src/memoria/core/`（含 `csrf.py`、`output_safety.py` 等横切模块）
+- 数据库操作放在 `src/memoria/db/repository/` 包内；对外仍使用 `from memoria.db import repository`
 - 角色卡 JSON 放在 `src/memoria/characters/`
 - 测试放在 `tests/`
 - 文档放在 `docs/`
+- 浏览器写请求需 CSRF 双提交；改认证/Cookie 行为时同步更新 `docs/API.md` 与 FAQ
 
 ## 需要帮助？
 

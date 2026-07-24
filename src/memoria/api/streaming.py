@@ -13,6 +13,8 @@ from typing import Any
 
 from fastapi.responses import StreamingResponse
 
+from memoria.db.repository import DialogueTurnConflictError
+
 
 EventSink = Callable[[str, dict[str, Any]], None]
 SyncWorker = Callable[[EventSink], Any]
@@ -126,6 +128,18 @@ def create_sse_response(
                 sink("turn_completed", {"response": result})
             except StreamDisconnected:
                 return
+            except DialogueTurnConflictError as exc:
+                # Expected concurrency conflict — keep real detail + HTTP 409 semantics.
+                logger.info("Dialogue stream conflict: %s", exc)
+                if not disconnected.is_set():
+                    sink(
+                        "error",
+                        {
+                            "detail": str(exc) or "对话请求冲突",
+                            "error_type": type(exc).__name__,
+                            "status_code": 409,
+                        },
+                    )
             except Exception as exc:
                 logger.exception("Dialogue stream worker failed")
                 if not disconnected.is_set():

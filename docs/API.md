@@ -4,7 +4,16 @@
 
 访问 http://127.0.0.1:8001/docs 可查看 Swagger 交互式文档，http://127.0.0.1:8001/redoc 可查看 ReDoc 文档。
 
-除用户注册/登录外，业务接口通常需要登录态。API 客户端可使用 `Authorization: Bearer <token>` 或登录后写入的 `memoria-token` HttpOnly Cookie。仓库内 Web 前端只使用 HttpOnly Cookie，并在启动时清理旧版 `localStorage` token。带 `player_id` 的接口会校验 `player_id` 必须等于当前登录用户 ID。角色卡、事件定义和角色关系都按当前登录用户隔离；不同用户可以拥有相同的 `character_id` / `event_id`。
+除用户注册/登录外，业务接口通常需要登录态。API 客户端可使用 `Authorization: Bearer <token>` 或登录后写入的 Cookie 会话。仓库内 Web 前端只使用 Cookie 登录态，并在启动时清理旧版 `localStorage` token。
+
+**Cookie 会话与 CSRF：** 注册/登录成功后响应会 `Set-Cookie`：
+
+- `memoria-token`：HttpOnly 会话凭证
+- `memoria-csrf`：前端可读的 CSRF 令牌（与会话同寿）
+
+携带 `memoria-token` 的 Cookie 会话对 `/api/*` 写方法必须附带请求头 `X-CSRF-Token: <与 memoria-csrf 相同的值>`，否则返回 `403`，`{"detail":"CSRF 校验失败"}`。`Authorization: Bearer ...` 客户端、登录/注册接口，以及 `GET`/`HEAD`/`OPTIONS` 不校验 CSRF。仓库前端 `web/src/api/memoria.js` 在 `credentials: 'include'` 下自动附加该头。
+
+带 `player_id` 的接口会校验 `player_id` 必须等于当前登录用户 ID。角色卡、事件定义和角色关系都按当前登录用户隔离；不同用户可以拥有相同的 `character_id` / `event_id`。
 
 ---
   - [对话系统 API](#对话系统-api)
@@ -1678,7 +1687,7 @@ DELETE /api/v1/admin/characters/{character_id}/voice
 
 ## 用户 API
 
-用户接口用于 Web 前端登录态、账户资料、玩家角色卡、语音偏好、世界时钟和头像管理。登录成功后服务端会写入 `memoria-token` HttpOnly Cookie，响应体不返回原始 token；通用 API 客户端支持 Bearer、查询参数或 Cookie，仓库内 Web 前端只使用 Cookie。
+用户接口用于 Web 前端登录态、账户资料、玩家角色卡、语音偏好、世界时钟和头像管理。登录/注册成功后服务端写入 `memoria-token`（HttpOnly）与 `memoria-csrf`（可读）两枚 Cookie，响应体不返回原始 token。通用 API 客户端支持 Bearer 或 Cookie；仓库内 Web 前端只使用 Cookie，并在写请求自动带 `X-CSRF-Token`。
 
 ### 1. 注册
 ```http
@@ -1707,7 +1716,7 @@ Content-Type: application/json
 
 | 场景 | 状态码 | 说明 |
 |------|--------|------|
-| 普通注册或首次有效管理员初始化 | 200 | 写入登录 Cookie 并返回用户资料 |
+| 普通注册或首次有效管理员初始化 | 200 | 写入 `memoria-token` + `memoria-csrf` 并返回用户资料 |
 | 初始化凭据无效或服务未配置 | 403 | 不访问用户创建流程 |
 | 管理员名额已占用或已有管理员 | 409 | 不创建新用户 |
 | 用户名已存在 | 409 | 不覆盖现有用户 |
@@ -1725,7 +1734,29 @@ Content-Type: application/json
 }
 ```
 
-登录态通过响应中的 `memoria-token` HttpOnly Cookie 建立，响应体不返回原始 token。Cookie 默认有效 30 天，使用 `HttpOnly`、`SameSite=Lax` 和根路径；HTTPS 部署必须设置 `AUTH_COOKIE_SECURE=true`。
+登录态通过响应中的 Cookie 建立，响应体不返回原始 token。默认有效 30 天，`SameSite=Lax`、路径 `/`：
+
+| Cookie | HttpOnly | 说明 |
+|--------|----------|------|
+| `memoria-token` | 是 | 会话认证 |
+| `memoria-csrf` | 否 | 双提交 CSRF；写请求头 `X-CSRF-Token` 须与此值一致 |
+
+`Secure` 标志由 `AUTH_COOKIE_SECURE` 控制；`MEMORIA_ENV=production` 时会强制 `AUTH_COOKIE_SECURE=true`。本地 HTTP 开发保持 Secure 关闭；HTTPS 部署必须开启。
+
+**CSRF 写请求示例（Cookie 会话）：**
+
+```http
+POST /api/v1/user/profile
+Cookie: memoria-token=...; memoria-csrf=abc123
+X-CSRF-Token: abc123
+Content-Type: application/json
+```
+
+缺少或与 Cookie 不一致时返回：
+
+```json
+{"detail": "CSRF 校验失败"}
+```
 
 ### 2. 登录
 ```http
@@ -1738,19 +1769,24 @@ Content-Type: application/json
 }
 ```
 
-响应结构同注册。
+响应结构同注册；同样写入 `memoria-token` 与 `memoria-csrf`。登录/注册路径本身不校验 CSRF。
 
 ### 3. 退出登录
 ```http
 POST /api/v1/user/logout
-Authorization: Bearer token-value
+Cookie: memoria-token=...; memoria-csrf=...
+X-CSRF-Token: <memoria-csrf 值>
 ```
+
+也可使用 `Authorization: Bearer <token>`（Bearer 路径不要求 CSRF）。成功后清除 `memoria-token` 与 `memoria-csrf`。
 
 ### 4. 获取当前用户
 ```http
 GET /api/v1/user/me
-Authorization: Bearer token-value
+Cookie: memoria-token=...
 ```
+
+若尚无 CSRF Cookie，响应会 `ensure` 签发 `memoria-csrf`，便于后续写请求。也可用 Bearer 认证。
 
 ### 5. 更新资料
 ```http
@@ -2026,7 +2062,7 @@ Authorization: Bearer token-value
 
 ### 4. 速率限制（Rate Limiting）
 
-所有 `/api/*` 写操作（非 GET/HEAD/OPTIONS）均受速率限制保护。服务端优先使用认证 token 解析出的用户 ID 作为限流 key，未登录或 token 无效时退回客户端 IP；不会信任客户端传入的 `X-Player-ID`。反向代理部署必须配置 Uvicorn 的可信代理地址，使 `request.client.host` 来自受信任的转发链。计数器使用单调时钟和线程锁，并周期清理过期 key。
+所有 `/api/*` 写操作（非 GET/HEAD/OPTIONS）均受速率限制保护；Cookie 会话写请求还会先经过 CSRF 中间件（见上文「Cookie 会话与 CSRF」）。服务端优先使用认证 token 解析出的用户 ID 作为限流 key，未登录或 token 无效时退回客户端 IP；不会信任客户端传入的 `X-Player-ID`。反向代理部署必须配置 Uvicorn 的可信代理地址，使 `request.client.host` 来自受信任的转发链。计数器使用单调时钟和线程锁，并周期清理过期 key。
 
 | 项目       | 值                    |
 |------------|-----------------------|

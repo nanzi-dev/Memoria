@@ -173,7 +173,8 @@ class TestRateLimiting:
     def test_rate_limit_prunes_stale_keys(self, monkeypatch):
         from memoria import main
 
-        monkeypatch.setattr(main, "_RATE_LIMIT_WINDOW", 10.0)
+        # Implementation reads live config, not the module-level snapshot constants.
+        monkeypatch.setattr(main.configs, "rate_limit_window_seconds", 10.0)
         monkeypatch.setattr(main, "_last_rate_limit_cleanup", 0.0)
         monkeypatch.setattr(main.time, "monotonic", iter([1.0, 12.0]).__next__)
         with main._request_counts_lock:

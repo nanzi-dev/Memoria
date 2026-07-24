@@ -314,7 +314,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     user_id         TEXT PRIMARY KEY,      -- usr_xxxxxxxx 格式
     username        TEXT NOT NULL UNIQUE,
-    password_hash   TEXT NOT NULL,         -- sha256 hash
+    password_hash   TEXT NOT NULL,         -- pbkdf2_sha256 (legacy sha256 still accepted on verify)
     is_admin        INTEGER NOT NULL DEFAULT 0,
     gender          TEXT DEFAULT 'unknown', -- male/female/unknown
     avatar_url      TEXT,                  -- base64 data URL

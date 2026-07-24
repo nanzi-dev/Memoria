@@ -6,7 +6,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Configs(BaseSettings):
@@ -69,10 +69,15 @@ class Configs(BaseSettings):
     speech_cache_max_bytes: int = Field(default=512 * 1024 * 1024, ge=0)
     
     # 应用配置
+    # development | production。production 下强制 Secure Cookie，并关闭进程内 token 回退。
+    memoria_env: Literal["development", "production"] = "development"
     database_path: str = "./data/sqlite_db/memoria.db"
     database_url: str = ""
     auth_cookie_secure: bool = False
     admin_bootstrap_token: SecretStr = ""
+    # 进程内写操作限流（多进程/多实例下各自独立，生产建议前置网关限流）
+    rate_limit_window_seconds: float = Field(default=60.0, gt=0, le=3600)
+    rate_limit_max_requests: int = Field(default=60, ge=1, le=10000)
     short_term_memory_turns: int = Field(default = 8, ge = 1, le = 50)
     long_term_memory_interval_turns: int = Field(default = 5, ge = 1, le = 50)
     max_output_tokens: int = Field(default = 400, ge = 1, le = 4096)
@@ -99,6 +104,13 @@ class Configs(BaseSettings):
     knowledge_chunk_overlap_tokens: int = Field(default=36, ge=0, le=80)
     knowledge_chunk_max_tokens: int = Field(default=240, ge=128, le=256)
     
+    @model_validator(mode="after")
+    def _apply_production_security_defaults(self) -> "Configs":
+        """生产环境默认启用 Secure Cookie，避免明文 HTTP 下误配。"""
+        if self.memoria_env == "production" and not self.auth_cookie_secure:
+            object.__setattr__(self, "auth_cookie_secure", True)
+        return self
+
     @property
     def light_model(self) -> str:
         """

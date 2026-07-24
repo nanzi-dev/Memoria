@@ -23,6 +23,11 @@ class TestDialogueAPI:
         r = DialogueTurnRequest(session_id="s1",player_message="Hi")
         assert r.player_message == "Hi"
 
+    def test_turn_request_rejects_overlong_message(self):
+        from memoria.api.dialogue import DialogueTurnRequest
+        with pytest.raises(ValidationError):
+            DialogueTurnRequest(session_id="s1", player_message="x" * 8001)
+
     def test_end_session_request(self):
         from memoria.api.dialogue import SessionEndRequest
         r = SessionEndRequest(session_id="s1")
@@ -126,6 +131,11 @@ class TestMultiDialogueAPI:
         from memoria.api.multi_dialogue import MultiDialogueTurnRequest as MultiTurnRequest
         r = MultiTurnRequest(session_id="s",player_message="Hi")
         assert r.player_message == "Hi"
+
+    def test_multi_turn_request_rejects_overlong_message(self):
+        from memoria.api.multi_dialogue import MultiDialogueTurnRequest as MultiTurnRequest
+        with pytest.raises(ValidationError):
+            MultiTurnRequest(session_id="s", player_message="x" * 8001)
 
     def test_session_info_preserves_group_thread_fields(self):
         from memoria.api.dialogue import SessionInfo
