@@ -62,6 +62,19 @@ def test_retention_half_life_and_curve_multipliers():
     ) == 0.9
 
 
+def test_memoria_memory_curve_environment_flag(monkeypatch):
+    from memoria.core.config import Configs
+
+    monkeypatch.setenv("MEMORIA_MEMORY_CURVE_ENABLED", "false")
+    monkeypatch.setenv("MEMORY_CURVE_ENABLED", "true")
+
+    assert Configs(_env_file=None).memory_curve_enabled is False
+    assert Configs(
+        _env_file=None,
+        memory_curve_enabled=False,
+    ).memory_curve_enabled is False
+
+
 @pytest.mark.parametrize(
     ("value", "clarity"),
     [
