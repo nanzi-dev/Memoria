@@ -313,3 +313,26 @@ def list_memory_curve_states(
             tuple(params),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def list_memory_curve_states_for_memory(
+    owner_user_id: str,
+    memory_type: str,
+    memory_id: str,
+) -> list[dict]:
+    """Return every witness state for one tenant-scoped memory."""
+    owner_user_id = str(owner_user_id or "").strip()
+    memory_type = str(memory_type or "").strip()
+    memory_id = str(memory_id or "").strip()
+    if not owner_user_id or not memory_type or not memory_id:
+        raise ValueError("memory curve lookup fields must not be blank")
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM memory_curve_state
+            WHERE owner_user_id = ? AND memory_type = ? AND memory_id = ?
+            ORDER BY character_id
+            """,
+            (owner_user_id, memory_type, memory_id),
+        ).fetchall()
+    return [dict(row) for row in rows]

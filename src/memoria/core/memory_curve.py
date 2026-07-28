@@ -146,13 +146,25 @@ def candidate_source(record: dict, memory_type: str) -> str:
 
 def candidate_importance(record: dict, memory_type: str) -> float:
     provenance = record.get("provenance") or {}
-    raw = record.get("importance", provenance.get("importance", 0.5))
-    legacy_integer_scale = (
-        memory_type == "player_fact"
-        and "claim_id" not in record
-        and "importance" in record
-    )
-    return normalized_importance(raw, integer_scale=legacy_integer_scale)
+    if "importance" in record:
+        return normalized_importance(
+            record["importance"],
+            integer_scale=(memory_type == "player_fact" and "claim_id" not in record),
+        )
+    candidates = []
+    if "importance" in provenance:
+        candidates.append(normalized_importance(provenance["importance"]))
+    for evidence in provenance.get("evidence") or []:
+        if not isinstance(evidence, dict):
+            continue
+        details = evidence.get("details") or {}
+        if not isinstance(details, dict) or "importance" not in details:
+            continue
+        candidates.append(normalized_importance(
+            details["importance"],
+            integer_scale=(evidence.get("source_kind") == "legacy"),
+        ))
+    return max(candidates, default=0.5)
 
 
 def effective_elapsed_seconds(state: dict, world_now: datetime | str) -> float:

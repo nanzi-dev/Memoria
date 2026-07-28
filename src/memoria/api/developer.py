@@ -12,8 +12,10 @@ from memoria.api.user import require_admin_user_id, require_current_user_id
 from memoria.core import (
     character_loader,
     memory_curve,
+    multi_character_memory,
     performance,
     quality_scorer,
+    relationship_context,
     replay,
     world_clock,
 )
@@ -61,6 +63,142 @@ def _memory_participants(record: dict) -> set[str]:
         except (TypeError, ValueError):
             raw = []
     return {str(value) for value in (raw or []) if str(value).strip()}
+
+
+def _diagnostic_character_aliases(
+    character_id: str,
+    current_user_id: str,
+) -> list[str]:
+    aliases = [character_id]
+    if repository.is_player_node_id(character_id):
+        return relationship_context.normalize_aliases([*aliases, "玩家"])
+    try:
+        card = character_loader.load_character_card(character_id, current_user_id)
+    except (FileNotFoundError, ValueError):
+        return aliases
+    meta = getattr(card, "meta", None)
+    aliases.extend([
+        getattr(meta, "name", ""),
+        getattr(meta, "display_name", ""),
+    ])
+    return relationship_context.normalize_aliases(aliases)
+
+
+def _diagnostic_relationship_exclusions(
+    *,
+    current_user_id: str,
+    character_id: str,
+    fact_records: list[dict],
+    impression_records: list[dict],
+    group_records: list[dict],
+) -> set[tuple[str, str]]:
+    relationship_records = repository.list_character_relationships(
+        current_user_id,
+        character_id,
+    )
+    relationships = relationship_context.relationship_map_from_records(
+        relationship_records
+    )
+    related_ids = set()
+    for record in [
+        *relationship_records,
+        *repository.list_character_relationship_revisions(
+            current_user_id,
+            character_id,
+        ),
+    ]:
+        character_a = record.get("character_id_a")
+        character_b = record.get("character_id_b")
+        other_id = character_b if character_a == character_id else character_a
+        if other_id and other_id != character_id:
+            related_ids.add(str(other_id))
+    related_ids.update(
+        str(record["target_character_id"])
+        for record in impression_records
+        if record.get("target_character_id")
+    )
+    for record in group_records:
+        related_ids.update(_memory_participants(record) - {character_id})
+
+    aliases_by_character = {
+        current_id: _diagnostic_character_aliases(
+            current_id,
+            current_user_id,
+        )
+        for current_id in [character_id, *sorted(related_ids)]
+    }
+    all_aliases = relationship_context.normalize_aliases([
+        alias
+        for aliases in aliases_by_character.values()
+        for alias in aliases
+    ])
+    cutoff = multi_character_memory.get_relationship_history_cutoff(
+        current_user_id,
+        [character_id, *sorted(related_ids)],
+        relationships,
+    )
+
+    retained_facts = relationship_context.filter_stale_relationship_memory_records(
+        fact_records,
+        cutoff,
+        participant_aliases=all_aliases,
+        text_key="fact_text",
+        relationship_context=False,
+    )
+    retained_groups = relationship_context.filter_stale_relationship_memory_records(
+        group_records,
+        cutoff,
+        participant_aliases=all_aliases,
+        text_key="memory_text",
+        relationship_context=True,
+    )
+    retained_impressions = []
+    for record in impression_records:
+        target_id = str(record.get("target_character_id") or "")
+        pair_aliases = relationship_context.normalize_aliases([
+            *aliases_by_character.get(character_id, [character_id]),
+            *aliases_by_character.get(target_id, [target_id]),
+        ])
+        pair_cutoff = multi_character_memory.get_relationship_history_cutoff(
+            current_user_id,
+            [character_id, target_id],
+            relationships,
+        )
+        relationship = relationship_context.relationship_between(
+            relationships,
+            character_id,
+            target_id,
+        )
+        retained_impressions.extend(
+            relationship_context.filter_stale_relationship_memory_records(
+                [record],
+                pair_cutoff,
+                participant_aliases=pair_aliases,
+                text_key="memory_text",
+                relationship_context=True,
+                relationship=relationship,
+            )
+        )
+
+    retained_keys = {
+        (memory_type, memory_curve.memory_identity(record, memory_type))
+        for records, memory_type in (
+            (retained_facts, "player_fact"),
+            (retained_impressions, "character_impression"),
+            (retained_groups, "group_experience"),
+        )
+        for record in records
+    }
+    all_keys = {
+        (memory_type, memory_curve.memory_identity(record, memory_type))
+        for records, memory_type in (
+            (fact_records, "player_fact"),
+            (impression_records, "character_impression"),
+            (group_records, "group_experience"),
+        )
+        for record in records
+    }
+    return all_keys - retained_keys
 
 
 @router.get("/replay/{session_id}")
@@ -172,6 +310,14 @@ def memory_curve_diagnostics(
             limit=200,
         )
 
+    relationship_exclusions = _diagnostic_relationship_exclusions(
+        current_user_id=current_user_id,
+        character_id=character_id,
+        fact_records=fact_records,
+        impression_records=impression_records,
+        group_records=group_records,
+    )
+
     world_now = _diagnostic_world_now(current_user_id)
     effective_recall_key = recall_key or (
         f"diagnostic:{session_id or character_id}"
@@ -191,6 +337,11 @@ def memory_curve_diagnostics(
             recall_key=effective_recall_key,
             text_key=text_key,
         ))
+    for item in items:
+        identity = (item["memory_type"], item["memory_id"])
+        if identity in relationship_exclusions:
+            item["sampled"] = False
+            item["exclusion_reason"] = "stale_relationship_history"
     if not include_forgotten:
         items = [item for item in items if item["clarity"] != "forgotten"]
     return {

@@ -1182,15 +1182,18 @@ class MultiCharacterOrchestrator:
                 session_id=self.session_id,
                 recent_messages=[
                     {
+                        "message_id": response.get("message_id"),
                         "role": "assistant",
                         "content": response.get("dialogue", ""),
                         "character_id": response.get("character_id"),
                         "character_name": response.get("character_name"),
+                        "world_created_at": response.get("world_created_at"),
                     }
                     for response in responses
                 ],
                 character_ids=self.character_ids,
                 player_id=self.player_id,
+                pulse_id=request_id,
             )
         return responses
 
@@ -1847,6 +1850,15 @@ class MultiCharacterOrchestrator:
                         "display_name": other_card.meta.display_name,
                         "occupation": other_card.identity.occupation
                     })
+
+        opening_memory_context = {}
+        if configs.memory_curve_enabled:
+            opening_memory_context["past_summaries"] = self._load_memory_context(
+                character_id,
+                character_relationships=character_relationships,
+                world_now=clock_snapshot.world_now.isoformat(),
+                recall_key=f"opening:{self.session_id}",
+            )
         
         # 使用 prompt_builder 构建系统提示
         system_prompt = _build_multi_character_system_prompt(
@@ -1857,14 +1869,9 @@ class MultiCharacterOrchestrator:
             player_character=self.player_character,
             other_characters=other_characters,
             character_relationships=character_relationships,
-            past_summaries=self._load_memory_context(
-                character_id,
-                character_relationships=character_relationships,
-                world_now=clock_snapshot.world_now.isoformat(),
-                recall_key=f"opening:{self.session_id}",
-            ),
             is_opening=True,
             time_context=time_context,
+            **opening_memory_context,
         )
         
         # 生成开场白

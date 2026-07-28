@@ -235,10 +235,12 @@ def run_group_dialogue_pulse(
                     session_id=carrier["session_id"],
                     recent_messages=[
                         {
+                            "message_id": response.get("message_id"),
                             "role": "assistant",
                             "content": response.get("dialogue", ""),
                             "character_id": response.get("character_id"),
                             "character_name": response.get("character_name"),
+                            "world_created_at": response.get("world_created_at"),
                         }
                         for response in responses
                     ],

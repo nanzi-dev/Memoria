@@ -381,24 +381,32 @@ def process_dialogue_pulse_memories(
     recent_messages: list[dict],
     character_ids: list[str],
     player_id: str,
+    pulse_id: str | None = None,
 ) -> dict:
     """提取一次并按在场/知情范围持久化整个对话脉冲的长期记忆。"""
     present_ids = list(dict.fromkeys(cid for cid in character_ids if cid))
     extracted = extract_dialogue_pulse_memories(recent_messages, present_ids)
     generated_scope = resolve_generated_fact_scope(session_id)
-    pulse_material = "\0".join(
-        str(
-            message.get("message_id")
-            or message.get("id")
-            or f"{message.get('role')}:{message.get('content')}"
+    clean_pulse_id = str(pulse_id or "").strip()
+    if clean_pulse_id:
+        evidence_id = f"pulse:{session_id}:{clean_pulse_id}"
+    else:
+        pulse_material = "\0".join(
+            str(
+                message.get("message_id")
+                or message.get("id")
+                or (
+                    f"{message.get('role')}:{message.get('content')}:"
+                    f"{message.get('world_created_at') or ''}"
+                )
+            )
+            for message in recent_messages
         )
-        for message in recent_messages
-    )
-    pulse_id = (
-        f"pulse:{session_id}:"
-        + hashlib.sha256(pulse_material.encode("utf-8")).hexdigest()
-    )
-    source_ids = [f"session:{session_id}", pulse_id]
+        evidence_id = (
+            f"pulse:{session_id}:"
+            + hashlib.sha256(pulse_material.encode("utf-8")).hexdigest()
+        )
+    source_ids = [f"session:{session_id}", evidence_id]
     world_occurred_at = next(
         (
             str(message.get("world_created_at"))
@@ -426,7 +434,7 @@ def process_dialogue_pulse_memories(
                         "session_id": session_id,
                     },
                     witness_character_ids=present_ids,
-                    evidence_id=pulse_id,
+                    evidence_id=evidence_id,
                     world_occurred_at=world_occurred_at,
                 )
 
@@ -443,7 +451,7 @@ def process_dialogue_pulse_memories(
                     "allowed_character_ids": row["allowed_character_ids"],
                 },
                 witness_character_ids=row["allowed_character_ids"],
-                evidence_id=pulse_id,
+                evidence_id=evidence_id,
                 world_occurred_at=world_occurred_at,
             )
 
