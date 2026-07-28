@@ -1249,6 +1249,9 @@ def test_group_dialogue_saves_one_logical_thread_player_memory(monkeypatch):
             "scope_type": "group_thread",
             "scope_id": "thread-1",
             "session_id": "group-session",
+            "witness_character_ids": ["char-a", "char-b"],
+            "evidence_id": "group-checkpoint:group-session:5",
+            "world_occurred_at": "2026-07-12T12:00:00+08:00",
             "history": [
                 {"role": "assistant", "content": "上次聊到饮料。"},
                 {"role": "user", "content": "我喜欢茉莉花茶"},
@@ -1351,6 +1354,11 @@ def test_group_dialogue_single_response_saves_one_logical_thread_claim(monkeypat
             "scope_type": "group_thread",
             "scope_id": "thread-1",
             "session_id": "group-session",
+            "witness_character_ids": [
+                "speaker", "listener-a", "listener-b"
+            ],
+            "evidence_id": "group-checkpoint:group-session:5",
+            "world_occurred_at": "2026-07-12T12:00:00+08:00",
             "history": [
                 {"role": "assistant", "content": "上次约好周末见。"},
                 {"role": "user", "content": "我周末会带蛋糕来"},

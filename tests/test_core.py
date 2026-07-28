@@ -1434,19 +1434,20 @@ class TestMultiCharacterMemory:
         )
 
         assert legacy_facts == []
-        assert saved_claims == [
-            {
-                "owner_user_id": "user_auto_shared",
-                "scope_type": "character",
-                "scope_id": "npc_a",
-                "fact_text": "我记得这次行动开始了",
-                "source_ids": ["session:auto_shared_session"],
-                "provenance": {
-                    "memory_kind": "character_memory",
-                    "session_id": "auto_shared_session",
-                },
-            }
-        ]
+        assert len(saved_claims) == 1
+        claim = saved_claims[0]
+        assert claim["owner_user_id"] == "user_auto_shared"
+        assert claim["scope_type"] == "character"
+        assert claim["scope_id"] == "npc_a"
+        assert claim["fact_text"] == "我记得这次行动开始了"
+        assert claim["source_ids"][0] == "session:auto_shared_session"
+        assert claim["source_ids"][1] == claim["evidence_id"]
+        assert claim["witness_character_ids"] == ["npc_a"]
+        assert claim["world_occurred_at"]
+        assert claim["provenance"] == {
+            "memory_kind": "character_memory",
+            "session_id": "auto_shared_session",
+        }
         assert processed
         assert processed[0]["session_id"] == "auto_shared_session"
         assert processed[0]["character_ids"] == ["npc_a", "npc_b"]
