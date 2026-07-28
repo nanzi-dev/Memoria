@@ -2038,6 +2038,54 @@ Content-Type: application/json
 
 也可以直接传入 `messages`。默认使用本地启发式评分，返回角色一致性、趣味性和综合分；`use_llm: true` 时会调用轻量模型评估，失败时自动回退到启发式评分。
 
+### 4. 记忆曲线诊断
+
+```http
+GET /api/v1/developer/memory-curve?character_id=npc_luo_xiaohei&session_id=550e8400-e29b-41d4-a716-446655440000&recall_key=turn-42&include_forgotten=true
+Authorization: Bearer token-value
+```
+
+查询参数：
+
+| 参数 | 必填 | 默认值 | 说明 |
+|---|---|---|---|
+| `character_id` | 是 | — | 要检查的当前用户角色 ID |
+| `session_id` | 否 | `null` | 限定会话；会校验会话属于当前用户且角色属于该会话 |
+| `recall_key` | 否 | `diagnostic:{session_id 或 character_id}` | 控制弱记忆确定性采样的键 |
+| `include_forgotten` | 否 | `false` | 是否包含保留度低于 `0.15` 的 `forgotten` 项 |
+
+```json
+{
+  "character_id": "npc_luo_xiaohei",
+  "session_id": "550e8400-e29b-41d4-a716-446655440000",
+  "recall_key": "turn-42",
+  "world_now": "2026-07-28T12:00:00+00:00",
+  "items": [
+    {
+      "memory_id": "claim_01",
+      "memory_type": "player_fact",
+      "text": "玩家喜欢喝茉莉花茶",
+      "source_kind": "player_message",
+      "importance": 0.7,
+      "retention": 0.58,
+      "clarity": "fuzzy",
+      "stability_days": 31.08,
+      "elapsed_decay_seconds": 1123200.0,
+      "reinforcement_count": 1,
+      "recall_probability": 0.58,
+      "sample_value": 0.31,
+      "sampled": true,
+      "exclusion_reason": null,
+      "memory_curve_rank": 0.82
+    }
+  ]
+}
+```
+
+响应会同时检查 `player_fact`、`character_impression` 和 `group_experience`。`exclusion_reason` 可能为 `deterministic_sample_miss`、`retention_below_threshold` 或 `stale_relationship_history`；最后一种表示该关系记忆早于当前关系图谱修订时间。`include_forgotten=false` 只隐藏 `forgotten` 项，不隐藏采样未命中的 fuzzy/fragment 项。
+
+该接口严格只读：不初始化存量曲线、不推进世界时间水位、不累计衰减，也不强化记忆。接口仍按当前用户校验角色卡、会话和参与者归属。曲线公式、阈值与配置见 [世界时间记忆曲线](MEMORY_CURVE.md)。
+
 ---
 
 ## 系统管理 API

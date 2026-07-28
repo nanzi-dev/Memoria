@@ -387,6 +387,36 @@ store.add_memory(fact_id, "npc_luo_xiaohei", "player_001", "玩家喜欢吃鱼",
 
 ---
 
+### Q: 为什么角色对一段记忆变得模糊，或偶尔想不起来？
+
+世界时间记忆曲线默认开启。玩家事实、角色印象和群体经历会随向前经过的世界时间降低保留度；世界时钟暂停时不衰减，回拨也不会恢复已经衰减的强度。新证据会恢复一半缺失强度，并延长稳定期。
+
+保留度在 `0.35–0.65` 时，Prompt 会要求角色用不确定语气表达；`0.15–0.35` 时只能作为记忆碎片；低于 `0.15` 时本轮不可召回。弱记忆按回合键确定性采样，所以同一请求重试结果一致，不同回合可能偶发闪回。原始记忆没有被删除。
+
+可用只读开发者接口查看原因：
+
+```bash
+curl -G \
+  -H "Authorization: Bearer <token>" \
+  --data-urlencode "character_id=npc_luo_xiaohei" \
+  --data-urlencode "session_id=<session_id>" \
+  --data-urlencode "recall_key=<turn_or_pulse_id>" \
+  --data-urlencode "include_forgotten=true" \
+  http://127.0.0.1:8001/api/v1/developer/memory-curve
+```
+
+检查 `retention`、`clarity`、`sampled` 和 `exclusion_reason`。`stale_relationship_history` 表示内容因关系图谱修订而排除，不是曲线遗忘。诊断调用不会初始化或推进曲线。
+
+如需恢复旧版召回行为，在根目录 `.env` 或部署环境中设置并重启服务：
+
+```bash
+MEMORIA_MEMORY_CURVE_ENABLED=false
+```
+
+关闭功能不会删除已有曲线状态。完整说明见 [世界时间记忆曲线](MEMORY_CURVE.md)。
+
+---
+
 ### Q: 内存占用过高
 
 **原因：** 向量模型约 100MB，加上大量对话历史和记忆。
