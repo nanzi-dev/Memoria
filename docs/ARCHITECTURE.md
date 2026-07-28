@@ -15,6 +15,8 @@ Memoria/
 │   │   ├── knowledge.py        # 知识库、文档、绑定和检索预览 API
 │   │   ├── speech.py           # STT、TTS 与角色自定义声音 API
 │   │   ├── developer.py        # 回放、性能指标、质量评分等开发者 API
+│   │   ├── avatar_fetcher.py    # 远程头像 SSRF 防护与固定 IP 下载
+│   │   ├── avatar_image.py      # 头像格式、像素和尺寸规范化
 │   │   └── user.py             # 用户注册、登录、资料和头像 API
 │   ├── characters/             # 角色卡 JSON 配置文件
 │   │   ├── npc_luo_xiaohei.json
@@ -120,7 +122,9 @@ Memoria/
 | `memoria-token` | HttpOnly | 会话认证，脚本不可读 |
 | `memoria-csrf` | 非 HttpOnly（前端可读） | 双提交 CSRF 校验 |
 
-对携带 `memoria-token` 的 **Cookie 会话写请求**（`POST`/`PUT`/`PATCH`/`DELETE` 等，路径以 `/api/` 开头），中间件要求请求头 `X-CSRF-Token` 与 `memoria-csrf` Cookie 值一致（`hmac.compare_digest`）；否则返回 `403`，`detail` 为「CSRF 校验失败」。
+对携带 `memoria-token` 的 **Cookie 会话写请求**（`POST`/`PUT`/`PATCH`/`DELETE` 等），中间件要求请求头 `X-CSRF-Token` 与 `memoria-csrf` Cookie 值一致（`hmac.compare_digest`）；否则返回 `403`，`detail` 为「CSRF 校验失败」。
+
+保护范围由 `csrf.PROTECTED_PATH_PREFIXES` 集中定义为 `/api/` 与 `/admin/` 两个前缀，速率限制中间件复用同一判定（`csrf.is_protected_path`）。集中定义是为了避免"新增写路由挂在前缀之外就静默失去保护"——`/admin/log-level` 曾因不在 `/api/` 下而同时绕过 CSRF 与限流。
 
 豁免与例外：
 
@@ -128,10 +132,25 @@ Memoria/
 - 认证引导：`POST /api/v1/user/login`、`POST /api/v1/user/register`（凭 body 凭证建立会话）
 - 使用 `Authorization: Bearer ...` 的客户端（非 Cookie 会话，不校验 CSRF）
 - 未携带 `memoria-token` 的请求（无 Cookie 会话面）
+- 路径不在 `PROTECTED_PATH_PREFIXES` 内（如 `/health`、`/ready`）
+
+**页面卸载专用的 query 回退：** `csrf._QUERY_TOKEN_PATHS` 白名单内的两条路径（`/api/v1/dialogue/session/end`、`/api/v1/multi-dialogue/session/end`）在缺少 `X-CSRF-Token` 时，允许改用查询参数 `csrf_token` 完成双提交。原因是 `navigator.sendBeacon` / `keepalive fetch` 无法携带自定义头，否则关闭页面时的结束会话请求必然 403、会话残留为 `active`。白名单刻意收窄到这两条：令牌与会话同寿（30 天），放开到全部写接口会使其进入访问日志、浏览器历史与 `Referer`。
 
 生命周期：注册/登录时 `set_csrf_cookie`；`GET /api/v1/user/me` 会 `ensure_csrf_cookie`（已有则续写，没有则签发）；退出登录同时清除 `memoria-token` 与 `memoria-csrf`。仓库前端 `web/src/api/memoria.js` 在 `credentials: 'include'` 下自动从可读 Cookie 附加 `X-CSRF-Token`。
 
 Cookie 的 `Secure` 标志由 `AUTH_COOKIE_SECURE` 控制；`MEMORIA_ENV=production` 时配置校验会强制启用 Secure Cookie。本地 HTTP 开发应保持 `AUTH_COOKIE_SECURE=false`。
+
+### 远程头像安全下载
+
+`api/avatar_fetcher.py` 为角色头像、用户头像和玩家角色卡头像提供统一的远程下载边界。入口只接受规范的 HTTP(S) URL，不允许 URL 用户凭据、反斜杠、控制字符、畸形主机或系统解析器支持但 `ipaddress` 不认可的旧式数字 IPv4 表示。
+
+地址校验采用公网允许列表语义：只有 `ipaddress.ip_address(address).is_global` 为真的地址可用，因此回环、RFC 1918 私网、链路本地、保留地址、`100.64.0.0/10` CGNAT 和 `198.18.0.0/15` 测试/Fake-IP 地址都默认拒绝。普通 DNS 环境会检查系统解析出的全部地址；任一结果不是公网地址即拒绝。
+
+Clash/Mihomo 的 Fake-IP 模式会让所有域名在系统层解析为 `198.18.0.0/15`，应用无法从该连接地址判断代理最终目标。检测到该网段时，下载器不直接放行，而是通过固定 IP 的 Cloudflare/Google HTTPS DoH 端点查询真实地址。DoH 请求本身保持解析器域名的 Host、TLS SNI 和证书主机名校验；真实地址不存在、包含非公网地址或两个端点均不可达时采用 fail-closed 策略。
+
+通过校验后，请求 URL 的网络位置改写为选定公网 IP，原始域名继续用于 HTTP Host；HTTPS 还通过 `_PinnedHTTPSAdapter` 固定 SNI 与证书主机名。连接建立后从底层 socket 读取对端地址，要求它与选定 IP 完全一致。该设计关闭了“校验时解析一次、连接时再次解析”的 DNS 重绑定窗口。重定向关闭自动跟随，每一跳使用原始逻辑 URL 重新执行完整校验，最多 3 次。
+
+资源限制包括 8 MiB 响应上限、20 秒绝对期限、4 KiB 流式读取块和每进程 8 个非阻塞下载槽位。下载器关闭环境代理继承，并在成功、拒绝和异常路径关闭响应、Session 与固定地址 adapter。下载完成后，`api/avatar_image.py` 继续执行真实图片格式、最大像素数和尺寸/体积规范化检查。
 
 ### 输出安全
 
@@ -150,7 +169,15 @@ Cookie 的 `Secure` 标志由 `AUTH_COOKIE_SECURE` 控制；`MEMORIA_ENV=product
 
 ### 速率限制
 
-API 写操作通过速率限制中间件保护（默认 60 请求 / 60 秒窗口，读取 `configs.rate_limit_*`）。限流 key 优先使用认证 token 解析出的用户 ID，未登录或 token 无效时退回客户端 IP，不信任客户端传入的 `X-Player-ID`。Docker Compose 通过 `FORWARDED_ALLOW_IPS` 让 Uvicorn 只从可信代理链解析客户端地址；默认 `*` 仅适用于后端端口不直接暴露公网的 Compose 拓扑。计数器使用单调时钟和线程锁，并周期清理过期 key。限流状态保存在单个应用进程内，多 worker 或多实例部署需要外部集中式限流器才能共享额度。
+API 写操作通过速率限制中间件保护（默认 60 请求 / 60 秒窗口，读取 `configs.rate_limit_*`），范围与 CSRF 一致（`csrf.is_protected_path`：`/api/` 与 `/admin/`）。限流 key 优先使用认证 token 解析出的用户 ID，未登录或 token 无效时退回客户端 IP，不信任客户端传入的 `X-Player-ID`。Docker Compose 通过 `FORWARDED_ALLOW_IPS` 让 Uvicorn 只从可信代理链解析客户端地址；默认 `*` 仅适用于后端端口不直接暴露公网的 Compose 拓扑。计数器使用单调时钟和线程锁，并周期清理过期 key。限流状态保存在单个应用进程内，多 worker 或多实例部署需要外部集中式限流器才能共享额度。
+
+**登录失败节流**（`api/user.py`）是独立于上述通用限流的第二层：同一用户名 15 分钟内累计失败 10 次后返回 `429`，按用户名隔离，成功登录立即清零。登录接口对「用户名不存在」与「密码错误」返回相同的 401，且用户不存在时同样执行一次等价开销的 PBKDF2（`_burn_password_hash_time`），消除按响应时间枚举用户名的侧信道。该计数器同样只在单进程内共享。
+
+### 请求体大小限制
+
+实际执行顺序为 **请求体大小 → 限流 → CSRF**。注意 Starlette 按注册的**逆序**执行中间件（最后注册的最先执行），因此 `main.py` 中 `body_size_limit_middleware` 定义在最后。大小检查排在最前有两个理由：一是各上传接口的 `read_upload_limited` / `validate_document_size` 都是**读完之后**才校验——在此之前 multipart 已由 Starlette 缓冲落盘、JSON 已整体读入内存；二是超大请求不应先消耗限流额度和一次 token 查询。
+
+按声明的 `Content-Length` 拦截，超过 `configs.max_request_body_bytes`（默认 32 MB）返回 `413`，`Content-Length` 无法解析返回 `400`。默认值高于所有单文件上传上限（最大的是 STT 的 25 MB）。chunked 传输不带 `Content-Length`，该检查不生效，生产部署仍需在反向代理配置 `client_max_body_size`。
 
 ### 应用生命周期
 

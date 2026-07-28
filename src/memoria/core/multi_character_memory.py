@@ -202,17 +202,13 @@ def _extract_character_specific_memories(
             task_name="character_memory",
             max_tokens=180,
         )
-        memories = json.loads(response)
+        memories = _parse_json_array_response(response)
         
         if isinstance(memories, list):
             return [m for m in memories if m and isinstance(m, str)]
         else:
             logger.warning(f"记忆提取返回非数组格式: {response}")
             return []
-    
-    except json.JSONDecodeError as e:
-        logger.error(f"记忆提取JSON解析失败: {e}")
-        return []
     
     except Exception as e:
         logger.error(f"记忆提取失败: {e}")
@@ -710,10 +706,15 @@ def get_group_memories(
     if memories:
         return memories
     
-    # 回退：按角色查询历史群体记忆
+    # 回退：按角色查询历史群体记忆（限定会话所属用户，避免跨用户泄露）
+    session = repository.get_session(session_id)
+    owner_user_id = session.get("player_id") if session else None
+    if not owner_user_id:
+        return []
     return repository.get_character_group_memories(
         character_id=character_id,
-        limit=limit
+        limit=limit,
+        owner_user_id=owner_user_id,
     )
 
 

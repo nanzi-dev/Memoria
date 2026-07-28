@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import logging
+import random
 import sqlite3
 import uuid
 from typing import Any, Callable
@@ -321,10 +322,14 @@ def get_user_id_for_auth_token(token: str) -> str | None:
                 )
                 conn.execute("DELETE FROM auth_token WHERE token = ?", (token,))
             return row["user_id"]
+        # 只删除当前无效 token；过期 token 的批量清理低概率触发，
+        # 避免恶意无效请求放大成每次全表扫描的写压力。
         conn.execute(
-            "DELETE FROM auth_token WHERE token IN (?, ?) OR expires_at <= ?",
+            "DELETE FROM auth_token WHERE token IN (?, ?) AND expires_at <= ?",
             (storage_key, token, now),
         )
+        if random.random() < 0.01:
+            conn.execute("DELETE FROM auth_token WHERE expires_at <= ?", (now,))
     return None
 
 

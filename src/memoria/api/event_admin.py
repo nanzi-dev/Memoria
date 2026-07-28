@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from memoria.api.user import require_admin_user_id, require_current_user_id
 from memoria.core.cron_schedule import next_cron_run, validate_cron_schedule
@@ -604,7 +604,8 @@ def get_event(
         effects_cfg = json.loads(row["effects_config"])
         trigger_type = trigger_cfg.get("trigger_type")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"解析事件配置失败: {e}")
+        logger.exception("解析事件配置失败")
+        raise HTTPException(status_code=500, detail="解析事件配置失败")
 
     return EventDetail(
         event_id=row["event_id"],
@@ -920,7 +921,7 @@ def get_trigger_history(
     event_id: str,
     character_id: Optional[str] = None,
     player_id: Optional[str] = None,
-    limit: int = 50,
+    limit: int = Query(default=50, ge=1, le=200),
     current_user_id: str = Depends(require_current_user_id),
 ):
     """查询指定事件的触发历史记录"""
@@ -939,7 +940,7 @@ def get_trigger_history(
 def get_all_trigger_history(
     character_id: Optional[str] = None,
     player_id: Optional[str] = None,
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=500),
     current_user_id: str = Depends(require_current_user_id),
 ):
     """查询所有事件的触发历史（可按角色/玩家过滤）"""
@@ -999,7 +1000,8 @@ def list_event_templates(
             effects_config = json.loads(row["effects_config"])
             metadata = json.loads(row["metadata"]) if row.get("metadata") else None
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"解析事件模板失败: {e}")
+            logger.exception("解析事件模板失败")
+            raise HTTPException(status_code=500, detail="解析事件模板失败")
         result.append(EventTemplateItem(
             template_id=row["template_id"],
             template_name=row["template_name"],
@@ -1112,7 +1114,7 @@ def register_event_schedule(
 def list_event_schedules(
     event_id: Optional[str] = None,
     status: Optional[str] = None,
-    limit: int = 200,
+    limit: int = Query(default=200, ge=1, le=500),
     current_user_id: str = Depends(require_current_user_id),
 ):
     if status and status not in {"active", "paused"}:
@@ -1200,7 +1202,7 @@ def get_event_metrics(
 @router.get("/admin/events/{event_id}/executions")
 def list_event_executions(
     event_id: str,
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=500),
     current_user_id: str = Depends(require_current_user_id),
 ):
     if not repository.get_event_definition(current_user_id, event_id):
@@ -1297,14 +1299,16 @@ def simulate_event(
 
 @router.post("/admin/events/schedules/run-due", response_model=ScheduleRunResponse)
 def run_due_event_schedules(
-    limit: int = 50,
+    # 该接口在请求内同步执行事件（含 LLM 主动对白），上限必须比纯查询接口更严。
+    limit: int = Query(default=50, ge=1, le=50),
     current_user_id: str = Depends(require_current_user_id),
 ):
     """手动检查并执行到期的时间驱动事件。"""
     try:
         results = event_runtime.run_due_time_events(limit=limit, player_id=current_user_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"执行调度失败: {e}")
+    except Exception:
+        logger.exception("执行调度失败")
+        raise HTTPException(status_code=500, detail="执行调度失败")
 
     return ScheduleRunResponse(
         success=True,
@@ -1327,7 +1331,7 @@ def list_event_context_states(
     character_id: Optional[str] = None,
     player_id: Optional[str] = None,
     status: Optional[str] = None,
-    limit: int = 100,
+    limit: int = Query(default=100, ge=1, le=500),
     current_user_id: str = Depends(require_current_user_id),
 ):
     """查询跨会话持久化的事件上下文。"""

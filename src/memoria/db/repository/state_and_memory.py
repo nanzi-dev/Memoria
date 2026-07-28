@@ -236,8 +236,9 @@ def get_long_term_fact_records(
                             SELECT id, fact_text, importance, created_at, last_referenced
                             FROM long_term_fact
                             WHERE id IN ({placeholders})
+                              AND character_id = ? AND player_id = ?
                             """,
-                            tuple(fact_ids),
+                            tuple(fact_ids) + (character_id, player_id),
                         ).fetchall()
                     records_by_id = {row["id"]: dict(row) for row in rows}
 
@@ -248,7 +249,7 @@ def get_long_term_fact_records(
                     if record:
                         record["similarity"] = result.get("similarity")
                         records.append(record)
-                    else:
+                    elif fact_id is None:
                         records.append({
                             "id": fact_id,
                             "fact_text": result["fact_text"],
@@ -257,6 +258,7 @@ def get_long_term_fact_records(
                             "last_referenced": None,
                             "similarity": result.get("similarity"),
                         })
+                    # fact_id 有值但租户复验未命中：属于其他租户或已删除，跳过
                 return records
                 
         except Exception as e:
@@ -516,4 +518,3 @@ def save_long_term_fact_if_checkpoint(
         return None
     return save_long_term_fact(character_id, player_id, fact_text, importance)
         
-

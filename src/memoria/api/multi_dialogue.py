@@ -28,6 +28,8 @@ router = APIRouter(prefix="/multi-dialogue")
 
 SUMMARY_CHUNK_MESSAGE_LIMIT = 80
 SUMMARY_MIN_MESSAGE_COUNT = 6
+# 每回合的事件上下文查询与状态写入都随参与人数线性放大，需要硬上限。
+MAX_GROUP_CHARACTERS = 8
 
 
 # =========================
@@ -36,10 +38,15 @@ SUMMARY_MIN_MESSAGE_COUNT = 6
 
 class StartMultiSessionRequest(BaseModel):
     """开始多角色会话请求"""
-    player_id: str = Field(..., description="玩家ID")
-    player_name: str = Field(..., description="玩家名称")
-    group_name: Optional[str] = Field(None, description="群聊名称")
-    character_ids: list[str] = Field(..., min_length=2, description="参与角色ID列表（至少2个）")
+    player_id: str = Field(..., max_length=64, description="玩家ID")
+    player_name: str = Field(..., max_length=50, description="玩家名称")
+    group_name: Optional[str] = Field(None, max_length=80, description="群聊名称")
+    character_ids: list[str] = Field(
+        ...,
+        min_length=2,
+        max_length=MAX_GROUP_CHARACTERS,
+        description=f"参与角色ID列表（{2}-{MAX_GROUP_CHARACTERS} 个）",
+    )
     locale: Locale = DEFAULT_LOCALE
 
 
@@ -72,6 +79,7 @@ class MultiDialogueTurnRequest(BaseModel):
 class MultiDialogueTurnResponse(BaseModel):
     """多角色对话轮次响应"""
     message_id: Optional[int] = None
+    stream_id: Optional[str] = None
     character_id: str
     character_name: str
     dialogue: str
@@ -108,9 +116,11 @@ class TriggerInteractionRequest(BaseModel):
     session_id: str
     trigger_character_id: Optional[str] = Field(
         None,
+        max_length=64,
         description="触发角色ID，留空则自动选择"
     )
-    prompt: Optional[str] = Field(None, description="主动发言提示")
+    # 该字段原样进入 LLM prompt，必须与 player_message 一样有长度上限。
+    prompt: Optional[str] = Field(None, max_length=2000, description="主动发言提示")
 
 
 class EndMultiSessionRequest(BaseModel):

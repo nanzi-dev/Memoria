@@ -103,10 +103,18 @@ def build_event_context(
     trigger_source: str = "dialogue",
     current_user_turn_persisted: bool = False,
     response_index: int | None = None,
+    shared_cache: dict | None = None,
 ) -> EventContext:
     """Build one canonical event context for dialogue, group chat, and schedules."""
-    session = repository.get_session(session_id)
-    session_turns = repository.get_session_user_turn_count(session_id) if session else 0
+    cache = shared_cache if shared_cache is not None else {}
+    if "session" not in cache:
+        cache["session"] = repository.get_session(session_id)
+    session = cache["session"]
+    if "session_turns" not in cache:
+        cache["session_turns"] = (
+            repository.get_session_user_turn_count(session_id) if session else 0
+        )
+    session_turns = cache["session_turns"]
     total_turns = repository.count_character_user_turns(player_id, character_id)
     if player_message and not current_user_turn_persisted:
         session_turns += 1
@@ -121,9 +129,28 @@ def build_event_context(
                 (datetime.now(timezone.utc) - created_at).total_seconds() / 60.0,
             )
 
-    active_multi_session = repository.get_latest_active_multi_session(player_id)
+    if "active_multi_session" not in cache:
+        cache["active_multi_session"] = repository.get_latest_active_multi_session(
+            player_id
+        )
+    active_multi_session = cache["active_multi_session"]
+    world_timezone: str | None = None
     if world_time is None:
-        world_time = world_clock.get_clock_snapshot(player_id).world_now.isoformat()
+        snapshot = cache.get("clock_snapshot") or world_clock.get_clock_snapshot(
+            player_id
+        )
+        cache["clock_snapshot"] = snapshot
+        world_time = snapshot.world_now.isoformat()
+        world_timezone = snapshot.timezone
+    else:
+        try:
+            snapshot = cache.get("clock_snapshot") or world_clock.get_clock_snapshot(
+                player_id
+            )
+            cache["clock_snapshot"] = snapshot
+            world_timezone = snapshot.timezone
+        except Exception:
+            world_timezone = None
     if affinity_delta is None:
         affinity_delta = (
             current_affinity - previous_affinity
@@ -137,6 +164,10 @@ def build_event_context(
             else 0.0
         )
 
+    if "event_history" not in cache:
+        cache["event_history"] = repository.list_event_execution_history(
+            player_id, limit=200
+        )
     return EventContext(
         character_id=character_id,
         player_id=player_id,
@@ -156,8 +187,9 @@ def build_event_context(
         unlocked_content=repository.list_event_unlocks(player_id, character_id),
         character_relationships=character_relationships or {},
         event_data=event_data or {},
-        event_history=repository.list_event_execution_history(player_id, limit=200),
+        event_history=cache["event_history"],
         world_time=world_time,
+        world_timezone=world_timezone,
         last_event_id=last_event_id,
         active_multi_session_id=(
             active_multi_session["session_id"] if active_multi_session else None
@@ -343,6 +375,16 @@ def _plan_event_roots(
         if enforce_cooldown:
             claimed_at = datetime.now(timezone.utc)
             claim_token = uuid.uuid4().hex
+            # NPC 主动对白在持有守卫期间同步执行完整 LLM 生成，
+            # 使用更长的租约避免超时被其他 worker 重复领取
+            claim_lease_minutes = (
+                15
+                if any(
+                    effect.effect_type == EffectType.NPC_PROACTIVE_DIALOGUE
+                    for effect in event.effects
+                )
+                else 5
+            )
             claimed = repository.claim_event_trigger_guard(
                 player_id=event_context.player_id,
                 event_id=event.event_id,
@@ -350,7 +392,9 @@ def _plan_event_roots(
                 cooldown_hours=event.trigger_condition.cooldown_hours or 0,
                 claim_token=claim_token,
                 claimed_at=claimed_at.isoformat(),
-                claim_expires_at=(claimed_at + timedelta(minutes=5)).isoformat(),
+                claim_expires_at=(
+                    claimed_at + timedelta(minutes=claim_lease_minutes)
+                ).isoformat(),
             )
             if not claimed:
                 result = EventTriggerResult(
@@ -886,15 +930,12 @@ def detect_and_execute_event_contexts(
     candidates.sort(key=lambda pair: pair[0].priority, reverse=True)
     roots: list[tuple[EventDefinition, EventContext]] = []
     exclusive_groups: set[str] = set()
-    turn_limit = min(
-        (max(1, event.max_triggers_per_turn or 3) for event, _ in candidates),
-        default=3,
-    )
     for event, context in candidates:
         if event.exclusive_group and event.exclusive_group in exclusive_groups:
             continue
-        if len(roots) >= turn_limit:
-            break
+        # max_triggers_per_turn 只约束自身，避免单个低优先级事件压制全局配额
+        if len(roots) >= max(1, event.max_triggers_per_turn or 3):
+            continue
         roots.append((event, context))
         if event.exclusive_group:
             exclusive_groups.add(event.exclusive_group)

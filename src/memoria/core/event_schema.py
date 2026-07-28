@@ -277,6 +277,7 @@ class EventContext(BaseModel):
     event_data: dict[str, Any] = Field(default_factory=dict)
     event_history: list[dict[str, Any]] = Field(default_factory=list)
     world_time: Optional[str] = None
+    world_timezone: Optional[str] = None
     last_event_id: Optional[str] = None
     active_multi_session_id: Optional[str] = None
     execution_key: Optional[str] = None

@@ -164,6 +164,7 @@ def collect_due_cron_runs(
     *,
     timezone_name: str,
     replay_limit: int,
+    max_due_scans: int = 10_000,
 ) -> tuple[list[datetime], int, datetime]:
     """Collect bounded replay instants, total due count, and the next future run."""
     if replay_limit < 1:
@@ -177,6 +178,15 @@ def collect_due_cron_runs(
         due_count += 1
         if len(replay_runs) < replay_limit:
             replay_runs.append(cursor)
+        if due_count >= max_due_scans:
+            # 世界时钟大幅前跳时避免无上界迭代：
+            # 放弃精确统计剩余错过次数，直接跳到窗口之后的下一次运行。
+            cursor = next_cron_run(
+                schedule,
+                through,
+                timezone_name=timezone_name,
+            )
+            break
         cursor = next_cron_run(
             schedule,
             cursor,

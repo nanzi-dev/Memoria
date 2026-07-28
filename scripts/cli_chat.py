@@ -59,9 +59,35 @@ def _character_label(character_id: str) -> str:
         return character_id
 
 
+def _ensure_character_available(character_id: str, player_id: str) -> None:
+    """确保玩家在数据库中拥有该角色卡；缺失时从文件角色卡导入。"""
+    import json
+
+    if repository.get_character_card_from_db(player_id, character_id):
+        return
+    path = character_loader.CHARACTERS_DIR / f"{character_id}.json"
+    if not path.exists():
+        raise SystemExit(
+            f"角色卡 '{character_id}' 在数据库和文件系统中都不存在"
+        )
+    raw_data = character_loader.normalize_character_data(
+        json.loads(path.read_text(encoding="utf-8"))
+    )
+    repository.save_character_card_to_db(
+        owner_user_id=player_id,
+        character_id=character_id,
+        card_data_json=json.dumps(raw_data, ensure_ascii=False),
+        version=str(raw_data.get("version") or "1.0.0"),
+        name=(raw_data.get("meta") or {}).get("name"),
+        display_name=(raw_data.get("meta") or {}).get("display_name"),
+        source="file",
+    )
+
+
 def run_chat(args: argparse.Namespace) -> int:
     repository.init_db()
 
+    _ensure_character_available(args.character_id, args.player_id)
     character_label = _character_label(args.character_id)
     session = orchestrator.start_session(
         args.character_id,

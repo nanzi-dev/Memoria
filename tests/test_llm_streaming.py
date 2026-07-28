@@ -209,7 +209,9 @@ def test_call_role_turn_records_repair_and_response_format_fallback(monkeypatch)
         def create(self, **kwargs):
             calls.append(kwargs)
             if "response_format" in kwargs:
-                raise UnsupportedResponseFormat()
+                raise UnsupportedResponseFormat(
+                    "response_format is not supported by this model"
+                )
             return iter([_stream_chunk("not json")])
 
     fake_client = SimpleNamespace(
@@ -317,13 +319,14 @@ def test_call_role_turn_does_not_restart_after_stream_has_emitted(monkeypatch):
     monkeypatch.setattr(llm_client, "_get_client", lambda: fake_client)
     deltas = []
 
-    with pytest.raises(StreamBadRequest, match="stream failed after output"):
-        llm_client.call_role_turn(
-            "system",
-            [{"role": "user", "content": "hello"}],
-            on_dialogue_delta=deltas.append,
-        )
+    # 已有部分输出后中断：降级使用已收到的内容，不重启也不抛出
+    result = llm_client.call_role_turn(
+        "system",
+        [{"role": "user", "content": "hello"}],
+        on_dialogue_delta=deltas.append,
+    )
 
+    assert result["dialogue"] == "前缀"
     assert len(calls) == 1
     assert calls[0]["response_format"] == {"type": "json_object"}
     assert deltas == ["前缀"]

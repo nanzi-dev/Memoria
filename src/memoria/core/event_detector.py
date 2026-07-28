@@ -11,6 +11,7 @@ import logging
 import re
 from datetime import datetime, time, timedelta, timezone
 from typing import Any, List
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from memoria.core.event_schema import (
     EventDefinition,
@@ -65,15 +66,13 @@ class EventDetector:
 
         triggered_events = []
         exclusive_groups: set[str] = set()
-        turn_limit = min(
-            (max(1, event.max_triggers_per_turn or 3) for event in matched_events),
-            default=3,
-        )
         for event in matched_events:
             if event.exclusive_group and event.exclusive_group in exclusive_groups:
                 continue
-            if len(triggered_events) >= turn_limit:
-                break
+            # 每个事件的 max_triggers_per_turn 只约束自身：
+            # 若本回合已触发数达到该事件的上限，则跳过该事件而非终止全部
+            if len(triggered_events) >= max(1, event.max_triggers_per_turn or 3):
+                continue
             triggered_events.append(event)
             if event.exclusive_group:
                 exclusive_groups.add(event.exclusive_group)
@@ -324,6 +323,13 @@ class EventDetector:
             end = time.fromisoformat(condition.time_window_end)
         except ValueError:
             return False
+        if context.world_timezone:
+            try:
+                world_datetime = world_datetime.astimezone(
+                    ZoneInfo(context.world_timezone)
+                )
+            except (ValueError, KeyError, ZoneInfoNotFoundError):
+                pass
         if condition.weekdays is not None and world_datetime.weekday() not in condition.weekdays:
             return False
         current = world_datetime.timetz().replace(tzinfo=None)

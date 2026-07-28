@@ -31,7 +31,7 @@ from memoria.api.user import (
     router as user_router,
 )
 from memoria.core.config import configs
-from memoria.core.csrf import validate_csrf
+from memoria.core.csrf import is_protected_path, validate_csrf
 from memoria.core.background_jobs import (
     BackgroundJobWorker,
     checkpoint_memory_lease_seconds,
@@ -298,13 +298,47 @@ async def csrf_middleware(request: Request, call_next):
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
     """写操作速率限制中间件。"""
-    # 仅对 API 写操作应用限流；列表、详情、历史等读请求不消耗窗口。
-    if request.url.path.startswith("/api/") and request.method not in {"GET", "HEAD", "OPTIONS"}:
+    # 仅对写操作应用限流；列表、详情、历史等读请求不消耗窗口。
+    if is_protected_path(request.url.path) and request.method not in {"GET", "HEAD", "OPTIONS"}:
         rate_limit_key = _get_rate_limit_key(request)
         if not _check_rate_limit(rate_limit_key):
             return JSONResponse(
                 status_code=429,
                 content={"error": "请求过于频繁，请稍后再试", "retry_after": float(configs.rate_limit_window_seconds)}
+            )
+    return await call_next(request)
+
+
+# =========================
+# 请求体大小上限
+#
+# 注意：Starlette 按注册的**逆序**执行中间件——最后注册的最先执行。
+# 本中间件必须放在最后注册，才能排在 CSRF 与限流之前，让超大请求在消耗
+# 限流额度和 token 查询之前就被拒绝。
+# =========================
+@app.middleware("http")
+async def body_size_limit_middleware(request: Request, call_next):
+    """按 Content-Length 前置拦截超大请求体，避免读满内存或磁盘后才报错。
+
+    各上传接口自身的 `read_upload_limited` / `validate_document_size` 都是读完
+    才校验，在此之前 multipart 已由 Starlette 缓冲落盘、JSON 已整体读入内存。
+    """
+    declared_length = request.headers.get("content-length")
+    if declared_length:
+        try:
+            body_bytes = int(declared_length)
+        except ValueError:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Content-Length 无效"},
+            )
+        if body_bytes > configs.max_request_body_bytes:
+            return JSONResponse(
+                status_code=413,
+                content={
+                    "error": "请求体过大",
+                    "max_bytes": configs.max_request_body_bytes,
+                },
             )
     return await call_next(request)
 

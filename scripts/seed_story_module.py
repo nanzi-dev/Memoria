@@ -687,7 +687,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--password",
-        help="仅在首次创建 memoria_demo 时使用；也可设置 MEMORIA_DEMO_PASSWORD。",
+        help=(
+            "仅在首次创建演示用户（manifest 的 demo_username，"
+            f"默认 {DEMO_USERNAME}）时使用；也可设置 MEMORIA_DEMO_PASSWORD。"
+        ),
     )
     parser.add_argument(
         "--skip-knowledge-index",

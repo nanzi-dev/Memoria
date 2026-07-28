@@ -348,6 +348,13 @@ def _apply_story_update_in_transaction(
         state = _append_and_project_story_event_in_transaction(conn, started)
 
     requested_status = update.get("status")
+    if (
+        requested_status in _TERMINAL_STORY_STATUSES
+        and state["status"] in _TERMINAL_STORY_STATUSES
+    ):
+        # 幂等短路：剧情已终态，再次应用终态更新直接返回，
+        # 避免抛错回滚整个事件执行批次。
+        return state
     if requested_status == "completed":
         event_type = "story.completed.v1"
         payload = {
@@ -367,6 +374,9 @@ def _apply_story_update_in_transaction(
             or update.get("progress_delta") is not None
         )
         if not has_progress and requested_status not in {"active", "pending"}:
+            return state
+        if state["status"] in _TERMINAL_STORY_STATUSES:
+            # 幂等短路：终态剧情不再接受进度更新，直接返回现状。
             return state
         event_type = "story.progressed.v1"
         payload = {}
@@ -403,5 +413,3 @@ def get_story_state(
             owner_user_id,
             story_id,
         )
-
-

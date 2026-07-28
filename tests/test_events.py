@@ -1111,7 +1111,7 @@ class TestEventReliability:
         assert runtime["affection_level"] == 20
         assert repository.get_event_definition(player_id, event_id)["trigger_count"] == 0
 
-    def test_turn_limit_is_the_strictest_matching_event_limit(self):
+    def test_turn_limit_only_constrains_the_event_that_declares_it(self):
         from memoria.core.event_detector import EventDetector
 
         context = self._context()
@@ -1119,9 +1119,22 @@ class TestEventReliability:
             self._event(f"limit_{index}", [], priority=10 - index, max_triggers_per_turn=limit)
             for index, limit in enumerate([1, 20, 20])
         ]
+        # limit_0 的上限只约束它自己，不应压制后续高配额事件
         assert [event.event_id for event in EventDetector().check_events(context, events)] == [
-            "limit_0"
+            "limit_0",
+            "limit_1",
+            "limit_2",
         ]
+
+        # 低配额事件排在后面时，会因本回合已触发数达到自身上限而被跳过
+        events_low_priority_last = [
+            self._event(f"tail_{index}", [], priority=10 - index, max_triggers_per_turn=limit)
+            for index, limit in enumerate([20, 20, 1])
+        ]
+        assert [
+            event.event_id
+            for event in EventDetector().check_events(context, events_low_priority_last)
+        ] == ["tail_0", "tail_1"]
 
     def test_new_condition_sources_and_conflict_rules(self):
         from memoria.core.event_detector import EventDetector

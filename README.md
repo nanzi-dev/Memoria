@@ -103,10 +103,11 @@
 - **JSON 强制输出**：支持结构化输出的模型可获得更好的稳定性
 
 ### Web 前端
-- **登录与用户资料**：支持用户注册、登录、资料编辑和头像设置；浏览器登录态使用 `memoria-token`（HttpOnly）与 `memoria-csrf`（可读）双 Cookie，写请求自动带 `X-CSRF-Token`，不把 token 持久化到 `localStorage`
+- **登录与用户资料**：支持用户注册、登录、资料编辑和头像设置；浏览器登录态使用 `memoria-token`（HttpOnly）与 `memoria-csrf`（可读）双 Cookie，写请求自动带 `X-CSRF-Token`，不把 token 持久化到 `localStorage`。CSRF 与限流覆盖 `/api/*` 与 `/admin/*`；登录另有按用户名的失败节流（15 分钟 / 10 次），且用户名不存在与密码错误的响应时间一致，无法据此枚举账号
+- **安全头像下载**：URL 头像由服务端校验并下载；仅允许公网 HTTP(S) 目标，逐跳校验重定向并固定连接到已验证 IP。在 Clash 等 Fake-IP 环境中会通过 DoH 取得真实地址，不把 `198.18.0.0/15` 代理地址直接视为可信目标
 - **玩家角色卡**：独立编辑玩家名称、头像、身份、外观、性格、背景和目标，并从下一条单聊或群聊消息开始参与 Prompt 与关系图谱
 - **角色卡编辑器**：分步编辑角色身份、性格、语言风格、背景和交互规则
-- **会话体验**：支持单角色对话、会话恢复、多角色群聊、会话语言选择、录音转写和角色语音播放；好感度/信任度变化只在当前会话新回复上展示，历史加载消息不回放旧变化提示
+- **会话体验**：支持单角色对话、会话恢复、多角色群聊、录音转写和角色语音播放；好感度/信任度变化只在当前会话新回复上展示，历史加载消息不回放旧变化提示
 - **流式与群聊同步**：单聊和群聊按 SSE 增量展示回复；群聊使用逻辑线程合并续聊历史，并同步自主脉冲产生的新消息和聚合未读状态
 - **管理工作台**：事件与知识库页面采用左右分栏工作台，支持汇总、搜索、筛选、排序、详情查看及编辑；事件关联角色可直接选择当前用户已有角色
 - **用户设置**：账户、世界时间和语音设置分区管理；世界时钟按 IANA 时区展示，支持暂停、同步、设置、推进及 `0/1/2/5/10` 倍速
@@ -416,6 +417,8 @@ KNOWLEDGE_SIMILARITY_THRESHOLD=0.60            # 知识检索最低相似度
 语音的 TTS 与 STT 分别配置。TTS 默认使用 MiniMax 的 T2A v2 流式响应：浏览器在收到首个音频分块后即可播放，完整 MP3 会原子写入 `SPEECH_STORAGE_PATH/cache` 供历史消息复播。STT 始终调用独立的 OpenAI-compatible `/audio/transcriptions` 端点，不会请求 MiniMax TTS 地址。角色 Custom Voice 需要先上传授权录音，再上传参考样本；成功后会持久化 MiniMax `voice_id`，失败时继续回退到角色的内置音色。旧的 `SPEECH_PROVIDER`、`SPEECH_API_KEY`、`SPEECH_BASE_URL` 和 `SPEECH_TIMEOUT_SECONDS` 仅作为迁移回退，并会发出弃用警告。
 
 Docker 部署文件统一存放在 `deploy/docker/`。运行时 `deploy/docker/docker-compose.yml` 会自动生成容器内 PostgreSQL 连接串；通常只需要通过 `deploy/docker/.env` 配置 `POSTGRES_*`、`LLM_*`、`ADMIN_BOOTSTRAP_TOKEN`、语音、端口和模型参数。后端直连端口默认绑定 `127.0.0.1`，显式设置 `API_BIND_HOST=0.0.0.0` 才会对所有网络接口开放。Compose 默认设置 `FORWARDED_ALLOW_IPS=*`，以便后端从 Nginx 转发头取得真实客户端 IP；若后端端口直接对公网开放，必须把该值收紧到可信代理 IP 或网段。
+
+URL 头像下载默认关闭环境代理继承，并只连接经过校验的公网 IP。系统 DNS 返回 Clash/Mihomo 常用的 `198.18.0.0/15` Fake-IP 时，后端会通过 HTTPS 访问 `1.1.1.1` 或 `8.8.8.8` 的 DoH 服务取得真实 A/AAAA 地址，再保留原始 Host、TLS SNI 和证书主机名进行固定 IP 下载。使用 Fake-IP 的部署必须允许后端出站访问这些地址的 TCP 443；两个 DoH 端点都不可达时会安全拒绝 URL 头像，不会退回到直接信任 Fake-IP。详见 [FAQ](docs/FAQ.md#q-url-头像提示不允许访问内网或保留地址或无法安全解析图片-url-主机) 与 [架构文档](docs/ARCHITECTURE.md#远程头像安全下载)。
 
 ---
 

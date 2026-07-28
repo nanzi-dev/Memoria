@@ -329,14 +329,14 @@ def _get_character_group_memories_for_player(
     player_id: str,
     limit: int = 20,
 ) -> list[dict]:
-    try:
-        return repository.get_character_group_memories(
-            character_id=character_id,
-            owner_user_id=player_id,
-            limit=limit,
-        )
-    except TypeError:
-        return repository.get_character_group_memories(character_id, limit=limit)
+    # 这里曾有一个 `except TypeError` 回退，会在签名不匹配时改调不带
+    # owner_user_id 的版本——那条路径会跨用户返回群体记忆。租户限定不允许有
+    # 回退分支，宁可让调用直接失败。
+    return repository.get_character_group_memories(
+        character_id=character_id,
+        owner_user_id=player_id,
+        limit=limit,
+    )
 
 
 def _format_cross_mode_memories(
@@ -1042,6 +1042,10 @@ def _run_dialogue_turn(
                     dialogue_turn_factory=build_turn,
                 )
         except Exception:
+            if "turn" in turn_holder:
+                # 对话轮次已进入提交阶段但提交失败：
+                # 消息与状态未持久化，必须失败而非误报成功。
+                raise
             logger.exception("事件系统处理失败，提交无事件结果的对话轮次")
             event_results = []
 
@@ -1068,12 +1072,22 @@ def _run_dialogue_turn(
             )
         return response
     except Exception as exc:
-        repository.fail_dialogue_turn(
-            session_id,
-            request_id,
-            lease_owner,
-            str(exc),
-        )
+        # 释放租约本身也可能失败（触发这条路径的往往就是 DB 写不进去）。
+        # 清理失败不能顶替原始异常——否则调用方看到的是误导性的错误，
+        # 且 `raise` 永远不会执行。
+        try:
+            repository.fail_dialogue_turn(
+                session_id,
+                request_id,
+                lease_owner,
+                str(exc),
+            )
+        except Exception:
+            logger.exception(
+                "标记对话轮次失败时出错，租约将等待过期: session=%s request_id=%s",
+                session_id,
+                request_id,
+            )
         raise
 
 

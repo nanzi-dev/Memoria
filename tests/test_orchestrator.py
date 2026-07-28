@@ -1010,6 +1010,162 @@ class TestDialogueTurn:
         with pytest.raises(RuntimeError, match="db write failed"):
             orchestrator.run_dialogue_turn("sid", "你好")
 
+    def test_event_batch_commit_failure_raises(self, monkeypatch):
+        """事件批次提交失败时，turn 已构建但未落库，必须失败而非误报成功。
+
+        回归：`_commit_planned_batch` 先调 dialogue_turn_factory（填充 turn_holder）
+        再执行原子提交；提交失败若被吞掉，玩家会收到"成功"的回复而消息、
+        runtime_state、后台任务全部未持久化。
+        """
+        from types import SimpleNamespace
+        from memoria.core import orchestrator
+
+        card = SimpleNamespace(
+            action_vocabulary=SimpleNamespace(
+                default_action="idle",
+                greeting_actions=[],
+                farewell_actions=[],
+                agreement_actions=[],
+                disagreement_actions=[],
+                emotional_reactions=[],
+            ),
+            runtime_state_schema=SimpleNamespace(
+                current_mood=SimpleNamespace(emotions=["neutral"])
+            ),
+        )
+
+        monkeypatch.setattr(orchestrator.repository, "get_session", lambda session_id: {
+            "session_id": session_id,
+            "character_id": "char",
+            "player_id": "player",
+            "player_name": "Tester",
+            "created_at": None,
+            "status": "active",
+        })
+        monkeypatch.setattr(orchestrator.character_loader, "load_character_card", lambda character_id, owner_user_id=None: card)
+        monkeypatch.setattr(orchestrator.repository, "get_runtime_state", lambda *args, **kwargs: {
+            "affection_level": 0,
+            "trust_level": 0,
+            "current_mood": "neutral",
+        })
+        monkeypatch.setattr(orchestrator.repository, "get_short_term_history", lambda *args, **kwargs: [])
+        monkeypatch.setattr(orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: [])
+        monkeypatch.setattr(orchestrator.prompt_builder, "build_system_prompt", lambda *args, **kwargs: "prompt")
+        monkeypatch.setattr(orchestrator.llm_client, "call_role_turn", lambda *args, **kwargs: {
+            "dialogue": "你好",
+            "action": "idle",
+            "affinity_delta": 0,
+            "trust_delta": 0,
+            "mood_after": "neutral",
+            "memory_worth_keeping": None,
+        })
+        def commit_batch_fails(context, dialogue_turn_factory=None, **kwargs):
+            # 模拟 _commit_planned_batch：先构建 turn（写入 turn_holder），再提交失败
+            assert dialogue_turn_factory is not None
+            dialogue_turn_factory([])
+            raise RuntimeError("batch commit failed")
+
+        monkeypatch.setattr(
+            orchestrator.event_runtime,
+            "detect_and_execute_events",
+            commit_batch_fails,
+        )
+        monkeypatch.setattr(
+            orchestrator.event_runtime,
+            "apply_event_results_to_dialogue_state",
+            lambda event_results, dialogue, affinity, trust, mood: (dialogue, affinity, trust, mood, [], None),
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "commit_dialogue_turn",
+            lambda *args, **kwargs: pytest.fail("提交失败后不应再走非事件提交路径"),
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "claim_dialogue_turn",
+            lambda **kwargs: {"completed": False, "lease_owner": "lease"},
+        )
+        failed = []
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "fail_dialogue_turn",
+            lambda *args: failed.append(args),
+        )
+
+        with pytest.raises(RuntimeError, match="batch commit failed"):
+            orchestrator.run_dialogue_turn("sid", "你好")
+        # 租约必须被显式标记失败，否则 dialogue_turn 会卡在 processing。
+        assert failed
+
+    def test_lease_cleanup_failure_does_not_mask_original_error(self, monkeypatch):
+        """fail_dialogue_turn 自身失败时，调用方仍须看到原始异常。"""
+        from types import SimpleNamespace
+        from memoria.core import orchestrator
+
+        card = SimpleNamespace(
+            action_vocabulary=SimpleNamespace(
+                default_action="idle",
+                greeting_actions=[],
+                farewell_actions=[],
+                agreement_actions=[],
+                disagreement_actions=[],
+                emotional_reactions=[],
+            ),
+            runtime_state_schema=SimpleNamespace(
+                current_mood=SimpleNamespace(emotions=["neutral"])
+            ),
+        )
+
+        monkeypatch.setattr(orchestrator.repository, "get_session", lambda session_id: {
+            "session_id": session_id,
+            "character_id": "char",
+            "player_id": "player",
+            "player_name": "Tester",
+            "created_at": None,
+            "status": "active",
+        })
+        monkeypatch.setattr(orchestrator.character_loader, "load_character_card", lambda character_id, owner_user_id=None: card)
+        monkeypatch.setattr(orchestrator.repository, "get_runtime_state", lambda *args, **kwargs: {
+            "affection_level": 0,
+            "trust_level": 0,
+            "current_mood": "neutral",
+        })
+        monkeypatch.setattr(orchestrator.repository, "get_short_term_history", lambda *args, **kwargs: [])
+        monkeypatch.setattr(orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: [])
+        monkeypatch.setattr(orchestrator.prompt_builder, "build_system_prompt", lambda *args, **kwargs: "prompt")
+        monkeypatch.setattr(orchestrator.llm_client, "call_role_turn", lambda *args, **kwargs: {
+            "dialogue": "你好",
+            "action": "idle",
+            "affinity_delta": 0,
+            "trust_delta": 0,
+            "mood_after": "neutral",
+            "memory_worth_keeping": None,
+        })
+        monkeypatch.setattr(orchestrator.event_runtime, "detect_and_execute_events", lambda *args, **kwargs: [])
+        monkeypatch.setattr(
+            orchestrator.event_runtime,
+            "apply_event_results_to_dialogue_state",
+            lambda event_results, dialogue, affinity, trust, mood: (dialogue, affinity, trust, mood, [], None),
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "commit_dialogue_turn",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("db write failed")),
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "claim_dialogue_turn",
+            lambda **kwargs: {"completed": False, "lease_owner": "lease"},
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "fail_dialogue_turn",
+            lambda *args: (_ for _ in ()).throw(RuntimeError("lease cleanup failed")),
+        )
+
+        with pytest.raises(RuntimeError, match="db write failed"):
+            orchestrator.run_dialogue_turn("sid", "你好")
+
 
 def test_group_dialogue_saves_one_logical_thread_player_memory(monkeypatch):
     from types import SimpleNamespace

@@ -108,16 +108,18 @@ class OpenAICompatibleSpeechProvider:
             )
         return {"Authorization": f"Bearer {self.settings.api_key}"}
 
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=self.settings.timeout_seconds)
+        return self._client
+
     async def _request(
         self,
         method: str,
         path: str,
         **kwargs: Any,
     ) -> httpx.Response:
-        client = self._client
-        owns_client = client is None
-        if client is None:
-            client = httpx.AsyncClient(timeout=self.settings.timeout_seconds)
+        client = self._get_client()
         try:
             response = await client.request(
                 method,
@@ -139,9 +141,6 @@ class OpenAICompatibleSpeechProvider:
                 502,
                 retryable=True,
             ) from exc
-        finally:
-            if owns_client:
-                await client.aclose()
         if response.is_success:
             return response
         raise _map_http_error(response)
@@ -154,10 +153,17 @@ class OpenAICompatibleSpeechProvider:
         mime_type: str,
         locale: str,
     ) -> str:
+        language = STT_LANGUAGES.get(locale)
+        if language is None:
+            raise SpeechProviderError(
+                "invalid_input",
+                f"Unsupported locale: {locale}",
+                400,
+            )
         response = await self._request(
             "POST",
             "/audio/transcriptions",
-            data={"model": self.settings.model, "language": STT_LANGUAGES[locale]},
+            data={"model": self.settings.model, "language": language},
             files={"file": (filename, audio, mime_type)},
         )
         payload = _json_object(response)
@@ -210,6 +216,11 @@ class MiniMaxSpeechProvider:
                 503,
             )
         return {"Authorization": f"Bearer {self.settings.api_key}"}
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=self.settings.timeout_seconds)
+        return self._client
 
     def _tts_payload(self, text: str, voice: str, instructions: str) -> dict[str, Any]:
         if self.output_format != "mp3":
@@ -272,11 +283,8 @@ class MiniMaxSpeechProvider:
                 await asyncio.sleep(0.2 * (attempt + 1))
 
     async def _request_stream(self, payload: dict[str, Any]) -> AsyncIterator[bytes]:
-        client = self._client
-        owns_client = client is None
+        client = self._get_client()
         yielded_audio = False
-        if client is None:
-            client = httpx.AsyncClient(timeout=self.settings.timeout_seconds)
         try:
             async with client.stream(
                 "POST",
@@ -327,9 +335,6 @@ class MiniMaxSpeechProvider:
                 502,
                 retryable=True,
             ) from exc
-        finally:
-            if owns_client:
-                await client.aclose()
 
     async def create_custom_voice(
         self,
@@ -402,10 +407,7 @@ class MiniMaxSpeechProvider:
         json_payload: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        client = self._client
-        owns_client = client is None
-        if client is None:
-            client = httpx.AsyncClient(timeout=self.settings.timeout_seconds)
+        client = self._get_client()
         try:
             response = await client.request(
                 method,
@@ -422,9 +424,6 @@ class MiniMaxSpeechProvider:
                 "MiniMax is unavailable",
                 502,
             ) from exc
-        finally:
-            if owns_client:
-                await client.aclose()
         if not response.is_success:
             raise _map_http_error(response)
         return _json_object(response)

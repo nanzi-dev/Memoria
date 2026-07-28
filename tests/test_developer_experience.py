@@ -87,8 +87,16 @@ def test_replay_builds_step_and_state_timeline():
     assert data["current_step"] == 1
     assert data["total_steps"] == 2
     assert len(data["messages"]) == 1
-    assert data["state_tracking_available"] is True
-    assert data["state_timeline"][0]["state"]["affinity"] == 11
+    # step=1 只包含用户消息，未来状态不应泄露到时间线
+    assert data["state_tracking_available"] is False
+    assert data["state_timeline"] == []
+    assert data["current_state"] is None
+
+    data_full = replay.build_replay(session, messages, step=2)
+
+    assert data_full["state_tracking_available"] is True
+    assert data_full["state_timeline"][0]["state"]["affinity"] == 11
+    assert data_full["current_state"]["affinity"] == 11
 
 
 def test_quality_score_heuristic_returns_scores():
@@ -148,3 +156,33 @@ def test_developer_quality_score_from_session(monkeypatch):
 
     assert result["method"] == "heuristic"
     assert result["overall"] > 0
+
+
+def test_request_body_size_limit_rejects_oversized_content_length():
+    """超大请求体应在读入内存/落盘前被 413 拦下。"""
+    from fastapi.testclient import TestClient
+
+    from memoria.core.config import configs
+    from memoria.main import app
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/user/login",
+            content=b"{}",
+            headers={
+                "Content-Type": "application/json",
+                "Content-Length": str(configs.max_request_body_bytes + 1),
+            },
+        )
+    assert response.status_code == 413
+    assert response.json()["max_bytes"] == configs.max_request_body_bytes
+
+
+def test_request_body_size_limit_allows_normal_requests():
+    from fastapi.testclient import TestClient
+
+    from memoria.main import app
+
+    with TestClient(app) as client:
+        response = client.get("/health")
+    assert response.status_code == 200

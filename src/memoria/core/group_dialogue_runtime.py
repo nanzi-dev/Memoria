@@ -176,6 +176,13 @@ def run_group_dialogue_pulse(
         return []
 
     try:
+        # 领取租约后重读状态快照，避免用过期快照判断冷却/限额
+        fresh_state = repository.get_group_dialogue_state(group_thread_id)
+        if fresh_state:
+            state = fresh_state
+        if not explicit_event and not _ordinary_pulse_due(state, snapshot):
+            repository.release_group_dialogue_state(group_thread_id, lease_owner=owner)
+            return []
         carrier = _ensure_carrier_session(state, latest_session, character_ids)
         orchestrator = MultiCharacterOrchestrator(carrier["session_id"])
         today = real_now.date().isoformat()

@@ -7,11 +7,12 @@ API 路由层
 3. 返回标准 DTO
 """
 
+import logging
 from datetime import datetime, timedelta, timezone
 import uuid
 
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from memoria.core import character_loader, orchestrator, performance, world_clock
 from memoria.core.memory_extractor import summarize_session
@@ -20,6 +21,8 @@ from memoria.api.user import require_current_user_id
 from memoria.api.knowledge_models import KnowledgeSource
 from memoria.api.streaming import create_sse_response
 from memoria.db import repository
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 SUMMARY_MIN_MESSAGE_COUNT = 6
@@ -388,8 +391,11 @@ def _close_idle_sessions(player_id: str, background_tasks: BackgroundTasks | Non
         if now - activity_at >= IDLE_SESSION_TIMEOUT:
             try:
                 _end_session(session["session_id"], background_tasks)
-            except Exception as e:
-                print(f"[ERROR] Failed to close idle session {session.get('session_id')}: {e}")
+            except Exception:
+                logger.exception(
+                    "关闭空闲会话失败: session=%s",
+                    session.get("session_id"),
+                )
 
 
 def _require_player_access(player_id: str, current_user_id: str) -> None:
@@ -574,8 +580,8 @@ def latest_session(
 def get_history(
     character_id: str,
     player_id: str,
-    offset: int = 0,
-    limit: int = 20,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
     exclude_session_id: str | None = None,
     current_user_id: str = Depends(require_current_user_id),
 ):
@@ -630,7 +636,7 @@ def session_end(
 def get_summaries(
     character_id: str,
     player_id: str,
-    limit: int = 5,
+    limit: int = Query(default=5, ge=1, le=50),
     current_user_id: str = Depends(require_current_user_id),
 ):
     """获取角色与玩家的最近会话摘要"""

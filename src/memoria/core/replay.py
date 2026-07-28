@@ -16,7 +16,7 @@ def build_replay(session: dict, messages: list[dict], step: int | None = None) -
 
     state_timeline = []
     last_state = None
-    for index, message in enumerate(messages, start=1):
+    for index, message in enumerate(replay_messages, start=1):
         state = {
             "affinity": message.get("current_affinity"),
             "trust": message.get("current_trust"),

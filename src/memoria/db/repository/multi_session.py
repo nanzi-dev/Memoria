@@ -384,6 +384,7 @@ def append_multi_character_message(
     intent: str | None = None,
     topic: str | None = None,
     trigger_source: str | None = None,
+    runtime_state: dict | None = None,
 ) -> int:
     """
     添加多角色会话消息
@@ -394,6 +395,8 @@ def append_multi_character_message(
         content: 消息内容
         character_id: 发言角色ID（assistant时必填）
         character_name: 发言角色显示名称
+        runtime_state: 可选，随消息在同一事务内写入的角色状态
+            （需包含 player_id/affection_level/trust_level/current_mood）
     """
     with get_conn() as conn:
         insert_sql = """
@@ -424,10 +427,29 @@ def append_multi_character_message(
             ),
         )
         message_id = cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
-    
-    # 如果是角色发言，更新参与者统计
-    if role == "assistant" and character_id:
-        update_participant_speak_time(session_id, character_id)
+
+        # 如果是角色发言，在同一事务内更新参与者统计，保证原子性
+        if role == "assistant" and character_id:
+            conn.execute(
+                """
+                UPDATE multi_session_participant
+                SET last_spoke_at = ?,
+                    message_count = message_count + 1
+                WHERE session_id = ? AND character_id = ?
+                """,
+                (_now(), session_id, character_id),
+            )
+
+        if runtime_state and character_id:
+            _save_runtime_state_in_transaction(
+                conn,
+                character_id=character_id,
+                player_id=runtime_state["player_id"],
+                affection_level=runtime_state["affection_level"],
+                trust_level=runtime_state["trust_level"],
+                current_mood=runtime_state["current_mood"],
+                now=_now(),
+            )
     return int(message_id)
 
 
@@ -1141,5 +1163,3 @@ def get_latest_group_thread_session(group_thread_id: str) -> dict | None:
             (group_thread_id,),
         ).fetchone()
     return _row_to_dict(row)
-
-

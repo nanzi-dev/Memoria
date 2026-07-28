@@ -40,12 +40,17 @@ CUDA_ERROR_MARKERS = (
 
 class VectorMemoryStore:
     """向量记忆存储管理类"""
-    
+
+    # 类级兜底锁：绕过 __init__ 构造的实例（测试替身、反序列化等）同样能安全地
+    # 走 CUDA 降级路径；正常实例在 __init__ 中替换为各自独立的锁。
+    _embedding_lock = threading.Lock()
+
     def __init__(self):
         """初始化向量数据库和嵌入模型(懒加载)"""
         import chromadb
         from chromadb.config import Settings
         from sentence_transformers import SentenceTransformer
+        self._embedding_lock = threading.Lock()
         try:
             # 初始化 ChromaDB 客户端（持久化模式）
             # 注意：必须使用 PersistentClient 而不是 Client
@@ -95,21 +100,22 @@ class VectorMemoryStore:
 
     def _recover_embedding_model_to_cpu(self) -> bool:
         """CUDA 失败后重建 CPU 嵌入模型，避免后续请求持续失败。"""
-        if self._is_cpu_embedding():
-            return True
+        with self._embedding_lock:
+            if self._is_cpu_embedding():
+                return True
 
-        try:
-            from sentence_transformers import SentenceTransformer
+            try:
+                from sentence_transformers import SentenceTransformer
 
-            logger.warning("嵌入模型 CUDA 运行失败，切换到 CPU 后重试")
-            self.embedding_model = SentenceTransformer(configs.embedding_model, device="cpu")
-            self.embedding_device = "cpu"
-            self.embedding_disabled = False
-            return True
-        except Exception as e:
-            self.embedding_disabled = True
-            logger.error(f"嵌入模型切换到 CPU 失败，已暂时禁用向量记忆: {e}")
-            return False
+                logger.warning("嵌入模型 CUDA 运行失败，切换到 CPU 后重试")
+                self.embedding_model = SentenceTransformer(configs.embedding_model, device="cpu")
+                self.embedding_device = "cpu"
+                self.embedding_disabled = False
+                return True
+            except Exception as e:
+                self.embedding_disabled = True
+                logger.error(f"嵌入模型切换到 CPU 失败，已暂时禁用向量记忆: {e}")
+                return False
 
     def _encode_text(self, text: str) -> list[float]:
         """生成文本向量；CUDA 崩溃时降级到 CPU 并重试一次。"""
@@ -232,8 +238,8 @@ class VectorMemoryStore:
                     metadata = results['metadatas'][0][i]
                     distance = results['distances'][0][i] if 'distances' in results else 0.0
                     
-                    # 距离转相似度（cosine distance → similarity）
-                    similarity = 1.0 - distance
+                    # 距离转相似度（cosine distance → similarity），夹取到非负
+                    similarity = max(0.0, 1.0 - distance)
                     
                     memories.append({
                         "fact_id": metadata["fact_id"],

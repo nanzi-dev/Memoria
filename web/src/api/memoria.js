@@ -27,6 +27,13 @@ function withCsrfHeaders(headers = {}) {
   return next;
 }
 
+function withCsrfQuery(url) {
+  const csrf = readCookie(CSRF_COOKIE_NAME);
+  if (!csrf) return url;
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}csrf_token=${encodeURIComponent(csrf)}`;
+}
+
 
 function pathSegment(value) {
   return encodeURIComponent(String(value));
@@ -615,7 +622,7 @@ export const dialogue = {
   endSessionOnUnload(sessionId) {
     if (!sessionId) return;
     const body = JSON.stringify({ session_id: sessionId });
-    const url = `${API_BASE}/dialogue/session/end`;
+    const url = withCsrfQuery(`${API_BASE}/dialogue/session/end`);
     if (navigator.sendBeacon) {
       const blob = new Blob([body], { type: 'application/json' });
       navigator.sendBeacon(url, blob);
@@ -713,7 +720,7 @@ export const multiDialogue = {
   endSessionOnUnload(sessionId) {
     if (!sessionId) return;
     const body = JSON.stringify({ session_id: sessionId });
-    const url = `${API_BASE}/multi-dialogue/session/end`;
+    const url = withCsrfQuery(`${API_BASE}/multi-dialogue/session/end`);
     if (navigator.sendBeacon) {
       const blob = new Blob([body], { type: 'application/json' });
       navigator.sendBeacon(url, blob);

@@ -358,6 +358,8 @@ def claim_event_trigger_guard(
     """领取 once/cooldown 事件的持久化触发权。"""
     scope = character_scope or ""
     with get_conn() as conn:
+        if not _is_postgres_enabled():
+            conn.execute("BEGIN IMMEDIATE")
         if scope:
             legacy = conn.execute(
                 """
@@ -2708,5 +2710,4 @@ def delete_event_template(template_id: str) -> bool:
             (template_id,),
         )
     return cursor.rowcount > 0
-
 

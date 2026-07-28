@@ -7,6 +7,7 @@
 3. 支持关系可视化
 """
 
+import logging
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -14,6 +15,11 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from memoria.api.user import require_current_user_id
 from memoria.db import repository
+
+logger = logging.getLogger(__name__)
+
+# 每条关系要执行 3+ 条 SQL，请求体列表必须有硬上限。
+MAX_BATCH_RELATIONSHIPS = 200
 
 router = APIRouter()
 
@@ -150,7 +156,8 @@ def create_relationship(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"创建关系失败: {str(e)}")
+        logger.exception("创建关系失败")
+        raise HTTPException(status_code=500, detail="创建关系失败")
 
 
 # =========================
@@ -230,7 +237,8 @@ def update_relationship(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"更新关系失败: {str(e)}")
+        logger.exception("更新关系失败")
+        raise HTTPException(status_code=500, detail="更新关系失败")
 
 
 # =========================
@@ -277,7 +285,8 @@ def delete_relationship(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"删除关系失败: {str(e)}")
+        logger.exception("删除关系失败")
+        raise HTTPException(status_code=500, detail="删除关系失败")
 
 
 # =========================
@@ -403,7 +412,8 @@ def get_relationship_network(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取关系网络失败: {str(e)}")
+        logger.exception("获取关系网络失败")
+        raise HTTPException(status_code=500, detail="获取关系网络失败")
 
 
 # =========================
@@ -415,6 +425,11 @@ def batch_create_relationships(
     current_user_id: str = Depends(require_current_user_id),
 ):
     """批量创建角色关系"""
+    if len(relationships) > MAX_BATCH_RELATIONSHIPS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"单次批量创建最多 {MAX_BATCH_RELATIONSHIPS} 条关系",
+        )
     try:
         success_count = 0
         failed_count = 0
@@ -455,4 +470,5 @@ def batch_create_relationships(
         )
     
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"批量创建失败: {str(e)}")
+        logger.exception("批量创建失败")
+        raise HTTPException(status_code=500, detail="批量创建失败")

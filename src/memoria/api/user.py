@@ -6,6 +6,8 @@ import hashlib
 import hmac
 import secrets
 import re
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
@@ -35,6 +37,40 @@ AUTH_COOKIE_NAME = "memoria-token"
 AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 天
 PASSWORD_HASH_ALGORITHM = "pbkdf2_sha256"
 PASSWORD_HASH_ITERATIONS = 210_000
+
+# 登录失败节流：进程内计数，多 worker/多实例各自独立；生产建议在网关层叠加。
+LOGIN_FAILURE_WINDOW_SECONDS = 15 * 60
+LOGIN_FAILURE_MAX_ATTEMPTS = 10
+_login_failures: dict[str, list[float]] = {}
+_login_failures_lock = threading.Lock()
+
+
+def _login_throttle_key(username: str) -> str:
+    return username.strip().casefold()
+
+
+def _login_attempt_allowed(username: str) -> bool:
+    """同一用户名短时间内连续失败过多时拒绝继续尝试。"""
+    cutoff = time.monotonic() - LOGIN_FAILURE_WINDOW_SECONDS
+    key = _login_throttle_key(username)
+    with _login_failures_lock:
+        for existing_key, timestamps in list(_login_failures.items()):
+            timestamps[:] = [t for t in timestamps if t > cutoff]
+            if not timestamps:
+                del _login_failures[existing_key]
+        return len(_login_failures.get(key, ())) < LOGIN_FAILURE_MAX_ATTEMPTS
+
+
+def _record_login_failure(username: str) -> None:
+    key = _login_throttle_key(username)
+    with _login_failures_lock:
+        _login_failures.setdefault(key, []).append(time.monotonic())
+
+
+def _clear_login_failures(username: str) -> None:
+    with _login_failures_lock:
+        _login_failures.pop(_login_throttle_key(username), None)
+
 
 def _hash_password(password: str) -> str:
     salt = secrets.token_hex(16)
@@ -69,6 +105,16 @@ def _verify_password(password: str, stored_hash: str) -> bool:
 
 def _needs_password_rehash(stored_hash: str) -> bool:
     return not stored_hash.startswith(f"{PASSWORD_HASH_ALGORITHM}${PASSWORD_HASH_ITERATIONS}$")
+
+
+def _burn_password_hash_time(password: str) -> None:
+    """用户不存在时也付出一次等价的哈希开销，消除用户名枚举时序差。"""
+    hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        b"\x00" * 16,
+        PASSWORD_HASH_ITERATIONS,
+    )
 
 def _gen_token() -> str:
     return secrets.token_hex(32)
@@ -206,7 +252,7 @@ class UpdateSpeechSettingsRequest(BaseModel):
     stt_auto_send: bool
 
 class SetAvatarUrlRequest(BaseModel):
-    url: str
+    url: str = Field(..., max_length=2048)
 
 
 class UserCharacterCardUpdate(BaseModel):
@@ -438,10 +484,20 @@ def register(req: RegisterRequest, response: Response):
 # =========================
 @router.post("/user/login", response_model=AuthResponse)
 def login(req: LoginRequest, response: Response):
+    if not _login_attempt_allowed(req.username):
+        raise HTTPException(429, "登录失败次数过多，请稍后再试")
+
     user = repository.get_user_by_username(req.username)
-    if not user or not _verify_password(req.password, user["password_hash"]):
+    if not user:
+        # 恒定开销路径：不做提前返回，避免响应时间暴露用户名是否存在。
+        _burn_password_hash_time(req.password)
+        _record_login_failure(req.username)
+        raise HTTPException(401, "用户名或密码错误")
+    if not _verify_password(req.password, user["password_hash"]):
+        _record_login_failure(req.username)
         raise HTTPException(401, "用户名或密码错误")
 
+    _clear_login_failures(req.username)
     if _needs_password_rehash(user["password_hash"]):
         repository.update_user_password_hash(user["user_id"], _hash_password(req.password))
 

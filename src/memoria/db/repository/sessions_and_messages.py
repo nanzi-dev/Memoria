@@ -103,7 +103,7 @@ def get_or_create_active_session(
             WHERE player_id = ?
               AND character_id = ?
               AND status = 'active'
-              AND is_multi_character = 0
+              AND COALESCE(is_multi_character, 0) = 0
             ORDER BY created_at DESC, session_id DESC
             LIMIT 1
             """,
@@ -174,7 +174,7 @@ def get_latest_active_session(player_id: str, character_id: str | None = None) -
                         LIMIT 1
                     ) AS last_message_at
                 FROM session s
-                WHERE s.player_id = ? AND s.character_id = ? AND s.status = 'active' AND s.is_multi_character = 0
+                WHERE s.player_id = ? AND s.character_id = ? AND s.status = 'active' AND COALESCE(s.is_multi_character, 0) = 0
                 ORDER BY COALESCE(last_message_at, s.created_at) DESC
                 LIMIT 1
                 """,
@@ -412,10 +412,7 @@ def get_sessions_by_player_and_character(character_id: str, player_id: str) -> l
                     ELSE (
                         SELECT m.content
                         FROM short_term_message m
-                        INNER JOIN session sm ON sm.session_id = m.session_id
-                        WHERE sm.character_id = s.character_id
-                          AND sm.player_id = s.player_id
-                          AND COALESCE(sm.is_multi_character, 0) = 0
+                        WHERE m.session_id = s.session_id
                         ORDER BY m.id DESC
                         LIMIT 1
                     )
@@ -431,10 +428,7 @@ def get_sessions_by_player_and_character(character_id: str, player_id: str) -> l
                     ELSE (
                         SELECT m.created_at
                         FROM short_term_message m
-                        INNER JOIN session sm ON sm.session_id = m.session_id
-                        WHERE sm.character_id = s.character_id
-                          AND sm.player_id = s.player_id
-                          AND COALESCE(sm.is_multi_character, 0) = 0
+                        WHERE m.session_id = s.session_id
                         ORDER BY m.id DESC
                         LIMIT 1
                     )
@@ -448,10 +442,7 @@ def get_sessions_by_player_and_character(character_id: str, player_id: str) -> l
                     ELSE (
                         SELECT COUNT(*)
                         FROM short_term_message m
-                        INNER JOIN session sm ON sm.session_id = m.session_id
-                        WHERE sm.character_id = s.character_id
-                          AND sm.player_id = s.player_id
-                          AND COALESCE(sm.is_multi_character, 0) = 0
+                        WHERE m.session_id = s.session_id
                     )
                 END AS message_count
             FROM session s
@@ -539,6 +530,57 @@ def get_all_player_sessions(player_id: str) -> list[dict]:
             (player_id,),
         ).fetchall()
 
+        # 批量统计各群聊线程的消息数、最新消息与未读数，避免 N+1 查询。
+        message_stats = {
+            row["thread_id"]: dict(row)
+            for row in conn.execute(
+                """
+                SELECT COALESCE(sm.group_thread_id, sm.session_id) AS thread_id,
+                       COUNT(*) AS message_count,
+                       MAX(m.id) AS latest_message_id
+                FROM short_term_message m
+                INNER JOIN session sm ON sm.session_id = m.session_id
+                WHERE sm.player_id = ?
+                  AND COALESCE(sm.is_multi_character, 0) = 1
+                GROUP BY COALESCE(sm.group_thread_id, sm.session_id)
+                """,
+                (player_id,),
+            ).fetchall()
+        }
+        latest_ids = [
+            stats["latest_message_id"]
+            for stats in message_stats.values()
+            if stats.get("latest_message_id") is not None
+        ]
+        latest_messages = {}
+        if latest_ids:
+            placeholders = ",".join("?" for _ in latest_ids)
+            latest_messages = {
+                row["message_id"]: dict(row)
+                for row in conn.execute(
+                    f"""
+                    SELECT id AS message_id, content, created_at
+                    FROM short_term_message
+                    WHERE id IN ({placeholders})
+                    """,
+                    tuple(latest_ids),
+                ).fetchall()
+            }
+        unread_stats = {
+            row["group_thread_id"]: int(row["unread_count"] or 0)
+            for row in conn.execute(
+                """
+                SELECT group_thread_id,
+                       COALESCE(SUM(unread_count), 0) AS unread_count
+                FROM player_event_inbox
+                WHERE player_id = ? AND event_type = 'group_message'
+                  AND read_at IS NULL
+                GROUP BY group_thread_id
+                """,
+                (player_id,),
+            ).fetchall()
+        }
+
         group_rows = []
         seen_group_threads = set()
         for raw_session in group_sessions:
@@ -548,48 +590,15 @@ def get_all_player_sessions(player_id: str) -> list[dict]:
                 continue
             seen_group_threads.add(thread_id)
 
-            latest_message = conn.execute(
-                """
-                SELECT m.id AS message_id, m.content, m.created_at
-                FROM short_term_message m
-                INNER JOIN session sm ON sm.session_id = m.session_id
-                WHERE sm.player_id = ?
-                  AND COALESCE(sm.is_multi_character, 0) = 1
-                  AND COALESCE(sm.group_thread_id, sm.session_id) = ?
-                ORDER BY m.id DESC
-                LIMIT 1
-                """,
-                (player_id, thread_id),
-            ).fetchone()
-            message_count_row = conn.execute(
-                """
-                SELECT COUNT(*) AS message_count
-                FROM short_term_message m
-                INNER JOIN session sm ON sm.session_id = m.session_id
-                WHERE sm.player_id = ?
-                  AND COALESCE(sm.is_multi_character, 0) = 1
-                  AND COALESCE(sm.group_thread_id, sm.session_id) = ?
-                """,
-                (player_id, thread_id),
-            ).fetchone()
-            unread_row = conn.execute(
-                """
-                SELECT COALESCE(SUM(unread_count), 0) AS unread_count
-                FROM player_event_inbox
-                WHERE player_id = ? AND event_type = 'group_message'
-                  AND group_thread_id = ? AND read_at IS NULL
-                """,
-                (player_id, thread_id),
-            ).fetchone()
-
-            latest = dict(latest_message) if latest_message else {}
+            stats = message_stats.get(thread_id) or {}
+            latest = latest_messages.get(stats.get("latest_message_id")) or {}
             session.update({
                 "group_thread_id": thread_id,
                 "last_message": latest.get("content"),
                 "last_message_at": latest.get("created_at"),
-                "latest_message_id": latest.get("message_id"),
-                "message_count": int(message_count_row["message_count"] or 0),
-                "unread_count": int(unread_row["unread_count"] or 0),
+                "latest_message_id": stats.get("latest_message_id"),
+                "message_count": int(stats.get("message_count") or 0),
+                "unread_count": unread_stats.get(thread_id, 0),
             })
             group_rows.append(session)
 
@@ -634,12 +643,6 @@ def get_messages_paginated(session_id: str, offset: int, limit: int) -> tuple[li
     - offset=20, limit=20: 获取次新的20条（用于"加载更多"）
     """
     with get_conn() as conn:
-        # 先统计总数
-        total_count = conn.execute(
-            "SELECT COUNT(*) FROM short_term_message WHERE session_id = ?",
-            (session_id,)
-        ).fetchone()[0]
-        
         # 倒序查询（最新的在前）
         rows = conn.execute(
             """
@@ -731,7 +734,7 @@ def get_messages_by_player_and_character(
             WHERE
                 s.character_id = ?
                 AND s.player_id = ?
-                AND s.is_multi_character = 0
+                AND COALESCE(s.is_multi_character, 0) = 0
                 {exclude_clause}
             ORDER BY
                 m.id DESC
@@ -790,22 +793,17 @@ def save_session_summary(
     summary_status: pending / generating / completed / failed
     """
     with get_conn() as conn:
-        existing = conn.execute(
-            "SELECT id FROM session_summary WHERE session_id=? AND character_id=? AND player_id=? LIMIT 1",
-            (session_id, character_id, player_id),
-        ).fetchone()
-        if existing:
-            conn.execute(
-                "UPDATE session_summary SET summary_text=?, message_count=?, summary_status=?, created_at=? WHERE id=?",
-                (summary_text, message_count, summary_status, _now(), existing["id"]),
-            )
-        else:
-            conn.execute(
-                """INSERT INTO session_summary
-                   (session_id, character_id, player_id, summary_text, message_count, summary_status, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (session_id, character_id, player_id, summary_text, message_count, summary_status, _now()),
-            )
+        conn.execute(
+            """INSERT INTO session_summary
+               (session_id, character_id, player_id, summary_text, message_count, summary_status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(session_id, character_id, player_id) DO UPDATE SET
+                   summary_text=excluded.summary_text,
+                   message_count=excluded.message_count,
+                   summary_status=excluded.summary_status,
+                   created_at=excluded.created_at""",
+            (session_id, character_id, player_id, summary_text, message_count, summary_status, _now()),
+        )
         
 def get_session_summary(session_id: str) -> dict | None:
     """获取指定会话的摘要"""
@@ -1083,25 +1081,39 @@ def get_character_group_memories(
     character_id: str,
     limit: int = 20,
     created_after: str | None = None,
-    owner_user_id: str | None = None
+    *,
+    owner_user_id: str,
 ) -> list[dict]:
-    """获取某个角色参与过的群体记忆"""
-    table_clause = "group_memory"
-    prefix = ""
-    where_clause = "participants LIKE ?"
-    params = [f"%{character_id}%"]
-    if owner_user_id:
-        table_clause = "group_memory gm JOIN session s ON s.session_id = gm.session_id"
-        prefix = "gm."
-        where_clause = "gm.participants LIKE ? AND s.player_id = ?"
-        params.append(owner_user_id)
+    """获取某个角色在指定用户下参与过的群体记忆。
+
+    `owner_user_id` 是**必填的关键字参数**：角色 ID 会跨用户重复（预置角色卡
+    `source='file'` 对所有用户是同一 ID），缺少租户限定会把 A 用户群聊里形成的
+    记忆注入 B 用户的 prompt。设为必填是为了让任何未限定租户的调用直接以
+    TypeError 失败，而不是静默返回跨用户数据。
+    """
+    if not owner_user_id:
+        raise ValueError("get_character_group_memories 需要 owner_user_id")
+
+    # participants 以 JSON 数组存储（如 ["char_a","char_b"]）。
+    # 用带引号的精确 token 匹配并转义 LIKE 通配符，避免 char-a 误命中 char-a-2。
+    escaped_id = (
+        character_id
+        .replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+    where_clause = "gm.participants LIKE ? ESCAPE '\\' AND s.player_id = ?"
+    params = [f'%"{escaped_id}"%', owner_user_id]
     if created_after:
-        where_clause += f" AND {prefix}created_at >= ?"
+        where_clause += " AND gm.created_at >= ?"
         params.append(created_after)
     params.append(limit)
     with get_conn() as conn:
         rows = conn.execute(
-            f"SELECT {prefix}id, {prefix}session_id, {prefix}memory_text, {prefix}participants, {prefix}context, {prefix}importance, {prefix}created_at FROM {table_clause} WHERE {where_clause} ORDER BY {prefix}importance DESC, {prefix}last_referenced DESC LIMIT ?",
+            "SELECT gm.id, gm.session_id, gm.memory_text, gm.participants, gm.context,"
+            " gm.importance, gm.created_at"
+            " FROM group_memory gm JOIN session s ON s.session_id = gm.session_id"
+            f" WHERE {where_clause}"
+            " ORDER BY gm.importance DESC, gm.last_referenced DESC LIMIT ?",
             tuple(params)).fetchall()
     return [dict(r) for r in rows]
-

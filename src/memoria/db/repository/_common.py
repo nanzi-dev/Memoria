@@ -268,6 +268,9 @@ def _dedup_check(conn, table, text_col, text, where_clause, params, threshold=0.
 # =========================
 # 数据库连接管理
 # =========================
+_wal_configured_paths: set = set()
+
+
 @contextmanager
 def get_conn():
     """
@@ -291,8 +294,10 @@ def get_conn():
 
         conn.row_factory = sqlite3.Row
 
-        # WAL 模式（推荐用于并发读写）
-        conn.execute("PRAGMA journal_mode=WAL;")
+        # WAL 模式是数据库文件的持久属性，每进程只需设置一次
+        if configs.database_path not in _wal_configured_paths:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            _wal_configured_paths.add(configs.database_path)
     
     with tracing.start_span("db.transaction", **{"db.system": db_system, "db.name": _database_name()}):
         try:
@@ -1192,6 +1197,36 @@ def init_db():
     """初始化数据库结构"""
     with get_conn() as conn:
         conn.executescript(_schema_for_current_db())
+        # 历史数据可能存在重复摘要行，先去重再建唯一索引。
+        conn.execute(
+            """
+            DELETE FROM session_summary WHERE id NOT IN (
+                SELECT MAX(id) FROM session_summary
+                GROUP BY session_id, character_id, player_id
+            )
+            """
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_summary_unique "
+            "ON session_summary(session_id, character_id, player_id)"
+        )
+        # 群聊未读聚合通知：清理历史重复行后建立部分唯一索引。
+        conn.execute(
+            """
+            DELETE FROM player_event_inbox
+            WHERE event_type = 'group_message' AND read_at IS NULL
+              AND id NOT IN (
+                SELECT MAX(id) FROM player_event_inbox
+                WHERE event_type = 'group_message' AND read_at IS NULL
+                GROUP BY player_id, group_thread_id
+              )
+            """
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_group_unread "
+            "ON player_event_inbox(player_id, group_thread_id) "
+            "WHERE event_type = 'group_message' AND read_at IS NULL"
+        )
         if _is_postgres_enabled():
             conn.execute(
                 "ALTER TABLE session ADD COLUMN IF NOT EXISTS story_id TEXT"
@@ -1241,5 +1276,3 @@ def init_db():
                 conn.execute(
                     "ALTER TABLE character_card ADD COLUMN avatar_revision TEXT"
                 )
-
-

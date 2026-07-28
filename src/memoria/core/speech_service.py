@@ -177,6 +177,8 @@ class SpeechService:
         session = self._require_session(session_id, current_user_id, mode)
         self.validate_stt_upload(audio, filename, mime_type)
         locale = session.get("locale") or "zh-CN"
+        if locale not in CONSENT_PHRASES:
+            raise SpeechServiceError(400, f"Unsupported session locale: {locale}")
         try:
             text = await self.stt_provider.transcribe(
                 audio,
@@ -497,6 +499,8 @@ class SpeechService:
     ) -> dict:
         card, _ = self._owned_character(owner_user_id, character_id)
         self.validate_custom_voice_upload(audio, mime_type)
+        if locale not in CONSENT_PHRASES:
+            raise SpeechServiceError(400, f"Unsupported locale: {locale}")
         workflow = self._read_workflow(owner_user_id, character_id)
         consent_path = self._save_workflow_audio(
             owner_user_id,

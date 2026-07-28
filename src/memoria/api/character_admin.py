@@ -10,7 +10,7 @@
 import json
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from starlette.concurrency import run_in_threadpool
 
@@ -64,7 +64,13 @@ class CharacterCardDetail(BaseModel):
 
 class ImportFromFileRequest(BaseModel):
     """从文件导入请求"""
-    character_id: str = Field(..., description="要导入的角色 ID（对应文件名）")
+    character_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9_-]+$",
+        description="要导入的角色 ID（对应文件名，仅允许字母/数字/下划线/连字符）",
+    )
 
 class OperationResponse(BaseModel):
     """操作响应"""
@@ -91,8 +97,8 @@ def list_characters_admin(
         cards = repository.list_character_cards_from_db(current_user_id, only_active=only_active)
         return [CharacterCardListItem(**card) for card in cards]
     except Exception as e:
-        logger.error(f"获取角色卡列表失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取角色卡列表失败: {str(e)}")
+        logger.exception("获取角色卡列表失败")
+        raise HTTPException(status_code=500, detail="获取角色卡列表失败")
 
 
 # =========================
@@ -134,8 +140,8 @@ def get_character_detail(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取角色卡详情失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取角色卡详情失败: {str(e)}")
+        logger.exception("获取角色卡详情失败")
+        raise HTTPException(status_code=500, detail="获取角色卡详情失败")
 
 
 # =========================
@@ -199,9 +205,12 @@ def create_character(
     
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"创建角色卡失败: {e}")
-        raise HTTPException(status_code=400, detail=f"创建角色卡失败: {str(e)}")
+    except ValidationError as e:
+        # 校验对象是请求方自己提交的数据，回传明细不构成信息泄露。
+        raise HTTPException(status_code=400, detail=f"角色卡数据校验失败: {e}")
+    except Exception:
+        logger.exception("创建角色卡失败")
+        raise HTTPException(status_code=400, detail="创建角色卡失败")
 
 
 # =========================
@@ -274,9 +283,11 @@ def update_character(
     
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"更新角色卡失败: {e}")
-        raise HTTPException(status_code=400, detail=f"更新角色卡失败: {str(e)}")
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=f"角色卡数据校验失败: {e}")
+    except Exception:
+        logger.exception("更新角色卡失败")
+        raise HTTPException(status_code=400, detail="更新角色卡失败")
 
 
 # =========================
@@ -324,8 +335,8 @@ def delete_character(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"删除角色卡失败: {e}")
-        raise HTTPException(status_code=500, detail=f"删除角色卡失败: {str(e)}")
+        logger.exception("删除角色卡失败")
+        raise HTTPException(status_code=500, detail="删除角色卡失败")
 
 
 # =========================
@@ -360,8 +371,8 @@ def activate_character(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"激活角色卡失败: {e}")
-        raise HTTPException(status_code=500, detail=f"激活角色卡失败: {str(e)}")
+        logger.exception("激活角色卡失败")
+        raise HTTPException(status_code=500, detail="激活角色卡失败")
 
 
 # =========================
@@ -379,10 +390,13 @@ def import_character_from_file(
         req: 包含角色 ID 的请求
     """
     try:
-        # 构建文件路径
+        # 构建文件路径；character_id 已由模型限制为安全字符集，这里再做一次
+        # 目录逃逸复核，确保任何拼接结果都落在 characters 目录内。
         characters_dir = Path(__file__).resolve().parent.parent / "characters"
-        file_path = characters_dir / f"{req.character_id}.json"
-        
+        file_path = (characters_dir / f"{req.character_id}.json").resolve()
+        if not file_path.is_relative_to(characters_dir):
+            raise HTTPException(status_code=400, detail="角色 ID 无效")
+
         if not file_path.exists():
             raise HTTPException(
                 status_code=404,
@@ -420,11 +434,13 @@ def import_character_from_file(
     
     except HTTPException:
         raise
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=400, detail=f"JSON 格式错误: {str(e)}")
-    except Exception as e:
-        logger.error(f"导入角色卡失败: {e}")
-        raise HTTPException(status_code=400, detail=f"导入角色卡失败: {str(e)}")
+    except json.JSONDecodeError:
+        # 文件内容来自服务器磁盘而非请求方，异常详情不能回传给客户端。
+        logger.exception("角色卡文件 JSON 格式错误: %s", req.character_id)
+        raise HTTPException(status_code=400, detail="角色卡文件 JSON 格式错误")
+    except Exception:
+        logger.exception("导入角色卡失败: %s", req.character_id)
+        raise HTTPException(status_code=400, detail="导入角色卡失败")
 
 # =========================
 # 头像管理
@@ -484,7 +500,7 @@ def _schedule_avatar_download(
 
 class AvatarUrlRequest(BaseModel):
     """通过 URL 设置头像"""
-    url: str = Field(..., description="头像图片的 URL 地址")
+    url: str = Field(..., max_length=2048, description="头像图片的 URL 地址")
 
 
 @router.get("/admin/characters/{character_id}/avatar", response_model=dict)
@@ -508,8 +524,8 @@ def get_character_avatar(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取头像失败: {e}")
-        raise HTTPException(status_code=500, detail=f"获取头像失败: {str(e)}")
+        logger.exception("获取头像失败")
+        raise HTTPException(status_code=500, detail="获取头像失败")
 
 
 @router.post("/admin/characters/{character_id}/avatar/upload", response_model=OperationResponse)
@@ -552,8 +568,8 @@ async def upload_character_avatar(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"头像上传失败: {e}")
-        raise HTTPException(status_code=500, detail=f"头像上传失败: {str(e)}")
+        logger.exception("头像上传失败")
+        raise HTTPException(status_code=500, detail="头像上传失败")
 
 
 @router.post("/admin/characters/{character_id}/avatar/url", response_model=OperationResponse)
@@ -594,5 +610,5 @@ def set_character_avatar_url(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"设置头像 URL 失败: {e}")
-        raise HTTPException(status_code=500, detail=f"设置头像 URL 失败: {str(e)}")
+        logger.exception("设置头像 URL 失败")
+        raise HTTPException(status_code=500, detail="设置头像 URL 失败")

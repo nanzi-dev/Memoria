@@ -105,6 +105,22 @@ curl -X POST "https://api.deepseek.com/v1/chat/completions" \
 
 ---
 
+### Q: URL 头像提示「不允许访问内网或保留地址」或「无法安全解析图片 URL 主机」
+
+URL 头像由后端下载，不能访问回环、私网、链路本地、CGNAT、保留地址或直接提交的 Fake-IP。先确认 URL 使用 `http` / `https`，没有用户凭据或反斜杠，并且域名真实 DNS 结果全部是公网地址。`127.0.0.1.nip.io`、`100.64.0.0/10`、`198.18.0.0/15` 以及十进制/十六进制数字 IP 都会被拒绝，这是预期的 SSRF 防护。
+
+Clash/Mihomo Fake-IP 模式通常把公网域名解析为 `198.18.x.x`。后端检测到这种结果后会查询 HTTPS DoH，再固定连接到验证后的真实公网 IP；无需关闭整个内网地址防护。排查步骤：
+
+1. 在后端所在主机或容器中检查系统解析：`getent ahosts example.com`。得到 `198.18.x.x` 表示当前使用 Fake-IP。
+2. 确认后端可以出站访问 `https://1.1.1.1/dns-query` 或 `https://8.8.8.8/resolve` 的 TCP 443。防火墙、容器网络或企业出口必须至少允许一个端点。
+3. 检查真实 DNS 结果是否包含回环或内网地址。此类域名即使系统先返回 Fake-IP，也会在 DoH 校验阶段被拒绝。
+4. 检查图片响应状态和 `Content-Type`。只支持 PNG、JPEG、GIF、WebP，远程响应上限为 8 MiB，总解析与下载期限为 20 秒。
+5. `429` 且提示「头像下载任务繁忙」表示当前后端进程已有 8 个远程头像下载，应稍后重试；它与通用写接口速率限制是两层独立保护。
+
+DoH 全部不可达时下载器会安全拒绝请求，不会退回到直接信任 Fake-IP。无法开放 DoH 出站访问时，可改用非 Fake-IP DNS 模式，让后端系统解析器直接获得真实公网 A/AAAA 地址。
+
+---
+
 ### Q: 浏览器登录后仍然显示未登录
 
 仓库内 Web 前端只使用服务端写入的 Cookie 登录态：`memoria-token`（HttpOnly）与 `memoria-csrf`（可读），不从响应体构造 Bearer 头，也不把 token 保存到 `localStorage`。排查时确认：
@@ -120,7 +136,7 @@ curl -X POST "https://api.deepseek.com/v1/chat/completions" \
 
 ### Q: 写接口返回 403「CSRF 校验失败」
 
-Cookie 会话对 `/api/*` 的写方法（非 GET/HEAD/OPTIONS）要求请求头 `X-CSRF-Token` 与 Cookie `memoria-csrf` 完全一致。
+Cookie 会话对 `/api/*` 与 `/admin/*` 的写方法（非 GET/HEAD/OPTIONS）要求请求头 `X-CSRF-Token` 与 Cookie `memoria-csrf` 完全一致。
 
 排查：
 
@@ -129,8 +145,17 @@ Cookie 会话对 `/api/*` 的写方法（非 GET/HEAD/OPTIONS）要求请求头 
 3. 请求是否 `credentials: 'include'`，且前后端同源或反向代理正确转发 Cookie。
 4. 是否误用了跨站页面发起写请求；`SameSite=Lax` 下跨站 POST 不会带 Cookie。
 5. 若使用 `Authorization: Bearer ...`，中间件会豁免 CSRF，此时 403 更可能来自权限或其他业务校验。
+6. 是否试图用查询参数 `?csrf_token=` 代替请求头。该回退**只对两条页面卸载专用路径生效**：`POST /api/v1/dialogue/session/end` 与 `POST /api/v1/multi-dialogue/session/end`，其它接口传了也不会被接受。
 
 登录与注册路径本身不校验 CSRF。
+
+---
+
+### Q: 为什么关闭页面时的「结束会话」要用查询参数带 CSRF 令牌？
+
+浏览器的 `navigator.sendBeacon` 和 `keepalive fetch` 无法携带自定义请求头，页面卸载时无法发送 `X-CSRF-Token`。若不做处理，关闭或刷新页面时的结束会话请求会 100% 被拒，会话残留为 `active`。
+
+因此服务端只对上述两条路径接受 `?csrf_token=<memoria-csrf 值>` 形式的双提交。白名单是刻意收窄的——如果放开到全部写接口，CSRF 令牌会进入反向代理的访问日志、浏览器历史和 `Referer`，而该令牌与会话同寿（30 天），一次日志泄露即长期有效。
 
 ---
 
@@ -391,11 +416,36 @@ sqlite3 data/sqlite_db/memoria.db \
 
 ### Q: API 返回 429 Too Many Requests
 
-触发了写操作速率限制（60 次/60 秒）。登录请求优先按认证用户限流，未登录或 token 无效时按客户端 IP 限流；`X-Player-ID` 不会作为可信限流依据。计数器使用线程锁和单调时钟，并周期清理过期 key。
+有三种可能，先看响应体区分：
+
+| 响应体 | 来源 |
+|--------|------|
+| `{"error": "请求过于频繁，请稍后再试"}` | 通用写操作速率限制 |
+| `{"detail": "登录失败次数过多，请稍后再试"}` | 登录失败节流 |
+| `{"detail": "头像下载任务繁忙，请稍后重试"}` | 远程头像下载并发上限（8 个） |
+
+**通用写操作速率限制**（60 次/60 秒）覆盖 `/api/*` 与 `/admin/*` 的非 GET/HEAD/OPTIONS 请求。优先按认证用户限流，未登录或 token 无效时按客户端 IP 限流；`X-Player-ID` 不会作为可信限流依据。计数器使用线程锁和单调时钟，并周期清理过期 key。
+
+**登录失败节流**：同一用户名 15 分钟内累计失败 10 次后触发，按用户名隔离，不影响其他账号；一次成功登录立即清零。它与通用限流是两层独立保护。另注意登录接口对「用户名不存在」和「密码错误」返回相同的 401 且**响应时间相同**，无法据此枚举用户名。
 
 当前额度只在单个应用进程内共享；多 worker 或多实例部署不会形成全局限额。生产环境需要在反向代理或 Redis 等集中式存储上实现统一限流。
 
 Docker Compose 部署依赖 Uvicorn 的可信代理配置解析 Nginx 设置的转发头。默认 `FORWARDED_ALLOW_IPS=*` 仅适用于后端端口不直接暴露公网的拓扑；直接开放后端端口时必须限制为实际代理地址，否则客户端可伪造转发头绕过按 IP 的限流。
+
+### Q: 上传返回 413「请求体过大」
+
+请求声明的 `Content-Length` 超过 `MAX_REQUEST_BODY_BYTES`（默认 32 MB）。该检查是最外层中间件，排在限流与 CSRF 之前，目的是让超大请求在被缓冲落盘或读入内存之前就拒掉。
+
+各接口自身的上传限制更小，通常应该先命中它们（返回 400 而非 413）：
+
+| 接口 | 上限 | 配置项 |
+|------|------|--------|
+| 语音转写 | 25 MB | `SPEECH_STT_UPLOAD_MAX_BYTES` |
+| 自定义声音样本 / 授权录音 | 10 MB | `SPEECH_CUSTOM_VOICE_UPLOAD_MAX_BYTES` |
+| 知识文档 | 10 MB | `KNOWLEDGE_UPLOAD_MAX_BYTES` |
+| 头像 | 8 MB | 代码常量 `MAX_AVATAR_UPLOAD_SIZE` |
+
+若确实需要更大的请求体，调高 `MAX_REQUEST_BODY_BYTES` 时要保证它仍高于上表中最大的单项限制。使用 chunked 传输编码的请求不带 `Content-Length`，该中间件不生效——生产部署仍需在反向代理侧配置 `client_max_body_size`。
 
 ### Q: 启动时出现配置警告
 

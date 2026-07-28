@@ -1017,7 +1017,9 @@ export default function ChatRoom() {
       nextItems.sort((a, b) => new Date(getActivityTime(b) || 0) - new Date(getActivityTime(a) || 0));
       if (isCurrentRequest()) setChatItems(nextItems);
 
-    } catch {}
+    } catch (e) {
+      if (isCurrentRequest()) setError(`会话列表加载失败：${e.message}`);
+    }
 
   }
 

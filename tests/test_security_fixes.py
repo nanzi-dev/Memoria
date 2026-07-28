@@ -95,6 +95,175 @@ def test_avatar_downloader_rejects_private_ip(monkeypatch):
     assert "内网" in exc_info.value.detail
 
 
+def test_avatar_downloader_resolves_and_pins_proxy_fake_ip_domain(monkeypatch):
+    from memoria.api import avatar_fetcher
+
+    peer_socket = SimpleNamespace(getpeername=lambda: ("140.150.22.50", 443))
+    response = SimpleNamespace(
+        is_redirect=False,
+        headers={"Content-Type": "image/jpeg", "Content-Length": "3"},
+        close=lambda: setattr(response, "closed", True),
+        raise_for_status=lambda: None,
+        iter_content=lambda chunk_size: [b"jpg"],
+        raw=SimpleNamespace(_connection=SimpleNamespace(sock=peer_socket)),
+        closed=False,
+    )
+    requests_seen = []
+    mounts = []
+
+    class FakeSession:
+        trust_env = True
+
+        def mount(self, prefix, adapter):
+            mounts.append((prefix, adapter))
+
+        def get(self, url, **kwargs):
+            requests_seen.append((url, kwargs))
+            return response
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        avatar_fetcher.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (
+                avatar_fetcher.socket.AF_INET,
+                avatar_fetcher.socket.SOCK_STREAM,
+                0,
+                "",
+                ("198.18.0.24", 443),
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        avatar_fetcher,
+        "_resolve_public_dns",
+        lambda hostname, deadline: ["140.150.22.50"],
+    )
+    monkeypatch.setattr(avatar_fetcher.requests, "Session", FakeSession)
+
+    image = avatar_fetcher.download_remote_image(
+        "https://img.itouxiang.com/m12/28/c7/01dd9a4bf126.jpg"
+    )
+
+    assert image.data == b"jpg"
+    assert image.content_type == "image/jpeg"
+    assert response.closed is True
+    assert requests_seen[0][0] == (
+        "https://140.150.22.50/m12/28/c7/01dd9a4bf126.jpg"
+    )
+    assert requests_seen[0][1]["headers"]["Host"] == "img.itouxiang.com"
+    assert mounts[0][0] == "https://140.150.22.50/"
+    assert mounts[0][1]._hostname == "img.itouxiang.com"
+
+
+def test_avatar_downloader_rejects_literal_proxy_fake_ip(monkeypatch):
+    from memoria.api import avatar_fetcher
+
+    monkeypatch.setattr(
+        avatar_fetcher.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [(None, None, None, None, ("198.18.0.24", 80))],
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        avatar_fetcher.download_remote_image("http://198.18.0.24/avatar.png")
+
+    assert exc_info.value.status_code == 400
+    assert "内网" in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    "hostname",
+    ["3323068440", "0xc6120018", "198.18.24"],
+)
+def test_avatar_downloader_rejects_legacy_numeric_ip(hostname):
+    from memoria.api import avatar_fetcher
+
+    with pytest.raises(HTTPException) as exc_info:
+        avatar_fetcher.download_remote_image(f"http://{hostname}/avatar.png")
+
+    assert exc_info.value.status_code == 400
+    assert "主机名格式" in exc_info.value.detail
+
+
+def test_avatar_downloader_rejects_cgnat_address(monkeypatch):
+    from memoria.api import avatar_fetcher
+
+    monkeypatch.setattr(
+        avatar_fetcher.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (
+                avatar_fetcher.socket.AF_INET,
+                avatar_fetcher.socket.SOCK_STREAM,
+                0,
+                "",
+                ("100.64.0.1", 80),
+            )
+        ],
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        avatar_fetcher.download_remote_image("http://internal.example/avatar.png")
+
+    assert exc_info.value.status_code == 400
+    assert "内网" in exc_info.value.detail
+
+
+def test_avatar_downloader_rejects_private_real_dns_answer(monkeypatch):
+    from memoria.api import avatar_fetcher
+
+    monkeypatch.setattr(
+        avatar_fetcher.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (
+                avatar_fetcher.socket.AF_INET,
+                avatar_fetcher.socket.SOCK_STREAM,
+                0,
+                "",
+                ("198.18.0.24", 80),
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        avatar_fetcher,
+        "_query_doh",
+        lambda hostname, record_type, deadline: (
+            ["127.0.0.1"] if record_type == "A" else []
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        avatar_fetcher.download_remote_image(
+            "http://127.0.0.1.nip.io:8001/openapi.json"
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "内网" in exc_info.value.detail
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://[",
+        "http://[]/avatar.png",
+        "http://user:password@example.com/avatar.png",
+        "http://example.com\\@127.0.0.1/avatar.png",
+    ],
+)
+def test_avatar_downloader_rejects_malformed_or_credential_url(url):
+    from memoria.api import avatar_fetcher
+
+    with pytest.raises(HTTPException) as exc_info:
+        avatar_fetcher.download_remote_image(url)
+
+    assert exc_info.value.status_code == 400
+
+
 def test_avatar_downloader_closes_rejected_response(monkeypatch):
     from memoria.api import avatar_fetcher
 
@@ -118,6 +287,9 @@ def test_avatar_downloader_closes_rejected_response(monkeypatch):
         def get(self, *args, **kwargs):
             return response
 
+        def mount(self, *args, **kwargs):
+            pass
+
         def close(self):
             self.closed = True
 
@@ -125,7 +297,13 @@ def test_avatar_downloader_closes_rejected_response(monkeypatch):
         avatar_fetcher.socket,
         "getaddrinfo",
         lambda *args, **kwargs: [
-            (avatar_fetcher.socket.AF_INET, avatar_fetcher.socket.SOCK_STREAM, 0, "", ("93.184.216.34", 443))
+            (
+                avatar_fetcher.socket.AF_INET,
+                avatar_fetcher.socket.SOCK_STREAM,
+                0,
+                "",
+                ("93.184.216.34", 443),
+            )
         ],
     )
     monkeypatch.setattr(avatar_fetcher.requests, "Session", FakeSession)
@@ -154,6 +332,9 @@ def test_avatar_downloader_rejects_private_connected_peer(monkeypatch):
         def get(self, *args, **kwargs):
             return response
 
+        def mount(self, *args, **kwargs):
+            pass
+
         def close(self):
             pass
 
@@ -172,6 +353,67 @@ def test_avatar_downloader_rejects_private_connected_peer(monkeypatch):
     assert exc_info.value.status_code == 400
     assert "内网" in exc_info.value.detail
     assert response.closed is True
+
+
+def test_avatar_downloader_enforces_total_download_deadline(monkeypatch):
+    from memoria.api import avatar_fetcher
+
+    peer_socket = SimpleNamespace(getpeername=lambda: ("93.184.216.34", 443))
+    response = SimpleNamespace(
+        is_redirect=False,
+        headers={"Content-Type": "image/jpeg"},
+        close=lambda: setattr(response, "closed", True),
+        raise_for_status=lambda: None,
+        iter_content=lambda chunk_size: [b"first", b"second"],
+        raw=SimpleNamespace(_connection=SimpleNamespace(sock=peer_socket)),
+        closed=False,
+    )
+
+    class FakeSession:
+        trust_env = True
+
+        def mount(self, *args, **kwargs):
+            pass
+
+        def get(self, *args, **kwargs):
+            return response
+
+        def close(self):
+            pass
+
+    timestamps = iter([0.0, 0.0, 0.0, 21.0])
+    monkeypatch.setattr(avatar_fetcher.time, "monotonic", lambda: next(timestamps))
+    monkeypatch.setattr(
+        avatar_fetcher.socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (avatar_fetcher.socket.AF_INET, avatar_fetcher.socket.SOCK_STREAM, 0, "", ("93.184.216.34", 443))
+        ],
+    )
+    monkeypatch.setattr(avatar_fetcher.requests, "Session", FakeSession)
+
+    with pytest.raises(HTTPException) as exc_info:
+        avatar_fetcher.download_remote_image("https://example.test/avatar.jpg")
+
+    assert exc_info.value.status_code == 400
+    assert "超时" in exc_info.value.detail
+    assert response.closed is True
+
+
+def test_avatar_downloader_rejects_when_concurrency_limit_is_reached(monkeypatch):
+    from memoria.api import avatar_fetcher
+
+    slots = SimpleNamespace(
+        acquire=lambda **kwargs: False,
+        release=lambda: pytest.fail("unacquired slot must not be released"),
+    )
+    monkeypatch.setattr(avatar_fetcher, "_DOWNLOAD_SLOTS", slots)
+
+    with pytest.raises(HTTPException) as exc_info:
+        avatar_fetcher.download_remote_image("https://example.test/avatar.jpg")
+
+    assert exc_info.value.status_code == 429
+    assert "繁忙" in exc_info.value.detail
 
 
 def test_user_avatar_url_rejects_url_when_remote_fetch_is_blocked(monkeypatch):
@@ -872,3 +1114,199 @@ def test_development_keeps_auth_cookie_secure_default_false(monkeypatch):
     finally:
         config_module.get_config.cache_clear()
 
+
+# =========================
+# 角色卡导入的路径穿越防护
+# =========================
+@pytest.mark.parametrize(
+    "character_id",
+    [
+        "../../../../../etc/passwd",
+        "../../../.claude",
+        "/etc/hosts",
+        "demo/../../secret",
+        "demo\\..\\secret",
+        "demo.json",
+    ],
+)
+def test_import_character_rejects_path_traversal_ids(character_id):
+    """character_id 只能是安全文件名，不能逃出 characters 目录。"""
+    from pydantic import ValidationError
+
+    from memoria.api.character_admin import ImportFromFileRequest
+
+    with pytest.raises(ValidationError):
+        ImportFromFileRequest(character_id=character_id)
+
+
+def test_import_character_accepts_plain_id():
+    from memoria.api.character_admin import ImportFromFileRequest
+
+    assert ImportFromFileRequest(character_id="lin_yuan-01").character_id == "lin_yuan-01"
+
+
+def test_import_character_error_does_not_echo_file_contents(monkeypatch, tmp_path):
+    """磁盘文件的解析异常不能回传给客户端（pydantic 错误串含 input_value）。"""
+    from memoria.api import character_admin
+
+    secret = tmp_path / "leaky.json"
+    secret.write_text('{"aws_secret_access_key": "TOTALLY_SECRET_VALUE"}', encoding="utf-8")
+
+    monkeypatch.setattr(
+        character_admin.Path,
+        "read_text",
+        lambda self, encoding="utf-8": secret.read_text(encoding=encoding),
+    )
+    monkeypatch.setattr(character_admin.Path, "exists", lambda self: True)
+    monkeypatch.setattr(character_admin.Path, "resolve", lambda self: self)
+    monkeypatch.setattr(character_admin.Path, "is_relative_to", lambda self, other: True)
+
+    with pytest.raises(HTTPException) as exc_info:
+        character_admin.import_character_from_file(
+            character_admin.ImportFromFileRequest(character_id="leaky"),
+            current_user_id="usr_test",
+        )
+
+    assert exc_info.value.status_code == 400
+    # 确认走到的是校验失败分支（而非 404），且详情已完全脱敏。
+    assert exc_info.value.detail == "导入角色卡失败"
+    assert "TOTALLY_SECRET_VALUE" not in str(exc_info.value.detail)
+    assert "aws_secret_access_key" not in str(exc_info.value.detail)
+
+
+# =========================
+# 登录节流与时序对齐
+# =========================
+def test_login_rejects_unknown_user_without_timing_shortcut(monkeypatch):
+    """用户不存在时也要付出一次哈希开销，否则响应时间会泄露用户名是否有效。"""
+    from memoria.api import user
+
+    user._login_failures.clear()
+    burned = []
+    monkeypatch.setattr(user, "_burn_password_hash_time", lambda password: burned.append(password))
+    monkeypatch.setattr(user.repository, "get_user_by_username", lambda username: None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        user.login(user.LoginRequest(username="ghost", password="passw0rd"), Response())
+
+    assert exc_info.value.status_code == 401
+    assert burned == ["passw0rd"]
+    user._login_failures.clear()
+
+
+def test_login_throttles_repeated_failures(monkeypatch):
+    from memoria.api import user
+
+    user._login_failures.clear()
+    monkeypatch.setattr(user, "_burn_password_hash_time", lambda password: None)
+    monkeypatch.setattr(user.repository, "get_user_by_username", lambda username: None)
+
+    for _ in range(user.LOGIN_FAILURE_MAX_ATTEMPTS):
+        with pytest.raises(HTTPException) as exc_info:
+            user.login(user.LoginRequest(username="victim", password="wrong-pass1"), Response())
+        assert exc_info.value.status_code == 401
+
+    with pytest.raises(HTTPException) as exc_info:
+        user.login(user.LoginRequest(username="victim", password="wrong-pass1"), Response())
+    assert exc_info.value.status_code == 429
+
+    # 节流按用户名隔离，不应影响其它账号。
+    with pytest.raises(HTTPException) as exc_info:
+        user.login(user.LoginRequest(username="bystander", password="wrong-pass1"), Response())
+    assert exc_info.value.status_code == 401
+    user._login_failures.clear()
+
+
+def test_successful_login_clears_failure_counter(monkeypatch):
+    from memoria.api import user
+
+    user._login_failures.clear()
+    monkeypatch.setattr(user, "_burn_password_hash_time", lambda password: None)
+    monkeypatch.setattr(
+        user.repository,
+        "get_user_by_username",
+        lambda username: {
+            "user_id": "usr_ok",
+            "username": username,
+            "password_hash": user._hash_password("correct-pass1"),
+            "gender": "unknown",
+        },
+    )
+    monkeypatch.setattr(user.repository, "create_auth_token", lambda *a, **k: None)
+    monkeypatch.setattr(user, "_build_user_response", lambda u: SimpleNamespace(user_id=u["user_id"]))
+    monkeypatch.setattr(user, "AuthResponse", lambda user: SimpleNamespace(user=user))
+
+    user._record_login_failure("recover_me")
+    assert user._login_failures.get("recover_me")
+
+    user.login(user.LoginRequest(username="recover_me", password="correct-pass1"), Response())
+    assert "recover_me" not in user._login_failures
+    user._login_failures.clear()
+
+
+# =========================
+# 输入边界
+# =========================
+def test_group_session_start_rejects_oversized_roster():
+    from pydantic import ValidationError
+
+    from memoria.api.multi_dialogue import MAX_GROUP_CHARACTERS, StartMultiSessionRequest
+
+    roster = [f"npc_{i}" for i in range(MAX_GROUP_CHARACTERS + 1)]
+    with pytest.raises(ValidationError):
+        StartMultiSessionRequest(
+            player_id="usr_1",
+            player_name="p",
+            character_ids=roster,
+        )
+
+
+def test_trigger_interaction_prompt_has_length_cap():
+    from pydantic import ValidationError
+
+    from memoria.api.multi_dialogue import TriggerInteractionRequest
+
+    with pytest.raises(ValidationError):
+        TriggerInteractionRequest(session_id="s1", prompt="x" * 2001)
+
+    assert TriggerInteractionRequest(session_id="s1", prompt="x" * 2000).prompt
+
+
+def test_batch_relationship_creation_is_bounded():
+    from memoria.api import relationship
+
+    payload = [
+        relationship.RelationshipCreateRequest(
+            character_id_a=f"a{i}",
+            character_id_b=f"b{i}",
+            relationship_type="friend",
+        )
+        for i in range(relationship.MAX_BATCH_RELATIONSHIPS + 1)
+    ]
+    with pytest.raises(HTTPException) as exc_info:
+        relationship.batch_create_relationships(payload, current_user_id="usr_test")
+    assert exc_info.value.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "route_path, param, bound",
+    [
+        ("/dialogue/history", "limit", 100),
+        ("/dialogue/summaries", "limit", 50),
+    ],
+)
+def test_pagination_limits_are_bounded(route_path, param, bound):
+    """裸 `limit: int` 在 SQLite 下可用 -1 绕过分页，必须声明上下界。"""
+    from memoria.api.dialogue import router
+
+    for route in router.routes:
+        if route.path == route_path:
+            field = next(
+                p for p in route.dependant.query_params if p.name == param
+            )
+            metadata = field.field_info.metadata
+            assert any(getattr(m, "le", None) == bound for m in metadata), metadata
+            assert any(getattr(m, "ge", None) == 1 for m in metadata), metadata
+            break
+    else:
+        raise AssertionError(f"route not found: {route_path}")

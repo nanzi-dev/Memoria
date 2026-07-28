@@ -383,6 +383,7 @@ class MultiCharacterOrchestrator:
                     turn_context=turn_context,
                 )
                 result["message_id"] = -2
+                result["stream_id"] = f"{request_id}:0"
                 if event_sink:
                     event_sink(
                         "character_completed",
@@ -439,12 +440,20 @@ class MultiCharacterOrchestrator:
             committed_response = responses if allow_multiple_responses else responses[0]
             return committed_response
         except Exception as exc:
-            repository.fail_dialogue_turn(
-                self.session_id,
-                request_id,
-                lease_owner,
-                str(exc),
-            )
+            # 清理失败不得顶替原始异常，详见 orchestrator.run_dialogue_turn 同处注释。
+            try:
+                repository.fail_dialogue_turn(
+                    self.session_id,
+                    request_id,
+                    lease_owner,
+                    str(exc),
+                )
+            except Exception:
+                logger.exception(
+                    "标记群聊轮次失败时出错，租约将等待过期: session=%s request_id=%s",
+                    self.session_id,
+                    request_id,
+                )
             raise
 
 
@@ -500,6 +509,7 @@ class MultiCharacterOrchestrator:
                 for participant in self.participants
                 if participant["character_id"] not in responding_character_ids
             ]
+            event_context_cache: dict = {}
             for character_id, response, response_index in ordered_context_inputs:
                 if response is not None:
                     current_affinity = response["current_affinity"]
@@ -549,6 +559,7 @@ class MultiCharacterOrchestrator:
                     trigger_source="multi_dialogue",
                     current_user_turn_persisted=False,
                     response_index=response_index,
+                    shared_cache=event_context_cache,
                 ))
 
         turn_holder: dict = {}
@@ -713,7 +724,9 @@ class MultiCharacterOrchestrator:
         return event_results
 
 
-    def _persist_generated_response(self, response: dict, clock_snapshot) -> int:
+    def _persist_generated_response(
+        self, response: dict, clock_snapshot, runtime_state: dict | None = None
+    ) -> int:
         world_created_at = (
             response.get("world_created_at")
             or clock_snapshot.world_now.isoformat()
@@ -738,11 +751,20 @@ class MultiCharacterOrchestrator:
                 **persistence_fields,
             )
             if updated:
+                if runtime_state:
+                    repository.save_runtime_state(
+                        response["character_id"],
+                        self.player_id,
+                        runtime_state["affection_level"],
+                        runtime_state["trust_level"],
+                        runtime_state["current_mood"],
+                    )
                 return int(message_id)
 
         message_id = repository.append_multi_character_message(
             self.session_id,
             role="assistant",
+            runtime_state=runtime_state,
             **persistence_fields,
         )
         response["message_id"] = message_id
@@ -1019,6 +1041,21 @@ class MultiCharacterOrchestrator:
                 (msg for msg in reversed(history) if msg.get("message_id") == decision.reply_to_message_id),
                 history[-1] if history else None,
             )
+            previous_same_speaker = next(
+                (
+                    prior
+                    for prior in reversed(responses)
+                    if prior.get("character_id") == decision.speaker_id
+                ),
+                None,
+            )
+            state_overrides = None
+            if previous_same_speaker is not None:
+                state_overrides = {
+                    "affection_level": previous_same_speaker.get("current_affinity"),
+                    "trust_level": previous_same_speaker.get("current_trust"),
+                    "current_mood": previous_same_speaker.get("current_mood"),
+                }
             result = self._generate_character_response(
                 decision.speaker_id,
                 str((target or {}).get("content") or trigger_text or ""),
@@ -1031,6 +1068,7 @@ class MultiCharacterOrchestrator:
                 event_sink=event_sink,
                 stream_id=stream_id,
                 turn_context=turn_context,
+                state_overrides=state_overrides,
             )
             if self._is_redundant_dialogue_response(
                 result,
@@ -1051,6 +1089,7 @@ class MultiCharacterOrchestrator:
                 ))
                 break
             if persist_messages:
+                runtime_state = None
                 if all(
                     key in result
                     for key in (
@@ -1060,19 +1099,29 @@ class MultiCharacterOrchestrator:
                         "current_mood",
                     )
                 ):
-                    repository.save_runtime_state(
-                        result["character_id"],
-                        self.player_id,
-                        result["current_affinity"],
-                        result["current_trust"],
-                        result["current_mood"],
-                    )
+                    runtime_state = {
+                        "player_id": self.player_id,
+                        "affection_level": result["current_affinity"],
+                        "trust_level": result["current_trust"],
+                        "current_mood": result["current_mood"],
+                    }
                 if (
                     result.get("message_id") is None
                     and result.get("character_id")
                     and result.get("character_name")
                 ):
-                    self._persist_generated_response(result, clock_snapshot)
+                    # 消息与状态在同一事务内落库，避免部分持久化
+                    self._persist_generated_response(
+                        result, clock_snapshot, runtime_state=runtime_state
+                    )
+                elif runtime_state:
+                    repository.save_runtime_state(
+                        result["character_id"],
+                        self.player_id,
+                        runtime_state["affection_level"],
+                        runtime_state["trust_level"],
+                        runtime_state["current_mood"],
+                    )
             else:
                 temporary_message_id = -(
                     len(staged_messages) + len(staged_history or []) + 1
@@ -1093,6 +1142,7 @@ class MultiCharacterOrchestrator:
                     "trigger_source": result.get("trigger_source"),
                 })
             if event_sink and stream_id:
+                result["stream_id"] = stream_id
                 event_sink(
                     "character_completed",
                     {
@@ -1698,13 +1748,16 @@ class MultiCharacterOrchestrator:
             last_spoke = participant.get("last_spoke_at")
             message_count = participant.get("message_count", 0)
             
-            # 计算权重：发言次数少的优先
-            weight = 100.0 - message_count * 5
-            
+            # 计算权重：发言次数少的优先；钳制非负避免长会话后权重为负
+            weight = max(0.0, 100.0 - message_count * 5)
+
             # 最近没发言的优先
             if not last_spoke:
                 weight += 50.0
-            
+
+            # 保底权重，避免全员为 0 时随机退化
+            weight = max(weight, 1.0)
+
             candidates.append((char_id, weight))
         
         if not candidates:
@@ -1831,6 +1884,7 @@ class MultiCharacterOrchestrator:
         event_sink: EventSink | None = None,
         stream_id: str | None = None,
         turn_context: GroupTurnContext | None = None,
+        state_overrides: dict | None = None,
     ) -> dict:
         """
         生成角色对玩家的回应
@@ -1858,6 +1912,10 @@ class MultiCharacterOrchestrator:
             relationship_history_cutoff=relationship_history_cutoff,
             character_relationships=character_relationships
         )
+        if state_overrides:
+            # 同一脉冲内该角色已发言过：以内存中的最新状态为基线，
+            # 避免第二次发言覆盖第一次的状态增量。
+            runtime_state.update(state_overrides)
         clock_snapshot = clock_snapshot or world_clock.get_clock_snapshot(self.player_id)
         time_context = clock_snapshot.prompt_context(
             repository.get_last_character_interaction_world_at(

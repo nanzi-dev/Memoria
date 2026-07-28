@@ -3,7 +3,7 @@
 """
 
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException
 
 from memoria.api.user import require_admin_user_id, require_current_user_id
 from memoria.core import performance, quality_scorer, replay
@@ -33,7 +33,7 @@ def _owned_session(session_id: str, current_user_id: str) -> dict:
 def replay_session(
     session_id: str,
     step: int | None = None,
-    limit: int = 1000,
+    limit: int = Query(default=1000, ge=1, le=5000),
     current_user_id: str = Depends(require_current_user_id),
 ):
     """加载历史 session，并返回可逐步查看的消息和状态时间线。"""

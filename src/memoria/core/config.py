@@ -78,6 +78,9 @@ class Configs(BaseSettings):
     # 进程内写操作限流（多进程/多实例下各自独立，生产建议前置网关限流）
     rate_limit_window_seconds: float = Field(default=60.0, gt=0, le=3600)
     rate_limit_max_requests: int = Field(default=60, ge=1, le=10000)
+    # 请求体总量上限，必须大于最大的单文件上传限制（默认 STT 的 25 MB）。
+    # 仅在声明了 Content-Length 时生效；chunked 传输仍需网关侧兜底。
+    max_request_body_bytes: int = Field(default=32 * 1024 * 1024, ge=1024)
     short_term_memory_turns: int = Field(default = 8, ge = 1, le = 50)
     long_term_memory_interval_turns: int = Field(default = 5, ge = 1, le = 50)
     max_output_tokens: int = Field(default = 400, ge = 1, le = 4096)

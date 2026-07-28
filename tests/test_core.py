@@ -1205,20 +1205,43 @@ class TestMultiCharacterMemory:
         assert "旧事件：恋人约会和拥抱" not in group_text
 
     def test_get_character_group_memories(self):
-        """测试按角色查询群体记忆"""
+        """测试按角色查询群体记忆（必须限定在同一用户下）"""
         from memoria.db import repository
 
+        player_id = f"usr_{uuid.uuid4().hex[:8]}"
+        sess_x = f"sess_x_{uuid.uuid4().hex[:8]}"
+        sess_y = f"sess_y_{uuid.uuid4().hex[:8]}"
+        repository.create_multi_character_session(
+            sess_x, player_id, "P", ["char_1", "char_2", "char_3"]
+        )
+        repository.create_multi_character_session(
+            sess_y, player_id, "P", ["char_1", "char_4"]
+        )
+
         repository.save_group_memory(
-            "sess_x", "群体事件A",
+            sess_x, "群体事件A",
             participants=["char_1", "char_2", "char_3"]
         )
         repository.save_group_memory(
-            "sess_y", "群体事件B",
+            sess_y, "群体事件B",
             participants=["char_1", "char_4"]
         )
-        
-        results = repository.get_character_group_memories("char_1", limit=10)
+
+        results = repository.get_character_group_memories(
+            "char_1", limit=10, owner_user_id=player_id
+        )
         assert len(results) >= 2
+
+    def test_get_character_group_memories_requires_owner(self):
+        """未限定租户的调用必须直接失败，不能静默返回跨用户数据。"""
+        from memoria.db import repository
+
+        with pytest.raises(TypeError):
+            repository.get_character_group_memories("char_1", limit=10)
+        with pytest.raises(ValueError):
+            repository.get_character_group_memories(
+                "char_1", limit=10, owner_user_id=""
+            )
 
     def test_character_impression_high_level(self):
         """测试高层印象记忆函数"""
@@ -1491,15 +1514,27 @@ class TestEdgeCases:
         assert "npc_luo_xiaohei" in ids
 
     def test_relation_state_like_match(self):
-        """测试 LIKE 匹配正确性"""
+        """participants 必须按完整 token 匹配，char_x 不能命中 char_xy"""
         from memoria.db import repository
-        
-        repository.save_group_memory("like_test", "测试LIKE", ["char_x", "char_y"])
-        results = repository.get_character_group_memories("char_x", 5)
-        assert len(results) >= 1
-        # 不应匹配到 char_xy（子串问题）
-        for r in results:
-            assert "char_x" in r["participants"] or r["memory_text"] is not None
+
+        player_id = f"usr_{uuid.uuid4().hex[:8]}"
+        exact_session = f"like_exact_{uuid.uuid4().hex[:8]}"
+        superstring_session = f"like_super_{uuid.uuid4().hex[:8]}"
+        repository.create_multi_character_session(
+            exact_session, player_id, "P", ["char_x", "char_y"]
+        )
+        repository.create_multi_character_session(
+            superstring_session, player_id, "P", ["char_xy", "char_z"]
+        )
+        repository.save_group_memory(exact_session, "精确命中", ["char_x", "char_y"])
+        repository.save_group_memory(superstring_session, "子串误命中", ["char_xy", "char_z"])
+
+        results = repository.get_character_group_memories(
+            "char_x", 5, owner_user_id=player_id
+        )
+        texts = [r["memory_text"] for r in results]
+        assert "精确命中" in texts
+        assert "子串误命中" not in texts
 
     def test_event_detector_singleton(self):
         """测试事件检测器单例"""

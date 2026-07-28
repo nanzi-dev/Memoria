@@ -11,7 +11,23 @@
 - `memoria-token`：HttpOnly 会话凭证
 - `memoria-csrf`：前端可读的 CSRF 令牌（与会话同寿）
 
-携带 `memoria-token` 的 Cookie 会话对 `/api/*` 写方法必须附带请求头 `X-CSRF-Token: <与 memoria-csrf 相同的值>`，否则返回 `403`，`{"detail":"CSRF 校验失败"}`。`Authorization: Bearer ...` 客户端、登录/注册接口，以及 `GET`/`HEAD`/`OPTIONS` 不校验 CSRF。仓库前端 `web/src/api/memoria.js` 在 `credentials: 'include'` 下自动附加该头。
+携带 `memoria-token` 的 Cookie 会话对 `/api/*` 与 `/admin/*` 的写方法必须附带请求头 `X-CSRF-Token: <与 memoria-csrf 相同的值>`，否则返回 `403`，`{"detail":"CSRF 校验失败"}`。`Authorization: Bearer ...` 客户端、登录/注册接口，以及 `GET`/`HEAD`/`OPTIONS` 不校验 CSRF。仓库前端 `web/src/api/memoria.js` 在 `credentials: 'include'` 下自动附加该头。
+
+**页面卸载时的例外：** 只有以下两条路径允许改用查询参数 `?csrf_token=<memoria-csrf 值>` 完成双提交，因为浏览器 `sendBeacon` / `keepalive fetch` 无法携带自定义请求头：
+
+- `POST /api/v1/dialogue/session/end`
+- `POST /api/v1/multi-dialogue/session/end`
+
+其余任何接口传 `csrf_token` 查询参数都不会被接受（仍返回 403）。这个白名单是刻意收窄的——放开到全部写接口会让 CSRF 令牌进入访问日志、浏览器历史和 `Referer`。
+
+**请求体大小：** 声明的 `Content-Length` 超过 `MAX_REQUEST_BODY_BYTES`（默认 32 MB）时，请求在进入路由前即被拒绝：
+
+```json
+HTTP/1.1 413 Payload Too Large
+{"error": "请求体过大", "max_bytes": 33554432}
+```
+
+该上限高于所有单文件上传限制（最大的是 STT 的 25 MB），正常上传不受影响。使用 chunked 传输（无 `Content-Length`）时该检查不生效，生产部署仍需在反向代理配置 `client_max_body_size`。
 
 带 `player_id` 的接口会校验 `player_id` 必须等于当前登录用户 ID。角色卡、事件定义和角色关系都按当前登录用户隔离；不同用户可以拥有相同的 `character_id` / `event_id`。
 
@@ -207,9 +223,11 @@ GET /api/v1/dialogue/history?character_id=npc_luo_xiaohei&player_id=player_001&o
 **查询参数：**
 - `character_id` : 角色 ID
 - `player_id`: 用户ID
-- `offset` (可选): 偏移量，默认 0
-- `limit` (可选): 每页数量，默认 20
+- `offset` (可选): 偏移量，默认 0，须 ≥ 0
+- `limit` (可选): 每页数量，默认 20，取值范围 1–100
 - `exclude_session_id` (可选): 排除指定会话，常用于当前会话外的历史分页
+
+越界的 `offset` / `limit` 返回 `422`。所有分页接口的 `limit` 都有显式上下界，不接受 `-1` 之类的"不限量"取值。
 
 **响应示例：**
 ```json
@@ -262,7 +280,7 @@ GET /api/v1/dialogue/summaries
 **查询参数：**
 - `character_id` (必需): 角色 ID
 - `player_id` (必需): 玩家 ID
-- `limit` (可选): 返回数量，默认 5
+- `limit` (可选): 返回数量，默认 5，取值范围 1–50
 
 **响应示例：**
 ```json
@@ -424,6 +442,10 @@ Content-Type: application/json
 }
 ```
 
+从 `src/memoria/characters/<character_id>.json` 读取角色卡并写入当前用户的数据库。
+
+`character_id` 必须匹配 `^[A-Za-z0-9_-]+$` 且长度 1–64，服务端还会在拼接路径后复核结果仍位于 `characters` 目录内——含 `/`、`..` 或绝对路径的取值返回 `422`/`400`，不会被用来读取目录外的文件。文件不存在返回 `404`；文件存在但不是合法角色卡返回 `400`，且**不回显文件内容**（详情只写入服务端日志）。
+
 ### 8. 获取角色头像
 ```http
 GET /api/v1/admin/characters/{character_id}/avatar
@@ -457,7 +479,7 @@ Content-Type: application/json
 }
 ```
 
-传空字符串会清除头像。服务端会下载图片并转成 data URL 存储，以避免前端 CORS 问题。
+传空字符串会清除头像。服务端会按[「URL 头像统一安全约束」](#url-头像统一安全约束)下载图片并转成 data URL 存储，以避免前端 CORS 问题。
 
 ---
 
@@ -1161,6 +1183,8 @@ Content-Type: application/json
 
 批量接口逐条尝试创建并返回每项结果。自关系、未知/他人角色和已存在关系计为失败，不会覆盖已有关系；至少一项写入成功时顶层 `success` 才为 true。
 
+单次请求最多 200 条（每条关系要执行 3 条以上 SQL）；超出返回 `400`，`{"detail":"单次批量创建最多 200 条关系"}`。
+
 ---
 
 ## 多角色对话 API
@@ -1197,10 +1221,10 @@ Content-Type: application/json
 ```
 
 **参数说明：**
-- `player_id`: 玩家ID
-- `player_name`: 玩家显示名称
-- `group_name` (可选): 群聊名称，会写入会话列表
-- `character_ids`: 参与角色 ID 列表（至少 2 个且不得重复，公开 API 当前没有上限）；不存在、属于其他用户或已禁用的角色都会被拒绝
+- `player_id`: 玩家ID（最长 64）
+- `player_name`: 玩家显示名称（最长 50）
+- `group_name` (可选): 群聊名称，会写入会话列表（最长 80）
+- `character_ids`: 参与角色 ID 列表，**2–8 个**且不得重复；不存在、属于其他用户或已禁用的角色都会被拒绝。上限为 8 是因为每回合的事件上下文查询与状态写入都随参与人数线性放大
 - `locale` (可选): `zh-CN` 或 `en-US`，默认 `zh-CN`；持久化后控制整个群聊线程的输出和语音语言
 
 **响应示例：**
@@ -1323,6 +1347,11 @@ Content-Type: application/json
 - 推进剧情发展
 
 留空 `trigger_character_id` 则自动选择一个角色。
+
+**参数说明：**
+- `session_id`: 会话 ID
+- `trigger_character_id` (可选): 触发角色 ID，最长 64
+- `prompt` (可选): 主动发言提示，**最长 2000**。该字段原样进入 LLM prompt，与 `player_message` 一样受长度约束
 
 互动只允许在 `active` 会话中触发。指定 `trigger_character_id` 时，该角色必须是当前会话的活跃参与者；会话中任一参与角色卡不存在或被禁用时请求会被拒绝。
 
@@ -1771,6 +1800,17 @@ Content-Type: application/json
 
 响应结构同注册；同样写入 `memoria-token` 与 `memoria-csrf`。登录/注册路径本身不校验 CSRF。
 
+用户名或密码错误一律返回 `401`，`{"detail":"用户名或密码错误"}`——两种情况**响应时间也相同**（用户不存在时同样执行一次等价开销的口令哈希），不能据此判断用户名是否存在。
+
+同一用户名在 15 分钟内累计失败 10 次后，后续尝试直接返回：
+
+```json
+HTTP/1.1 429 Too Many Requests
+{"detail": "登录失败次数过多，请稍后再试"}
+```
+
+节流按用户名隔离，不影响其他账号；一次成功登录立即清零该用户名的失败计数。计数只在单个应用进程内共享，多 worker / 多实例部署需要在网关层叠加。这与通用写接口速率限制（60 次/60 秒）是两层独立保护。
+
 ### 3. 退出登录
 ```http
 POST /api/v1/user/logout
@@ -1824,7 +1864,7 @@ Content-Type: application/json
 }
 ```
 
-传空字符串会清除头像。
+传空字符串会清除头像。非空 URL 适用[「URL 头像统一安全约束」](#url-头像统一安全约束)。
 
 ### 8. 更新语音偏好
 
@@ -1892,7 +1932,21 @@ Content-Type: application/json
 }
 ```
 
-服务端会下载并校验图片后保存为 data URL。传空字符串会清除玩家角色卡头像。
+服务端会按[「URL 头像统一安全约束」](#url-头像统一安全约束)下载并校验图片后保存为 data URL。传空字符串会清除玩家角色卡头像。
+
+### URL 头像统一安全约束
+
+角色头像、用户头像和玩家角色卡头像的 URL 接口共用同一个服务端下载器：
+
+- 仅接受不含用户凭据的 `http` / `https` URL；反斜杠、控制字符、畸形 IPv6、非法端口和旧式数字 IPv4（十进制整数、十六进制、缩写形式）会返回 `400`。
+- DNS 结果和实际连接对端都必须是公网地址。回环、私网、链路本地、保留地址、`100.64.0.0/10` CGNAT 和直接提交的 `198.18.0.0/15` Fake-IP 均会被拒绝。
+- 系统 DNS 返回 Clash/Mihomo Fake-IP 时，服务端通过固定 IP 的 HTTPS DoH 查询真实 A/AAAA 地址；真实地址必须为公网地址。解析失败时默认拒绝，不会直接信任 Fake-IP。
+- 请求固定连接到已验证 IP。HTTPS 仍使用原始域名作为 Host、SNI 和证书校验主机名，防止 DNS 重绑定且不降低 TLS 校验。
+- 最多跟随 3 次重定向，每一跳重新执行 URL、DNS 和连接地址校验。
+- 只接受 PNG、JPEG、GIF 和 WebP；远程响应最多读取 8 MiB，整个解析与下载过程最长 20 秒。图片随后还会经过格式、像素数量和尺寸规范化检查。
+- 单个后端进程最多同时执行 8 个远程头像下载；槽位耗尽时返回 `429` 和「头像下载任务繁忙，请稍后重试」。
+
+以上限制按后端进程独立计算。使用 Fake-IP 的部署还需允许后端出站访问 `1.1.1.1:443` 或 `8.8.8.8:443`；故障排查见 [FAQ](FAQ.md#q-url-头像提示不允许访问内网或保留地址或无法安全解析图片-url-主机)。
 
 ### 13. 获取或更新世界时钟
 
@@ -2040,6 +2094,8 @@ GET /ready
 
 系统管理员无需重启服务即可动态修改全局日志级别。普通登录用户会收到 403。
 
+该端点虽不在 `/api/v1` 前缀下，但同样受 CSRF 与速率限制覆盖（保护范围是 `/api/*` 与 `/admin/*` 两个前缀）。用 Cookie 会话调用时需附带 `X-CSRF-Token`；Bearer 客户端不需要。
+
 ```http
 POST /admin/log-level?level=DEBUG
 Authorization: Bearer token-value
@@ -2062,7 +2118,7 @@ Authorization: Bearer token-value
 
 ### 4. 速率限制（Rate Limiting）
 
-所有 `/api/*` 写操作（非 GET/HEAD/OPTIONS）均受速率限制保护；Cookie 会话写请求还会先经过 CSRF 中间件（见上文「Cookie 会话与 CSRF」）。服务端优先使用认证 token 解析出的用户 ID 作为限流 key，未登录或 token 无效时退回客户端 IP；不会信任客户端传入的 `X-Player-ID`。反向代理部署必须配置 Uvicorn 的可信代理地址，使 `request.client.host` 来自受信任的转发链。计数器使用单调时钟和线程锁，并周期清理过期 key。
+所有 `/api/*` 与 `/admin/*` 写操作（非 GET/HEAD/OPTIONS）均受速率限制保护；Cookie 会话写请求还会先经过 CSRF 中间件（见上文「Cookie 会话与 CSRF」）。`/health`、`/ready` 不在保护范围内。服务端优先使用认证 token 解析出的用户 ID 作为限流 key，未登录或 token 无效时退回客户端 IP；不会信任客户端传入的 `X-Player-ID`。反向代理部署必须配置 Uvicorn 的可信代理地址，使 `request.client.host` 来自受信任的转发链。计数器使用单调时钟和线程锁，并周期清理过期 key。
 
 | 项目       | 值                    |
 |------------|-----------------------|
@@ -2073,6 +2129,22 @@ Authorization: Bearer token-value
 | 超限响应码 | HTTP 429             |
 
 当前限流器保存在单个应用进程内；多 worker 或多实例部署不会共享额度，生产环境需要外部集中式限流器才能获得全局配额。
+
+登录接口在此之外还有一层按用户名的失败节流（15 分钟 / 10 次 → 429），详见「用户 API · 登录」。
+
+---
+
+### 5. 请求体大小限制
+
+在 CSRF 与限流之前，中间件会按声明的 `Content-Length` 拦截超大请求体，避免 multipart 缓冲落盘或 JSON 整体读入内存之后才报错。
+
+| 项目       | 值                                     |
+|------------|----------------------------------------|
+| 上限       | `MAX_REQUEST_BODY_BYTES`，默认 32 MB   |
+| 超限响应码 | HTTP 413                               |
+| 生效条件   | 请求声明了 `Content-Length`            |
+
+默认值高于所有单文件上传限制（最大的是 STT 的 25 MB）。`Content-Length` 无法解析时返回 `400`。使用 chunked 传输编码的请求不带 `Content-Length`，该检查不生效，生产部署仍需在反向代理侧配置 `client_max_body_size`。
 
 Docker Compose 默认设置 `FORWARDED_ALLOW_IPS=*`，仅适用于后端端口不直接暴露公网的内置 Nginx 拓扑。若设置 `API_BIND_HOST=0.0.0.0` 直接开放后端端口，必须将 `FORWARDED_ALLOW_IPS` 收紧到实际可信代理 IP 或网段。
 

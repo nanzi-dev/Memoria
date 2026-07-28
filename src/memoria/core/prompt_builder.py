@@ -350,7 +350,7 @@ def build_opening_line_prompt(
     player_name = _effective_player_name(player_name, player_character)
     return (
         f"\n【特别说明】这是与玩家'{player_name}'的新一轮见面对话，"
-        f"请你作为{card.meta.name}，根据当前好感度（{runtime_state.get('affinity', 0)}）和心情，"
+        f"请你作为{card.meta.name}，根据当前好感度（{_safe_get_runtime(runtime_state, 'affection_level', 0)}）和心情，"
         f"主动说一句开场白打招呼，不需要玩家先说话。仍然按要求只输出 JSON。"
     ) + language_instruction(locale)
 

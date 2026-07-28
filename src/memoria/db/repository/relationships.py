@@ -310,7 +310,7 @@ def update_relationship_affinity(
         cursor = conn.execute(
             """
             UPDATE character_relationship
-            SET affinity = affinity + ?,
+            SET affinity = MAX(-100, MIN(100, affinity + ?)),
                 updated_at = ?
             WHERE owner_user_id = ? AND character_id_a = ? AND character_id_b = ?
             """,
@@ -338,5 +338,4 @@ def update_relationship_affinity(
 
 
  
-
 

@@ -1,6 +1,6 @@
 """Authenticated speech transcription, synthesis, and Custom Voice routes."""
 
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
@@ -28,7 +28,7 @@ SPEECH_MEDIA_TYPES = {
 }
 
 
-def _raise_service_error(exc: SpeechServiceError) -> None:
+def _raise_service_error(exc: SpeechServiceError) -> NoReturn:
     raise HTTPException(
         status_code=exc.status_code,
         detail={"category": exc.category, "message": exc.detail},
