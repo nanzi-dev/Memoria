@@ -18,6 +18,7 @@ from memoria.db.repository import background_jobs
 from memoria.db.repository import domain_events
 from memoria.db.repository import story
 from memoria.db.repository import fact_claims
+from memoria.db.repository import memory_curve
 from memoria.db.repository import world_clock
 from memoria.db.repository import state_and_memory
 from memoria.db.repository import sessions_and_messages
@@ -34,6 +35,7 @@ _MODULES = (
     domain_events,
     story,
     fact_claims,
+    memory_curve,
     world_clock,
     state_and_memory,
     sessions_and_messages,

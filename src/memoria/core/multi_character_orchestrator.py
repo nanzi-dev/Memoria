@@ -806,6 +806,14 @@ class MultiCharacterOrchestrator:
         ):
             performance.increment("llm.calls_avoided.memory_gate")
             return []
+        world_occurred_at = next(
+            (
+                str(message.get("world_created_at"))
+                for message in reversed(messages)
+                if message.get("world_created_at")
+            ),
+            None,
+        ) or _clock_snapshot_for_player(self.player_id).world_now.isoformat()
         return [{
             "job_type": "group_checkpoint_memory",
             "dedupe_key": (
@@ -817,6 +825,11 @@ class MultiCharacterOrchestrator:
                 "scope_id": scope_id,
                 "session_id": self.session_id,
                 "history": history,
+                "witness_character_ids": list(self.character_ids),
+                "evidence_id": (
+                    f"group-checkpoint:{self.session_id}:{checkpoint_turn}"
+                ),
+                "world_occurred_at": world_occurred_at,
             },
         }]
 
@@ -1633,7 +1646,9 @@ class MultiCharacterOrchestrator:
         character_id: str,
         query_context: str | None = None,
         character_relationships: dict | None = None,
-        relationship_aliases: list[str] | None = None
+        relationship_aliases: list[str] | None = None,
+        world_now: str | None = None,
+        recall_key: str | None = None,
     ) -> list[str]:
         """加载多角色记忆上下文，供 prompt 的历史记录区使用。"""
         other_character_ids = [cid for cid in self.character_ids if cid != character_id]
@@ -1647,6 +1662,8 @@ class MultiCharacterOrchestrator:
                 query_context=query_context,
                 character_relationships=character_relationships,
                 relationship_aliases=relationship_aliases or self._memory_aliases_for_characters(self.character_ids),
+                world_now=world_now,
+                recall_key=recall_key,
             )
         except Exception as e:
             logger.warning(f"加载多角色记忆上下文失败: {e}")
@@ -1700,7 +1717,9 @@ class MultiCharacterOrchestrator:
         card,
         relationship_history_cutoff: str | None = None,
         query_context: str | None = None,
-        character_relationships: dict | None = None
+        character_relationships: dict | None = None,
+        world_now: str | None = None,
+        recall_key: str | None = None,
     ) -> dict:
         """加载运行时状态，并过滤会覆盖当前图谱的角色关系事实。"""
         runtime_state = repository.get_runtime_state(
@@ -1719,6 +1738,8 @@ class MultiCharacterOrchestrator:
                 relationship_history_cutoff=relationship_history_cutoff,
                 query_context=query_context,
                 relationship_aliases=self._memory_aliases_for_characters(self.character_ids),
+                world_now=world_now,
+                recall_key=recall_key,
             )
         )
         runtime_state["known_player_facts"] = [
@@ -1788,6 +1809,7 @@ class MultiCharacterOrchestrator:
         """
         self._refresh_player_character()
         card = self.character_cards[character_id]
+        clock_snapshot = clock_snapshot or world_clock.get_clock_snapshot(self.player_id)
         character_relationships = self._load_all_relationships()
         relationship_history_cutoff = multi_character_memory.get_relationship_history_cutoff(
             self.player_id,
@@ -1798,9 +1820,10 @@ class MultiCharacterOrchestrator:
             character_id,
             card,
             relationship_history_cutoff=relationship_history_cutoff,
-            character_relationships=character_relationships
+            character_relationships=character_relationships,
+            world_now=clock_snapshot.world_now.isoformat(),
+            recall_key=f"opening:{self.session_id}",
         )
-        clock_snapshot = clock_snapshot or world_clock.get_clock_snapshot(self.player_id)
         time_context = clock_snapshot.prompt_context(
             repository.get_last_character_interaction_world_at(
                 self.player_id,
@@ -1834,6 +1857,12 @@ class MultiCharacterOrchestrator:
             player_character=self.player_character,
             other_characters=other_characters,
             character_relationships=character_relationships,
+            past_summaries=self._load_memory_context(
+                character_id,
+                character_relationships=character_relationships,
+                world_now=clock_snapshot.world_now.isoformat(),
+                recall_key=f"opening:{self.session_id}",
+            ),
             is_opening=True,
             time_context=time_context,
         )
@@ -1900,6 +1929,7 @@ class MultiCharacterOrchestrator:
         if character_id not in self.character_cards:
             raise ValueError(f"角色不可回复: {character_id}")
         card = self.character_cards[character_id]
+        clock_snapshot = clock_snapshot or world_clock.get_clock_snapshot(self.player_id)
         character_relationships = turn_context.character_relationships
         relationship_history_cutoff = multi_character_memory.get_relationship_history_cutoff(
             self.player_id,
@@ -1910,13 +1940,14 @@ class MultiCharacterOrchestrator:
             character_id,
             card,
             relationship_history_cutoff=relationship_history_cutoff,
-            character_relationships=character_relationships
+            character_relationships=character_relationships,
+            world_now=clock_snapshot.world_now.isoformat(),
+            recall_key=stream_id or f"turn:{self.session_id}",
         )
         if state_overrides:
             # 同一脉冲内该角色已发言过：以内存中的最新状态为基线，
             # 避免第二次发言覆盖第一次的状态增量。
             runtime_state.update(state_overrides)
-        clock_snapshot = clock_snapshot or world_clock.get_clock_snapshot(self.player_id)
         time_context = clock_snapshot.prompt_context(
             repository.get_last_character_interaction_world_at(
                 self.player_id,
@@ -1983,7 +2014,9 @@ class MultiCharacterOrchestrator:
             character_relationships=character_relationships,
             past_summaries=self._load_memory_context(
                 character_id,
-                character_relationships=character_relationships
+                character_relationships=character_relationships,
+                world_now=clock_snapshot.world_now.isoformat(),
+                recall_key=stream_id or f"turn:{self.session_id}",
             ),
             time_context=time_context,
             knowledge_context=knowledge.prompt_section,
@@ -2124,6 +2157,7 @@ class MultiCharacterOrchestrator:
         if trigger_character_id not in self.character_cards:
             raise ValueError(f"角色不可回复: {trigger_character_id}")
         card = self.character_cards[trigger_character_id]
+        clock_snapshot = clock_snapshot or world_clock.get_clock_snapshot(self.player_id)
         character_relationships = self._load_all_relationships()
         relationship_history_cutoff = multi_character_memory.get_relationship_history_cutoff(
             self.player_id,
@@ -2134,9 +2168,10 @@ class MultiCharacterOrchestrator:
             trigger_character_id,
             card,
             relationship_history_cutoff=relationship_history_cutoff,
-            character_relationships=character_relationships
+            character_relationships=character_relationships,
+            world_now=clock_snapshot.world_now.isoformat(),
+            recall_key=f"interaction:{self.session_id}:{clock_snapshot.world_now.isoformat()}",
         )
-        clock_snapshot = clock_snapshot or world_clock.get_clock_snapshot(self.player_id)
         time_context = clock_snapshot.prompt_context(
             repository.get_last_character_interaction_world_at(
                 self.player_id,
@@ -2186,7 +2221,9 @@ class MultiCharacterOrchestrator:
             character_relationships=character_relationships,
             past_summaries=self._load_memory_context(
                 trigger_character_id,
-                character_relationships=character_relationships
+                character_relationships=character_relationships,
+                world_now=clock_snapshot.world_now.isoformat(),
+                recall_key=f"interaction:{self.session_id}:{clock_snapshot.world_now.isoformat()}",
             ),
             is_interaction=True,
             time_context=time_context,

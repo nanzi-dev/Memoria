@@ -230,6 +230,10 @@ class EventExecutor:
                     "event_id": event.event_id,
                     "event_name": event.event_name,
                     "execution_id": result.execution_id,
+                    "importance": max(
+                        0.0,
+                        min(1.0, float(effect.memory_importance or 5) / 10.0),
+                    ),
                 },
                 "direct_support": True,
                 "session_id": context.session_id,

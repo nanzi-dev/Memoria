@@ -83,6 +83,7 @@ class Configs(BaseSettings):
     max_request_body_bytes: int = Field(default=32 * 1024 * 1024, ge=1024)
     short_term_memory_turns: int = Field(default = 8, ge = 1, le = 50)
     long_term_memory_interval_turns: int = Field(default = 5, ge = 1, le = 50)
+    memory_curve_enabled: bool = True
     max_output_tokens: int = Field(default = 400, ge = 1, le = 4096)
     world_clock_default_timezone: str = "UTC"
     world_clock_scheduler_interval_seconds: float = Field(default=30.0, gt=0)

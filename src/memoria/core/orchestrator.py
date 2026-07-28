@@ -17,6 +17,7 @@ from typing import Callable
 from memoria.core import (
     character_loader,
     llm_client,
+    memory_curve,
     multi_character_memory,
     performance,
     prompt_builder,
@@ -461,6 +462,8 @@ def _load_single_character_prompt_context(
     query_context: str | None = None,
     fallback_known_player_facts=None,
     player_character: dict | None = None,
+    world_now: str | None = None,
+    recall_key: str | None = None,
 ) -> dict:
     relationship_records = repository.list_character_relationships(player_id, character_id)
     character_relationships = relationship_context.relationship_map_from_records(
@@ -585,6 +588,44 @@ def _load_single_character_prompt_context(
         text_key="fact_text",
         relationship_context=False,
     )
+    if configs.memory_curve_enabled:
+        effective_world_now = world_now or world_clock.get_clock_snapshot(
+            player_id
+        ).world_now.isoformat()
+        effective_recall_key = recall_key or session_id or effective_world_now
+        try:
+            fact_records = memory_curve.evaluate_records(
+                fact_records,
+                owner_user_id=player_id,
+                character_id=character_id,
+                memory_type="player_fact",
+                world_now=effective_world_now,
+                recall_key=effective_recall_key,
+                text_key="fact_text",
+                limit=20,
+            )
+            shared_records = memory_curve.evaluate_records(
+                shared_records,
+                owner_user_id=player_id,
+                character_id=character_id,
+                memory_type="character_impression",
+                world_now=effective_world_now,
+                recall_key=effective_recall_key,
+                text_key="memory_text",
+                limit=20,
+            )
+            group_records = memory_curve.evaluate_records(
+                group_records,
+                owner_user_id=player_id,
+                character_id=character_id,
+                memory_type="group_experience",
+                world_now=effective_world_now,
+                recall_key=effective_recall_key,
+                text_key="memory_text",
+                limit=20,
+            )
+        except Exception as exc:
+            logger.warning("记忆曲线召回失败，回退到原始召回: %s", exc)
     known_player_facts = [
         record["fact_text"]
         for record in fact_records
@@ -670,6 +711,8 @@ def start_session(
         session_id=session_id,
         fallback_known_player_facts=runtime_state.get("known_player_facts"),
         player_character=player_character,
+        world_now=clock_snapshot.world_now.isoformat(),
+        recall_key=f"opening:{session_id}",
     )
     runtime_state["known_player_facts"] = prompt_context["known_player_facts"]
     past_summaries.extend(prompt_context["cross_mode_memories"])
@@ -815,6 +858,8 @@ def _run_dialogue_turn(
                     "known_player_facts"
                 ),
                 player_character=player_character,
+                world_now=world_created_at,
+                recall_key=request_id,
             )
             runtime_state["known_player_facts"] = (
                 prompt_context["known_player_facts"]
@@ -990,6 +1035,9 @@ def _run_dialogue_turn(
                             "scope_id": character_id,
                             "session_id": session_id,
                             "history": checkpoint_history,
+                            "witness_character_ids": [character_id],
+                            "evidence_id": f"message:{request_id}",
+                            "world_occurred_at": world_created_at,
                         },
                     })
                 else:

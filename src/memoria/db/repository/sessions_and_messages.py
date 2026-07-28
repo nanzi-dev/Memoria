@@ -852,7 +852,9 @@ def save_character_impression(
     target_character_id: str,
     impression_text: str,
     context: str = None,
-    importance: float = 0.5
+    importance: float = 0.5,
+    world_occurred_at: str | None = None,
+    evidence_id: str | None = None,
 ) -> str:
     """保存观察者对目标角色的定向印象。"""
     if not owner_user_id:
@@ -885,32 +887,46 @@ def save_character_impression(
             new_imp = max(existing.get("importance", 0), importance)
             conn.execute("UPDATE shared_memory SET importance=?, last_referenced=? WHERE id=?",
                          (new_imp, _now(), existing["id"]))
-            return existing["id"]
+            memory_id = existing["id"]
+        else:
+            conn.execute(
+                """
+                INSERT INTO shared_memory
+                (id, owner_user_id, character_a_id, character_b_id,
+                 observer_character_id, target_character_id, memory_kind,
+                 memory_text, context, importance, created_at, last_referenced,
+                 reference_count)
+                VALUES (?, ?, ?, ?, ?, ?, 'character_impression', ?, ?, ?, ?, ?, 0)
+                """,
+                (
+                    memory_id,
+                    owner_user_id,
+                    observer_character_id,
+                    target_character_id,
+                    observer_character_id,
+                    target_character_id,
+                    impression_text,
+                    context,
+                    importance,
+                    _now(),
+                    _now(),
+                ),
+            )
 
-        conn.execute(
-            """
-            INSERT INTO shared_memory
-            (id, owner_user_id, character_a_id, character_b_id,
-             observer_character_id, target_character_id, memory_kind,
-             memory_text, context, importance, created_at, last_referenced,
-             reference_count)
-            VALUES (?, ?, ?, ?, ?, ?, 'character_impression', ?, ?, ?, ?, ?, 0)
-            """,
-            (
-                memory_id,
-                owner_user_id,
-                observer_character_id,
-                target_character_id,
-                observer_character_id,
-                target_character_id,
-                impression_text,
-                context,
-                importance,
-                _now(),
-                _now(),
-            ),
-        )
-
+    if configs.memory_curve_enabled and world_occurred_at and evidence_id:
+        try:
+            record_memory_curve_evidence(
+                owner_user_id=owner_user_id,
+                character_id=observer_character_id,
+                memory_type="character_impression",
+                memory_id=memory_id,
+                evidence_id=evidence_id,
+                world_occurred_at=world_occurred_at,
+                source_kind="model_inference",
+                importance=importance,
+            )
+        except Exception as exc:
+            logger.warning("角色印象曲线写入失败，保留原始记忆: %s", exc)
     return memory_id
 
 
@@ -1032,12 +1048,15 @@ def save_group_memory(
     memory_text: str,
     participants: list[str] = None,
     context: str = None,
-    importance: float = 0.5
+    importance: float = 0.5,
+    world_occurred_at: str | None = None,
+    evidence_id: str | None = None,
 ) -> str:
     """保存多角色会话的群体记忆。含去重检查。"""
     import uuid, json
     memory_id = str(uuid.uuid4())
     participants_json = json.dumps(participants) if participants else None
+    session = get_session(session_id)
 
     with get_conn() as conn:
         existing = _dedup_check(
@@ -1049,12 +1068,33 @@ def save_group_memory(
             new_imp = max(existing.get("importance", 0), importance)
             conn.execute("UPDATE group_memory SET importance=?, last_referenced=? WHERE id=?",
                          (new_imp, _now(), existing["id"]))
-            return existing["id"]
+            memory_id = existing["id"]
+        else:
+            conn.execute(
+                "INSERT INTO group_memory (id, session_id, memory_text, participants, context, importance, created_at, last_referenced, reference_count) VALUES (?,?,?,?,?,?,?,?,0)",
+                (memory_id, session_id, memory_text, participants_json, context, importance, _now(), _now()))
 
-        conn.execute(
-            "INSERT INTO group_memory (id, session_id, memory_text, participants, context, importance, created_at, last_referenced, reference_count) VALUES (?,?,?,?,?,?,?,?,0)",
-            (memory_id, session_id, memory_text, participants_json, context, importance, _now(), _now()))
-
+    if (
+        configs.memory_curve_enabled
+        and world_occurred_at
+        and evidence_id
+        and participants
+    ):
+        if session:
+            for character_id in dict.fromkeys(participants):
+                try:
+                    record_memory_curve_evidence(
+                        owner_user_id=session["player_id"],
+                        character_id=character_id,
+                        memory_type="group_experience",
+                        memory_id=memory_id,
+                        evidence_id=evidence_id,
+                        world_occurred_at=world_occurred_at,
+                        source_kind="model_inference",
+                        importance=importance,
+                    )
+                except Exception as exc:
+                    logger.warning("群体记忆曲线写入失败，保留原始记忆: %s", exc)
     return memory_id
 
 
