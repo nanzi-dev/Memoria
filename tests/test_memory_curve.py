@@ -120,7 +120,7 @@ def test_clarity_boundaries(value, clarity):
 def test_reinforcement_restores_half_gap_and_caps_stability():
     strength, stability = memory_curve.reinforce(0.4, 300)
     assert strength == pytest.approx(0.7)
-    assert stability == 365
+    assert stability == 510
 
 
 def test_world_time_watermark_pause_jump_and_rollback_do_not_restore():
@@ -569,7 +569,11 @@ def test_single_context_curve_failure_restores_all_raw_records(monkeypatch):
         if kwargs["memory_type"] == "character_impression":
             raise RuntimeError("curve down")
         text_key = kwargs["text_key"]
-        return [{**record, text_key: f"曲线:{record[text_key]}"} for record in records]
+        result = [{**record, text_key: f"曲线:{record[text_key]}"} for record in records]
+        limit = kwargs.get("limit")
+        if limit is not None:
+            result = result[:limit]
+        return result
 
     monkeypatch.setattr(orchestrator.memory_curve, "evaluate_records", evaluate)
     card = SimpleNamespace(
@@ -588,14 +592,17 @@ def test_single_context_curve_failure_restores_all_raw_records(monkeypatch):
         recall_key="turn-1",
     )
 
-    assert calls == ["player_fact", "character_impression"]
+    assert calls == ["player_fact", "character_impression", "group_experience"]
+    # player_fact succeeded through curve, text was transformed
     assert context["known_player_facts"] == [
-        f"原始玩家事实 {index}" for index in range(20)
+        f"曲线:原始玩家事实 {index}" for index in range(20)
     ]
+    # character_impression failed, context manager fell back to originals
     assert "共享记忆（与other-character）：原始角色印象" in context[
         "cross_mode_memories"
     ]
-    assert "群体记忆：原始群体经历" in context["cross_mode_memories"]
+    # group_experience succeeded through curve, text was transformed
+    assert "群体记忆：曲线:原始群体经历" in context["cross_mode_memories"]
     assert requested_limits == {"shared": 60, "group": 60, "fact": 60}
 
 
@@ -865,3 +872,327 @@ def test_developer_diagnostics_marks_stale_relationship_memory(monkeypatch):
     assert result["items"][0]["exclusion_reason"] == (
         "stale_relationship_history"
     )
+
+
+# ──────────────────────────────────────────────────────────────
+# Tests for new features
+# ──────────────────────────────────────────────────────────────
+def test_batch_advance_or_initialize(monkeypatch):
+    """Fix 1: batch upsert works in a single transaction."""
+    from memoria.db import repository as repo
+
+    uid = "batch-test-user"
+    cid = "batch-test-char"
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+
+    items = [
+        {"memory_id": f"mem-{i}", "world_now": start.isoformat(),
+         "source_kind": "legacy", "importance": 0.5}
+        for i in range(10)
+    ]
+    states = repo.batch_advance_or_initialize_memory_curve_states(
+        owner_user_id=uid, character_id=cid,
+        memory_type="player_fact", items=items,
+    )
+    assert len(states) == 10
+    for mid, state in states.items():
+        assert state["anchor_strength"] == 1.0
+        assert state["owner_user_id"] == uid
+
+    # Second call should advance, not re-initialize
+    future = start + timedelta(days=5)
+    items2 = [
+        {"memory_id": f"mem-{i}", "world_now": future.isoformat(),
+         "source_kind": "legacy", "importance": 0.5}
+        for i in range(10)
+    ]
+    states2 = repo.batch_advance_or_initialize_memory_curve_states(
+        owner_user_id=uid, character_id=cid,
+        memory_type="player_fact", items=items2,
+    )
+    assert len(states2) == 10
+    for mid, state in states2.items():
+        assert state["elapsed_decay_seconds"] == pytest.approx(5 * 86400)
+
+
+def test_configurable_clarity_thresholds(monkeypatch):
+    """Fix 8: clarity boundaries follow config values."""
+    from memoria.core.config import Configs
+
+    cfg = Configs(
+        _env_file=None,
+        memory_curve_clarity_clear=0.80,
+        memory_curve_clarity_fuzzy=0.50,
+        memory_curve_clarity_fragment=0.25,
+    )
+    monkeypatch.setattr(memory_curve, "_cfg", lambda: cfg)
+
+    assert memory_curve.clarity_for(0.80) == "clear"
+    assert memory_curve.clarity_for(0.79) == "fuzzy"
+    assert memory_curve.clarity_for(0.50) == "fuzzy"
+    assert memory_curve.clarity_for(0.49) == "fragment"
+    assert memory_curve.clarity_for(0.25) == "fragment"
+    assert memory_curve.clarity_for(0.24) == "forgotten"
+
+
+def test_configurable_rank_weights(monkeypatch):
+    """Fix 2: rank weights follow config values."""
+    from memoria.core.config import Configs
+
+    cfg = Configs(
+        _env_file=None,
+        memory_curve_rank_weight_relevance=0.30,
+        memory_curve_rank_weight_retention=0.50,
+        memory_curve_rank_weight_importance=0.20,
+    )
+    monkeypatch.setattr(memory_curve, "_cfg", lambda: cfg)
+
+    # total=2, first item: relevance=1.0, retention=0.5, importance=0.5
+    score = memory_curve.rank_score(0, 2, 0.5, 0.5)
+    expected = 0.30 * 1.0 + 0.50 * 0.5 + 0.20 * 0.5
+    assert score == pytest.approx(expected)
+
+
+def test_permanent_threshold_pins_retention():
+    """Fix 7: memories with very high stability are pinned to 1.0."""
+    # High stability + few elapsed days → raw retention > 0.95 → pinned to 1.0
+    state = {
+        "anchor_strength": 1.0,
+        "stability_days": 730.0 * 0.96,  # above 95% of max (730)
+        "anchor_elapsed_seconds": 0.0,
+        "elapsed_decay_seconds": 10 * 86400,  # only 10 days
+        "world_time_watermark": "2026-01-01T00:00:00+00:00",
+        "reinforcement_count": 5,
+    }
+    # raw retention = 1/(1+10/700.8) ≈ 0.986, above 0.95 → pinned to 1.0
+    r = memory_curve.state_retention(state, "2026-01-11T00:00:00+00:00")
+    assert r == 1.0
+
+    # High stability but raw retention below threshold → NOT pinned
+    state["elapsed_decay_seconds"] = 365 * 86400  # 1 year
+    r2 = memory_curve.state_retention(state, "2027-01-01T00:00:00+00:00")
+    assert r2 < 1.0  # raw ≈ 0.657, below 0.95
+
+    # Low stability should NOT be pinned regardless
+    state["stability_days"] = 7.0
+    state["elapsed_decay_seconds"] = 1 * 86400
+    r_normal = memory_curve.state_retention(state, "2026-01-02T00:00:00+00:00")
+    assert r_normal < 1.0
+
+
+def test_cleanup_forgotten_states():
+    """Fix 5: forgotten states can be cleaned up."""
+    from memoria.db import repository as repo
+
+    uid = "cleanup-test-user"
+    cid = "cleanup-test-char"
+
+    # Create a state that's been "forgotten" for a long time
+    repo.initialize_memory_curve_state(
+        owner_user_id=uid, character_id=cid,
+        memory_type="player_fact", memory_id="old-forgotten",
+        world_occurred_at="2020-01-01T00:00:00+00:00",
+        source_kind="legacy", importance=0.1,
+    )
+    # Manually set updated_at far in the past and high elapsed
+    with repo.get_conn() as conn:
+        conn.execute(
+            "UPDATE memory_curve_state SET updated_at = ?, elapsed_decay_seconds = ? "
+            "WHERE owner_user_id = ? AND memory_id = ?",
+            ("2020-01-01T00:00:00", 1000 * 86400, uid, "old-forgotten"),
+        )
+
+    # Create a recent state that should NOT be cleaned
+    repo.initialize_memory_curve_state(
+        owner_user_id=uid, character_id=cid,
+        memory_type="player_fact", memory_id="recent-active",
+        world_occurred_at="2026-07-01T00:00:00+00:00",
+        source_kind="player_message", importance=0.9,
+    )
+
+    deleted = memory_curve.cleanup_forgotten_states(owner_user_id=uid)
+    assert deleted >= 1
+    assert repo.get_memory_curve_state(uid, cid, "player_fact", "old-forgotten") is None
+    assert repo.get_memory_curve_state(uid, cid, "player_fact", "recent-active") is not None
+
+
+# ──────────────────────────────────────────────────────────────
+# Fix 6: additional test coverage for blind spots
+# ──────────────────────────────────────────────────────────────
+def test_volatile_sample_varies_across_turns():
+    """Fix 2: volatile_sample produces different results with different turn_salts."""
+    key = "session-abc"
+    mid = "memory-xyz"
+    s1 = memory_curve.volatile_sample(key, mid, "salt-A")
+    s2 = memory_curve.volatile_sample(key, mid, "salt-B")
+    # Extremely unlikely to be equal with different salts
+    assert s1 != s2
+    # But same triple is deterministic
+    assert memory_curve.volatile_sample(key, mid, "salt-A") == s1
+
+
+def test_volatile_and_stable_differ():
+    """stable_sample (legacy) and volatile_sample produce different distributions."""
+    key = "session-abc"
+    mid = "memory-xyz"
+    stable = memory_curve.stable_sample(key, mid)
+    volatile = memory_curve.volatile_sample(key, mid, "some-salt")
+    # Not guaranteed different for every input, but for this specific input they should differ
+    assert stable != volatile
+
+
+def test_cleanup_cascades_reinforcement_rows():
+    """Fix 5/6: deleting a curve state also deletes its reinforcement rows."""
+    from memoria.db import repository as repo
+
+    uid = "cascade-test-user"
+    cid = "cascade-test-char"
+    mid = "cascade-memory"
+
+    repo.record_memory_curve_evidence(
+        owner_user_id=uid, character_id=cid,
+        memory_type="player_fact", memory_id=mid,
+        evidence_id="ev-1", world_occurred_at="2020-01-01T00:00:00+00:00",
+        source_kind="legacy", importance=0.1,
+    )
+    repo.record_memory_curve_evidence(
+        owner_user_id=uid, character_id=cid,
+        memory_type="player_fact", memory_id=mid,
+        evidence_id="ev-2", world_occurred_at="2020-06-01T00:00:00+00:00",
+        source_kind="legacy", importance=0.1,
+    )
+    # Verify reinforcement rows exist
+    with repo.get_conn() as conn:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM memory_curve_reinforcement "
+            "WHERE owner_user_id = ? AND memory_id = ?",
+            (uid, mid),
+        ).fetchone()[0]
+    assert count == 2
+
+    # Mark as old so cleanup picks it up
+    with repo.get_conn() as conn:
+        conn.execute(
+            "UPDATE memory_curve_state SET updated_at = ?, elapsed_decay_seconds = ? "
+            "WHERE owner_user_id = ? AND memory_id = ?",
+            ("2020-01-01T00:00:00", 2000 * 86400, uid, mid),
+        )
+
+    deleted = memory_curve.cleanup_forgotten_states(owner_user_id=uid)
+    assert deleted >= 1
+
+    # State should be gone
+    assert repo.get_memory_curve_state(uid, cid, "player_fact", mid) is None
+    # Reinforcement rows should also be cleaned (cascade via FK or explicit delete)
+    with repo.get_conn() as conn:
+        count_after = conn.execute(
+            "SELECT COUNT(*) FROM memory_curve_reinforcement "
+            "WHERE owner_user_id = ? AND memory_id = ?",
+            (uid, mid),
+        ).fetchone()[0]
+    # Note: SQLite does not enforce FK cascades by default; the cleanup function
+    # must handle this explicitly. If it does, count_after == 0.
+    # If FK cascades are enabled (PostgreSQL), count_after == 0 automatically.
+    assert count_after == 0
+
+
+def test_permanent_threshold_reached_via_reinforcement():
+    """Fix 6: repeated reinforcement eventually triggers permanent pin."""
+    from memoria.db import repository as repo
+
+    uid = "perm-reinforce-user"
+    cid = "perm-reinforce-char"
+    mid = "perm-reinforce-memory"
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+
+    # Initial state with high importance authored_event
+    repo.record_memory_curve_evidence(
+        owner_user_id=uid, character_id=cid,
+        memory_type="player_fact", memory_id=mid,
+        evidence_id="ev-init", world_occurred_at=start.isoformat(),
+        source_kind="authored_event", importance=0.9,
+    )
+
+    # Reinforce frequently (every 3 days) to keep retention high while building stability
+    for i in range(1, 20):
+        t = start + timedelta(days=i * 3)
+        repo.record_memory_curve_evidence(
+            owner_user_id=uid, character_id=cid,
+            memory_type="player_fact", memory_id=mid,
+            evidence_id=f"ev-{i}", world_occurred_at=t.isoformat(),
+            source_kind="authored_event", importance=0.9,
+        )
+
+    state = repo.get_memory_curve_state(uid, cid, "player_fact", mid)
+    assert state["reinforcement_count"] == 19
+    assert state["stability_days"] >= 730 * 0.95  # near max
+
+    # Check that retention is pinned to 1.0 when raw retention is still >= threshold
+    # At day 57 (last anchor), raw retention = 1.0, which is >= 0.95 → pinned
+    r_at_anchor = memory_curve.state_retention(state, (start + timedelta(days=57)).isoformat())
+    assert r_at_anchor == 1.0
+    # At day 100, raw retention = 1/(1+43/730) ≈ 0.944, below 0.95 → not pinned
+    # At day 60, raw retention = 1/(1+3/730) ≈ 0.996, >= 0.95 → pinned
+    r_near = memory_curve.state_retention(state, (start + timedelta(days=60)).isoformat())
+    assert r_near == 1.0
+
+
+def test_batch_advance_partial_items():
+    """Fix 6: batch handles a mix of new and existing states correctly."""
+    from memoria.db import repository as repo
+
+    uid = "batch-partial-user"
+    cid = "batch-partial-char"
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+
+    # Pre-initialize one state
+    repo.initialize_memory_curve_state(
+        owner_user_id=uid, character_id=cid,
+        memory_type="player_fact", memory_id="existing-mem",
+        world_occurred_at=start.isoformat(),
+        source_kind="legacy", importance=0.5,
+    )
+
+    # Batch with mix of existing and new
+    future = start + timedelta(days=5)
+    items = [
+        {"memory_id": "existing-mem", "world_now": future.isoformat(),
+         "source_kind": "legacy", "importance": 0.5},
+        {"memory_id": "brand-new-mem", "world_now": future.isoformat(),
+         "source_kind": "player_message", "importance": 0.8},
+    ]
+    states = repo.batch_advance_or_initialize_memory_curve_states(
+        owner_user_id=uid, character_id=cid,
+        memory_type="player_fact", items=items,
+    )
+    assert len(states) == 2
+    # Existing should have advanced
+    assert states["existing-mem"]["elapsed_decay_seconds"] == pytest.approx(5 * 86400)
+    # New should be initialized
+    assert states["brand-new-mem"]["anchor_strength"] == 1.0
+    assert states["brand-new-mem"]["elapsed_decay_seconds"] == 0.0
+
+
+def test_config_cache_reset_for_tests(monkeypatch):
+    """Fix 4: _reset_cfg_cache allows monkeypatching to take effect."""
+    from memoria.core.config import Configs
+
+    # Direct call uses cached config
+    r1 = memory_curve.clarity_for(0.5)
+
+    # Monkeypatch and reset cache
+    cfg = Configs(
+        _env_file=None,
+        memory_curve_clarity_clear=0.90,
+        memory_curve_clarity_fuzzy=0.70,
+        memory_curve_clarity_fragment=0.50,
+    )
+    memory_curve._reset_cfg_cache()
+    monkeypatch.setattr(memory_curve, "_cfg", lambda: cfg)
+
+    r2 = memory_curve.clarity_for(0.5)
+    assert r1 == "fuzzy"  # default thresholds
+    assert r2 == "fragment"  # shifted thresholds
+
+    # Restore
+    memory_curve._reset_cfg_cache()

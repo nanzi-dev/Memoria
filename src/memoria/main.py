@@ -179,6 +179,14 @@ async def lifespan(app: FastAPI):
         reconciled_schedules = reconcile_event_schedule_due_times()
         if reconciled_schedules:
             logger.info("已补全 %s 条事件调度的现实到期时间", reconciled_schedules)
+        # 自动清理过期的遗忘记忆曲线状态
+        try:
+            from memoria.core.memory_curve import cleanup_forgotten_states
+            cleaned = cleanup_forgotten_states()
+            if cleaned:
+                logger.info("已清理 %d 条过期遗忘记忆曲线状态", cleaned)
+        except Exception as cleanup_exc:
+            logger.debug("记忆曲线清理跳过: %s", cleanup_exc)
         logger.info("数据库初始化成功")
     except Exception as e:
         logger.error("数据库初始化失败: %s", e, exc_info=True)

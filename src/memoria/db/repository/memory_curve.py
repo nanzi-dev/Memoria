@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import sqlite3
 
 from memoria.core import memory_curve as curve
@@ -336,3 +337,135 @@ def list_memory_curve_states_for_memory(
             (owner_user_id, memory_type, memory_id),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+# ──────────────────────────────────────────────────────────────
+# Fix 1: batch advance or initialize in a single transaction
+# ──────────────────────────────────────────────────────────────
+def batch_advance_or_initialize_memory_curve_states(
+    *,
+    owner_user_id: str,
+    character_id: str,
+    memory_type: str,
+    items: list[dict],
+) -> dict[str, dict]:
+    """Advance or initialize curve states for multiple memory IDs in one transaction.
+
+    Each item in *items* must have keys: memory_id, world_now, source_kind, importance.
+    Returns a dict mapping memory_id -> state row.
+    """
+    if not items:
+        return {}
+
+    key_prefix = (str(owner_user_id), str(character_id), str(memory_type))
+    results: dict[str, dict] = {}
+
+    with get_conn() as conn:
+        _begin_memory_curve_write(conn)
+
+        for item in items:
+            memory_id = str(item["memory_id"] or "").strip()
+            if not memory_id:
+                continue
+            world_now = item["world_now"]
+            source_kind = item["source_kind"]
+            importance = float(item["importance"])
+
+            key = (*key_prefix, memory_id)
+            state = _get_memory_curve_state_in_transaction(conn, *key)
+
+            if state is None:
+                _initialize_memory_curve_state_in_transaction(
+                    conn,
+                    owner_user_id=owner_user_id,
+                    character_id=character_id,
+                    memory_type=memory_type,
+                    memory_id=memory_id,
+                    world_occurred_at=world_now,
+                    source_kind=source_kind,
+                    importance=importance,
+                )
+                state = _get_memory_curve_state_in_transaction(conn, *key)
+            else:
+                state = _advance_memory_curve_state_in_transaction(
+                    conn, state, world_now
+                )
+            results[memory_id] = state
+
+    return results
+
+
+# ──────────────────────────────────────────────────────────────
+# Fix 5: cleanup forgotten curve states
+# ──────────────────────────────────────────────────────────────
+def cleanup_forgotten_memory_curve_states(
+    *,
+    owner_user_id: str | None = None,
+    forgotten_threshold_days: float = 30.0,
+    clarity_fragment_threshold: float = 0.15,
+) -> int:
+    """Delete curve states whose retention has been below the forgotten
+    threshold for longer than *forgotten_threshold_days* world-time days.
+
+    Only deletes states whose current retention is below *clarity_fragment_threshold*
+    AND whose updated_at is older than the threshold.
+    """
+    from memoria.core import memory_curve as curve
+
+    if forgotten_threshold_days <= 0:
+        return 0
+
+    cutoff_iso = (
+        datetime.now(timezone.utc)
+        - timedelta(days=forgotten_threshold_days)
+    ).isoformat()
+
+    with get_conn() as conn:
+        # Find candidates: states updated long ago with very low retention
+        where = "updated_at < ? AND elapsed_decay_seconds > 0"
+        params: list = [cutoff_iso]
+        if owner_user_id:
+            where += " AND owner_user_id = ?"
+            params.append(owner_user_id)
+
+        rows = conn.execute(
+            f"SELECT * FROM memory_curve_state WHERE {where}",
+            tuple(params),
+        ).fetchall()
+
+        to_delete = []
+        for row in rows:
+            state = dict(row)
+            # Approximate current retention using the stored state
+            # (conservative: use a point well past the watermark to simulate decay)
+            approx_now_iso = (
+                curve.as_utc(state["world_time_watermark"])
+                + timedelta(days=forgotten_threshold_days)
+            ).isoformat()
+            r = curve.state_retention(state, approx_now_iso)
+            if r < clarity_fragment_threshold:
+                to_delete.append((
+                    state["owner_user_id"],
+                    state["character_id"],
+                    state["memory_type"],
+                    state["memory_id"],
+                ))
+
+        deleted = 0
+        for key in to_delete:
+            # Explicitly delete reinforcement rows first (SQLite doesn't enforce FK cascades)
+            conn.execute(
+                "DELETE FROM memory_curve_reinforcement "
+                "WHERE owner_user_id = ? AND character_id = ? "
+                "AND memory_type = ? AND memory_id = ?",
+                key,
+            )
+            conn.execute(
+                "DELETE FROM memory_curve_state "
+                "WHERE owner_user_id = ? AND character_id = ? "
+                "AND memory_type = ? AND memory_id = ?",
+                key,
+            )
+            deleted += 1
+
+    return deleted

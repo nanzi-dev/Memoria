@@ -598,8 +598,8 @@ def _load_single_character_prompt_context(
             player_id
         ).world_now.isoformat()
         effective_recall_key = recall_key or session_id or effective_world_now
-        try:
-            evaluated_fact_records = memory_curve.evaluate_records(
+        with memory_curve.curve_eval_context(fact_records, 20) as fb_fact:
+            fb_fact[:] = memory_curve.evaluate_records(
                 fact_records,
                 owner_user_id=player_id,
                 character_id=character_id,
@@ -609,7 +609,9 @@ def _load_single_character_prompt_context(
                 text_key="fact_text",
                 limit=20,
             )
-            evaluated_shared_records = memory_curve.evaluate_records(
+        fact_records = fb_fact
+        with memory_curve.curve_eval_context(shared_records, 20) as fb_shared:
+            fb_shared[:] = memory_curve.evaluate_records(
                 shared_records,
                 owner_user_id=player_id,
                 character_id=character_id,
@@ -619,7 +621,9 @@ def _load_single_character_prompt_context(
                 text_key="memory_text",
                 limit=20,
             )
-            evaluated_group_records = memory_curve.evaluate_records(
+        shared_records = fb_shared
+        with memory_curve.curve_eval_context(group_records, 20) as fb_group:
+            fb_group[:] = memory_curve.evaluate_records(
                 group_records,
                 owner_user_id=player_id,
                 character_id=character_id,
@@ -629,14 +633,7 @@ def _load_single_character_prompt_context(
                 text_key="memory_text",
                 limit=20,
             )
-            fact_records = evaluated_fact_records
-            shared_records = evaluated_shared_records
-            group_records = evaluated_group_records
-        except Exception as exc:
-            logger.warning("记忆曲线召回失败，回退到原始召回: %s", exc)
-            fact_records = fact_records[:20]
-            shared_records = shared_records[:20]
-            group_records = group_records[:20]
+        group_records = fb_group
     known_player_facts = [
         record["fact_text"]
         for record in fact_records

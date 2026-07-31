@@ -111,8 +111,8 @@ def load_player_memories_for_relationship_graph(
         effective_world_now = world_now or world_clock.get_clock_snapshot(
             player_id
         ).world_now.isoformat()
-        try:
-            records = memory_curve.evaluate_records(
+        with memory_curve.curve_eval_context(records, limit) as fb:
+            fb[:] = memory_curve.evaluate_records(
                 records,
                 owner_user_id=player_id,
                 character_id=character_id,
@@ -122,8 +122,7 @@ def load_player_memories_for_relationship_graph(
                 text_key="fact_text",
                 limit=limit,
             )
-        except Exception as exc:
-            logger.warning("玩家事实记忆曲线失败，回退到原始召回: %s", exc)
+        records = fb
     return [record["fact_text"] for record in records[:limit]]
 
 
@@ -1119,8 +1118,8 @@ def integrate_multi_character_context(
                 effective_world_now = world_now or world_clock.get_clock_snapshot(
                     player_id
                 ).world_now.isoformat()
-                try:
-                    impressions = memory_curve.evaluate_records(
+                with memory_curve.curve_eval_context(impressions, 3) as fb_imp:
+                    fb_imp[:] = memory_curve.evaluate_records(
                         impressions,
                         owner_user_id=player_id,
                         character_id=character_id,
@@ -1130,8 +1129,7 @@ def integrate_multi_character_context(
                         text_key="memory_text",
                         limit=3,
                     )
-                except Exception as exc:
-                    logger.warning("角色印象记忆曲线失败，回退到原始召回: %s", exc)
+                impressions = fb_imp
             if impressions:
                 # 提取 memory_text 用于 prompt 构建
                 context["character_impressions"][other_id] = [
@@ -1159,8 +1157,8 @@ def integrate_multi_character_context(
         effective_world_now = world_now or world_clock.get_clock_snapshot(
             player_id
         ).world_now.isoformat()
-        try:
-            group_memories = memory_curve.evaluate_records(
+        with memory_curve.curve_eval_context(group_memories, 5) as fb_grp:
+            fb_grp[:] = memory_curve.evaluate_records(
                 group_memories,
                 owner_user_id=player_id,
                 character_id=character_id,
@@ -1170,8 +1168,7 @@ def integrate_multi_character_context(
                 text_key="memory_text",
                 limit=5,
             )
-        except Exception as exc:
-            logger.warning("群体经历记忆曲线失败，回退到原始召回: %s", exc)
+        group_memories = fb_grp
     context["group_memories"] = [
         gm["memory_text"] for gm in group_memories[:5]
     ]

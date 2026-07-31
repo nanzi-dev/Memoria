@@ -2052,7 +2052,7 @@ Authorization: Bearer token-value
 | `character_id` | 是 | — | 要检查的当前用户角色 ID |
 | `session_id` | 否 | `null` | 限定会话；会校验会话属于当前用户且角色属于该会话 |
 | `recall_key` | 否 | `diagnostic:{session_id 或 character_id}` | 控制弱记忆确定性采样的键 |
-| `include_forgotten` | 否 | `false` | 是否包含保留度低于 `0.15` 的 `forgotten` 项 |
+| `include_forgotten` | 否 | `false` | 是否包含保留度低于 `clarity_fragment` 阈值（默认 0.15）的 `forgotten` 项 |
 
 ```json
 {

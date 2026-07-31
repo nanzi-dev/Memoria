@@ -91,6 +91,86 @@ class Configs(BaseSettings):
             "memory_curve_enabled",
         ),
     )
+    memory_curve_max_stability_days: float = Field(
+        default=730.0,
+        gt=0,
+        le=3650,
+        validation_alias=AliasChoices(
+            "MEMORIA_MEMORY_CURVE_MAX_STABILITY_DAYS",
+            "memory_curve_max_stability_days",
+        ),
+    )
+    memory_curve_permanent_threshold: float = Field(
+        default=0.95,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices(
+            "MEMORIA_MEMORY_CURVE_PERMANENT_THRESHOLD",
+            "memory_curve_permanent_threshold",
+        ),
+    )
+    memory_curve_clarity_clear: float = Field(
+        default=0.65,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices(
+            "MEMORIA_MEMORY_CURVE_CLARITY_CLEAR",
+            "memory_curve_clarity_clear",
+        ),
+    )
+    memory_curve_clarity_fuzzy: float = Field(
+        default=0.35,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices(
+            "MEMORIA_MEMORY_CURVE_CLARITY_FUZZY",
+            "memory_curve_clarity_fuzzy",
+        ),
+    )
+    memory_curve_clarity_fragment: float = Field(
+        default=0.15,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices(
+            "MEMORIA_MEMORY_CURVE_CLARITY_FRAGMENT",
+            "memory_curve_clarity_fragment",
+        ),
+    )
+    memory_curve_rank_weight_relevance: float = Field(
+        default=0.45,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices(
+            "MEMORIA_MEMORY_CURVE_RANK_WEIGHT_RELEVANCE",
+            "memory_curve_rank_weight_relevance",
+        ),
+    )
+    memory_curve_rank_weight_retention: float = Field(
+        default=0.35,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices(
+            "MEMORIA_MEMORY_CURVE_RANK_WEIGHT_RETENTION",
+            "memory_curve_rank_weight_retention",
+        ),
+    )
+    memory_curve_rank_weight_importance: float = Field(
+        default=0.20,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices(
+            "MEMORIA_MEMORY_CURVE_RANK_WEIGHT_IMPORTANCE",
+            "memory_curve_rank_weight_importance",
+        ),
+    )
+    memory_curve_forgotten_cleanup_days: float = Field(
+        default=30.0,
+        gt=0,
+        validation_alias=AliasChoices(
+            "MEMORIA_MEMORY_CURVE_FORGOTTEN_CLEANUP_DAYS",
+            "memory_curve_forgotten_cleanup_days",
+        ),
+    )
     max_output_tokens: int = Field(default = 400, ge = 1, le = 4096)
     world_clock_default_timezone: str = "UTC"
     world_clock_scheduler_interval_seconds: float = Field(default=30.0, gt=0)
