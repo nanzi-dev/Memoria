@@ -335,7 +335,21 @@ def delete_character_card_from_db(owner_user_id: str, character_id: str, soft_de
                     (_now(), owner_user_id, character_id),
                 )
             else:
-                # 硬删除：关系和角色卡必须在同一事务内删除。
+                # 硬删除：关系、记忆曲线和角色卡必须在同一事务内删除。
+                conn.execute(
+                    """
+                    DELETE FROM memory_curve_reinforcement
+                    WHERE owner_user_id = ? AND character_id = ?
+                    """,
+                    (owner_user_id, character_id),
+                )
+                conn.execute(
+                    """
+                    DELETE FROM memory_curve_state
+                    WHERE owner_user_id = ? AND character_id = ?
+                    """,
+                    (owner_user_id, character_id),
+                )
                 rows = conn.execute(
                     """
                     SELECT character_id_a, character_id_b

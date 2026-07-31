@@ -1855,7 +1855,7 @@ export default function RelationshipGraph() {
             <Users className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
             <div className="min-w-0">
               <h1 className="truncate font-archive-serif text-base font-semibold text-foreground sm:text-lg">
-                关系调查墙
+                关系墙
               </h1>
               <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 font-archive-mono text-[10px] text-muted-foreground">
                 <span><span className="tabular-nums text-foreground">{characters.length}</span> 个节点</span>

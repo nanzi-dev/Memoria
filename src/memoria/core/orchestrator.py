@@ -470,15 +470,20 @@ def _load_single_character_prompt_context(
         relationship_records
     )
 
+    curve_candidate_limit = (
+        memory_curve.candidate_limit(20)
+        if configs.memory_curve_enabled
+        else 20
+    )
     shared_records = repository.get_character_shared_memories(
         owner_user_id=player_id,
         character_id=character_id,
-        limit=20,
+        limit=curve_candidate_limit,
     )
     group_records = _get_character_group_memories_for_player(
         character_id,
         player_id,
-        limit=20,
+        limit=curve_candidate_limit,
     )
 
     related_character_ids = []
@@ -555,7 +560,7 @@ def _load_single_character_prompt_context(
             character_id=character_id,
             player_id=player_id,
             session_id=session_id,
-            limit=20,
+            limit=curve_candidate_limit,
             query_context=memory_query_context,
         )
     except Exception as e:
@@ -594,7 +599,7 @@ def _load_single_character_prompt_context(
         ).world_now.isoformat()
         effective_recall_key = recall_key or session_id or effective_world_now
         try:
-            fact_records = memory_curve.evaluate_records(
+            evaluated_fact_records = memory_curve.evaluate_records(
                 fact_records,
                 owner_user_id=player_id,
                 character_id=character_id,
@@ -604,7 +609,7 @@ def _load_single_character_prompt_context(
                 text_key="fact_text",
                 limit=20,
             )
-            shared_records = memory_curve.evaluate_records(
+            evaluated_shared_records = memory_curve.evaluate_records(
                 shared_records,
                 owner_user_id=player_id,
                 character_id=character_id,
@@ -614,7 +619,7 @@ def _load_single_character_prompt_context(
                 text_key="memory_text",
                 limit=20,
             )
-            group_records = memory_curve.evaluate_records(
+            evaluated_group_records = memory_curve.evaluate_records(
                 group_records,
                 owner_user_id=player_id,
                 character_id=character_id,
@@ -624,8 +629,14 @@ def _load_single_character_prompt_context(
                 text_key="memory_text",
                 limit=20,
             )
+            fact_records = evaluated_fact_records
+            shared_records = evaluated_shared_records
+            group_records = evaluated_group_records
         except Exception as exc:
             logger.warning("记忆曲线召回失败，回退到原始召回: %s", exc)
+            fact_records = fact_records[:20]
+            shared_records = shared_records[:20]
+            group_records = group_records[:20]
     known_player_facts = [
         record["fact_text"]
         for record in fact_records

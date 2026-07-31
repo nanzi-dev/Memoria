@@ -146,10 +146,11 @@ def record_admin_verification(
 
         if not configs.memory_curve_enabled:
             return projected
+        memory_id = memory_curve.memory_identity(claim, "player_fact")
         states = repository.list_memory_curve_states_for_memory(
             owner_user_id,
             "player_fact",
-            claim_id,
+            memory_id,
         )
         witness_ids = {
             str(state["character_id"])
@@ -197,7 +198,7 @@ def record_admin_verification(
                 owner_user_id=owner_user_id,
                 character_id=character_id,
                 memory_type="player_fact",
-                memory_id=claim_id,
+                memory_id=memory_id,
                 evidence_id=evidence_id,
                 world_occurred_at=occurred_at,
                 source_kind=ADMIN_VERIFICATION_SOURCE_KIND,

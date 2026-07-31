@@ -1101,19 +1101,29 @@ def save_group_memory(
 def get_session_group_memories(
     session_id: str,
     limit: int = 20,
-    created_after: str | None = None
+    created_after: str | None = None,
+    owner_user_id: str | None = None,
 ) -> list[dict]:
-    """获取某个会话的群体记忆"""
-    where_clause = "session_id=?"
+    """获取某个会话的群体记忆，可按会话归属用户隔离。"""
+    table_clause = "group_memory gm"
+    where_clause = "gm.session_id = ?"
     params = [session_id]
+    if owner_user_id:
+        table_clause += " JOIN session s ON s.session_id = gm.session_id"
+        where_clause += " AND s.player_id = ?"
+        params.append(owner_user_id)
     if created_after:
-        where_clause += " AND created_at >= ?"
+        where_clause += " AND gm.created_at >= ?"
         params.append(created_after)
     params.append(limit)
     with get_conn() as conn:
         rows = conn.execute(
-            f"SELECT id, memory_text, participants, context, importance, created_at FROM group_memory WHERE {where_clause} ORDER BY importance DESC, last_referenced DESC LIMIT ?",
-            tuple(params)).fetchall()
+            f"SELECT gm.id, gm.memory_text, gm.participants, gm.context, "
+            f"gm.importance, gm.created_at FROM {table_clause} "
+            f"WHERE {where_clause} "
+            "ORDER BY gm.importance DESC, gm.last_referenced DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
     return [dict(r) for r in rows]
 
 

@@ -60,6 +60,33 @@ def test_retention_half_life_and_curve_multipliers():
         },
         "player_fact",
     ) == 0.9
+    assert memory_curve.candidate_limit(0) == 20
+    assert memory_curve.candidate_limit(10) == 30
+    assert memory_curve.candidate_limit(20) == 60
+
+
+def test_legacy_backfill_preserves_memory_identity():
+    migrated = {
+        "claim_id": "claim-new",
+        "provenance": {
+            "evidence": [{
+                "source_kind": "legacy",
+                "details": {
+                    "legacy_backfill": True,
+                    "legacy_fact_id": 42,
+                },
+            }],
+        },
+    }
+    assert memory_curve.memory_identity(migrated, "player_fact") == "42"
+    assert memory_curve.memory_identity(
+        {"claim_id": "claim-new", "provenance": {}},
+        "player_fact",
+    ) == "claim-new"
+    assert memory_curve.memory_identity(
+        migrated,
+        "character_impression",
+    ) == "claim-new"
 
 
 def test_memoria_memory_curve_environment_flag(monkeypatch):
@@ -235,6 +262,74 @@ def test_admin_verification_reinforces_existing_witness_state():
     assert duplicate["reinforcement_count"] == 1
 
 
+def test_admin_verification_reinforces_legacy_backfill_identity(monkeypatch):
+    from memoria.core.fact_claims import record_admin_verification
+
+    suffix = uuid.uuid4().hex
+    owner_user_id = f"legacy-admin-owner-{suffix}"
+    character_id = f"legacy-admin-character-{suffix}"
+    claim_id = f"legacy-admin-claim-{suffix}"
+    legacy_memory_id = "4242"
+    formed_at = datetime(2026, 2, 1, tzinfo=UTC)
+    claim = {
+        "claim_id": claim_id,
+        "owner_user_id": owner_user_id,
+        "scope_type": "character",
+        "scope_id": character_id,
+        "fact_text": "旧事实",
+        "normalized_fact_text": "旧事实",
+        "content_hash": "content-hash",
+        "normalized_content_hash": "normalized-hash",
+        "provenance": {
+            "evidence": [{
+                "source_kind": "legacy",
+                "details": {
+                    "legacy_backfill": True,
+                    "legacy_fact_id": int(legacy_memory_id),
+                    "importance": 5,
+                },
+            }],
+        },
+    }
+    repository.record_memory_curve_evidence(
+        owner_user_id=owner_user_id,
+        character_id=character_id,
+        memory_type="player_fact",
+        memory_id=legacy_memory_id,
+        evidence_id="formation",
+        world_occurred_at=formed_at.isoformat(),
+        source_kind="legacy",
+        importance=0.5,
+    )
+    monkeypatch.setattr(repository, "get_fact_claim", lambda *args: claim)
+    monkeypatch.setattr(
+        repository,
+        "_record_fact_claim",
+        lambda **kwargs: {**claim, "status": "verified"},
+    )
+
+    record_admin_verification(
+        owner_user_id,
+        claim_id,
+        source_ids=["admin:legacy-confirmation"],
+        world_occurred_at=(formed_at + timedelta(days=7)).isoformat(),
+    )
+
+    legacy_state = repository.get_memory_curve_state(
+        owner_user_id,
+        character_id,
+        "player_fact",
+        legacy_memory_id,
+    )
+    assert legacy_state["reinforcement_count"] == 1
+    assert repository.get_memory_curve_state(
+        owner_user_id,
+        character_id,
+        "player_fact",
+        claim_id,
+    ) is None
+
+
 def test_concurrent_duplicate_evidence_reinforces_once():
     identity = _identity()
     start = datetime(2026, 3, 1, tzinfo=UTC)
@@ -361,10 +456,16 @@ def test_feature_disabled_and_curve_failure_preserve_existing_recall(monkeypatch
     from memoria.core import multi_character_memory
 
     records = [{"claim_id": "claim-1", "fact_text": "玩家喜欢茶"}]
+    requested_limits = []
+
+    def load_records(**kwargs):
+        requested_limits.append(kwargs["limit"])
+        return records
+
     monkeypatch.setattr(
         multi_character_memory.repository,
         "get_prompt_memory_fact_records",
-        lambda **kwargs: records,
+        load_records,
     )
     monkeypatch.setattr(
         multi_character_memory.relationship_context,
@@ -382,6 +483,7 @@ def test_feature_disabled_and_curve_failure_preserve_existing_recall(monkeypatch
     assert multi_character_memory.load_player_memories_for_relationship_graph(
         "character-1", "owner-1", [], world_now="2026-01-01T00:00:00+00:00"
     ) == ["玩家喜欢茶"]
+    assert requested_limits[-1] == 30
 
     monkeypatch.setattr(
         multi_character_memory.configs, "memory_curve_enabled", True
@@ -394,6 +496,186 @@ def test_feature_disabled_and_curve_failure_preserve_existing_recall(monkeypatch
     assert multi_character_memory.load_player_memories_for_relationship_graph(
         "character-1", "owner-1", [], world_now="2026-01-01T00:00:00+00:00"
     ) == ["玩家喜欢茶"]
+    assert requested_limits[-1] == 30
+
+
+def test_single_context_curve_failure_restores_all_raw_records(monkeypatch):
+    from types import SimpleNamespace
+    from memoria.core import orchestrator
+
+    character_id = "curve-fallback-character"
+    owner_user_id = "curve-fallback-owner"
+    raw_facts = [
+        {"claim_id": f"fact-{index}", "fact_text": f"原始玩家事实 {index}"}
+        for index in range(25)
+    ]
+    raw_shared = {
+        "id": "shared-1",
+        "character_a_id": character_id,
+        "character_b_id": "other-character",
+        "memory_text": "原始角色印象",
+    }
+    raw_group = {"id": "group-1", "memory_text": "原始群体经历"}
+    requested_limits = {}
+
+    monkeypatch.setattr(orchestrator.configs, "memory_curve_enabled", True)
+    monkeypatch.setattr(
+        orchestrator.repository,
+        "list_character_relationships",
+        lambda *args: [],
+    )
+    monkeypatch.setattr(
+        orchestrator.repository,
+        "list_character_relationship_revisions",
+        lambda *args: [],
+    )
+
+    def load_shared(**kwargs):
+        requested_limits["shared"] = kwargs["limit"]
+        return [raw_shared]
+
+    def load_group(*args, **kwargs):
+        requested_limits["group"] = kwargs["limit"]
+        return [raw_group]
+
+    def load_facts(**kwargs):
+        requested_limits["fact"] = kwargs["limit"]
+        return raw_facts
+
+    monkeypatch.setattr(
+        orchestrator.repository,
+        "get_character_shared_memories",
+        load_shared,
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "_get_character_group_memories_for_player",
+        load_group,
+    )
+    monkeypatch.setattr(
+        orchestrator.repository,
+        "get_prompt_memory_fact_records",
+        load_facts,
+    )
+    monkeypatch.setattr(
+        orchestrator.relationship_context,
+        "filter_stale_relationship_memory_records",
+        lambda records, *args, **kwargs: records,
+    )
+    calls = []
+
+    def evaluate(records, **kwargs):
+        calls.append(kwargs["memory_type"])
+        if kwargs["memory_type"] == "character_impression":
+            raise RuntimeError("curve down")
+        text_key = kwargs["text_key"]
+        return [{**record, text_key: f"曲线:{record[text_key]}"} for record in records]
+
+    monkeypatch.setattr(orchestrator.memory_curve, "evaluate_records", evaluate)
+    card = SimpleNamespace(
+        meta=SimpleNamespace(
+            name=character_id,
+            display_name=character_id,
+            aliases=[],
+        ),
+    )
+
+    context = orchestrator._load_single_character_prompt_context(
+        character_id,
+        owner_user_id,
+        card,
+        world_now="2026-01-01T00:00:00+00:00",
+        recall_key="turn-1",
+    )
+
+    assert calls == ["player_fact", "character_impression"]
+    assert context["known_player_facts"] == [
+        f"原始玩家事实 {index}" for index in range(20)
+    ]
+    assert "共享记忆（与other-character）：原始角色印象" in context[
+        "cross_mode_memories"
+    ]
+    assert "群体记忆：原始群体经历" in context["cross_mode_memories"]
+    assert requested_limits == {"shared": 60, "group": 60, "fact": 60}
+
+
+def test_multi_context_overfetches_before_curve_ranking(monkeypatch):
+    from memoria.core import multi_character_memory
+
+    requested_limits = {}
+    impressions = [
+        {"id": f"impression-{index}", "memory_text": f"印象 {index}"}
+        for index in range(20)
+    ]
+    groups = [
+        {"id": f"group-{index}", "memory_text": f"经历 {index}"}
+        for index in range(20)
+    ]
+    monkeypatch.setattr(multi_character_memory.configs, "memory_curve_enabled", True)
+    monkeypatch.setattr(
+        multi_character_memory,
+        "load_player_memories_for_relationship_graph",
+        lambda **kwargs: [],
+    )
+
+    def load_impressions(**kwargs):
+        requested_limits["impressions"] = kwargs["limit"]
+        return impressions
+
+    def load_groups(**kwargs):
+        requested_limits["groups"] = kwargs["limit"]
+        requested_limits["group_owner"] = kwargs["owner_user_id"]
+        return groups
+
+    monkeypatch.setattr(
+        multi_character_memory.repository,
+        "get_character_impressions",
+        load_impressions,
+    )
+    monkeypatch.setattr(
+        multi_character_memory.repository,
+        "get_session_group_memories",
+        load_groups,
+    )
+    monkeypatch.setattr(
+        multi_character_memory.relationship_context,
+        "filter_stale_relationship_memory_records",
+        lambda records, *args, **kwargs: records,
+    )
+    monkeypatch.setattr(
+        multi_character_memory,
+        "_relationship_updated_at_for_pair",
+        lambda *args: None,
+    )
+    seen = {}
+
+    def evaluate(records, **kwargs):
+        seen[kwargs["memory_type"]] = (len(records), kwargs["limit"])
+        return list(reversed(records))[:kwargs["limit"]]
+
+    monkeypatch.setattr(multi_character_memory.memory_curve, "evaluate_records", evaluate)
+
+    context = multi_character_memory.integrate_multi_character_context(
+        character_id="character-a",
+        player_id="owner-a",
+        session_id="session-a",
+        other_character_ids=["character-b"],
+        character_relationships={},
+        world_now="2026-01-01T00:00:00+00:00",
+        recall_key="turn-1",
+    )
+
+    assert requested_limits == {
+        "impressions": 20,
+        "groups": 20,
+        "group_owner": "owner-a",
+    }
+    assert seen == {
+        "character_impression": (20, 3),
+        "group_experience": (20, 5),
+    }
+    assert context["character_impressions"]["character-b"][0] == "印象 19"
+    assert context["group_memories"][0] == "经历 19"
 
 
 def test_feature_disabled_preserves_multi_opening_prompt(monkeypatch):

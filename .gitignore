@@ -46,3 +46,4 @@ test_*.log
 # OS
 # =========================
 .DS_Store
+.claude/

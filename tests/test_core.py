@@ -1040,6 +1040,12 @@ class TestMultiCharacterMemory:
 
         player_id = f"user_ctx_{uuid.uuid4().hex[:8]}"
         session_id = f"group_ctx_{uuid.uuid4().hex[:8]}"
+        repository.create_multi_character_session(
+            session_id,
+            player_id,
+            "Player",
+            ["npc_a", "npc_b"],
+        )
         repository.save_long_term_fact("npc_a", player_id, "旧玩家记忆：npc_b只是师徒", 7)
         repository.save_long_term_fact("npc_a", player_id, "旧普通记忆：玩家喜欢猫", 7)
         repository.save_long_term_fact("npc_a", player_id, "新玩家记忆：npc_b已经是情侣", 7)
@@ -1135,6 +1141,12 @@ class TestMultiCharacterMemory:
         player_id = f"user_del_{uuid.uuid4().hex[:8]}"
         session_id = f"group_del_{uuid.uuid4().hex[:8]}"
         cutoff = "2026-01-02T00:00:00+00:00"
+        repository.create_multi_character_session(
+            session_id,
+            player_id,
+            "Player",
+            ["npc_a", "npc_b"],
+        )
 
         repository.save_long_term_fact("npc_a", player_id, "过期恋爱关系事实：亲昵称呼和恋人承诺", 7)
         repository.save_shared_memory(player_id, "npc_a", "npc_b", "删除前印象：恋人关系", importance=0.9)

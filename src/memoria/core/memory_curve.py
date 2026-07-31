@@ -11,6 +11,8 @@ BASE_STABILITY_DAYS = 7.0
 MIN_STABILITY_DAYS = 0.5
 MAX_STABILITY_DAYS = 365.0
 SECONDS_PER_DAY = 86_400.0
+MIN_CANDIDATE_LIMIT = 20
+DEFAULT_CANDIDATE_MULTIPLIER = 3
 
 SOURCE_MULTIPLIERS = {
     "authored_event": 2.0,
@@ -129,7 +131,27 @@ def rank_score(
     )
 
 
+def candidate_limit(
+    target_limit: int,
+    multiplier: int = DEFAULT_CANDIDATE_MULTIPLIER,
+) -> int:
+    target = max(0, int(target_limit))
+    factor = max(1, int(multiplier))
+    return max(MIN_CANDIDATE_LIMIT, target * factor)
+
+
 def memory_identity(record: dict, memory_type: str) -> str:
+    if memory_type == "player_fact":
+        provenance = record.get("provenance") or {}
+        for evidence in provenance.get("evidence") or []:
+            if not isinstance(evidence, dict):
+                continue
+            details = evidence.get("details") or {}
+            if not isinstance(details, dict) or not details.get("legacy_backfill"):
+                continue
+            legacy_fact_id = details.get("legacy_fact_id")
+            if legacy_fact_id is not None and str(legacy_fact_id).strip():
+                return str(legacy_fact_id)
     for key in ("claim_id", "id", "memory_id"):
         value = record.get(key)
         if value is not None and str(value).strip():

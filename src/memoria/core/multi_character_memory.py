@@ -97,7 +97,7 @@ def load_player_memories_for_relationship_graph(
         character_id=character_id,
         player_id=player_id,
         session_id=session_id,
-        limit=max(limit * 3, 20),
+        limit=memory_curve.candidate_limit(limit),
         query_context=query_context,
     )
     records = relationship_context.filter_stale_relationship_memory_records(
@@ -1096,7 +1096,11 @@ def integrate_multi_character_context(
                 owner_user_id=player_id,
                 observer_character_id=character_id,
                 target_character_id=other_id,
-                limit=10,
+                limit=(
+                    memory_curve.candidate_limit(3)
+                    if configs.memory_curve_enabled
+                    else 10
+                ),
             )
             relationship = relationship_context.relationship_between(
                 character_relationships,
@@ -1137,7 +1141,12 @@ def integrate_multi_character_context(
     # 3. 群体记忆（从 group_memory 表查询）
     group_memories = repository.get_session_group_memories(
         session_id=session_id,
-        limit=10,
+        owner_user_id=player_id,
+        limit=(
+            memory_curve.candidate_limit(5)
+            if configs.memory_curve_enabled
+            else 10
+        ),
     )
     group_memories = relationship_context.filter_stale_relationship_memory_records(
         group_memories,
