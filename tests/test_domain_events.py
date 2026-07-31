@@ -16,7 +16,7 @@ def _event(**overrides):
     values = {
         "owner_user_id": "user-1",
         "aggregate_type": "story",
-        "aggregate_id": "graytide",
+        "aggregate_id": "test-story",
         "event_type": "story.started.v1",
         "payload": {},
     }
@@ -41,7 +41,7 @@ def _story_event(owner_user_id, event_name, *, event_id=None):
     values = {
         "owner_user_id": owner_user_id,
         "aggregate_type": "story",
-        "aggregate_id": "graytide",
+        "aggregate_id": "test-story",
         "event_type": f"story.{event_name}.v1",
         "payload": {},
     }
@@ -54,7 +54,7 @@ def _fully_identified_event(owner_user_id, *, event_id):
     return _event(
         owner_user_id=owner_user_id,
         aggregate_type="story",
-        aggregate_id="graytide",
+        aggregate_id="test-story",
         event_type="story.started.v1",
         event_id=event_id,
         payload={"chapter": 1},
@@ -112,7 +112,7 @@ def test_new_domain_event_normalizes_identity_and_defaults_event_id():
     first = _event(
         owner_user_id=" user-1 ",
         aggregate_type=" story ",
-        aggregate_id=" graytide ",
+        aggregate_id=" test-story ",
         event_type=" story.started.v1 ",
         correlation_id=" request-1 ",
     )
@@ -120,7 +120,7 @@ def test_new_domain_event_normalizes_identity_and_defaults_event_id():
 
     assert first.owner_user_id == "user-1"
     assert first.aggregate_type == "story"
-    assert first.aggregate_id == "graytide"
+    assert first.aggregate_id == "test-story"
     assert first.event_type == "story.started.v1"
     assert first.correlation_id == "request-1"
     assert len(first.event_id) == 32
@@ -246,7 +246,7 @@ def test_append_domain_event_is_idempotent_by_event_id(test_user):
     assert repository.list_domain_events(
         test_user,
         "story",
-        "graytide",
+        "test-story",
     ) == [first]
 
 
@@ -306,7 +306,7 @@ def test_append_domain_event_does_not_return_another_tenants_event(test_user):
     assert repository.list_domain_events(
         other_user,
         "story",
-        "graytide",
+        "test-story",
     ) == []
 
 
@@ -325,7 +325,7 @@ def test_append_domain_event_rejects_stale_expected_version(test_user):
     events = repository.list_domain_events(
         test_user,
         "story",
-        "graytide",
+        "test-story",
     )
     assert [event.aggregate_version for event in events] == [1]
 
@@ -349,7 +349,7 @@ def test_append_domain_events_is_atomic_across_aggregates(test_user):
                 _story_event(test_user, "progressed"),
             ],
             expected_versions={
-                (test_user, "story", "graytide"): 0,
+                (test_user, "story", "test-story"): 0,
             },
         )
 
@@ -382,7 +382,7 @@ def test_append_domain_events_is_atomic_when_external_transaction_catches_confli
                     _story_event(test_user, "progressed"),
                 ],
                 expected_versions={
-                    (test_user, "story", "graytide"): 0,
+                    (test_user, "story", "test-story"): 0,
                 },
                 conn=conn,
             )
@@ -560,7 +560,7 @@ def test_list_domain_events_rejects_invalid_limit(
         repository.list_domain_events(
             test_user,
             "story",
-            "graytide",
+            "test-story",
             limit=invalid_limit,
         )
 
@@ -604,14 +604,14 @@ def test_domain_event_schema_and_indexes_are_additive():
 def test_replay_rebuilds_fact_and_story_projections(test_user):
     from memoria.core import fact_claims
 
-    story_id = f"graytide-replay-{uuid4().hex}"
+    story_id = f"test-story-replay-{uuid4().hex}"
     fact_claims.record_claim(
         test_user,
         "story",
         story_id,
         "旧港灯塔编号为 GT-7。",
         source_kind="authored_event",
-        source_ids=["event:graytide-replay"],
+        source_ids=["event:test-story-replay"],
         provenance={"chapter": 3},
     )
     repository.append_story_event(
@@ -687,7 +687,7 @@ def test_replay_rebuilds_fact_and_story_projections(test_user):
 def test_replay_rejects_unknown_major_version_without_losing_projections(
     test_user,
 ):
-    story_id = f"graytide-stable-{uuid4().hex}"
+    story_id = f"test-story-stable-{uuid4().hex}"
     original_story = repository.append_story_event(
         test_user,
         story_id,
@@ -698,7 +698,7 @@ def test_replay_rejects_unknown_major_version_without_losing_projections(
         _event(
             owner_user_id=test_user,
             aggregate_type="story",
-            aggregate_id=f"graytide-future-{uuid4().hex}",
+            aggregate_id=f"test-story-future-{uuid4().hex}",
             event_type="story.started.v2",
         ),
     )
@@ -959,7 +959,7 @@ def test_postgres_batch_advances_version_after_recovered_duplicate(monkeypatch):
     conn = _MixedRecoveryPostgresConnection(
         _stored_database_row(first),
     )
-    aggregate_key = ("user-1", "story", "graytide")
+    aggregate_key = ("user-1", "story", "test-story")
 
     stored = repository.append_domain_events(
         [first, second],

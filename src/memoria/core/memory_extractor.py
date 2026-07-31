@@ -4,7 +4,9 @@ import re
 from typing import Any
 
 from memoria.core import fact_claims
+from memoria.core.config import configs
 from memoria.core.llm_client import call_light_task
+from memoria.db import repository
 
 logger = logging.getLogger(__name__)
 
@@ -166,11 +168,15 @@ def record_generated_memory_claim(
     fact_text: str | None,
     source_ids: list[str],
     provenance: dict[str, Any] | None = None,
+    witness_character_ids: list[str] | None = None,
+    evidence_id: str | None = None,
+    world_occurred_at: str | None = None,
+    importance: float = 0.5,
 ) -> dict | None:
     """Record model-generated memory as a candidate fact claim."""
     if not str(fact_text or "").strip():
         return None
-    return fact_claims.record_claim(
+    claim = fact_claims.record_claim(
         owner_user_id=owner_user_id,
         scope_type=scope_type,
         scope_id=scope_id,
@@ -180,6 +186,27 @@ def record_generated_memory_claim(
         provenance=provenance,
         direct_support=False,
     )
+    if (
+        configs.memory_curve_enabled
+        and witness_character_ids
+        and evidence_id
+        and world_occurred_at
+    ):
+        for character_id in dict.fromkeys(witness_character_ids):
+            try:
+                repository.record_memory_curve_evidence(
+                    owner_user_id=owner_user_id,
+                    character_id=character_id,
+                    memory_type="player_fact",
+                    memory_id=claim["claim_id"],
+                    evidence_id=evidence_id,
+                    world_occurred_at=world_occurred_at,
+                    source_kind="model_inference",
+                    importance=importance,
+                )
+            except Exception as exc:
+                logger.warning("玩家事实曲线写入失败，保留原始事实: %s", exc)
+    return claim
 
 
 def summarize_session(history: list[dict]) -> str | None:

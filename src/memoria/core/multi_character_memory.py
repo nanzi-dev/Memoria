@@ -8,10 +8,19 @@
 4. 多角色会话摘要生成
 """
 
+import hashlib
 import json
 import logging
 
-from memoria.core import llm_client, memory_extractor, performance, relationship_context
+from memoria.core import (
+    llm_client,
+    memory_curve,
+    memory_extractor,
+    performance,
+    relationship_context,
+    world_clock,
+)
+from memoria.core.config import configs
 from memoria.core.memory_extractor import clean_summary_text
 from memoria.db import repository
 
@@ -71,7 +80,9 @@ def load_player_memories_for_relationship_graph(
     relationship_history_cutoff: str | None = None,
     query_context: str | None = None,
     relationship_aliases: list[str] | None = None,
-    limit: int = 10
+    limit: int = 10,
+    world_now: str | None = None,
+    recall_key: str | None = None,
 ) -> list[str]:
     """
     加载多角色场景下的长期记忆。
@@ -86,7 +97,7 @@ def load_player_memories_for_relationship_graph(
         character_id=character_id,
         player_id=player_id,
         session_id=session_id,
-        limit=max(limit * 3, 20),
+        limit=memory_curve.candidate_limit(limit),
         query_context=query_context,
     )
     records = relationship_context.filter_stale_relationship_memory_records(
@@ -96,6 +107,23 @@ def load_player_memories_for_relationship_graph(
         text_key="fact_text",
         relationship_context=False,
     )
+    if configs.memory_curve_enabled:
+        effective_world_now = world_now or world_clock.get_clock_snapshot(
+            player_id
+        ).world_now.isoformat()
+        try:
+            records = memory_curve.evaluate_records(
+                records,
+                owner_user_id=player_id,
+                character_id=character_id,
+                memory_type="player_fact",
+                world_now=effective_world_now,
+                recall_key=recall_key or session_id or effective_world_now,
+                text_key="fact_text",
+                limit=limit,
+            )
+        except Exception as exc:
+            logger.warning("玩家事实记忆曲线失败，回退到原始召回: %s", exc)
     return [record["fact_text"] for record in records[:limit]]
 
 
@@ -353,12 +381,40 @@ def process_dialogue_pulse_memories(
     recent_messages: list[dict],
     character_ids: list[str],
     player_id: str,
+    pulse_id: str | None = None,
 ) -> dict:
     """提取一次并按在场/知情范围持久化整个对话脉冲的长期记忆。"""
     present_ids = list(dict.fromkeys(cid for cid in character_ids if cid))
     extracted = extract_dialogue_pulse_memories(recent_messages, present_ids)
     generated_scope = resolve_generated_fact_scope(session_id)
-    source_ids = [f"session:{session_id}"]
+    clean_pulse_id = str(pulse_id or "").strip()
+    if clean_pulse_id:
+        evidence_id = f"pulse:{session_id}:{clean_pulse_id}"
+    else:
+        pulse_material = "\0".join(
+            str(
+                message.get("message_id")
+                or message.get("id")
+                or (
+                    f"{message.get('role')}:{message.get('content')}:"
+                    f"{message.get('world_created_at') or ''}"
+                )
+            )
+            for message in recent_messages
+        )
+        evidence_id = (
+            f"pulse:{session_id}:"
+            + hashlib.sha256(pulse_material.encode("utf-8")).hexdigest()
+        )
+    source_ids = [f"session:{session_id}", evidence_id]
+    world_occurred_at = next(
+        (
+            str(message.get("world_created_at"))
+            for message in reversed(recent_messages)
+            if message.get("world_created_at")
+        ),
+        None,
+    ) or world_clock.get_clock_snapshot(player_id).world_now.isoformat()
 
     if generated_scope:
         scope_type, scope_id = generated_scope
@@ -377,6 +433,9 @@ def process_dialogue_pulse_memories(
                         "memory_kind": memory_kind,
                         "session_id": session_id,
                     },
+                    witness_character_ids=present_ids,
+                    evidence_id=evidence_id,
+                    world_occurred_at=world_occurred_at,
                 )
 
         for row in extracted["secret_facts"]:
@@ -391,6 +450,9 @@ def process_dialogue_pulse_memories(
                     "session_id": session_id,
                     "allowed_character_ids": row["allowed_character_ids"],
                 },
+                witness_character_ids=row["allowed_character_ids"],
+                evidence_id=evidence_id,
+                world_occurred_at=world_occurred_at,
             )
 
     return extracted
@@ -530,7 +592,9 @@ def save_character_impression(
     impression: str,
     session_id: str,
     player_id: str = None,
-    importance: float = 0.6
+    importance: float = 0.6,
+    world_occurred_at: str | None = None,
+    evidence_id: str | None = None,
 ):
     """
     保存角色对其他角色的印象
@@ -548,13 +612,24 @@ def save_character_impression(
     """
     if not player_id:
         raise ValueError("player_id is required for character impression isolation")
+    world_occurred_at = world_occurred_at or world_clock.get_clock_snapshot(
+        player_id
+    ).world_now.isoformat()
+    evidence_id = evidence_id or (
+        f"impression:{session_id}:"
+        + hashlib.sha256(
+            f"{observer_id}\0{target_id}\0{impression}".encode("utf-8")
+        ).hexdigest()
+    )
     memory_id = repository.save_character_impression(
         owner_user_id=player_id,
         observer_character_id=observer_id,
         target_character_id=target_id,
         impression_text=impression,
         context=f"session:{session_id}",
-        importance=importance
+        importance=importance,
+        world_occurred_at=world_occurred_at,
+        evidence_id=evidence_id,
     )
     
     logger.info(f"保存角色印象: {observer_id} -> {target_id}, id={memory_id}")
@@ -668,11 +743,24 @@ def save_group_event_memory(
     """
     memory_text = f"群体事件：{event_description}"
     
+    session = repository.get_session(session_id)
+    curve_fields = {}
+    if session:
+        curve_fields = {
+            "world_occurred_at": world_clock.get_clock_snapshot(
+                session["player_id"]
+            ).world_now.isoformat(),
+            "evidence_id": (
+                f"group-event:{session_id}:"
+                + hashlib.sha256(event_description.encode("utf-8")).hexdigest()
+            ),
+        }
     memory_id = repository.save_group_memory(
         session_id=session_id,
         memory_text=memory_text,
         participants=character_ids,
-        importance=importance
+        importance=importance,
+        **curve_fields,
     )
     
     logger.info(f"保存群体记忆: session={session_id}, participants={len(character_ids)}, id={memory_id}")
@@ -908,6 +996,7 @@ def save_multi_character_summary(
         summary_text: 摘要文本
         message_count: 消息数量
     """
+    world_now = world_clock.get_clock_snapshot(player_id).world_now.isoformat()
     # 为每个角色保存独立摘要（兼容单角色查询逻辑）
     for char_id in character_ids:
         repository.save_session_summary(
@@ -924,7 +1013,9 @@ def save_multi_character_summary(
         memory_text=f"会话摘要：{summary_text}",
         participants=character_ids,
         context=f"共 {message_count} 条消息",
-        importance=0.5
+        importance=0.5,
+        world_occurred_at=world_now,
+        evidence_id=f"group-summary:{session_id}:{message_count}",
     )
     
     logger.info(f"为 {len(character_ids)} 个角色保存会话摘要")
@@ -941,7 +1032,9 @@ def integrate_multi_character_context(
     other_character_ids: list[str],
     query_context: str = None,
     character_relationships: dict | None = None,
-    relationship_aliases: list[str] | None = None
+    relationship_aliases: list[str] | None = None,
+    world_now: str | None = None,
+    recall_key: str | None = None,
 ) -> dict:
     """
     整合多角色场景的完整上下文
@@ -985,6 +1078,8 @@ def integrate_multi_character_context(
         query_context=query_context,
         relationship_aliases=relationship_aliases,
         limit=10,
+        world_now=world_now,
+        recall_key=recall_key,
     )
     context["player_memories"] = player_memories
     
@@ -1001,7 +1096,11 @@ def integrate_multi_character_context(
                 owner_user_id=player_id,
                 observer_character_id=character_id,
                 target_character_id=other_id,
-                limit=10,
+                limit=(
+                    memory_curve.candidate_limit(3)
+                    if configs.memory_curve_enabled
+                    else 10
+                ),
             )
             relationship = relationship_context.relationship_between(
                 character_relationships,
@@ -1016,6 +1115,23 @@ def integrate_multi_character_context(
                 relationship_context=True,
                 relationship=relationship,
             )
+            if configs.memory_curve_enabled and impressions:
+                effective_world_now = world_now or world_clock.get_clock_snapshot(
+                    player_id
+                ).world_now.isoformat()
+                try:
+                    impressions = memory_curve.evaluate_records(
+                        impressions,
+                        owner_user_id=player_id,
+                        character_id=character_id,
+                        memory_type="character_impression",
+                        world_now=effective_world_now,
+                        recall_key=recall_key or session_id,
+                        text_key="memory_text",
+                        limit=3,
+                    )
+                except Exception as exc:
+                    logger.warning("角色印象记忆曲线失败，回退到原始召回: %s", exc)
             if impressions:
                 # 提取 memory_text 用于 prompt 构建
                 context["character_impressions"][other_id] = [
@@ -1025,7 +1141,12 @@ def integrate_multi_character_context(
     # 3. 群体记忆（从 group_memory 表查询）
     group_memories = repository.get_session_group_memories(
         session_id=session_id,
-        limit=10,
+        owner_user_id=player_id,
+        limit=(
+            memory_curve.candidate_limit(5)
+            if configs.memory_curve_enabled
+            else 10
+        ),
     )
     group_memories = relationship_context.filter_stale_relationship_memory_records(
         group_memories,
@@ -1034,6 +1155,23 @@ def integrate_multi_character_context(
         text_key="memory_text",
         relationship_context=True,
     )
+    if configs.memory_curve_enabled and group_memories:
+        effective_world_now = world_now or world_clock.get_clock_snapshot(
+            player_id
+        ).world_now.isoformat()
+        try:
+            group_memories = memory_curve.evaluate_records(
+                group_memories,
+                owner_user_id=player_id,
+                character_id=character_id,
+                memory_type="group_experience",
+                world_now=effective_world_now,
+                recall_key=recall_key or session_id,
+                text_key="memory_text",
+                limit=5,
+            )
+        except Exception as exc:
+            logger.warning("群体经历记忆曲线失败，回退到原始召回: %s", exc)
     context["group_memories"] = [
         gm["memory_text"] for gm in group_memories[:5]
     ]
@@ -1084,16 +1222,25 @@ def auto_process_multi_character_memories(
     
     for char_id, memories in character_memories.items():
         for memory in memories:
+            evidence_id = (
+                f"auto-memory:{session_id}:"
+                + hashlib.sha256(memory.encode("utf-8")).hexdigest()
+            )
             memory_extractor.record_generated_memory_claim(
                 owner_user_id=player_id,
                 scope_type="character",
                 scope_id=char_id,
                 fact_text=memory,
-                source_ids=[f"session:{session_id}"],
+                source_ids=[f"session:{session_id}", evidence_id],
                 provenance={
                     "memory_kind": "character_memory",
                     "session_id": session_id,
                 },
+                witness_character_ids=[char_id],
+                evidence_id=evidence_id,
+                world_occurred_at=world_clock.get_clock_snapshot(
+                    player_id
+                ).world_now.isoformat(),
             )
 
     impression_count = process_character_impressions(

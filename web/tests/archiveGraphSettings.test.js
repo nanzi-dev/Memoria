@@ -18,7 +18,7 @@ test('relationship graph uses the archive clue-wall surface without a legacy pag
   assert.match(graphSource, /--archive-graph-player/);
   assert.match(graphSource, /--archive-graph-surface/);
   assert.match(graphSource, /archive-clue-wall/);
-  assert.match(graphSource, /关系调查墙/);
+  assert.match(graphSource, /关系墙/);
   assert.match(archiveCss, /--archive-graph-wall/);
   assert.match(archiveCss, /--archive-graph-paper/);
   assert.match(archiveCss, /--archive-graph-pin/);

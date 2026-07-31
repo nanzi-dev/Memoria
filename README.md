@@ -51,6 +51,7 @@
 - **中期记忆**：自动生成会话摘要，支持跨会话记忆持久化
 - **长期记忆**：自动提取和存储重要事实，RAG 向量检索智能召回相关记忆
 - **记忆萃取引擎**：使用 AI 从对话中智能提取关键信息并评估重要性
+- **世界时间记忆曲线**：玩家事实、角色印象和群体经历会随世界时间衰减，并可由新证据强化；弱记忆以可复现采样偶发闪回，原始记忆不会被删除。详见 [记忆曲线说明](docs/MEMORY_CURVE.md)
 - **图谱修订隔离**：角色关系图谱更新或删除后，单聊和群聊生成上下文只过滤图谱变更前的旧关系事实；普通长期记忆、共同经历和世界事实继续保留。最近对话里若出现与当前图谱冲突的关系表述，也会在送入模型前跳过，避免旧关系覆盖当前图谱
 
 ### 外部知识库 RAG
@@ -139,6 +140,7 @@ Memoria/
 │   │   ├── orchestrator.py     # 对话编排核心
 │   │   ├── llm_client.py       # LLM 调用适配层
 │   │   ├── memory_extractor.py # 记忆萃取模块
+│   │   ├── memory_curve.py     # 世界时间记忆衰减、强化与召回
 │   │   ├── prompt_builder.py   # Prompt 组装器
 │   │   ├── vector_memory.py    # 向量记忆管理
 │   │   ├── knowledge_documents.py    # 知识文档校验、提取与切块
@@ -171,12 +173,14 @@ Memoria/
 │   │       ├── users.py / characters.py / sessions_and_messages.py
 │   │       ├── events.py / relationships.py / multi_session.py
 │   │       ├── knowledge.py / state_and_memory.py / fact_claims.py
+│   │       ├── memory_curve.py # 记忆曲线状态与幂等强化投影
 │   │       ├── story.py / domain_events.py / world_clock.py / background_jobs.py
 │   └── main.py                 # 应用入口
 ├── tests/                      # pytest 测试（核心、API、安全、知识库、世界时钟等）
 ├── docs/                       # 项目文档
 │   ├── API.md                  # API 文档
 │   ├── ARCHITECTURE.md         # 系统架构与数据库
+│   ├── MEMORY_CURVE.md         # 世界时间记忆曲线
 │   ├── FAQ.md                  # 故障排查
 │   ├── ROADMAP.md              # 开发路线图
 │   └── CONTRIBUTING.md         # 贡献指南
@@ -188,10 +192,10 @@ Memoria/
 ├── scripts/                    # 工具脚本
 │   ├── chat.sh                 # CLI 聊天启动脚本
 │   ├── cli_chat.py             # 命令行对话工具
-│   ├── seed_graytide_demo.py    # 灰潮港演示模块播种脚本
+│   ├── seed_next_door_demo.py    # 隔壁寝室演示模块播种脚本
 │   └── run_tests.sh            # 测试执行脚本
 ├── examples/                   # 可播种的完整故事模块
-│   └── graytide/               # 灰潮港角色、事件、关系、知识与评测数据
+│   └── next_door/              # 隔壁寝室角色、事件、关系、知识与评测数据
 ├── web/                        # React + Vite 前端
 │   ├── src/pages/              # Home、ChatRoom、CharacterEditor、PersonaEditor、EventList、EventEditor、RelationshipGraph、KnowledgeManager
 │   ├── src/components/         # 通用组件与编辑器步骤组件
@@ -333,13 +337,13 @@ npm run dev
 
 ## 完整演示模块
 
-`examples/graytide/` 提供“灰潮港：第十三声钟鸣”完整故事模块，包含玩家角色卡、8 个 NPC、关系网络、事件、4 个知识库、调查群聊和检索评测问题。后端配置完成后可播种到独立的 `memoria_demo` 普通用户：
+`examples/next_door/` 提供“隔壁寝室”完整故事模块，包含玩家角色卡、4 个 NPC、关系网络、事件、3 个知识库、群聊和检索评测问题。后端配置完成后可播种到独立的 `memoria_demo` 普通用户：
 
 ```bash
-python scripts/seed_graytide_demo.py --password '<choose-a-strong-password>'
+python scripts/seed_next_door_demo.py --password '<choose-a-strong-password>'
 ```
 
-只创建结构和知识文档队列、不加载本地嵌入模型时使用 `--skip-knowledge-index`；需要清理并重建该模块时使用 `--reset-module`。播种脚本不会创建或占用系统管理员名额。完整调查路线见 [Graytide README](examples/graytide/README.md) 和 [WALKTHROUGH](examples/graytide/WALKTHROUGH.md)。
+只创建结构和知识文档队列、不加载本地嵌入模型时使用 `--skip-knowledge-index`；需要清理并重建该模块时使用 `--reset-module`。播种脚本不会创建或占用系统管理员名额。破冰指南见 [Next Door README](examples/next_door/README.md) 和 [WALKTHROUGH](examples/next_door/WALKTHROUGH.md)。
 
 ---
 
@@ -348,7 +352,8 @@ python scripts/seed_graytide_demo.py --password '<choose-a-strong-password>'
 | 文档 | 内容 |
 |------|------|
 | [API 文档](docs/API.md) | 完整 REST API 参考（对话/角色卡/事件/关系/多角色/知识库/语音/用户/系统管理），含请求/响应示例 |
-| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、完整数据库表结构（40 张表）、记忆、知识检索与语音架构、角色卡开发规范 |
+| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、数据库表结构、记忆、知识检索与语音架构、角色卡开发规范 |
+| [记忆曲线](docs/MEMORY_CURVE.md) | 基于世界时间的记忆衰减、证据强化、确定性召回和只读诊断说明 |
 | [知识检索评测](docs/KNOWLEDGE_RETRIEVAL_EVALUATION.md) | 检索基线、嵌入模型对比和 Graytide 场景级评测夹具 |
 | [开发路线图](docs/ROADMAP.md) | 已完成功能和未来规划 |
 | [故障排查](docs/FAQ.md) | 常见问题解决方案、调试技巧、性能优化建议 |
@@ -401,6 +406,7 @@ ADMIN_BOOTSTRAP_TOKEN=                         # 一次性初始化管理员的�
 FORWARDED_ALLOW_IPS=127.0.0.1                  # Uvicorn 信任的反向代理 IP；Docker 模式默认 *
 SHORT_TERM_MEMORY_TURNS=8                      # 短期记忆轮数
 LONG_TERM_MEMORY_INTERVAL_TURNS=5              # 每隔多少个玩家回合保存一次长期记忆
+MEMORIA_MEMORY_CURVE_ENABLED=true              # 启用世界时间记忆曲线（默认开启）
 WORLD_CLOCK_SCHEDULER_INTERVAL_SECONDS=30      # 世界时钟调度扫描间隔
 WORLD_CLOCK_SCHEDULER_LEASE_SECONDS=90         # 到期事件调度租约
 

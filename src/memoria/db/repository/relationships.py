@@ -210,6 +210,26 @@ def get_character_relationship_updated_at(owner_user_id: str, character_id_a: st
 
     return row["updated_at"] if row else None
 
+
+def list_character_relationship_revisions(
+    owner_user_id: str,
+    character_id: str,
+) -> list[dict]:
+    """List current and deleted relationship revision pairs for diagnostics."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT character_id_a, character_id_b, updated_at
+            FROM character_relationship_revision
+            WHERE owner_user_id = ?
+              AND (character_id_a = ? OR character_id_b = ?)
+            ORDER BY updated_at, character_id_a, character_id_b
+            """,
+            (owner_user_id, character_id, character_id),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def list_character_relationships(owner_user_id: str, character_id: str) -> list[dict]:
     """列出指定角色的所有关系"""
     with get_conn() as conn:
@@ -338,4 +358,3 @@ def update_relationship_affinity(
 
 
  
-

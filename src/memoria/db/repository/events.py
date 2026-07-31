@@ -1279,6 +1279,7 @@ def commit_event_execution_batch(
 ) -> dict:
     """在一个数据库事务中提交整轮事件执行及全部数据库副作用。"""
     inserted_memories: list[dict] = []
+    memory_curve_evidence: list[dict] = []
     now = _now()
     statuses = {execution["status"] for execution in executions}
     if not executions or statuses <= {"succeeded", "skipped"}:
@@ -1599,6 +1600,25 @@ def commit_event_execution_batch(
                         },
                     },
                 )
+                provenance = dict(claim.get("provenance") or {})
+                witnesses = provenance.get("allowed_character_ids") or [
+                    execution["character_id"]
+                ]
+                if claim.get("world_occurred_at"):
+                    for witness in dict.fromkeys(witnesses):
+                        memory_curve_evidence.append({
+                            "owner_user_id": player_id,
+                            "character_id": witness,
+                            "memory_type": "player_fact",
+                            "memory_id": identity["claim_id"],
+                            "evidence_id": (
+                                f"event:{execution['execution_id']}:"
+                                f"{identity['claim_id']}"
+                            ),
+                            "world_occurred_at": claim["world_occurred_at"],
+                            "source_kind": claim["source_kind"],
+                            "importance": provenance.get("importance", 0.5),
+                        })
 
             for story_update in execution.get("story_updates") or []:
                 _apply_story_update_in_transaction(
@@ -1698,6 +1718,13 @@ def commit_event_execution_batch(
             if dialogue_turn
             else None
         )
+
+    if configs.memory_curve_enabled:
+        for evidence in memory_curve_evidence:
+            try:
+                record_memory_curve_evidence(**evidence)
+            except Exception as exc:
+                logger.warning("事件记忆曲线写入失败，保留事实账本: %s", exc)
 
     return {
         "deduplicated": False,
@@ -2710,4 +2737,3 @@ def delete_event_template(template_id: str) -> bool:
             (template_id,),
         )
     return cursor.rowcount > 0
-

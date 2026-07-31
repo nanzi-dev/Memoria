@@ -1040,6 +1040,12 @@ class TestMultiCharacterMemory:
 
         player_id = f"user_ctx_{uuid.uuid4().hex[:8]}"
         session_id = f"group_ctx_{uuid.uuid4().hex[:8]}"
+        repository.create_multi_character_session(
+            session_id,
+            player_id,
+            "Player",
+            ["npc_a", "npc_b"],
+        )
         repository.save_long_term_fact("npc_a", player_id, "旧玩家记忆：npc_b只是师徒", 7)
         repository.save_long_term_fact("npc_a", player_id, "旧普通记忆：玩家喜欢猫", 7)
         repository.save_long_term_fact("npc_a", player_id, "新玩家记忆：npc_b已经是情侣", 7)
@@ -1135,6 +1141,12 @@ class TestMultiCharacterMemory:
         player_id = f"user_del_{uuid.uuid4().hex[:8]}"
         session_id = f"group_del_{uuid.uuid4().hex[:8]}"
         cutoff = "2026-01-02T00:00:00+00:00"
+        repository.create_multi_character_session(
+            session_id,
+            player_id,
+            "Player",
+            ["npc_a", "npc_b"],
+        )
 
         repository.save_long_term_fact("npc_a", player_id, "过期恋爱关系事实：亲昵称呼和恋人承诺", 7)
         repository.save_shared_memory(player_id, "npc_a", "npc_b", "删除前印象：恋人关系", importance=0.9)
@@ -1434,19 +1446,20 @@ class TestMultiCharacterMemory:
         )
 
         assert legacy_facts == []
-        assert saved_claims == [
-            {
-                "owner_user_id": "user_auto_shared",
-                "scope_type": "character",
-                "scope_id": "npc_a",
-                "fact_text": "我记得这次行动开始了",
-                "source_ids": ["session:auto_shared_session"],
-                "provenance": {
-                    "memory_kind": "character_memory",
-                    "session_id": "auto_shared_session",
-                },
-            }
-        ]
+        assert len(saved_claims) == 1
+        claim = saved_claims[0]
+        assert claim["owner_user_id"] == "user_auto_shared"
+        assert claim["scope_type"] == "character"
+        assert claim["scope_id"] == "npc_a"
+        assert claim["fact_text"] == "我记得这次行动开始了"
+        assert claim["source_ids"][0] == "session:auto_shared_session"
+        assert claim["source_ids"][1] == claim["evidence_id"]
+        assert claim["witness_character_ids"] == ["npc_a"]
+        assert claim["world_occurred_at"]
+        assert claim["provenance"] == {
+            "memory_kind": "character_memory",
+            "session_id": "auto_shared_session",
+        }
         assert processed
         assert processed[0]["session_id"] == "auto_shared_session"
         assert processed[0]["character_ids"] == ["npc_a", "npc_b"]

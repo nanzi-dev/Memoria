@@ -25,7 +25,7 @@ def _record(
     source_kind,
     source_ids,
     scope_type="story",
-    scope_id="graytide",
+    scope_id="test-scope",
     direct_support=False,
     provenance=None,
 ):
@@ -63,7 +63,7 @@ def _replay_fact_claim(owner_user_id, claim_id):
     return repository.list_fact_claims(
         owner_user_id,
         "story",
-        "graytide",
+        "test-scope",
     )[0]
 
 
@@ -83,7 +83,7 @@ def test_model_inference_is_always_candidate(owner_user_id):
     assert repository.list_verified_fact_claims(
         owner_user_id,
         "story",
-        "graytide",
+        "test-scope",
     ) == []
 
 
@@ -102,7 +102,7 @@ def test_generated_single_character_memory_is_character_candidate(
     claim = record_generated_memory_claim(
         owner_user_id=owner_user_id,
         scope_type="character",
-        scope_id="npc_graytide",
+        scope_id="npc_test",
         fact_text="玩家偏好在清晨调查港口。",
         source_ids=["session:single-session"],
         provenance={"session_id": "single-session"},
@@ -110,13 +110,13 @@ def test_generated_single_character_memory_is_character_candidate(
 
     assert claim["status"] == "candidate"
     assert claim["scope_type"] == "character"
-    assert claim["scope_id"] == "npc_graytide"
+    assert claim["scope_id"] == "npc_test"
     assert claim["owner_user_id"] == owner_user_id
     assert claim["source_kind"] == "model_inference"
     assert repository.list_fact_claims(
         owner_user_id,
         "character",
-        "npc_graytide",
+        "npc_test",
     ) == [claim]
 
 
@@ -126,7 +126,7 @@ def test_default_group_session_uses_distinct_logical_thread_for_generated_claim(
 ):
     from memoria.core import multi_character_memory
 
-    session_id = f"graytide-group-{uuid4().hex}"
+    session_id = f"test-group-{uuid4().hex}"
     assert repository.create_multi_character_session(
         session_id,
         owner_user_id,
@@ -166,8 +166,8 @@ def test_default_group_session_uses_distinct_logical_thread_for_generated_claim(
 
 
 def test_multi_session_persists_real_story_scope(owner_user_id):
-    session_id = f"graytide-story-session-{uuid4().hex}"
-    story_id = f"graytide-story-{uuid4().hex}"
+    session_id = f"test-story-session-{uuid4().hex}"
+    story_id = f"test-story-{uuid4().hex}"
 
     assert repository.create_multi_character_session(
         session_id,
@@ -229,10 +229,10 @@ def test_prompt_memory_merges_only_applicable_verified_claims(
 ):
     from memoria.core.fact_claims import retract_claim, supersede_claim
 
-    character_id = "npc_graytide"
-    group_thread_id = "graytide-thread"
-    story_id = "graytide-story"
-    session_id = "graytide-session"
+    character_id = "npc_test"
+    group_thread_id = "test-thread"
+    story_id = "test-story"
+    session_id = "test-session"
 
     verified_character = _record(
         owner_user_id,
@@ -526,8 +526,8 @@ def test_prompt_memory_filters_verified_group_secret_by_allowed_character(
     owner_user_id,
     monkeypatch,
 ):
-    group_thread_id = "graytide-secret-thread"
-    session_id = "graytide-secret-session"
+    group_thread_id = "test-secret-thread"
+    session_id = "test-secret-session"
     public_claim = _record(
         owner_user_id,
         "调查组知道东侧闸门已关闭。",
@@ -585,8 +585,8 @@ def test_prompt_memory_legacy_compatibility_stops_after_backfill_marker(
     owner_user_id,
     monkeypatch,
 ):
-    character_id = "npc_graytide_legacy"
-    session_id = "graytide-legacy-session"
+    character_id = "npc_test_legacy"
+    session_id = "test-legacy-session"
     marker = "2026-07-15-long-term-fact-event-backfill"
     repository.create_session(
         session_id,
@@ -675,8 +675,8 @@ def test_prompt_fallback_does_not_leak_legacy_after_backfill_marker(
 
     from memoria.core import orchestrator
 
-    character_id = "npc_graytide_marker_fallback"
-    session_id = f"graytide-marker-{uuid4().hex}"
+    character_id = "npc_test_marker_fallback"
+    session_id = f"test-marker-{uuid4().hex}"
     legacy_fact = "旧系统记录：玩家掌握北闸门钥匙。"
     marker = repository.LONG_TERM_FACT_BACKFILL_MIGRATION
     card = SimpleNamespace(
@@ -769,13 +769,13 @@ def test_authored_event_is_verified_immediately(owner_user_id):
         owner_user_id,
         "港口警笛会在世界时间六点鸣响。",
         source_kind="authored_event",
-        source_ids=["graytide_harbor_siren_schedule"],
+        source_ids=["test_siren_schedule"],
         provenance={"event_version": 3},
     )
 
     assert claim["status"] == "verified"
     assert claim["verified_at"] is not None
-    assert claim["source_ids"] == ["graytide_harbor_siren_schedule"]
+    assert claim["source_ids"] == ["test_siren_schedule"]
     assert claim["provenance"]["evidence"][0]["details"] == {
         "event_version": 3,
     }
@@ -832,7 +832,7 @@ def test_direct_low_risk_support_is_deterministically_verified(
     assert repository.list_verified_fact_claims(
         owner_user_id,
         "story",
-        "graytide",
+        "test-scope",
     ) == [claim]
 
 
@@ -1119,7 +1119,7 @@ def test_same_scope_and_normalized_content_is_idempotent(owner_user_id):
     claims = repository.list_fact_claims(
         owner_user_id,
         "story",
-        "graytide",
+        "test-scope",
     )
     assert second["claim_id"] == first["claim_id"]
     assert len(claims) == 1
@@ -1167,7 +1167,7 @@ def test_retract_removes_claim_from_verified_projection(owner_user_id):
     assert repository.list_verified_fact_claims(
         owner_user_id,
         "story",
-        "graytide",
+        "test-scope",
     ) == []
     assert [event.event_type for event in _events(owner_user_id, claim["claim_id"])] == [
         "fact.claimed.v1",
@@ -1209,7 +1209,7 @@ def test_supersede_links_claims_and_removes_old_verified_projection(
     claims = repository.list_fact_claims(
         owner_user_id,
         "story",
-        "graytide",
+        "test-scope",
     )
     projected_replacement = next(
         claim
@@ -1224,7 +1224,7 @@ def test_supersede_links_claims_and_removes_old_verified_projection(
     assert repository.list_verified_fact_claims(
         owner_user_id,
         "story",
-        "graytide",
+        "test-scope",
     ) == [projected_replacement]
     assert [event.event_type for event in _events(
         owner_user_id,
@@ -1274,7 +1274,7 @@ def test_retracted_claim_cannot_be_superseded_or_accept_evidence(owner_user_id):
         for item in repository.list_fact_claims(
             owner_user_id,
             "story",
-            "graytide",
+            "test-scope",
         )
         if item["claim_id"] == claim["claim_id"]
     )
@@ -1330,7 +1330,7 @@ def test_superseded_claim_cannot_be_retracted_or_change_replacement(
         for item in repository.list_fact_claims(
             owner_user_id,
             "story",
-            "graytide",
+            "test-scope",
         )
     }
     assert claims[original["claim_id"]] == terminal
@@ -1404,7 +1404,7 @@ def test_terminal_replacement_cannot_receive_superseded_link(owner_user_id):
         for item in repository.list_fact_claims(
             owner_user_id,
             "story",
-            "graytide",
+            "test-scope",
         )
     }
     assert projected[original["claim_id"]]["status"] == "candidate"
@@ -1426,7 +1426,7 @@ def test_replaying_older_event_does_not_reduce_ledger_version(owner_user_id):
     projected = repository.list_fact_claims(
         owner_user_id,
         "story",
-        "graytide",
+        "test-scope",
     )[0]
     assert projected == claim
     assert projected["ledger_version"] == events[-1].aggregate_version
@@ -1494,7 +1494,7 @@ def test_projector_rejects_stale_projection_write(owner_user_id):
     assert repository.list_fact_claims(
         owner_user_id,
         "story",
-        "graytide",
+        "test-scope",
     ) == [claim]
 
 
@@ -1538,7 +1538,7 @@ def test_projector_rejects_model_only_verification_event(owner_user_id):
     assert repository.list_fact_claims(
         owner_user_id,
         "story",
-        "graytide",
+        "test-scope",
     ) == [claim]
 
 
@@ -1748,14 +1748,14 @@ def test_projector_replay_rejects_cross_scope_supersession(owner_user_id):
         "旧航线经过东侧浮标。",
         source_kind="legacy",
         source_ids=["route-v1"],
-        scope_id="graytide-east",
+        scope_id="test-east",
     )
     replacement = _record(
         owner_user_id,
         "新航线经过西侧浮标。",
         source_kind="legacy",
         source_ids=["route-v2"],
-        scope_id="graytide-west",
+        scope_id="test-west",
     )
     forged_event = StoredDomainEvent(
         owner_user_id=owner_user_id,
@@ -1812,7 +1812,7 @@ def test_projector_rejects_invalid_claimed_event_source_ids(
             "owner_user_id": owner_user_id,
             "claim_id": claim_id,
             "scope_type": "story",
-            "scope_id": "graytide",
+            "scope_id": "test-scope",
             "fact_text": "无效来源不能进入投影。",
             "normalized_fact_text": "无效来源不能进入投影",
             "content_hash": "content-hash",
@@ -1833,7 +1833,7 @@ def test_projector_rejects_invalid_claimed_event_source_ids(
     assert repository.list_fact_claims(
         owner_user_id,
         "story",
-        "graytide",
+        "test-scope",
     ) == []
 
 
@@ -1882,7 +1882,7 @@ def test_projector_replay_rejects_forged_fact_identity(
     assert repository.list_fact_claims(
         owner_user_id,
         "story",
-        "graytide",
+        "test-scope",
     ) == []
 
 
@@ -1893,7 +1893,7 @@ def test_postgres_initial_projection_conflict_reloads_concurrent_row(monkeypatch
     identity = derive_fact_claim_identity(
         "owner-1",
         "story",
-        "graytide",
+        "test-scope",
         "并发创建。",
     )
 
@@ -1906,7 +1906,7 @@ def test_postgres_initial_projection_conflict_reloads_concurrent_row(monkeypatch
         payload={
             "owner_user_id": "owner-1",
             "scope_type": "story",
-            "scope_id": "graytide",
+            "scope_id": "test-scope",
             "fact_text": "并发创建。",
             **identity,
             "source_kind": "legacy",
@@ -1921,7 +1921,7 @@ def test_postgres_initial_projection_conflict_reloads_concurrent_row(monkeypatch
     concurrent_row = {
         "owner_user_id": "owner-1",
         "scope_type": "story",
-        "scope_id": "graytide",
+        "scope_id": "test-scope",
         "fact_text": "并发创建。",
         **identity,
         "status": "candidate",
@@ -2008,7 +2008,7 @@ def test_claim_lists_are_tenant_safe_and_deterministically_sorted(owner_user_id)
     claims = repository.list_fact_claims(
         owner_user_id,
         "story",
-        "graytide",
+        "test-scope",
     )
 
     assert {claim["claim_id"] for claim in claims} == {
@@ -2105,7 +2105,7 @@ def test_ledger_and_projection_rollback_together_on_projector_failure(
     assert repository.list_fact_claims(
         owner_user_id,
         "story",
-        "graytide",
+        "test-scope",
     ) == []
     assert repository.list_domain_events(owner_user_id) == []
 

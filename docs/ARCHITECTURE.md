@@ -29,6 +29,7 @@ Memoria/
 │   │   ├── orchestrator.py     # 单角色对话编排核心
 │   │   ├── llm_client.py       # LLM 调用适配层（懒加载 + 指数退避重试） (OpenAI SDK)
 │   │   ├── memory_extractor.py # 记忆萃取模块
+│   │   ├── memory_curve.py     # 世界时间记忆衰减、强化、采样与排序
 │   │   ├── prompt_builder.py   # Prompt 组装器
 │   │   ├── vector_memory.py    # 向量记忆管理（懒加载） (ChromaDB)
 │   │   ├── knowledge_documents.py    # 知识文档校验、提取与切块
@@ -72,6 +73,7 @@ Memoria/
 │   │       ├── knowledge.py
 │   │       ├── state_and_memory.py
 │   │       ├── fact_claims.py
+│   │       ├── memory_curve.py # 曲线状态与幂等强化旁路投影
 │   │       ├── story.py / domain_events.py
 │   │       ├── world_clock.py / background_jobs.py
 │   └── main.py                 # FastAPI 应用入口
@@ -85,10 +87,10 @@ Memoria/
 ├── scripts/                    # 工具脚本
 │   ├── cli_chat.py             # 命令行对话工具
 │   ├── chat.sh                 # CLI 快捷启动
-│   ├── seed_graytide_demo.py    # 灰潮港完整故事模块播种脚本
+│   ├── seed_next_door_demo.py    # 隔壁寝室故事模块播种脚本
 │   └── run_tests.sh            # 测试执行
 ├── examples/                   # 可播种故事模块
-│   └── graytide/               # 角色、事件、关系、知识与检索评测数据
+│   └── next_door/              # 角色、事件、关系、知识与检索评测数据
 ├── web/                        # React + Vite 前端
 │   ├── src/pages/              # Home、ChatRoom、CharacterEditor、PersonaEditor、EventList、EventEditor、RelationshipGraph、KnowledgeManager
 │   ├── src/components/         # 通用组件与编辑器步骤组件
@@ -307,6 +309,14 @@ RAG 召回 (ChromaDB)            ← 余弦相似度搜索
 - 嵌入模型：sentence-transformers/all-MiniLM-L6-v2 (约 80MB)
 - 检索方式：余弦相似度，Top-K 返回
 
+### 世界时间记忆曲线
+
+玩家事实、方向性角色印象和群体经历在既有相关性检索与关系历史过滤后，共用 `core/memory_curve.py` 计算保留度。基础稳定期为 7 个世界日，并叠加 importance 与来源倍率；新证据恢复一半缺失强度并将稳定期乘以 `1.7`。世界时间暂停不衰减，回拨不恢复已经累计的衰减，水位字段防止重复结算。
+
+保留度 `>= 0.65` 的记忆始终召回；`0.35–0.65` 的模糊记忆和 `0.15–0.35` 的记忆碎片按 `SHA-256(recall_key, memory_id)` 做确定性采样；低于 `0.15` 不注入本轮 Prompt。模糊与碎片候选会附加相应的表达约束。最终排序保留既有相关性的主导权重，并叠加 retention 与 importance。单聊、多角色玩家轮次、开场和自主互动均使用同一规则。
+
+`memory_curve_state` 和 `memory_curve_reinforcement` 是不改写原始记忆的旁路投影。曲线异常时编排器回退到既有召回，写入异常时保留事实账本或原始共享/群体记忆；整个流程不增加 LLM 调用，也不重建向量索引。完整公式、阈值、强化与运维说明见 [世界时间记忆曲线](MEMORY_CURVE.md)。
+
 ### 外部知识库架构
 
 知识库与角色长期记忆共享嵌入模型和 ChromaDB 基础设施，但使用独立集合与独立持久化表。知识库可以绑定到 `global`、`character` 或 `group_thread`；检索时只考虑当前用户拥有、已启用、至少有一个 `ready` 文档且命中当前上下文绑定的知识库。
@@ -367,7 +377,7 @@ Web 端的角色编辑器只编辑基础角色卡，不提供 `Default` / `zh-CN
 
 ## 数据库设计
 
-Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=postgresql://...` 切换 PostgreSQL。当前 schema 初始化后共有 40 张应用表和 40 个显式索引（不计 SQLite 内部表和自动索引）。
+Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=postgresql://...` 切换 PostgreSQL。当前 schema 初始化后共有 42 张应用表和 41 个显式索引（不计 SQLite 内部表和自动索引）。
 
 ### 1. users（用户表）
 
@@ -1259,9 +1269,56 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 ---
 
+### 40. memory_curve_state（记忆曲线状态表）
+
+保存玩家事实、角色印象和群体经历按用户与见证角色隔离的衰减状态。该表是旁路投影，不删除或改写原始记忆，也不改变 `fact_claim` 账本语义。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| owner_user_id | TEXT NOT NULL | 记忆归属用户 ID（联合主键） |
+| character_id | TEXT NOT NULL | 持有该曲线的见证/观察角色 ID（联合主键） |
+| memory_type | TEXT NOT NULL | `player_fact` / `character_impression` / `group_experience`（联合主键） |
+| memory_id | TEXT NOT NULL | 原始记忆或事实声明 ID（联合主键） |
+| anchor_strength | REAL NOT NULL DEFAULT 1.0 | 当前强度锚点 |
+| stability_days | REAL NOT NULL | 稳定期（世界日） |
+| anchor_elapsed_seconds | REAL NOT NULL DEFAULT 0.0 | 建立当前强度锚点时的累计衰减秒数 |
+| elapsed_decay_seconds | REAL NOT NULL DEFAULT 0.0 | 已累计的世界时间衰减秒数 |
+| world_time_watermark | TEXT NOT NULL | 已处理的最高世界时间 |
+| reinforcement_count | INTEGER NOT NULL DEFAULT 0 | 首次形成后的有效强化次数 |
+| source_kind | TEXT NOT NULL DEFAULT 'legacy' | 来源类型 |
+| importance | REAL NOT NULL DEFAULT 0.5 | 归一化重要度（0.0–1.0） |
+| created_at | TEXT NOT NULL | 创建时间 |
+| updated_at | TEXT NOT NULL | 更新时间 |
+
+**主键：** `PRIMARY KEY (owner_user_id, character_id, memory_type, memory_id)`
+
+**索引：** `idx_memory_curve_character ON memory_curve_state(owner_user_id, character_id, memory_type)`
+
+---
+
+### 41. memory_curve_reinforcement（记忆曲线强化去重表）
+
+记录已经处理的 evidence、message 或 pulse ID。首次形成的证据也会落表作为幂等标记，但只有后续新证据会增加 `reinforcement_count`。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| owner_user_id | TEXT NOT NULL | 记忆归属用户 ID（联合主键、外键） |
+| character_id | TEXT NOT NULL | 曲线所属角色 ID（联合主键、外键） |
+| memory_type | TEXT NOT NULL | 记忆类型（联合主键、外键） |
+| memory_id | TEXT NOT NULL | 记忆 ID（联合主键、外键） |
+| evidence_id | TEXT NOT NULL | 幂等证据 ID（联合主键） |
+| world_occurred_at | TEXT NOT NULL | 证据的世界发生时间 |
+| created_at | TEXT NOT NULL | 记录创建时间 |
+
+**外键：** `(owner_user_id, character_id, memory_type, memory_id)` 引用 `memory_curve_state` 的复合主键。
+
+> 当前 schema 的第 42 张表是内部管理员初始化占位表 `system_bootstrap_claim`；它不承载业务领域数据，因此未在上述业务表章节中单列。
+
+---
+
 ### 完整索引汇总
 
-共 40 个显式索引，覆盖高频查询、账本投影、任务恢复、调度租约与未读通知路径：
+共 41 个显式索引，覆盖高频查询、账本投影、任务恢复、调度租约与未读通知路径：
 
 | 索引名 | 表 | 列 |
 |--------|-----|-----|
@@ -1303,6 +1360,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 | `idx_knowledge_vector_cleanup_pending` | knowledge_vector_cleanup | (updated_at, attempts) |
 | `idx_shared_memory_owner_pair` | shared_memory | (owner_user_id, character_a_id, character_b_id, importance DESC) |
 | `idx_shared_memory_directional` | shared_memory | (owner_user_id, observer_character_id, target_character_id, importance DESC) |
+| `idx_memory_curve_character` | memory_curve_state | (owner_user_id, character_id, memory_type) |
 | `idx_relationship_lookup` | character_relationship | (owner_user_id, character_id_a, character_id_b) |
 | `idx_relationship_revision_lookup` | character_relationship_revision | (owner_user_id, character_id_a, character_id_b) |
 
@@ -1319,10 +1377,11 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 7. **知识任务可恢复** — 文档状态和错误持久化到 `knowledge_document`；原子状态声明防止重复处理，启动恢复继续排队或中断任务
 8. **世界时间与通知持久化** — `player_world_clock` 保存带修订号的用户世界时间锚点，Web 单调应用时钟修订；调度表保存真实到期时间和租约，`player_event_inbox` 保存单聊或群聊聚合通知
 9. **事务一致性、幂等与恢复** — `dialogue_turn` 为单聊和群聊轮次保存请求幂等结果与租约；群聊脉冲消息/状态/通知、事件定义/调度分别原子提交；`event_trigger_guard` 串行化 once/cooldown 副作用，`event_exclusive_group_guard` 串行化互斥事件选择；`background_job`、`knowledge_vector_cleanup`、`group_dialogue_state` 和事件执行表保存可恢复任务状态、幂等结果与租约
-10. **轻量迁移** — 启动时为旧库补齐角色、会话、事件、认证、世界时钟、通知收件箱、关系修订和知识库相关结构；`owner_user_id` 相关主键重建不做旧数据迁移，升级前需要删除旧 SQLite 数据库或手动重建表
-11. **完整索引覆盖** — 40 个显式索引覆盖常用查询、领域事件投影、对话幂等、后台任务、调度和恢复路径
-12. **可迁移性** — `db/repository` 包适配 SQLite/PostgreSQL 占位符、自增主键和少量 UPSERT 差异；对外保持 `from memoria.db import repository` 的 facade，并对 monkeypatch 同步到各领域子模块，便于测试与渐进拆分
-13. **认证与输出边界** — Cookie 会话写路径强制 CSRF 双提交；Bearer 客户端与登录/注册引导路径豁免；模型输出经 `output_safety` 过滤后再返回 REST 或 SSE
+10. **记忆曲线旁路投影** — `memory_curve_state` 按用户、角色与记忆隔离曲线，`memory_curve_reinforcement` 以证据 ID 幂等强化；遗忘只影响召回，不删除原始记录或改写事实账本
+11. **轻量迁移** — 启动时为旧库补齐角色、会话、事件、认证、世界时钟、通知收件箱、关系修订和知识库相关结构；`owner_user_id` 相关主键重建不做旧数据迁移，升级前需要删除旧 SQLite 数据库或手动重建表
+12. **完整索引覆盖** — 41 个显式索引覆盖常用查询、领域事件投影、对话幂等、后台任务、调度和恢复路径
+13. **可迁移性** — `db/repository` 包适配 SQLite/PostgreSQL 占位符、自增主键和少量 UPSERT 差异；对外保持 `from memoria.db import repository` 的 facade，并对 monkeypatch 同步到各领域子模块，便于测试与渐进拆分
+14. **认证与输出边界** — Cookie 会话写路径强制 CSRF 双提交；Bearer 客户端与登录/注册引导路径豁免；模型输出经 `output_safety` 过滤后再返回 REST 或 SSE
 
 ## 角色卡规范
 

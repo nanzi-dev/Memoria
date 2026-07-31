@@ -81,7 +81,7 @@ test('knowledge preview forwards abort signals', async () => {
     await knowledgeApi.preview(
       {
         query: 'harbor',
-        knowledge_base_id: 'kb-graytide',
+        knowledge_base_id: 'kb-test',
       },
       { signal: controller.signal },
     );

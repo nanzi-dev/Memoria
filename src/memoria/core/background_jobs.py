@@ -142,16 +142,27 @@ def _process_checkpoint_memory(payload: dict[str, Any]) -> None:
     if not fact_text:
         return
     session_id = payload["session_id"]
+    curve_fields = {}
+    if payload.get("evidence_id") and payload.get("world_occurred_at"):
+        curve_fields = {
+            "witness_character_ids": payload.get("witness_character_ids"),
+            "evidence_id": payload["evidence_id"],
+            "world_occurred_at": payload["world_occurred_at"],
+        }
+    source_ids = [f"session:{session_id}"]
+    if payload.get("evidence_id"):
+        source_ids.append(str(payload["evidence_id"]))
     record_generated_memory_claim(
         owner_user_id=payload["owner_user_id"],
         scope_type=payload["scope_type"],
         scope_id=payload["scope_id"],
         fact_text=fact_text,
-        source_ids=[f"session:{session_id}"],
+        source_ids=source_ids,
         provenance={
             "memory_kind": "player_fact",
             "session_id": session_id,
         },
+        **curve_fields,
     )
 
 

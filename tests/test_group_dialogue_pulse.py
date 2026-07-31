@@ -1254,42 +1254,22 @@ def test_dialogue_pulse_memory_secret_is_not_broadcast(monkeypatch):
     assert long_term == []
     assert group_memories == []
     assert shared_memories == []
-    assert claims == [
-        {
-            "owner_user_id": "player-1",
-            "scope_type": "group_thread",
-            "scope_id": "thread-1",
-            "fact_text": "玩家来自北境",
-            "source_ids": ["session:session-1"],
-            "provenance": {
-                "memory_kind": "player_fact",
-                "session_id": "session-1",
-            },
-        },
-        {
-            "owner_user_id": "player-1",
-            "scope_type": "group_thread",
-            "scope_id": "thread-1",
-            "fact_text": "众人决定夜间出发",
-            "source_ids": ["session:session-1"],
-            "provenance": {
-                "memory_kind": "shared_fact",
-                "session_id": "session-1",
-            },
-        },
-        {
-            "owner_user_id": "player-1",
-            "scope_type": "group_thread",
-            "scope_id": "thread-1",
-            "fact_text": "甲持有密钥",
-            "source_ids": ["session:session-1"],
-            "provenance": {
-                "memory_kind": "secret_fact",
-                "session_id": "session-1",
-                "allowed_character_ids": ["c1", "c2"],
-            },
-        },
+    assert [claim["fact_text"] for claim in claims] == [
+        "玩家来自北境", "众人决定夜间出发", "甲持有密钥"
     ]
+    assert all(claim["owner_user_id"] == "player-1" for claim in claims)
+    assert all(claim["scope_type"] == "group_thread" for claim in claims)
+    assert all(claim["scope_id"] == "thread-1" for claim in claims)
+    assert all(claim["source_ids"][0] == "session:session-1" for claim in claims)
+    assert len({claim["evidence_id"] for claim in claims}) == 1
+    assert all(
+        claim["source_ids"][1] == claim["evidence_id"] for claim in claims
+    )
+    assert claims[0]["witness_character_ids"] == ["c1", "c2", "c3"]
+    assert claims[1]["witness_character_ids"] == ["c1", "c2", "c3"]
+    assert claims[2]["witness_character_ids"] == ["c1", "c2"]
+    assert all(claim["world_occurred_at"] for claim in claims)
+    assert claims[2]["provenance"]["allowed_character_ids"] == ["c1", "c2"]
 def test_dialogue_pulse_does_not_duplicate_character_impression_writes(monkeypatch):
     from memoria.core import multi_character_memory
     from memoria.db import repository

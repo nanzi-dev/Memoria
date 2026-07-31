@@ -302,13 +302,12 @@ function WorldDateSeparator({ value }) {
   );
 }
 
-function MessageWorldTime({ value, align = 'left', messageId, pending = false }) {
+function MessageWorldTime({ value, align = 'left', pending = false }) {
   const label = formatWorldTime(value);
-  if (!label && messageId == null && !pending) return null;
+  if (!label && !pending) return null;
   return (
     <div className={`mt-1.5 flex items-center gap-2 font-archive-mono text-[10px] text-muted-foreground tabular-nums ${align === 'right' ? 'justify-end' : 'justify-start'}`}>
       {label && <time dateTime={value}>{label}</time>}
-      {messageId != null && <span>#{messageId}</span>}
       {pending && <span>待发送</span>}
     </div>
   );
@@ -2484,7 +2483,6 @@ export default function ChatRoom() {
                             <MessageWorldTime
                               value={message.world_created_at}
                               align="right"
-                              messageId={message.message_id}
                               pending={message._pending}
                             />
                           )}
@@ -2513,7 +2511,6 @@ export default function ChatRoom() {
                             {isLastParagraph && (
                               <MessageWorldTime
                                 value={message.world_created_at}
-                                messageId={message.message_id}
                               />
                             )}
                             {isLastParagraph && message.message_id != null && (

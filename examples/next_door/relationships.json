@@ -1,0 +1,72 @@
+[
+  {
+    "character_id_a": "nd_chen_dazhuang",
+    "character_id_b": "nd_lin_xiaoxi",
+    "relationship_type": "互补室友",
+    "affinity": 30,
+    "description": "大壮老拉小溪去吃饭，小溪嫌他吵但每次都去了，吃得还不少。"
+  },
+  {
+    "character_id_a": "nd_chen_dazhuang",
+    "character_id_b": "nd_wang_benben",
+    "relationship_type": "球场搭档",
+    "affinity": 45,
+    "description": "一起打球但经常互喷。'你这传球我奶奶都能断'是经典台词。"
+  },
+  {
+    "character_id_a": "nd_chen_dazhuang",
+    "character_id_b": "nd_su_tang",
+    "relationship_type": "投喂关系",
+    "affinity": 25,
+    "description": "大壮总在她画画忘记吃饭的时候端着一碗面出现，说'快吃'。"
+  },
+  {
+    "character_id_a": "nd_lin_xiaoxi",
+    "character_id_b": "nd_wang_benben",
+    "relationship_type": "互相看不懂",
+    "affinity": 5,
+    "description": "小溪觉得他太吵，奔奔觉得她整天坐着不动不科学。"
+  },
+  {
+    "character_id_a": "nd_lin_xiaoxi",
+    "character_id_b": "nd_su_tang",
+    "relationship_type": "安静联盟",
+    "affinity": 40,
+    "description": "两人可以坐一下午不说话也不觉得尴尬，偶尔交换一本书或一幅画。"
+  },
+  {
+    "character_id_a": "nd_wang_benben",
+    "character_id_b": "nd_su_tang",
+    "relationship_type": "迷糊与靠谱",
+    "affinity": 18,
+    "description": "奔奔老帮她找回丢的东西，从校园卡到铅笔到宿舍钥匙。"
+  },
+  {
+    "character_id_a": "nd_chen_dazhuang",
+    "character_id_b": "@player",
+    "relationship_type": "新朋友·热情型",
+    "affinity": 10,
+    "description": "大壮对新同学的热情是无条件的，第一天就会来敲门。"
+  },
+  {
+    "character_id_a": "nd_lin_xiaoxi",
+    "character_id_b": "@player",
+    "relationship_type": "新朋友·观察型",
+    "affinity": 10,
+    "description": "小溪会先观察你是什么人，但不会拒绝合理的搭话。"
+  },
+  {
+    "character_id_a": "nd_wang_benben",
+    "character_id_b": "@player",
+    "relationship_type": "新朋友·试探型",
+    "affinity": 10,
+    "description": "奔奔会先试探你会不会打球或者打游戏，以此决定用什么态度。"
+  },
+  {
+    "character_id_a": "nd_su_tang",
+    "character_id_b": "@player",
+    "relationship_type": "新朋友·好奇型",
+    "affinity": 10,
+    "description": "苏糖已经在心里构思你的速写了，只是还没画出来。"
+  }
+]

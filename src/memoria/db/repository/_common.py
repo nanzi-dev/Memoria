@@ -1185,6 +1185,47 @@ CREATE TABLE IF NOT EXISTS group_memory (
     reference_count INTEGER DEFAULT 0
 );
 
+-- =========================
+-- 世界时间记忆曲线（旁路投影，不改写原始记忆）
+-- =========================
+CREATE TABLE IF NOT EXISTS memory_curve_state (
+    owner_user_id          TEXT NOT NULL,
+    character_id           TEXT NOT NULL,
+    memory_type            TEXT NOT NULL,
+    memory_id              TEXT NOT NULL,
+    anchor_strength        REAL NOT NULL DEFAULT 1.0,
+    stability_days         REAL NOT NULL,
+    anchor_elapsed_seconds REAL NOT NULL DEFAULT 0.0,
+    elapsed_decay_seconds  REAL NOT NULL DEFAULT 0.0,
+    world_time_watermark   TEXT NOT NULL,
+    reinforcement_count    INTEGER NOT NULL DEFAULT 0,
+    source_kind            TEXT NOT NULL DEFAULT 'legacy',
+    importance             REAL NOT NULL DEFAULT 0.5,
+    created_at             TEXT NOT NULL,
+    updated_at             TEXT NOT NULL,
+    PRIMARY KEY (owner_user_id, character_id, memory_type, memory_id)
+);
+
+CREATE TABLE IF NOT EXISTS memory_curve_reinforcement (
+    owner_user_id    TEXT NOT NULL,
+    character_id     TEXT NOT NULL,
+    memory_type      TEXT NOT NULL,
+    memory_id        TEXT NOT NULL,
+    evidence_id      TEXT NOT NULL,
+    world_occurred_at TEXT NOT NULL,
+    created_at       TEXT NOT NULL,
+    PRIMARY KEY (
+        owner_user_id, character_id, memory_type, memory_id, evidence_id
+    ),
+    FOREIGN KEY (owner_user_id, character_id, memory_type, memory_id)
+        REFERENCES memory_curve_state(
+            owner_user_id, character_id, memory_type, memory_id
+        )
+);
+
+CREATE INDEX IF NOT EXISTS idx_memory_curve_character
+ON memory_curve_state(owner_user_id, character_id, memory_type);
+
 CREATE INDEX IF NOT EXISTS idx_relationship_lookup
 ON character_relationship(owner_user_id, character_id_a, character_id_b);
 

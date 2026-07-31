@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backward-compatible CLI wrapper for the Graytide story module."""
+"""CLI wrapper for the Next Door (隔壁寝室) story module."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from scripts.seed_story_module import (
     seed_story_module,
 )
 
-DEFAULT_MODULE_ROOT = REPO_ROOT / "examples" / "graytide"
+DEFAULT_MODULE_ROOT = REPO_ROOT / "examples" / "next_door"
 
 
 def load_module(
@@ -30,7 +30,7 @@ def load_module(
     return load_story_module(module_root)
 
 
-def reset_graytide_module(
+def reset_next_door_module(
     owner_user_id: str,
     module: dict,
     *,
@@ -43,7 +43,7 @@ def reset_graytide_module(
     )
 
 
-def seed_graytide_demo(
+def seed_next_door_demo(
     *,
     password: str | None = None,
     skip_knowledge_index: bool = False,
@@ -62,7 +62,7 @@ def seed_graytide_demo(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="播种“灰潮港：第十三声钟鸣”演示与压力测试数据。"
+        description="播种《隔壁寝室》日常聊天示例数据。"
     )
     parser.add_argument(
         "--password",
@@ -76,7 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reset-module",
         action="store_true",
-        help="先清理当前演示用户下清单列出的灰潮港数据，再重新播种。",
+        help="先清理当前演示用户下清单列出的隔壁寝室数据，再重新播种。",
     )
     return parser
 
@@ -86,13 +86,13 @@ def main() -> int:
     args = parser.parse_args()
     password = args.password or os.getenv("MEMORIA_DEMO_PASSWORD")
     try:
-        result = seed_graytide_demo(
+        result = seed_next_door_demo(
             password=password,
             skip_knowledge_index=args.skip_knowledge_index,
             reset_module=args.reset_module,
         )
     except Exception as exc:
-        parser.exit(1, f"灰潮港播种失败: {exc}\n")
+        parser.exit(1, f"隔壁寝室播种失败: {exc}\n")
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 

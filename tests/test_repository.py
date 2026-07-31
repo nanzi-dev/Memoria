@@ -123,6 +123,31 @@ class TestSession:
         assert s["status"] == "ended"
         assert s["ended_at"] is not None
 
+    def test_get_session_group_memories_enforces_optional_owner_scope(self):
+        session_id = f"tenant-group-{uuid.uuid4().hex}"
+        owner_id = f"tenant-owner-{uuid.uuid4().hex}"
+        other_owner_id = f"tenant-other-{uuid.uuid4().hex}"
+        repository.create_multi_character_session(
+            session_id,
+            owner_id,
+            "Owner",
+            ["tenant-character-a", "tenant-character-b"],
+        )
+        repository.save_group_memory(
+            session_id,
+            "仅当前租户可见的群体经历",
+            ["tenant-character-a", "tenant-character-b"],
+        )
+
+        assert repository.get_session_group_memories(
+            session_id,
+            owner_user_id=owner_id,
+        )
+        assert repository.get_session_group_memories(
+            session_id,
+            owner_user_id=other_owner_id,
+        ) == []
+
     def test_get_sessions_list(self):
         sid = str(uuid.uuid4())
         repository.create_session(sid,"tc3","tp3","T3")
@@ -521,6 +546,78 @@ class TestCharacterCard:
             is not None
         )
 
+    def test_character_delete_cleans_curve_rows_only_on_hard_delete(self):
+        import json
+
+        character_id = f"curve-delete-{uuid.uuid4().hex[:8]}"
+        owner_a = f"curve-owner-a-{uuid.uuid4().hex[:8]}"
+        owner_b = f"curve-owner-b-{uuid.uuid4().hex[:8]}"
+        card = json.dumps({
+            "character_id": character_id,
+            "meta": {"name": "Curve", "display_name": "Curve"},
+        })
+        for owner in (owner_a, owner_b):
+            assert repository.save_character_card_to_db(
+                owner,
+                character_id,
+                card,
+                name="Curve",
+                display_name="Curve",
+            )
+            repository.record_memory_curve_evidence(
+                owner_user_id=owner,
+                character_id=character_id,
+                memory_type="player_fact",
+                memory_id="shared-memory-id",
+                evidence_id="formation",
+                world_occurred_at="2026-01-01T00:00:00+00:00",
+                source_kind="legacy",
+                importance=0.5,
+            )
+
+        assert repository.delete_character_card_from_db(
+            owner_a,
+            character_id,
+            soft_delete=True,
+        )
+        assert repository.get_memory_curve_state(
+            owner_a,
+            character_id,
+            "player_fact",
+            "shared-memory-id",
+        ) is not None
+
+        assert repository.delete_character_card_from_db(
+            owner_a,
+            character_id,
+            soft_delete=False,
+        )
+        assert repository.get_memory_curve_state(
+            owner_a,
+            character_id,
+            "player_fact",
+            "shared-memory-id",
+        ) is None
+        assert repository.get_memory_curve_state(
+            owner_b,
+            character_id,
+            "player_fact",
+            "shared-memory-id",
+        ) is not None
+        with repository.get_conn() as conn:
+            reinforcement_owners = {
+                row["owner_user_id"]
+                for row in conn.execute(
+                    """
+                    SELECT owner_user_id
+                    FROM memory_curve_reinforcement
+                    WHERE character_id = ? AND memory_id = ?
+                    """,
+                    (character_id, "shared-memory-id"),
+                ).fetchall()
+            }
+        assert reinforcement_owners == {owner_b}
+
 class TestEventDefinition:
     def test_crud(self):
         owner = f"user_{uuid.uuid4().hex[:8]}"
@@ -609,9 +706,9 @@ class TestEventDefinition:
             "Story event",
             "{}",
             "[]",
-            story_id="graytide",
+            story_id="test-story",
         )
-        assert repository.get_event_definition(owner, event_id)["story_id"] == "graytide"
+        assert repository.get_event_definition(owner, event_id)["story_id"] == "test-story"
 
         assert repository.save_event_definition_with_schedule(
             owner_user_id=owner,
@@ -620,11 +717,11 @@ class TestEventDefinition:
             trigger_config="{}",
             effects_config="[]",
             schedule_state=None,
-            story_id="graytide-finale",
+            story_id="test-story-finale",
         )
         definition = repository.get_event_definition(owner, event_id)
         assert definition["event_name"] == "Story event updated"
-        assert definition["story_id"] == "graytide-finale"
+        assert definition["story_id"] == "test-story-finale"
 
     def test_event_definition_exclusive_scope_survives_save_and_update(self):
         owner = f"user_scope_{uuid.uuid4().hex[:8]}"
