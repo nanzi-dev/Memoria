@@ -192,10 +192,10 @@ Memoria/
 ├── scripts/                    # 工具脚本
 │   ├── chat.sh                 # CLI 聊天启动脚本
 │   ├── cli_chat.py             # 命令行对话工具
-│   ├── seed_graytide_demo.py    # 灰潮港演示模块播种脚本
+│   ├── seed_next_door_demo.py    # 隔壁寝室演示模块播种脚本
 │   └── run_tests.sh            # 测试执行脚本
 ├── examples/                   # 可播种的完整故事模块
-│   └── graytide/               # 灰潮港角色、事件、关系、知识与评测数据
+│   └── next_door/              # 隔壁寝室角色、事件、关系、知识与评测数据
 ├── web/                        # React + Vite 前端
 │   ├── src/pages/              # Home、ChatRoom、CharacterEditor、PersonaEditor、EventList、EventEditor、RelationshipGraph、KnowledgeManager
 │   ├── src/components/         # 通用组件与编辑器步骤组件
@@ -337,13 +337,13 @@ npm run dev
 
 ## 完整演示模块
 
-`examples/graytide/` 提供“灰潮港：第十三声钟鸣”完整故事模块，包含玩家角色卡、8 个 NPC、关系网络、事件、4 个知识库、调查群聊和检索评测问题。后端配置完成后可播种到独立的 `memoria_demo` 普通用户：
+`examples/next_door/` 提供“隔壁寝室”完整故事模块，包含玩家角色卡、4 个 NPC、关系网络、事件、3 个知识库、群聊和检索评测问题。后端配置完成后可播种到独立的 `memoria_demo` 普通用户：
 
 ```bash
-python scripts/seed_graytide_demo.py --password '<choose-a-strong-password>'
+python scripts/seed_next_door_demo.py --password '<choose-a-strong-password>'
 ```
 
-只创建结构和知识文档队列、不加载本地嵌入模型时使用 `--skip-knowledge-index`；需要清理并重建该模块时使用 `--reset-module`。播种脚本不会创建或占用系统管理员名额。完整调查路线见 [Graytide README](examples/graytide/README.md) 和 [WALKTHROUGH](examples/graytide/WALKTHROUGH.md)。
+只创建结构和知识文档队列、不加载本地嵌入模型时使用 `--skip-knowledge-index`；需要清理并重建该模块时使用 `--reset-module`。播种脚本不会创建或占用系统管理员名额。破冰指南见 [Next Door README](examples/next_door/README.md) 和 [WALKTHROUGH](examples/next_door/WALKTHROUGH.md)。
 
 ---
 

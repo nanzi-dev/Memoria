@@ -53,13 +53,13 @@ def test_user():
 def test_story_lifecycle_projects_canonical_state(test_user):
     repository.append_story_event(
         test_user,
-        "graytide",
+        "test-story",
         "story.started.v1",
         {"progress": -0.25},
     )
     progressed = repository.append_story_event(
         test_user,
-        "graytide",
+        "test-story",
         "story.progressed.v1",
         {"progress_delta": 1.5},
     )
@@ -70,13 +70,13 @@ def test_story_lifecycle_projects_canonical_state(test_user):
 
     completed = repository.append_story_event(
         test_user,
-        "graytide",
+        "test-story",
         "story.completed.v1",
         {"reason": "final_conclusion"},
     )
 
     assert completed["owner_user_id"] == test_user
-    assert completed["story_id"] == "graytide"
+    assert completed["story_id"] == "test-story"
     assert completed["status"] == "completed"
     assert completed["progress"] == 1.0
     assert completed["terminal_reason"] == "final_conclusion"
@@ -98,10 +98,10 @@ def test_event_effects_project_fact_and_story_atomically():
 
     user_id, _headers = _create_identity("story_event")
     suffix = uuid.uuid4().hex[:10]
-    story_id = f"graytide-{suffix}"
+    story_id = f"test-story-{suffix}"
     memory_text = f"灯塔账册确认潮汐钟由港务局维护 {suffix}"
     event = EventDefinition(
-        event_id=f"graytide_finale_{suffix}",
+        event_id=f"test-story_finale_{suffix}",
         event_name="灰潮终局",
         story_id=story_id,
         trigger_condition=TriggerCondition(
@@ -185,9 +185,9 @@ def test_event_effect_commit_failure_rolls_back_all_projections(monkeypatch):
 
     user_id, _headers = _create_identity("story_event_rollback")
     suffix = uuid.uuid4().hex[:10]
-    story_id = f"graytide-rollback-{suffix}"
+    story_id = f"test-story-rollback-{suffix}"
     character_id = f"archivist-rollback-{suffix}"
-    event_id = f"graytide_rollback_{suffix}"
+    event_id = f"test-story_rollback_{suffix}"
     memory_text = f"这条记忆必须随故事投影失败一起回滚 {suffix}"
     event = EventDefinition(
         event_id=event_id,
@@ -257,7 +257,7 @@ def test_story_progress_is_rejected_after_terminal_state(
     terminal_event_type,
     terminal_status,
 ):
-    story_id = f"graytide-{terminal_status}"
+    story_id = f"test-story-{terminal_status}"
     repository.append_story_event(
         test_user,
         story_id,
@@ -302,15 +302,15 @@ async def test_story_state_api_requires_auth_and_returns_not_found(monkeypatch):
         base_url="http://testserver",
     ) as client:
         assert (
-            await client.get("/api/v1/stories/graytide/state")
+            await client.get("/api/v1/stories/test-story/state")
         ).status_code == 401
         response = await client.get(
-            "/api/v1/stories/graytide/state",
+            "/api/v1/stories/test-story/state",
             headers=headers,
         )
 
     assert response.status_code == 404
-    assert repository.get_story_state(user_id, "graytide") is None
+    assert repository.get_story_state(user_id, "test-story") is None
 
 
 @pytest.mark.asyncio
@@ -321,13 +321,13 @@ async def test_story_completion_is_queryable_without_dialogue(monkeypatch):
     user_id, headers = _create_identity("story_api_complete")
     repository.append_story_event(
         user_id,
-        "graytide",
+        "test-story",
         "story.started.v1",
         {},
     )
     repository.append_story_event(
         user_id,
-        "graytide",
+        "test-story",
         "story.completed.v1",
         {"reason": "final_conclusion"},
     )
@@ -339,7 +339,7 @@ async def test_story_completion_is_queryable_without_dialogue(monkeypatch):
         base_url="http://testserver",
     ) as client:
         response = await client.get(
-            "/api/v1/stories/graytide/state",
+            "/api/v1/stories/test-story/state",
             headers=headers,
         )
 
@@ -358,7 +358,7 @@ async def test_story_state_api_enforces_owner_user_id(monkeypatch):
     other_user_id, other_headers = _create_identity("story_other")
     repository.append_story_event(
         owner_user_id,
-        "graytide",
+        "test-story",
         "story.started.v1",
         {"progress": 0.4},
     )
@@ -370,9 +370,9 @@ async def test_story_state_api_enforces_owner_user_id(monkeypatch):
         base_url="http://testserver",
     ) as client:
         response = await client.get(
-            "/api/v1/stories/graytide/state",
+            "/api/v1/stories/test-story/state",
             headers=other_headers,
         )
 
     assert response.status_code == 404
-    assert repository.get_story_state(other_user_id, "graytide") is None
+    assert repository.get_story_state(other_user_id, "test-story") is None

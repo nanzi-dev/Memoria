@@ -1,0 +1,237 @@
+[
+  {
+    "event_id": "nd_move_in",
+    "event_name": "搬进新宿舍",
+    "description": "玩家提到转学、搬宿舍或新学期开始时，触发到达通知。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": ["搬宿舍", "新宿舍", "转学", "新学期", "搬进", "新同学"],
+      "match_mode": "any",
+      "cooldown_hours": 24
+    },
+    "effects": [
+      {
+        "effect_type": "notify_player",
+        "notification_message": "欢迎来到302！隔壁寝室有人在走廊探头看你了，看起来很热情的样子。",
+        "notification_type": "info"
+      }
+    ],
+    "priority": 30,
+    "is_active": true
+  },
+  {
+    "event_id": "nd_dazhuang_invite",
+    "event_name": "大壮喊干饭",
+    "description": "跟陈大壮聊了几轮之后，他一定会邀请你去吃饭。",
+    "character_id": "nd_chen_dazhuang",
+    "trigger_condition": {
+      "trigger_type": "dialogue_count",
+      "count": 2,
+      "comparison": "gte",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "哎对了，你吃饭了没？没吃的话走走走，我带你去三食堂，他们家小炒必须尝一下，不尝等于没来这个学校。",
+        "dialogue_action": "站起来拍裤子"
+      }
+    ],
+    "priority": 50,
+    "is_active": true
+  },
+  {
+    "event_id": "nd_xiaoxi_recommends",
+    "event_name": "小溪推书",
+    "description": "玩家聊到书、小说或推荐看什么时，小溪会推荐一本。",
+    "character_id": "nd_lin_xiaoxi",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": ["书", "小说", "推荐", "看什么", "阅读", "有什么好看的"],
+      "match_mode": "any",
+      "cooldown_hours": 4
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "……你喜欢看什么类型的？算了，不管什么类型，先看这本。不好看你来找我退，当然退不了，但你可以来找我吵架。",
+        "dialogue_action": "从包里翻出一本书"
+      }
+    ],
+    "priority": 55,
+    "is_active": true
+  },
+  {
+    "event_id": "nd_benben_challenge",
+    "event_name": "奔奔挑战",
+    "description": "玩家聊到打球、篮球、游戏或比赛时，奔奔会发出挑战。",
+    "character_id": "nd_wang_benben",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": ["打球", "篮球", "solo", "比赛", "打游戏", "运动"],
+      "match_mode": "any",
+      "cooldown_hours": 4
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "哦？你打球？来来来，下午东操场见，三对三或者单挑随你选。放心，我会让着你一点的……大概。",
+        "dialogue_action": "站起来做了个投篮动作"
+      }
+    ],
+    "priority": 55,
+    "is_active": true
+  },
+  {
+    "event_id": "nd_sugar_sketch",
+    "event_name": "苏糖画你",
+    "description": "跟苏糖聊了几轮之后，她会忍不住开始画你的速写。",
+    "character_id": "nd_su_tang",
+    "trigger_condition": {
+      "trigger_type": "dialogue_count",
+      "count": 2,
+      "comparison": "gte",
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "你别动——对就这样——你刚才说话时候的表情好好看，等我三十秒……好了！你要看吗？画得还行……吧？",
+        "dialogue_action": "低头快速画速写"
+      }
+    ],
+    "priority": 50,
+    "is_active": true
+  },
+  {
+    "event_id": "nd_late_night_snack",
+    "event_name": "深夜夜宵",
+    "description": "跟任何一个NPC的好感度达到30后，会有人提议出去吃夜宵。",
+    "trigger_condition": {
+      "trigger_type": "affinity_threshold",
+      "threshold": 30,
+      "comparison": "gte",
+      "crossing": true,
+      "cooldown_hours": 12
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "饿了没？南门那家粥铺开着呢，走？反正明天第一节没课。",
+        "dialogue_action": "小声说话怕吵到别人"
+      },
+      {
+        "effect_type": "add_memory",
+        "memory_text": "一起出去吃过深夜夜宵，在南门粥铺聊到很晚。",
+        "memory_importance": 6
+      }
+    ],
+    "priority": 60,
+    "is_active": true
+  },
+  {
+    "event_id": "nd_confide_dazhuang",
+    "event_name": "大壮说秘密",
+    "description": "跟大壮信任度达到40后，他会坦白自己在写美食博客。",
+    "character_id": "nd_chen_dazhuang",
+    "trigger_condition": {
+      "trigger_type": "trust_threshold",
+      "threshold": 40,
+      "comparison": "gte",
+      "crossing": true,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "哎我跟你说个事你别跟篮球队那帮人说啊……我其实在写美食评测。就那个什么，公众号那种。别笑！我很认真的！粉丝都三千多了。",
+        "dialogue_action": "压低声音凑过来"
+      },
+      {
+        "effect_type": "add_memory",
+        "memory_text": "大壮私下在写美食评测博客，粉丝三千多，但不敢让篮球队的人知道。",
+        "memory_importance": 8
+      }
+    ],
+    "priority": 70,
+    "is_active": true
+  },
+  {
+    "event_id": "nd_library_together",
+    "event_name": "图书馆蹭座",
+    "description": "玩家提到图书馆、学习、期末或复习时，触发和小溪一起去图书馆。",
+    "trigger_condition": {
+      "trigger_type": "keyword_match",
+      "keywords": ["图书馆", "学习", "期末", "复习", "考试", "自习"],
+      "match_mode": "any",
+      "cooldown_hours": 8
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "去图书馆？五楼靠窗有位置，不过你得快点，那几个位置过了两点就被考研的人占完了。……跟着我走就行。",
+        "dialogue_action": "收起书往门口走"
+      },
+      {
+        "effect_type": "add_memory",
+        "memory_text": "一起去图书馆五楼靠窗位置自习过。",
+        "memory_importance": 5
+      }
+    ],
+    "priority": 55,
+    "is_active": true
+  },
+  {
+    "event_id": "nd_sugar_portrait",
+    "event_name": "苏糖的走廊画",
+    "description": "跟苏糖好感度达到35后，她会展示她的走廊众生相。",
+    "character_id": "nd_su_tang",
+    "trigger_condition": {
+      "trigger_type": "affinity_threshold",
+      "threshold": 35,
+      "comparison": "gte",
+      "crossing": true,
+      "cooldown_hours": 0
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "我给你看个东西……但你要保密哦。这是我画的'302走廊众生相'。你看这个是大壮端着饭盆飞奔，这个是小溪在窗台看书，这个是奔奔投篮……画了一个月呢。",
+        "dialogue_action": "小心翼翼翻开速写本"
+      },
+      {
+        "effect_type": "add_memory",
+        "memory_text": "苏糖画了一张'302走廊众生相'，把每个邻居最真实的状态都画下来了。",
+        "memory_importance": 9
+      }
+    ],
+    "priority": 65,
+    "is_active": true
+  },
+  {
+    "event_id": "nd_dorm_talk",
+    "event_name": "卧谈会",
+    "description": "跟任意两个NPC的好感度都达到40后，触发深夜卧谈会。",
+    "trigger_condition": {
+      "trigger_type": "affinity_threshold",
+      "threshold": 40,
+      "comparison": "gte",
+      "crossing": true,
+      "cooldown_hours": 24
+    },
+    "effects": [
+      {
+        "effect_type": "trigger_dialogue",
+        "dialogue_text": "灯关了但没人睡着。不知道谁先开的头，聊着聊着就聊到了各自为什么来这里、以后想做什么。黑暗里说话好像比白天容易。",
+        "dialogue_action": "关灯后躺在床上聊天"
+      },
+      {
+        "effect_type": "add_memory",
+        "memory_text": "有一次深夜卧谈会，大家关着灯聊到了各自的梦想和烦恼。",
+        "memory_importance": 9
+      }
+    ],
+    "priority": 75,
+    "is_active": true
+  }
+]

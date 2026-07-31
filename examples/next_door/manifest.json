@@ -1,0 +1,64 @@
+{
+  "module_id": "next_door",
+  "title": "隔壁寝室",
+  "version": "1.0.0",
+  "locale": "zh-CN",
+  "demo_username": "memoria_demo",
+  "player_character": "player_character.json",
+  "player_relationship_token": "@player",
+  "group": {
+    "session_id": "nd_dorm_session",
+    "thread_id": "nd_dorm_thread",
+    "name": "302隔壁闲聊群",
+    "character_ids": [
+      "nd_chen_dazhuang",
+      "nd_lin_xiaoxi",
+      "nd_wang_benben",
+      "nd_su_tang"
+    ]
+  },
+  "knowledge_bases": [
+    {
+      "key": "campus",
+      "name": "[隔壁寝室] 校园地图与设施",
+      "description": "校园地理、教学楼、宿舍区、操场和地标传说。next-door-module",
+      "documents": [
+        "knowledge/campus_guide.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "global",
+          "target_id": ""
+        }
+      ]
+    },
+    {
+      "key": "food",
+      "name": "[隔壁寝室] 食堂与觅食指南",
+      "description": "校内外美食排名、外卖避雷、深夜食堂推荐。next-door-module",
+      "documents": [
+        "knowledge/food_spots.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "global",
+          "target_id": ""
+        }
+      ]
+    },
+    {
+      "key": "culture",
+      "name": "[隔壁寝室] 校园文化与生存指南",
+      "description": "社团、考试周、选课攻略、校园流行语和传统。next-door-module",
+      "documents": [
+        "knowledge/campus_culture.md"
+      ],
+      "bindings": [
+        {
+          "target_type": "global",
+          "target_id": ""
+        }
+      ]
+    }
+  ]
+}

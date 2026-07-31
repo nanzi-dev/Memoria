@@ -1,0 +1,50 @@
+[
+  {
+    "id": "nd_eval_01",
+    "question": "南门小吃街有什么好吃的？",
+    "expected_facts": ["烤冷面", "鸡蛋灌饼", "螺蛳粉", "煎饼果子", "关东煮"],
+    "expected_documents": ["food_spots.md"]
+  },
+  {
+    "id": "nd_eval_02",
+    "question": "图书馆五楼自习区有什么说法？",
+    "expected_facts": ["靠窗有独立插座", "自然光充足", "下午两点后被考研的人占满", "被称为卷王天堂"],
+    "expected_documents": ["campus_guide.md"]
+  },
+  {
+    "id": "nd_eval_03",
+    "question": "学校哪个食堂的小炒最好？",
+    "expected_facts": ["三食堂", "鱼香肉丝", "干煸四季豆", "厨师颠勺技术全校第一"],
+    "expected_documents": ["food_spots.md"]
+  },
+  {
+    "id": "nd_eval_04",
+    "question": "302宿舍楼在什么位置？",
+    "expected_facts": ["男生宿舍区", "校园东侧", "三栋楼中间那栋", "三楼拐角最安静"],
+    "expected_documents": ["campus_guide.md"]
+  },
+  {
+    "id": "nd_eval_05",
+    "question": "考试周应该去哪里复习？",
+    "expected_facts": ["图书馆五楼靠窗", "通宵教室", "六点开始抢座", "林小溪的笔记是硬通货"],
+    "expected_documents": ["campus_guide.md", "campus_culture.md"]
+  },
+  {
+    "id": "nd_eval_06",
+    "question": "学校有什么社团推荐？",
+    "expected_facts": ["电竞社", "篮球社", "摄影社", "读书会", "植物观察社"],
+    "expected_documents": ["campus_culture.md"]
+  },
+  {
+    "id": "nd_eval_07",
+    "question": "校庆有什么传统活动？",
+    "expected_facts": ["校园歌手大赛", "社团嘉年华", "院际篮球赛决赛", "十月底"],
+    "expected_documents": ["campus_culture.md"]
+  },
+  {
+    "id": "nd_eval_08",
+    "question": "情人坡是什么地方？",
+    "expected_facts": ["图书馆后面的小山坡", "银杏树", "表白传说", "信号好风景安静"],
+    "expected_documents": ["campus_guide.md"]
+  }
+]

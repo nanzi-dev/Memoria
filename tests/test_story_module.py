@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from memoria.api.user import _hash_password
 from memoria.core.config import configs
 from memoria.db import repository
-from scripts.seed_graytide_demo import DEFAULT_MODULE_ROOT
+from scripts.seed_next_door_demo import DEFAULT_MODULE_ROOT
 
 
 def _story_module_api():
@@ -82,7 +82,7 @@ def test_load_story_module_normalizes_legacy_group_without_removing_it(tmp_path)
     module = api.load_story_module(module_root)
 
     assert module["manifest"]["group"]["thread_id"] == (
-        "graytide_investigation_thread"
+        "nd_dorm_thread"
     )
     assert module["manifest"]["groups"] == [module["manifest"]["group"]]
 
@@ -382,12 +382,12 @@ def test_seed_and_reset_are_idempotent_and_owner_scoped(isolated_story_module):
 
     assert second["created_user"] is False
     assert second["group_thread_ids"] == first["group_thread_ids"]
-    assert len(repository.list_character_cards_from_db(owner_user_id)) == 8
-    assert len(repository.list_all_character_relationships(owner_user_id)) == 26
+    assert len(repository.list_character_cards_from_db(owner_user_id)) == 4
+    assert len(repository.list_all_character_relationships(owner_user_id)) == 10
     assert len(
         repository.list_event_definitions(owner_user_id, only_active=False)
-    ) == 24
-    assert len(repository.list_knowledge_bases(owner_user_id)) == 4
+    ) == 10
+    assert len(repository.list_knowledge_bases(owner_user_id)) == 3
 
     unrelated_character_id = "unrelated_character"
     assert repository.save_character_card_to_db(
@@ -465,7 +465,7 @@ def test_seed_and_reset_are_idempotent_and_owner_scoped(isolated_story_module):
         for group in module["manifest"]["groups"]
     )
     assert not any(
-        card["character_id"].startswith("graytide_")
+        card["character_id"].startswith("nd_")
         for card in repository.list_character_cards_from_db(owner_user_id)
     )
     assert repository.list_event_definitions(

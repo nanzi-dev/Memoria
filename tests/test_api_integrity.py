@@ -161,7 +161,7 @@ def test_create_event_persists_story_id(monkeypatch):
         event_admin.EventCreateRequest(
             event_id="evt_story",
             event_name="Story event",
-            story_id="graytide",
+            story_id="test-story",
             trigger_condition=event_admin.TriggerConditionDTO(
                 trigger_type="keyword_match",
                 keywords=["story"],
@@ -171,7 +171,7 @@ def test_create_event_persists_story_id(monkeypatch):
     )
 
     assert response.success is True
-    assert saved["story_id"] == "graytide"
+    assert saved["story_id"] == "test-story"
 
 
 def test_create_update_and_toggle_event_preserve_exclusive_scope(monkeypatch):
@@ -284,7 +284,7 @@ def test_update_event_preserves_and_can_clear_story_id(monkeypatch):
 
     saved = {}
     existing = _event_row()
-    existing["story_id"] = "graytide"
+    existing["story_id"] = "test-story"
     monkeypatch.setattr(
         event_admin.repository,
         "get_event_definition",
@@ -301,7 +301,7 @@ def test_update_event_preserves_and_can_clear_story_id(monkeypatch):
         event_admin.EventUpdateRequest(event_name="Renamed"),
         current_user_id="user-1",
     )
-    assert saved["story_id"] == "graytide"
+    assert saved["story_id"] == "test-story"
 
     event_admin.update_event(
         "evt_test",

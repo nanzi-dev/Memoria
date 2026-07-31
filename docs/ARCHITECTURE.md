@@ -87,10 +87,10 @@ Memoria/
 ├── scripts/                    # 工具脚本
 │   ├── cli_chat.py             # 命令行对话工具
 │   ├── chat.sh                 # CLI 快捷启动
-│   ├── seed_graytide_demo.py    # 灰潮港完整故事模块播种脚本
+│   ├── seed_next_door_demo.py    # 隔壁寝室故事模块播种脚本
 │   └── run_tests.sh            # 测试执行
 ├── examples/                   # 可播种故事模块
-│   └── graytide/               # 角色、事件、关系、知识与检索评测数据
+│   └── next_door/              # 角色、事件、关系、知识与检索评测数据
 ├── web/                        # React + Vite 前端
 │   ├── src/pages/              # Home、ChatRoom、CharacterEditor、PersonaEditor、EventList、EventEditor、RelationshipGraph、KnowledgeManager
 │   ├── src/components/         # 通用组件与编辑器步骤组件

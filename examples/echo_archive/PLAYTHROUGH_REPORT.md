@@ -324,11 +324,11 @@ source .venv/bin/activate
 pytest tests/test_echo_archive.py -q
 # 6 passed in 14.47s
 
-pytest tests/test_graytide_demo.py -q
-# 1 failed, 1 error：仓库中不存在 examples/graytide
+pytest tests/test_story_module.py -q
+# 1 failed, 1 error：仓库中不存在 examples/next_door
 
 pytest -q \
-  --ignore=tests/test_graytide_demo.py \
+  --ignore=tests/test_story_module.py \
   --ignore=tests/test_story_module.py \
   -k 'not character_avatar_upload_rejects_invalid_image_bytes'
 # 620 passed, 1 deselected in 43.54s
@@ -341,8 +341,8 @@ npm run build
 完整 `pytest` 目前不能在此工作树和虚拟环境中跑完，原因有两类，均与本次
 Echo Archive 运行数据无关：
 
-1. `tests/test_graytide_demo.py` 和 `tests/test_story_module.py` 共 9 个测试依赖
-   `examples/graytide`，但该目录不在当前工作树，也不在 `HEAD` 的文件清单中。
+1. `tests/test_story_module.py` 和 `tests/test_story_module.py` 共 9 个测试依赖
+   `examples/next_door`，但该目录不在当前工作树，也不在 `HEAD` 的文件清单中。
 2. `tests/test_security_fixes.py::test_character_avatar_upload_rejects_invalid_image_bytes`
    单独运行也会停在 Starlette/AnyIO 的 `run_in_threadpool()`。同一 API 调用在
    pytest 外可立即返回预期的 HTTP 400。当前 `.venv` 安装的是 pytest 8.3.3、
