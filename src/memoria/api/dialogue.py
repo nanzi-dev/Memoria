@@ -319,7 +319,7 @@ def _generate_session_summary(session_id: str) -> None:
     try:
         summary_text = summarize_session(history)
     except Exception as e:
-        print(f"[ERROR] summarize_session failed: {e}")
+        logger.error("summarize_session failed: %s", e, exc_info=True)
         return
 
     summary_text = str(summary_text or "").strip()
@@ -336,7 +336,7 @@ def _generate_session_summary(session_id: str) -> None:
             summary_status="completed"
         )
     except Exception as e:
-        print(f"[ERROR] Failed to save summary: {e}")
+        logger.error("Failed to save summary: %s", e, exc_info=True)
 
 
 def _end_session(session_id: str, background_tasks: BackgroundTasks | None = None) -> SessionEndResponse:
