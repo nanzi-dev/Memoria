@@ -14,6 +14,9 @@ from urllib.parse import urlsplit
 import re
 from difflib import SequenceMatcher
 
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError as _IntegrityError
+
 from memoria.core.config import configs
 from memoria.core import performance, tracing
 from memoria.core.domain_events import NewDomainEvent, StoredDomainEvent
@@ -39,6 +42,7 @@ logger = logging.getLogger(__name__)
 # Import shared helpers / connection / schema. Private names included.
 from memoria.db.repository._common import *  # noqa: F403
 from memoria.db.repository import _common as _common_mod
+from memoria.db.repository._common import _lock_sqlite_write, db_session
 
 # Ensure private helpers from _common are visible as bare names.
 for _name, _value in vars(_common_mod).items():
@@ -97,13 +101,13 @@ def _get_domain_event_by_id_in_transaction(
     event_id: str,
 ) -> StoredDomainEvent | None:
     row = conn.execute(
-        """
+        text("""
         SELECT *
         FROM domain_event
-        WHERE event_id = ?
-        """,
-        (event_id,),
-    ).fetchone()
+        WHERE event_id = :event_id
+        """),
+        {"event_id": event_id},
+    ).mappings().fetchone()
     return _domain_event_from_row(row)
 
 
@@ -113,13 +117,13 @@ def _get_domain_event_in_transaction(
     owner_user_id: str,
 ) -> StoredDomainEvent | None:
     row = conn.execute(
-        """
+        text("""
         SELECT *
         FROM domain_event
-        WHERE event_id = ? AND owner_user_id = ?
-        """,
-        (event_id, owner_user_id),
-    ).fetchone()
+        WHERE event_id = :event_id AND owner_user_id = :owner_user_id
+        """),
+        {"event_id": event_id, "owner_user_id": owner_user_id},
+    ).mappings().fetchone()
     return _domain_event_from_row(row)
 
 
@@ -166,20 +170,28 @@ def _current_domain_event_version(
     aggregate_key: tuple[str, str, str],
 ) -> int:
     row = conn.execute(
-        """
+        text("""
         SELECT COALESCE(MAX(aggregate_version), 0) AS aggregate_version
         FROM domain_event
-        WHERE owner_user_id = ?
-          AND aggregate_type = ?
-          AND aggregate_id = ?
-        """,
-        aggregate_key,
-    ).fetchone()
+        WHERE owner_user_id = :owner_user_id
+          AND aggregate_type = :aggregate_type
+          AND aggregate_id = :aggregate_id
+        """),
+        {
+            "owner_user_id": aggregate_key[0],
+            "aggregate_type": aggregate_key[1],
+            "aggregate_id": aggregate_key[2],
+        },
+    ).mappings().fetchone()
     return int(row["aggregate_version"] or 0)
 
 
 def _is_unique_constraint_error(exc: Exception) -> bool:
     if isinstance(exc, sqlite3.IntegrityError):
+        return True
+    if isinstance(getattr(exc, "orig", None), sqlite3.IntegrityError):
+        return True
+    if isinstance(exc, _IntegrityError):
         return True
     return getattr(exc, "sqlstate", None) == "23505"
 
@@ -248,53 +260,56 @@ def _append_domain_events_in_transaction(
                 world_occurred_at,
                 recorded_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (:event_id, :owner_user_id, :aggregate_type, :aggregate_id,
+                    :aggregate_version, :event_type, :payload, :metadata,
+                    :correlation_id, :causation_id, :session_id,
+                    :group_thread_id, :source_turn_id, :source_message_id,
+                    :world_occurred_at, :recorded_at)
         """
         if _is_postgres_enabled():
             insert_sql += " RETURNING sequence"
         savepoint_name = f"domain_event_append_{event_index}"
         use_savepoint = _is_postgres_enabled()
         if use_savepoint:
-            conn.execute(f"SAVEPOINT {savepoint_name}")
+            conn.execute(text(f"SAVEPOINT {savepoint_name}"))
         try:
             cursor = conn.execute(
-                insert_sql,
-                (
-                    values["event_id"],
-                    values["owner_user_id"],
-                    values["aggregate_type"],
-                    values["aggregate_id"],
-                    aggregate_version,
-                    values["event_type"],
-                    json.dumps(
+                text(insert_sql),
+                {
+                    "event_id": values["event_id"],
+                    "owner_user_id": values["owner_user_id"],
+                    "aggregate_type": values["aggregate_type"],
+                    "aggregate_id": values["aggregate_id"],
+                    "aggregate_version": aggregate_version,
+                    "event_type": values["event_type"],
+                    "payload": json.dumps(
                         values["payload"],
                         ensure_ascii=False,
                         allow_nan=False,
                     ),
-                    json.dumps(
+                    "metadata": json.dumps(
                         values["metadata"],
                         ensure_ascii=False,
                         allow_nan=False,
                     ),
-                    values["correlation_id"],
-                    values["causation_id"],
-                    values["session_id"],
-                    values["group_thread_id"],
-                    values["source_turn_id"],
-                    values["source_message_id"],
-                    values["world_occurred_at"],
-                    recorded_at,
-                ),
+                    "correlation_id": values["correlation_id"],
+                    "causation_id": values["causation_id"],
+                    "session_id": values["session_id"],
+                    "group_thread_id": values["group_thread_id"],
+                    "source_turn_id": values["source_turn_id"],
+                    "source_message_id": values["source_message_id"],
+                    "world_occurred_at": values["world_occurred_at"],
+                    "recorded_at": recorded_at,
+                },
             )
-            sequence = (
-                cursor.fetchone()["sequence"]
-                if _is_postgres_enabled()
-                else cursor.lastrowid
-            )
+            if _is_postgres_enabled():
+                sequence = cursor.mappings().fetchone()["sequence"]
+            else:
+                sequence = cursor.lastrowid
         except Exception as exc:
             if use_savepoint:
-                conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
-                conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+                conn.execute(text(f"ROLLBACK TO SAVEPOINT {savepoint_name}"))
+                conn.execute(text(f"RELEASE SAVEPOINT {savepoint_name}"))
             existing = _get_domain_event_by_id_in_transaction(
                 conn,
                 event.event_id,
@@ -316,7 +331,7 @@ def _append_domain_events_in_transaction(
                 ) from exc
             raise
         if use_savepoint:
-            conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+            conn.execute(text(f"RELEASE SAVEPOINT {savepoint_name}"))
         stored = StoredDomainEvent(
             **values,
             sequence=sequence,
@@ -338,11 +353,10 @@ def _append_domain_event_batch(
     if not events:
         return []
 
-    if isinstance(conn, sqlite3.Connection) and not conn.in_transaction:
-        conn.execute("BEGIN IMMEDIATE")
+    _lock_sqlite_write(conn)
 
     savepoint_name = "domain_event_append_batch"
-    conn.execute(f"SAVEPOINT {savepoint_name}")
+    conn.execute(text(f"SAVEPOINT {savepoint_name}"))
     try:
         stored_events = _append_domain_events_in_transaction(
             conn,
@@ -350,10 +364,10 @@ def _append_domain_event_batch(
             expected_versions=expected_versions,
         )
     except Exception:
-        conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
-        conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+        conn.execute(text(f"ROLLBACK TO SAVEPOINT {savepoint_name}"))
+        conn.execute(text(f"RELEASE SAVEPOINT {savepoint_name}"))
         raise
-    conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+    conn.execute(text(f"RELEASE SAVEPOINT {savepoint_name}"))
     return stored_events
 
 
@@ -370,9 +384,9 @@ def append_domain_events(
             events,
             expected_versions=expected_versions,
         )
-    with get_conn() as transaction:
+    with db_session() as session:
         return _append_domain_event_batch(
-            transaction,
+            session,
             events,
             expected_versions=expected_versions,
         )
@@ -408,9 +422,9 @@ def get_domain_event(
     owner_user_id: str,
 ) -> StoredDomainEvent | None:
     """在租户边界内按全局 event_id 获取事件。"""
-    with get_conn() as conn:
+    with db_session() as session:
         return _get_domain_event_in_transaction(
-            conn,
+            session,
             event_id,
             owner_user_id,
         )
@@ -431,24 +445,26 @@ def list_domain_events(
     ):
         raise ValueError("limit must be a non-negative integer")
 
-    clauses = ["owner_user_id = ?", "sequence > ?"]
-    params: list[Any] = [owner_user_id, after_sequence]
+    clauses = ["owner_user_id = :owner_user_id", "sequence > :after_sequence"]
+    params: dict[str, Any] = {
+        "owner_user_id": owner_user_id,
+        "after_sequence": after_sequence,
+    }
     if aggregate_type is not None:
-        clauses.append("aggregate_type = ?")
-        params.append(aggregate_type)
+        clauses.append("aggregate_type = :aggregate_type")
+        params["aggregate_type"] = aggregate_type
     if aggregate_id is not None:
-        clauses.append("aggregate_id = ?")
-        params.append(aggregate_id)
+        clauses.append("aggregate_id = :aggregate_id")
+        params["aggregate_id"] = aggregate_id
     sql = (
         "SELECT * FROM domain_event WHERE "
         + " AND ".join(clauses)
         + " ORDER BY sequence ASC"
     )
     if limit is not None:
-        sql += " LIMIT ?"
-        params.append(limit)
-    with get_conn() as conn:
-        rows = conn.execute(sql, tuple(params)).fetchall()
+        sql += " LIMIT :limit"
+        params["limit"] = limit
+    with db_session() as session:
+        rows = session.execute(text(sql), params).mappings().fetchall()
     return [_domain_event_from_row(row) for row in rows]
-
 

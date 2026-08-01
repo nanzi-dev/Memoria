@@ -133,7 +133,7 @@ export default function StepIdentity({ formData, updateField, showAvatar = true 
                   type="text"
                   value={urlInput}
                   onChange={(e) => setUrlInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleUrlSubmit(); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) handleUrlSubmit(); }}
                   placeholder="或粘贴网络图片 URL..."
                   className="min-h-11 w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 font-archive-mono text-xs text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 />

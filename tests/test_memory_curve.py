@@ -1043,8 +1043,10 @@ def test_volatile_and_stable_differ():
 
 def test_cleanup_cascades_reinforcement_rows():
     """Fix 5/6: deleting a curve state also deletes its reinforcement rows."""
+    from memoria.core.config import configs
     from memoria.db import repository as repo
 
+    pg_enabled = bool((configs.database_url or "").strip())
     uid = "cascade-test-user"
     cid = "cascade-test-char"
     mid = "cascade-memory"
@@ -1063,13 +1065,13 @@ def test_cleanup_cascades_reinforcement_rows():
     )
     # Verify reinforcement rows exist
     with repo.get_conn() as conn:
-        count = conn.execute(
+        row = conn.execute(
             "SELECT COUNT(*) FROM memory_curve_reinforcement "
             "WHERE owner_user_id = ? AND memory_id = ?",
             (uid, mid),
-        ).fetchone()[0]
+        ).fetchone()
+        count = row["count"] if pg_enabled else row[0]
     assert count == 2
-
     # Mark as old so cleanup picks it up
     with repo.get_conn() as conn:
         conn.execute(
@@ -1085,11 +1087,12 @@ def test_cleanup_cascades_reinforcement_rows():
     assert repo.get_memory_curve_state(uid, cid, "player_fact", mid) is None
     # Reinforcement rows should also be cleaned (cascade via FK or explicit delete)
     with repo.get_conn() as conn:
-        count_after = conn.execute(
+        row_after = conn.execute(
             "SELECT COUNT(*) FROM memory_curve_reinforcement "
             "WHERE owner_user_id = ? AND memory_id = ?",
             (uid, mid),
-        ).fetchone()[0]
+        ).fetchone()
+        count_after = row_after["count"] if pg_enabled else row_after[0]
     # Note: SQLite does not enforce FK cascades by default; the cleanup function
     # must handle this explicitly. If it does, count_after == 0.
     # If FK cascades are enabled (PostgreSQL), count_after == 0 automatically.

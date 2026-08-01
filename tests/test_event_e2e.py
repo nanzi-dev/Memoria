@@ -56,10 +56,15 @@ def _character_card(character_id: str, name: str) -> dict:
     }
 
 
-def _create_identity(prefix: str) -> tuple[str, dict[str, str]]:
+def _create_identity(prefix: str, *, admin: bool = False) -> tuple[str, dict[str, str]]:
     suffix = uuid.uuid4().hex[:10]
     player_id = f"{prefix}_player_{suffix}"
-    repository.create_user(player_id, f"{prefix}_user_{suffix}", "test-hash")
+    repository.create_user(
+        player_id,
+        f"{prefix}_user_{suffix}",
+        "test-hash",
+        bootstrap_admin=admin,
+    )
     token = f"{prefix}_token_{uuid.uuid4().hex}"
     repository.create_auth_token(
         token,
@@ -391,7 +396,8 @@ async def test_group_dialogue_zero_speaker_surfaces_committed_event_metadata(
 @pytest.mark.asyncio
 async def test_scheduled_event_http_execution_persists_and_advances_schedule(monkeypatch):
     _install_inline_fastapi(monkeypatch)
-    player_id, headers = _create_identity("schedule_e2e")
+    # run-due 现在要求管理员权限（防止普通用户刷 LLM 预算）
+    player_id, headers = _create_identity("schedule_e2e", admin=True)
     suffix = uuid.uuid4().hex[:8]
     character_id = f"schedule_character_{suffix}"
     event_id = f"schedule_event_{suffix}"

@@ -505,17 +505,17 @@ GET /api/v1/admin/events?character_id=&only_active=true
 ```json
 [
   {
-    "event_id": "evt_npc_luo_xiaohei_idle",
-    "event_name": "闲聊触发",
-    "description": "角色进入闲置状态时触发",
-    "character_id": "npc_luo_xiaohei",
-    "priority": 1,
+    "event_id": "nd_dorm_talk",
+    "event_name": "卧谈会",
+    "description": "跟任意两个NPC的好感度都达到40后，触发深夜卧谈会。",
+    "character_id": null,
+    "priority": 75,
     "is_active": true,
-    "trigger_count": 12,
-    "last_triggered_at": "2026-06-28T10:12:00Z",
-    "created_at": "2026-06-01T00:00:00Z",
-    "updated_at": "2026-06-20T12:00:00Z",
-    "trigger_type": "state",
+    "trigger_count": 4,
+    "last_triggered_at": "2026-07-31T17:33:47.466118+00:00",
+    "created_at": "2026-07-31T16:19:11.490352+00:00",
+    "updated_at": "2026-07-31T17:17:05.646300+00:00",
+    "trigger_type": "affinity_threshold",
     "schedule": null,
     "template_id": null
   }
@@ -533,44 +533,46 @@ GET /api/v1/admin/events/{event_id}
 **响应示例：**
 ```json
 {
-  "event_id": "evt_npc_luo_xiaohei_idle",
-  "event_name": "闲聊触发",
-  "description": "角色进入闲置状态时触发",
-  "character_id": "npc_luo_xiaohei",
-  "priority": 1,
+  "event_id": "nd_dorm_talk",
+  "event_name": "卧谈会",
+  "description": "跟任意两个NPC的好感度都达到40后，触发深夜卧谈会。",
+  "character_id": null,
+  "priority": 75,
   "is_active": true,
-  "trigger_count": 12,
-  "last_triggered_at": "2026-06-28T10:12:00Z",
-  "created_at": "2026-06-01T00:00:00Z",
-  "updated_at": "2026-06-20T12:00:00Z",
+  "trigger_count": 4,
+  "last_triggered_at": "2026-07-31T17:33:47.466118+00:00",
+  "created_at": "2026-07-31T16:19:11.490352+00:00",
+  "updated_at": "2026-07-31T17:17:05.646300+00:00",
 
-  "trigger_type": "state",
-  "schedule": "*/30 * * * *",
-  "template_id": "tpl_story_keyword_node",
+  "trigger_type": "affinity_threshold",
+  "schedule": null,
+  "template_id": null,
 
   "trigger_condition": {
-    "trigger_type": "state",
-    "threshold": 0.6,
+    "trigger_type": "affinity_threshold",
+    "threshold": 40,
     "comparison": "gte",
-    "logic_operator": "and",
-    "cooldown_hours": 2
+    "aggregation": "count",
+    "min_characters": 2,
+    "character_ids": [
+      "nd_chen_dazhuang",
+      "nd_lin_xiaoxi",
+      "nd_su_tang",
+      "nd_wang_benben"
+    ],
+    "cooldown_hours": 24
   },
 
   "effects": [
     {
       "effect_type": "trigger_dialogue",
-      "dialogue_text": "你在做什么呀？",
-      "dialogue_action": "curious_talk"
+      "dialogue_text": "灯关了但没人睡着。不知道谁先开的头，聊着聊着就聊到了各自为什么来这里、以后想做什么。黑暗里说话好像比白天容易。",
+      "dialogue_action": "关灯后躺在床上聊天"
     },
     {
-      "effect_type": "trigger_event",
-      "next_event_id": "evt_follow_up"
-    },
-    {
-      "effect_type": "npc_proactive_dialogue",
-      "target_session_id": "multi-session-id",
-      "proactive_character_id": "npc_luo_xiaohei",
-      "proactive_prompt": "围绕刚触发的剧情主动说一句话"
+      "effect_type": "add_memory",
+      "memory_text": "有一次深夜卧谈会，大家关着灯聊到了各自的梦想和烦恼。",
+      "memory_importance": 9
     }
   ]
 }
@@ -585,30 +587,35 @@ POST /api/v1/admin/events
 Content-Type: application/json
 
 {
-  "event_id": "evt_npc_luo_xiaohei_idle",
+  "event_id": "evt_npc_luo_xiaohei_talk",
   "event_name": "闲聊触发",
-  "description": "角色进入闲置状态时触发",
+  "description": "玩家提到宿舍或夜晚时触发",
   "character_id": "npc_luo_xiaohei",
 
   "trigger_condition": {
-    "trigger_type": "state",
-    "threshold": 0.5,
-    "comparison": "gte",
+    "trigger_type": "keyword_match",
+    "keywords": ["宿舍", "夜晚"],
+    "match_mode": "any",
     "cooldown_hours": 1
   },
 
   "effects": [
     {
-      "effect_type": "dialogue",
+      "effect_type": "trigger_dialogue",
       "dialogue_text": "你在干嘛？",
-      "memory_text": "角色主动发起闲聊"
+      "dialogue_action": "主动发起闲聊"
+    },
+    {
+      "effect_type": "add_memory",
+      "memory_text": "角色主动发起闲聊",
+      "memory_importance": 5
     }
   ],
 
   "priority": 1,
   "is_active": true,
   "schedule": null,
-  "template_id": "tpl_story_keyword_node"
+  "template_id": null
 }
 ```
 
@@ -1199,7 +1206,7 @@ Content-Type: application/json
 
 玩家轮次与群聊脉冲是两条不同执行路径：
 
-- **玩家轮次**：`max_responses` 接受 1-5；编排器继续受参与人数和内部上限约束，当前最多提交 3 个角色回复。
+- **玩家轮次**：`max_responses` 接受 1-5；编排器继续受参与人数和内部上限约束，当前最多提交 3 个角色回复。高情绪、高利害、问句、多角色提及、长文本或高关系压力轮次保证至少 2 个角色接话，短 ack 仍可单回复。
 - **普通自主脉冲**：世界时钟不能暂停；距离上次脉冲至少经过 2 个现实分钟和 20 个世界分钟；当天自主消息数未达到 12；至少有 2 个 active 参与者；并且存在未解决话题钩子、角色目标，或群聊未等待玩家且有当前主题。
 - **事件脉冲**：由 `npc_proactive_dialogue` 等事件效果触发，绕过普通脉冲的现实/世界冷却和每日预算，但仍受本次消息上限约束。
 - **本次消息上限**：当前普通和事件脉冲都最多生成并提交 1 条角色消息，不等同于玩家轮次的 `max_responses`。
@@ -1233,17 +1240,11 @@ Content-Type: application/json
   "session_id": "multi-session-uuid",
   "group_name": "森林小队",
   "group_thread_id": "multi-session-uuid",
-  "opening": {
-    "character_id": "npc_luo_xiaohei",
-    "character_name": "小黑",
-    "dialogue": "[好奇地看着周围]哇，这里好多人呀！",
-    "action": "greeting_curious",
-    "current_affinity": 0,
-    "current_trust": 0,
-    "current_mood": "好奇"
-  }
+  "opening": null
 }
 ```
+
+> **注意**：`opening` 字段已停用，恒为 `null`。创建会话不再自动生成开场白——角色不会在会话开始时自我介绍，对话由玩家第一条消息触发。`start_conversation()` / `_generate_opening()` 保留在编排器中但不再被调用。
 
 ### 2. 发送对话消息
 ```http
@@ -1261,9 +1262,11 @@ Content-Type: application/json
 
 每次玩家发起的多角色轮次会保存玩家消息和角色回复。群聊结束且有效消息数大于 6 条、摘要模型返回非空内容时，系统会将整场对话统一摘要写入 `session_summary`，并同步保存到 `group_memory` 作为群聊会话记忆；后续多角色 Prompt 会召回这些群体记忆，帮助参与角色延续共同经历。若群聊期间关系图谱被修改或删除，结束摘要和角色间印象提取只处理图谱修订时间之后的消息，避免旧关系被重新萃取。
 
+**群聊历史的消息格式：** 多角色历史在送入 LLM 前以自然语言剧本格式格式化（如 `王奔奔（nd_wang_benben）回应玩家，意图回答，话题……：台词`），不携带 `消息 #id` 之类的机器化编号，避免模型在回复中复述元数据。传入 API 的消息内容仍是纯角色台词，不含该格式前缀。
+
 `request_id` 与单聊语义一致：可选，同一会话内用于安全重试和去重。相同 ID 的已完成请求返回原结果，不会再次生成角色回复或重复提交群聊副作用。
 
-根据讨论触发条件，响应可能是单角色回复，也可能是多角色连续讨论回复。`discussion_mode` 默认启用；`max_responses` 可传 1-5，但编排器会结合语境、参与人数和内部上限动态决定实际接话人数，当前最多 3 个角色发言。讨论模式下返回结构包含 `responses` 数组，每个元素对应一个角色发言。发送轮次前会重新校验全部会话参与者；任一参与角色卡不存在或被禁用时返回 400，避免以不完整参与者集合继续生成。
+根据讨论触发条件，响应可能是单角色回复，也可能是多角色连续讨论回复。`discussion_mode` 默认启用；`max_responses` 可传 1-5，但编排器会结合语境、参与人数和内部上限动态决定实际接话人数，当前最多 3 个角色发言。高情绪、高利害、问句、多角色提及、长文本或高关系压力场景会保证至少 2 个角色接话，短 ack 仍可单回复。讨论模式下返回结构包含 `responses` 数组，每个元素对应一个角色发言。发送轮次前会重新校验全部会话参与者；任一参与角色卡不存在或被禁用时返回 400，避免以不完整参与者集合继续生成。
 
 **响应示例：**
 ```json
@@ -2230,6 +2233,22 @@ Docker Compose 默认设置 `FORWARDED_ALLOW_IPS=*`，仅适用于后端端口�
 | `event_history` | 已提交事件历史及状态 |
 | `world_time_window` | 玩家世界时间窗口与星期 |
 | `composite` | 复合条件（AND/OR）|
+
+### 跨角色聚合
+
+`trigger_condition` 支持以下跨角色字段：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `aggregation` | `"any" \| "all" \| "count"` | 默认 `"any"`。单聊保持按当前角色判断；多角色轮次由本轮全部 scoped contexts 评估 |
+| `min_characters` | int | `aggregation="count"` 时必须大于 0，表示至少多少个角色满足条件 |
+| `character_ids` | string[] | 参与聚合的角色范围；为空时取当前参与角色。`aggregation="any"` 保存时会清空该字段，保持旧行为 |
+
+聚合语义：
+
+- `any`：任一参与/指定角色满足即触发（旧行为）。
+- `all`：全部参与/指定角色满足才触发。
+- `count`：至少 `min_characters` 个参与/指定角色满足才触发。
 
 ## 效果类型参考
 

@@ -675,6 +675,17 @@ def test_concurrent_schedulers_execute_due_event_once(monkeypatch):
     character_id = "npc_luo_xiaohei"
     real_now = datetime(2026, 7, 12, 10, 0, tzinfo=UTC)
     scheduled_for = real_now.isoformat()
+    # PG 强制外键：event_trigger_log 引用 event_definition，需先建事件定义
+    repository.save_event_definition(
+        owner_user_id=player_id,
+        event_id=event_id,
+        event_name="并发定时事件",
+        trigger_config=TriggerCondition(
+            trigger_type=TriggerType.TIME_BASED,
+            schedule="*/5 * * * *",
+        ).model_dump_json(),
+        effects_config="[]",
+    )
     row = {
         "event_id": event_id,
         "character_id": character_id,
@@ -1263,6 +1274,16 @@ def test_group_orchestrator_paths_share_clock_snapshot_with_prompt_and_messages(
 
     monkeypatch.setattr(
         multi_character_orchestrator,
+        "retrieve_knowledge",
+        fake_retrieve_knowledge,
+    )
+    # mixin 拆分后 _generate_character_response 位于 multi_character_turn 模块，
+    # 需同时 patch 实际执行模块的 retrieve_knowledge
+    import importlib
+
+    turn_mod = importlib.import_module("memoria.core.multi_character_turn")
+    monkeypatch.setattr(
+        turn_mod,
         "retrieve_knowledge",
         fake_retrieve_knowledge,
     )

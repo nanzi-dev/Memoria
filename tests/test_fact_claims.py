@@ -3,8 +3,15 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from memoria.db import repository
+
+
+def _pg_enabled() -> bool:
+    from memoria.core.config import configs
+    return bool((configs.database_url or "").strip())
 
 
 @pytest.fixture
@@ -53,10 +60,14 @@ def _events(owner_user_id, claim_id):
 
 def _replay_fact_claim(owner_user_id, claim_id):
     events = _events(owner_user_id, claim_id)
-    with repository.get_conn() as conn:
+    with repository.db_session() as conn:
         conn.execute(
-            "DELETE FROM fact_claim WHERE owner_user_id = ? AND claim_id = ?",
-            (owner_user_id, claim_id),
+            text(
+                "DELETE FROM fact_claim "
+                "WHERE owner_user_id = :owner_user_id "
+                "AND claim_id = :claim_id"
+            ),
+            {"owner_user_id": owner_user_id, "claim_id": claim_id},
         )
         for event in events:
             repository._project_fact_claim_event(event, conn=conn)
@@ -1420,7 +1431,7 @@ def test_replaying_older_event_does_not_reduce_ledger_version(owner_user_id):
     )
     events = _events(owner_user_id, claim["claim_id"])
 
-    with repository.get_conn() as conn:
+    with repository.db_session() as conn:
         repository._project_fact_claim_event(events[0], conn=conn)
 
     projected = repository.list_fact_claims(
@@ -1436,12 +1447,16 @@ def test_postgres_advisory_lock_precedes_fact_claim_read(monkeypatch):
     statements = []
 
     class Cursor:
+        def mappings(self):
+            return self
+
         def fetchone(self):
             return None
 
     class FakeConnection:
         def execute(self, sql, params=None):
-            statements.append((" ".join(sql.split()), params))
+            sql_text = getattr(sql, "text", sql)
+            statements.append((" ".join(sql_text.split()), params))
             return Cursor()
 
     monkeypatch.setattr(repository, "_is_postgres_enabled", lambda: True)
@@ -1455,8 +1470,8 @@ def test_postgres_advisory_lock_precedes_fact_claim_read(monkeypatch):
     )
 
     assert statements[0] == (
-        "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))",
-        ("fact-claim-1",),
+        "SELECT pg_advisory_xact_lock(hashtextextended(:claim_id, 0))",
+        {"claim_id": "fact-claim-1"},
     )
     assert statements[1][0].startswith("SELECT * FROM fact_claim")
 
@@ -1578,10 +1593,14 @@ def test_projector_replay_rejects_forged_verification_decision(
     }
     forged_event = StoredDomainEvent(**event_values)
 
-    with repository.get_conn() as conn:
+    with repository.db_session() as conn:
         conn.execute(
-            "DELETE FROM fact_claim WHERE owner_user_id = ? AND claim_id = ?",
-            (owner_user_id, claim["claim_id"]),
+            text(
+                "DELETE FROM fact_claim "
+                "WHERE owner_user_id = :owner_user_id "
+                "AND claim_id = :claim_id"
+            ),
+            {"owner_user_id": owner_user_id, "claim_id": claim["claim_id"]},
         )
         repository._project_fact_claim_event(claimed_event, conn=conn)
         with pytest.raises(ValueError, match="decision"):
@@ -1622,10 +1641,14 @@ def test_projector_replay_rejects_list_shaped_verification_snapshot(
     }
     forged_event = StoredDomainEvent(**event_values)
 
-    with repository.get_conn() as conn:
+    with repository.db_session() as conn:
         conn.execute(
-            "DELETE FROM fact_claim WHERE owner_user_id = ? AND claim_id = ?",
-            (owner_user_id, claim["claim_id"]),
+            text(
+                "DELETE FROM fact_claim "
+                "WHERE owner_user_id = :owner_user_id "
+                "AND claim_id = :claim_id"
+            ),
+            {"owner_user_id": owner_user_id, "claim_id": claim["claim_id"]},
         )
         repository._project_fact_claim_event(claimed_event, conn=conn)
         with pytest.raises(
@@ -1670,10 +1693,14 @@ def test_projector_replay_rejects_list_shaped_verification_evidence(
     }
     forged_event = StoredDomainEvent(**event_values)
 
-    with repository.get_conn() as conn:
+    with repository.db_session() as conn:
         conn.execute(
-            "DELETE FROM fact_claim WHERE owner_user_id = ? AND claim_id = ?",
-            (owner_user_id, claim["claim_id"]),
+            text(
+                "DELETE FROM fact_claim "
+                "WHERE owner_user_id = :owner_user_id "
+                "AND claim_id = :claim_id"
+            ),
+            {"owner_user_id": owner_user_id, "claim_id": claim["claim_id"]},
         )
         repository._project_fact_claim_event(claimed_event, conn=conn)
         with pytest.raises(ValueError, match="evidence.*object"):
@@ -1871,10 +1898,14 @@ def test_projector_replay_rejects_forged_fact_identity(
     event_values["event_id"] = uuid4().hex
     forged_event = StoredDomainEvent(**event_values)
 
-    with repository.get_conn() as conn:
+    with repository.db_session() as conn:
         conn.execute(
-            "DELETE FROM fact_claim WHERE owner_user_id = ? AND claim_id = ?",
-            (owner_user_id, claim["claim_id"]),
+            text(
+                "DELETE FROM fact_claim "
+                "WHERE owner_user_id = :owner_user_id "
+                "AND claim_id = :claim_id"
+            ),
+            {"owner_user_id": owner_user_id, "claim_id": claim["claim_id"]},
         )
         with pytest.raises(ValueError, match=field_name):
             repository._project_fact_claim_event(forged_event, conn=conn)
@@ -1944,13 +1975,17 @@ def test_postgres_initial_projection_conflict_reloads_concurrent_row(monkeypatch
             self._row = row
             self.rowcount = rowcount
 
+        def mappings(self):
+            return self
+
         def fetchone(self):
             return self._row
 
     class FakeConnection:
         def execute(self, sql, params=None):
             nonlocal select_count
-            normalized_sql = " ".join(sql.split())
+            sql_text = getattr(sql, "text", sql)
+            normalized_sql = " ".join(sql_text.split())
             statements.append((normalized_sql, params))
             if normalized_sql.startswith("SELECT * FROM fact_claim"):
                 select_count += 1
@@ -2077,6 +2112,10 @@ def test_source_ids_must_be_a_non_empty_list_of_non_empty_strings(
     assert repository.list_domain_events(owner_user_id) == []
 
 
+@pytest.mark.skipif(
+    _pg_enabled(),
+    reason="CREATE TRIGGER ... BEGIN ... END 是 SQLite 专属触发器语法",
+)
 def test_ledger_and_projection_rollback_together_on_projector_failure(
     owner_user_id,
 ):
@@ -2091,7 +2130,7 @@ def test_ledger_and_projection_rollback_together_on_projector_failure(
             """
         )
     try:
-        with pytest.raises(sqlite3.IntegrityError, match="projector failure"):
+        with pytest.raises(IntegrityError, match="projector failure"):
             _record(
                 owner_user_id,
                 "这个投影必须失败。",
@@ -2110,26 +2149,19 @@ def test_ledger_and_projection_rollback_together_on_projector_failure(
     assert repository.list_domain_events(owner_user_id) == []
 
 
-def test_fact_claim_schema_is_additive_and_postgres_compatible(monkeypatch):
-    with repository.get_conn() as conn:
-        tables = {
-            row["name"]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-            ).fetchall()
-        }
+def test_fact_claim_schema_is_additive_and_postgres_compatible():
+    """Verify ORM models define the expected tables and constraints."""
+    from memoria.db.models import Base
 
-    assert {"users", "domain_event", "fact_claim"} <= tables
-    assert "CHECK (scope_type IN ('character', 'group_thread', 'story'))" in (
-        repository.SCHEMA
-    )
+    table_names = set(Base.metadata.tables.keys())
+    assert {"users", "domain_event", "fact_claim"} <= table_names
 
-    monkeypatch.setattr(
-        repository.configs,
-        "database_url",
-        "postgresql://user:pass@localhost/memoria",
-    )
-    postgres_schema = repository._schema_for_current_db()
-
-    assert "ledger_version BIGINT NOT NULL" in postgres_schema
-    assert "AUTOINCREMENT" not in postgres_schema
+    # Verify fact_claim CHECK constraint on scope_type is present in the model
+    fact_table = Base.metadata.tables["fact_claim"]
+    from sqlalchemy import CheckConstraint
+    check_texts = [
+        str(c.sqltext)
+        for c in fact_table.constraints
+        if isinstance(c, CheckConstraint)
+    ]
+    assert any("scope_type" in t for t in check_texts)

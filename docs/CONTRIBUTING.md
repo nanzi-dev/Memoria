@@ -165,7 +165,7 @@ docs: 更新 API 文档中的事件系统说明
 - 源代码放在 `src/memoria/` 下
 - API 端点放在 `src/memoria/api/`
 - 核心逻辑放在 `src/memoria/core/`（含 `csrf.py`、`output_safety.py` 等横切模块）
-- 数据库操作放在 `src/memoria/db/repository/` 包内；对外仍使用 `from memoria.db import repository`
+- 数据库模型和连接放在 `src/memoria/db/models.py` / `src/memoria/db/engine.py`；业务读写放在 `src/memoria/db/repository/` 包内，对外仍使用 `from memoria.db import repository`。正式 schema 变更同步维护 `alembic/`
 - 角色卡 JSON 放在 `src/memoria/characters/`
 - 测试放在 `tests/`
 - 文档放在 `docs/`

@@ -207,6 +207,65 @@ class TestCharacterInteraction:
 
         assert orch._decide_group_response_count("乙，你怎么看？", 3) == 1
 
+    def test_decide_group_response_count_high_pressure_never_returns_single(
+        self,
+        monkeypatch,
+    ):
+        from types import SimpleNamespace
+        from memoria.core import multi_character_orchestrator
+
+        orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
+            multi_character_orchestrator.MultiCharacterOrchestrator
+        )
+        orch.participants = [
+            {"character_id": "a"},
+            {"character_id": "b"},
+            {"character_id": "c"},
+        ]
+        orch.character_cards = {
+            "a": SimpleNamespace(meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])),
+            "b": SimpleNamespace(meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])),
+            "c": SimpleNamespace(meta=SimpleNamespace(name="丙", display_name="丙", aliases=[])),
+        }
+        orch._load_all_relationships = lambda: {}
+        monkeypatch.setattr(
+            multi_character_orchestrator.random,
+            "uniform",
+            lambda a, b: a + 0.02,
+        )
+
+        count = orch._decide_group_response_count(
+            "大家快逃，这个计划太危险了，马上行动",
+            3,
+        )
+
+        assert count >= 2
+
+    def test_decide_group_response_count_short_ack_still_single(self, monkeypatch):
+        from types import SimpleNamespace
+        from memoria.core import multi_character_orchestrator
+
+        orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
+            multi_character_orchestrator.MultiCharacterOrchestrator
+        )
+        orch.participants = [
+            {"character_id": "a"},
+            {"character_id": "b"},
+            {"character_id": "c"},
+        ]
+        orch.character_cards = {
+            "a": SimpleNamespace(meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])),
+            "b": SimpleNamespace(meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])),
+            "c": SimpleNamespace(meta=SimpleNamespace(name="丙", display_name="丙", aliases=[])),
+        }
+        monkeypatch.setattr(
+            multi_character_orchestrator.random,
+            "uniform",
+            lambda a, b: a + 0.05,
+        )
+
+        assert orch._decide_group_response_count("好的", 3) == 1
+
 
 class TestMultiCharacterGroupMemory:
     def test_load_memory_context_includes_group_memories(self, monkeypatch):

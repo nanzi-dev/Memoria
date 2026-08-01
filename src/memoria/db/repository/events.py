@@ -26,6 +26,7 @@ from memoria.core.fact_claim_policy import (
     normalize_evidence_entry,
     normalize_fact_text,
 )
+from sqlalchemy import text
 
 try:
     import psycopg
@@ -71,13 +72,12 @@ def _save_event_definition_in_transaction(
     story_id: str = None,
 ) -> None:
     now = _now()
-    conn.execute(
-        """
+    conn.execute(text("""
         INSERT INTO event_definition
         (owner_user_id, event_id, event_name, description, character_id, story_id, trigger_config,
          effects_config, priority, exclusive_group, exclusive_scope, max_triggers_per_turn,
          stop_processing, is_active, created_at, updated_at, schedule, template_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (:p0, :p1, :p2, :p3, :p4, :p5, :p6, :p7, :p8, :p9, :p10, :p11, :p12, :p13, :p14, :p15, :p16, :p17)
         ON CONFLICT(owner_user_id, event_id)
         DO UPDATE SET
             event_name=excluded.event_name,
@@ -95,45 +95,18 @@ def _save_event_definition_in_transaction(
             updated_at=excluded.updated_at,
             schedule=excluded.schedule,
             template_id=excluded.template_id
-        """,
-        (
-            owner_user_id,
-            event_id,
-            event_name,
-            description,
-            character_id,
-            story_id,
-            trigger_config,
-            effects_config,
-            priority,
-            exclusive_group,
-            exclusive_scope,
-            max_triggers_per_turn,
-            1 if stop_processing else 0,
-            1 if is_active else 0,
-            now,
-            now,
-            schedule,
-            template_id,
-        ),
-    )
+        """), {"p0": owner_user_id, "p1": event_id, "p2": event_name, "p3": description, "p4": character_id, "p5": story_id, "p6": trigger_config, "p7": effects_config, "p8": priority, "p9": exclusive_group, "p10": exclusive_scope, "p11": max_triggers_per_turn, "p12": 1 if stop_processing else 0, "p13": 1 if is_active else 0, "p14": now, "p15": now, "p16": schedule, "p17": template_id})
     if exclusive_scope == "player" and exclusive_group:
-        conn.execute(
-            """
+        conn.execute(text("""
             DELETE FROM event_exclusive_group_guard
-            WHERE player_id = ? AND selected_event_id = ?
-              AND exclusive_group <> ?
-            """,
-            (owner_user_id, event_id, exclusive_group),
-        )
+            WHERE player_id = :p0 AND selected_event_id = :p1
+              AND exclusive_group <> :p2
+            """), {"p0": owner_user_id, "p1": event_id, "p2": exclusive_group})
     else:
-        conn.execute(
-            """
+        conn.execute(text("""
             DELETE FROM event_exclusive_group_guard
-            WHERE player_id = ? AND selected_event_id = ?
-            """,
-            (owner_user_id, event_id),
-        )
+            WHERE player_id = :p0 AND selected_event_id = :p1
+            """), {"p0": owner_user_id, "p1": event_id})
 
 
 def save_event_definition(
@@ -156,7 +129,7 @@ def save_event_definition(
 ) -> bool:
     """保存事件定义"""
     try:
-        with get_conn() as conn:
+        with db_session() as conn:
             _save_event_definition_in_transaction(
                 conn,
                 owner_user_id=owner_user_id,
@@ -183,11 +156,8 @@ def save_event_definition(
 
 def get_event_definition(owner_user_id: str, event_id: str) -> dict | None:
     """获取单个事件定义"""
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM event_definition WHERE owner_user_id = ? AND event_id = ?",
-            (owner_user_id, event_id),
-        ).fetchone()
+    with db_session() as conn:
+        row = conn.execute(text("""SELECT * FROM event_definition WHERE owner_user_id = :p0 AND event_id = :p1"""), {"p0": owner_user_id, "p1": event_id}).mappings().fetchone()
     return _row_to_dict(row)
 
 def list_event_definitions(
@@ -196,54 +166,36 @@ def list_event_definitions(
     only_active: bool = True
 ) -> list[dict]:
     """列出事件定义"""
-    with get_conn() as conn:
-        query = "SELECT * FROM event_definition WHERE owner_user_id = ?"
-        params = [owner_user_id]
+    with db_session() as conn:
+        query = "SELECT * FROM event_definition WHERE owner_user_id = :owner_user_id"
+        params = {"owner_user_id": owner_user_id}
 
         if character_id is not None:
-            query += " AND (character_id = ? OR character_id IS NULL)"
-            params.append(character_id)
+            query += " AND (character_id = :character_id OR character_id IS NULL)"
+            params["character_id"] = character_id
 
         if only_active:
             query += " AND is_active = 1"
 
         query += " ORDER BY priority DESC, created_at DESC"
 
-        rows = conn.execute(query, params).fetchall()
+        rows = conn.execute(text(query), params).mappings().fetchall()
 
     return [dict(r) for r in rows]
 
 def delete_event_definition(owner_user_id: str, event_id: str) -> bool:
     """Delete an event definition and its operational trigger state."""
     try:
-        with get_conn() as conn:
-            conn.execute(
-                "DELETE FROM event_schedule_state WHERE player_id = ? AND event_id = ?",
-                (owner_user_id, event_id),
-            )
-            conn.execute(
-                "DELETE FROM event_context_state WHERE player_id = ? AND event_id = ?",
-                (owner_user_id, event_id),
-            )
-            conn.execute(
-                "DELETE FROM event_trigger_log WHERE player_id = ? AND event_id = ?",
-                (owner_user_id, event_id),
-            )
-            conn.execute(
-                "DELETE FROM event_trigger_guard WHERE player_id = ? AND event_id = ?",
-                (owner_user_id, event_id),
-            )
-            conn.execute(
-                """
+        with db_session() as conn:
+            conn.execute(text("""DELETE FROM event_schedule_state WHERE player_id = :p0 AND event_id = :p1"""), {"p0": owner_user_id, "p1": event_id})
+            conn.execute(text("""DELETE FROM event_context_state WHERE player_id = :p0 AND event_id = :p1"""), {"p0": owner_user_id, "p1": event_id})
+            conn.execute(text("""DELETE FROM event_trigger_log WHERE player_id = :p0 AND event_id = :p1"""), {"p0": owner_user_id, "p1": event_id})
+            conn.execute(text("""DELETE FROM event_trigger_guard WHERE player_id = :p0 AND event_id = :p1"""), {"p0": owner_user_id, "p1": event_id})
+            conn.execute(text("""
                 DELETE FROM event_exclusive_group_guard
-                WHERE player_id = ? AND selected_event_id = ?
-                """,
-                (owner_user_id, event_id),
-            )
-            deleted = conn.execute(
-                "DELETE FROM event_definition WHERE owner_user_id = ? AND event_id = ?",
-                (owner_user_id, event_id),
-            )
+                WHERE player_id = :p0 AND selected_event_id = :p1
+                """), {"p0": owner_user_id, "p1": event_id})
+            deleted = conn.execute(text("""DELETE FROM event_definition WHERE owner_user_id = :p0 AND event_id = :p1"""), {"p0": owner_user_id, "p1": event_id})
         return deleted.rowcount == 1
     except Exception as e:
         logger.error(f"删除事件定义失败: {e}")
@@ -251,16 +203,13 @@ def delete_event_definition(owner_user_id: str, event_id: str) -> bool:
 
 def increment_event_trigger_count(owner_user_id: str, event_id: str):
     """增加事件触发计数"""
-    with get_conn() as conn:
-        conn.execute(
-            """
+    with db_session() as conn:
+        conn.execute(text("""
             UPDATE event_definition
             SET trigger_count = trigger_count + 1,
-                last_triggered_at = ?
-            WHERE owner_user_id = ? AND event_id = ?
-            """,
-            (_now(), owner_user_id, event_id),
-        )
+                last_triggered_at = :p0
+            WHERE owner_user_id = :p1 AND event_id = :p2
+            """), {"p0": _now(), "p1": owner_user_id, "p2": event_id})
 
 
 # =========================
@@ -275,17 +224,13 @@ def log_event_trigger(
     effects_applied: str
 ):
     """记录事件触发"""
-    with get_conn() as conn:
-        conn.execute(
-            """
+    with db_session() as conn:
+        conn.execute(text("""
             INSERT INTO event_trigger_log
             (event_id, character_id, player_id, session_id, 
              triggered_at, context_snapshot, effects_applied)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (event_id, character_id, player_id, session_id,
-             _now(), context_snapshot, effects_applied),
-        )
+            VALUES (:p0, :p1, :p2, :p3, :p4, :p5, :p6)
+            """), {"p0": event_id, "p1": character_id, "p2": player_id, "p3": session_id, "p4": _now(), "p5": context_snapshot, "p6": effects_applied})
 
 def get_event_trigger_history(
     event_id: str = None,
@@ -294,53 +239,47 @@ def get_event_trigger_history(
     limit: int = 50
 ) -> list[dict]:
     """获取事件触发历史"""
-    with get_conn() as conn:
+    with db_session() as conn:
         query = "SELECT * FROM event_trigger_log WHERE 1=1"
-        params = []
+        params = {}
         
         if event_id:
-            query += " AND event_id = ?"
-            params.append(event_id)
+            query += " AND event_id = :event_id"
+            params["event_id"] = event_id
         
         if character_id:
-            query += " AND character_id = ?"
-            params.append(character_id)
+            query += " AND character_id = :character_id"
+            params["character_id"] = character_id
         
         if player_id:
-            query += " AND player_id = ?"
-            params.append(player_id)
+            query += " AND player_id = :player_id"
+            params["player_id"] = player_id
         
-        query += " ORDER BY triggered_at DESC LIMIT ?"
-        params.append(limit)
+        query += " ORDER BY triggered_at DESC LIMIT :limit"
+        params["limit"] = limit
         
-        rows = conn.execute(query, params).fetchall()
+        rows = conn.execute(text(query), params).mappings().fetchall()
     
     return [dict(r) for r in rows]
 
 def get_last_trigger_time(event_id: str, character_id: str | None, player_id: str) -> str | None:
     """获取事件最后触发时间（用于冷却时间判断）"""
-    with get_conn() as conn:
+    with db_session() as conn:
         if character_id is None:
-            row = conn.execute(
-                """
+            row = conn.execute(text("""
                 SELECT triggered_at FROM event_trigger_log
-                WHERE event_id = ? AND player_id = ? AND status = 'succeeded'
+                WHERE event_id = :p0 AND player_id = :p1 AND status = 'succeeded'
                 ORDER BY triggered_at DESC
                 LIMIT 1
-                """,
-                (event_id, player_id),
-            ).fetchone()
+                """), {"p0": event_id, "p1": player_id}).mappings().fetchone()
         else:
-            row = conn.execute(
-                """
+            row = conn.execute(text("""
                 SELECT triggered_at FROM event_trigger_log
-                WHERE event_id = ? AND character_id = ? AND player_id = ?
+                WHERE event_id = :p0 AND character_id = :p1 AND player_id = :p2
                   AND status = 'succeeded'
                 ORDER BY triggered_at DESC
                 LIMIT 1
-                """,
-                (event_id, character_id, player_id),
-            ).fetchone()
+                """), {"p0": event_id, "p1": character_id, "p2": player_id}).mappings().fetchone()
 
     return row["triggered_at"] if row else None
 
@@ -357,72 +296,50 @@ def claim_event_trigger_guard(
 ) -> bool:
     """领取 once/cooldown 事件的持久化触发权。"""
     scope = character_scope or ""
-    with get_conn() as conn:
+    with db_session() as conn:
         if not _is_postgres_enabled():
-            conn.execute("BEGIN IMMEDIATE")
+            _lock_sqlite_write(conn)
         if scope:
-            legacy = conn.execute(
-                """
+            legacy = conn.execute(text("""
                 SELECT triggered_at FROM event_trigger_log
-                WHERE player_id = ? AND event_id = ? AND character_id = ?
+                WHERE player_id = :p0 AND event_id = :p1 AND character_id = :p2
                   AND status = 'succeeded'
                 ORDER BY triggered_at DESC
                 LIMIT 1
-                """,
-                (player_id, event_id, scope),
-            ).fetchone()
+                """), {"p0": player_id, "p1": event_id, "p2": scope}).mappings().fetchone()
         else:
-            legacy = conn.execute(
-                """
+            legacy = conn.execute(text("""
                 SELECT triggered_at FROM event_trigger_log
-                WHERE player_id = ? AND event_id = ? AND status = 'succeeded'
+                WHERE player_id = :p0 AND event_id = :p1 AND status = 'succeeded'
                 ORDER BY triggered_at DESC
                 LIMIT 1
-                """,
-                (player_id, event_id),
-            ).fetchone()
+                """), {"p0": player_id, "p1": event_id}).mappings().fetchone()
         legacy_last_triggered_at = legacy["triggered_at"] if legacy else None
-        conn.execute(
-            """
+        conn.execute(text("""
             INSERT INTO event_trigger_guard
             (player_id, event_id, character_scope, last_triggered_at,
              claim_token, claim_expires_at, updated_at)
-            VALUES (?, ?, ?, ?, NULL, NULL, ?)
+            VALUES (:p0, :p1, :p2, :p3, NULL, NULL, :p4)
             ON CONFLICT(player_id, event_id, character_scope) DO NOTHING
-            """,
-            (
-                player_id,
-                event_id,
-                scope,
-                legacy_last_triggered_at,
-                claimed_at,
-            ),
-        )
+            """), {"p0": player_id, "p1": event_id, "p2": scope, "p3": legacy_last_triggered_at, "p4": claimed_at})
         lock_suffix = " FOR UPDATE" if _is_postgres_enabled() else ""
-        row = conn.execute(
-            """
+        row = conn.execute(text("""
             SELECT last_triggered_at, claim_token, claim_expires_at
             FROM event_trigger_guard
-            WHERE player_id = ? AND event_id = ? AND character_scope = ?
-            """ + lock_suffix,
-            (player_id, event_id, scope),
-        ).fetchone()
+            WHERE player_id = :player_id AND event_id = :event_id
+              AND character_scope = :character_scope
+            """ + lock_suffix), {
+            "player_id": player_id,
+            "event_id": event_id,
+            "character_scope": scope,
+        }).mappings().fetchone()
         last_triggered_at = row["last_triggered_at"] or legacy_last_triggered_at
         if not row["last_triggered_at"] and legacy_last_triggered_at:
-            conn.execute(
-                """
+            conn.execute(text("""
                 UPDATE event_trigger_guard
-                SET last_triggered_at = ?, updated_at = ?
-                WHERE player_id = ? AND event_id = ? AND character_scope = ?
-                """,
-                (
-                    legacy_last_triggered_at,
-                    claimed_at,
-                    player_id,
-                    event_id,
-                    scope,
-                ),
-            )
+                SET last_triggered_at = :p0, updated_at = :p1
+                WHERE player_id = :p2 AND event_id = :p3 AND character_scope = :p4
+                """), {"p0": legacy_last_triggered_at, "p1": claimed_at, "p2": player_id, "p3": event_id, "p4": scope})
 
         claimed_time = datetime.fromisoformat(claimed_at.replace("Z", "+00:00"))
         if claimed_time.tzinfo is None:
@@ -447,21 +364,11 @@ def claim_event_trigger_guard(
             if expires_at > claimed_time:
                 return False
 
-        cursor = conn.execute(
-            """
+        cursor = conn.execute(text("""
             UPDATE event_trigger_guard
-            SET claim_token = ?, claim_expires_at = ?, updated_at = ?
-            WHERE player_id = ? AND event_id = ? AND character_scope = ?
-            """,
-            (
-                claim_token,
-                claim_expires_at,
-                claimed_at,
-                player_id,
-                event_id,
-                scope,
-            ),
-        )
+            SET claim_token = :p0, claim_expires_at = :p1, updated_at = :p2
+            WHERE player_id = :p3 AND event_id = :p4 AND character_scope = :p5
+            """), {"p0": claim_token, "p1": claim_expires_at, "p2": claimed_at, "p3": player_id, "p4": event_id, "p5": scope})
         return cursor.rowcount == 1
 
 
@@ -472,16 +379,13 @@ def release_event_trigger_guard(
     character_scope: str,
     claim_token: str,
 ) -> bool:
-    with get_conn() as conn:
-        cursor = conn.execute(
-            """
+    with db_session() as conn:
+        cursor = conn.execute(text("""
             UPDATE event_trigger_guard
-            SET claim_token = NULL, claim_expires_at = NULL, updated_at = ?
-            WHERE player_id = ? AND event_id = ? AND character_scope = ?
-              AND claim_token = ?
-            """,
-            (_now(), player_id, event_id, character_scope or "", claim_token),
-        )
+            SET claim_token = NULL, claim_expires_at = NULL, updated_at = :p0
+            WHERE player_id = :p1 AND event_id = :p2 AND character_scope = :p3
+              AND claim_token = :p4
+            """), {"p0": _now(), "p1": player_id, "p2": event_id, "p3": character_scope or "", "p4": claim_token})
     return cursor.rowcount == 1
 
 
@@ -494,65 +398,51 @@ def claim_event_exclusive_group(
     claim_expires_at: str,
 ) -> bool:
     """Claim a player-scoped exclusive group unless it is already selected."""
-    with get_conn() as conn:
+    with db_session() as conn:
         if not _is_postgres_enabled():
-            conn.execute("BEGIN IMMEDIATE")
-        conn.execute(
-            """
+            _lock_sqlite_write(conn)
+        conn.execute(text("""
             INSERT INTO event_exclusive_group_guard
             (player_id, exclusive_group, selected_event_id, claim_token,
              claim_expires_at, updated_at)
-            VALUES (?, ?, NULL, NULL, NULL, ?)
+            VALUES (:p0, :p1, NULL, NULL, NULL, :p2)
             ON CONFLICT(player_id, exclusive_group) DO NOTHING
-            """,
-            (player_id, exclusive_group, claimed_at),
-        )
+            """), {"p0": player_id, "p1": exclusive_group, "p2": claimed_at})
         lock_suffix = " FOR UPDATE" if _is_postgres_enabled() else ""
-        row = conn.execute(
-            """
+        row = conn.execute(text("""
             SELECT selected_event_id, claim_token, claim_expires_at
             FROM event_exclusive_group_guard
-            WHERE player_id = ? AND exclusive_group = ?
-            """ + lock_suffix,
-            (player_id, exclusive_group),
-        ).fetchone()
+            WHERE player_id = :player_id AND exclusive_group = :exclusive_group
+            """ + lock_suffix), {
+            "player_id": player_id,
+            "exclusive_group": exclusive_group,
+        }).mappings().fetchone()
         if row["selected_event_id"]:
             return False
 
-        legacy_selection = conn.execute(
-            """
+        legacy_selection = conn.execute(text("""
             SELECT trigger_log.event_id
             FROM event_trigger_log AS trigger_log
             INNER JOIN event_definition AS definition
               ON definition.owner_user_id = trigger_log.player_id
              AND definition.event_id = trigger_log.event_id
-            WHERE trigger_log.player_id = ?
+            WHERE trigger_log.player_id = :p0
               AND trigger_log.status = 'succeeded'
-              AND definition.exclusive_group = ?
+              AND definition.exclusive_group = :p1
               AND definition.exclusive_scope = 'player'
             ORDER BY
               CASE WHEN trigger_log.triggered_at IS NULL THEN 1 ELSE 0 END,
               trigger_log.triggered_at ASC,
               trigger_log.id ASC
             LIMIT 1
-            """,
-            (player_id, exclusive_group),
-        ).fetchone()
+            """), {"p0": player_id, "p1": exclusive_group}).mappings().fetchone()
         if legacy_selection:
-            conn.execute(
-                """
+            conn.execute(text("""
                 UPDATE event_exclusive_group_guard
-                SET selected_event_id = ?, claim_token = NULL,
-                    claim_expires_at = NULL, updated_at = ?
-                WHERE player_id = ? AND exclusive_group = ?
-                """,
-                (
-                    legacy_selection["event_id"],
-                    claimed_at,
-                    player_id,
-                    exclusive_group,
-                ),
-            )
+                SET selected_event_id = :p0, claim_token = NULL,
+                    claim_expires_at = NULL, updated_at = :p1
+                WHERE player_id = :p2 AND exclusive_group = :p3
+                """), {"p0": legacy_selection["event_id"], "p1": claimed_at, "p2": player_id, "p3": exclusive_group})
             return False
 
         claimed_time = datetime.fromisoformat(claimed_at.replace("Z", "+00:00"))
@@ -567,21 +457,12 @@ def claim_event_exclusive_group(
             if expires_at > claimed_time:
                 return False
 
-        cursor = conn.execute(
-            """
+        cursor = conn.execute(text("""
             UPDATE event_exclusive_group_guard
-            SET claim_token = ?, claim_expires_at = ?, updated_at = ?
-            WHERE player_id = ? AND exclusive_group = ?
+            SET claim_token = :p0, claim_expires_at = :p1, updated_at = :p2
+            WHERE player_id = :p3 AND exclusive_group = :p4
               AND selected_event_id IS NULL
-            """,
-            (
-                claim_token,
-                claim_expires_at,
-                claimed_at,
-                player_id,
-                exclusive_group,
-            ),
-        )
+            """), {"p0": claim_token, "p1": claim_expires_at, "p2": claimed_at, "p3": player_id, "p4": exclusive_group})
         return cursor.rowcount == 1
 
 
@@ -591,16 +472,13 @@ def release_event_exclusive_group(
     exclusive_group: str,
     claim_token: str,
 ) -> bool:
-    with get_conn() as conn:
-        cursor = conn.execute(
-            """
+    with db_session() as conn:
+        cursor = conn.execute(text("""
             UPDATE event_exclusive_group_guard
-            SET claim_token = NULL, claim_expires_at = NULL, updated_at = ?
-            WHERE player_id = ? AND exclusive_group = ?
-              AND selected_event_id IS NULL AND claim_token = ?
-            """,
-            (_now(), player_id, exclusive_group, claim_token),
-        )
+            SET claim_token = NULL, claim_expires_at = NULL, updated_at = :p0
+            WHERE player_id = :p1 AND exclusive_group = :p2
+              AND selected_event_id IS NULL AND claim_token = :p3
+            """), {"p0": _now(), "p1": player_id, "p2": exclusive_group, "p3": claim_token})
     return cursor.rowcount == 1
 
 
@@ -608,28 +486,22 @@ def get_event_exclusive_group_selection(
     player_id: str,
     exclusive_group: str,
 ) -> dict | None:
-    with get_conn() as conn:
-        row = conn.execute(
-            """
+    with db_session() as conn:
+        row = conn.execute(text("""
             SELECT * FROM event_exclusive_group_guard
-            WHERE player_id = ? AND exclusive_group = ?
+            WHERE player_id = :p0 AND exclusive_group = :p1
               AND selected_event_id IS NOT NULL
-            """,
-            (player_id, exclusive_group),
-        ).fetchone()
+            """), {"p0": player_id, "p1": exclusive_group}).mappings().fetchone()
     return _row_to_dict(row)
 
 
 def get_event_execution_batch(player_id: str, execution_key: str) -> dict | None:
     """读取已完成的事件批次，用于请求重放。"""
-    with get_conn() as conn:
-        row = conn.execute(
-            """
+    with db_session() as conn:
+        row = conn.execute(text("""
             SELECT * FROM event_execution_batch
-            WHERE player_id = ? AND execution_key = ?
-            """,
-            (player_id, execution_key),
-        ).fetchone()
+            WHERE player_id = :p0 AND execution_key = :p1
+            """), {"p0": player_id, "p1": execution_key}).mappings().fetchone()
     return _row_to_dict(row)
 
 
@@ -638,15 +510,12 @@ def increment_event_execution_batch_deduplicated(
     execution_key: str,
 ) -> bool:
     """记录一次命中已完成批次的幂等重放。"""
-    with get_conn() as conn:
-        cursor = conn.execute(
-            """
+    with db_session() as conn:
+        cursor = conn.execute(text("""
             UPDATE event_execution_batch
             SET deduplicated_count = COALESCE(deduplicated_count, 0) + 1
-            WHERE player_id = ? AND execution_key = ?
-            """,
-            (player_id, execution_key),
-        )
+            WHERE player_id = :p0 AND execution_key = :p1
+            """), {"p0": player_id, "p1": execution_key})
     return cursor.rowcount == 1
 
 
@@ -655,14 +524,11 @@ def get_event_execution(
     event_id: str,
     execution_key: str,
 ) -> dict | None:
-    with get_conn() as conn:
-        row = conn.execute(
-            """
+    with db_session() as conn:
+        row = conn.execute(text("""
             SELECT * FROM event_execution
-            WHERE owner_user_id = ? AND event_id = ? AND execution_key = ?
-            """,
-            (owner_user_id, event_id, execution_key),
-        ).fetchone()
+            WHERE owner_user_id = :p0 AND event_id = :p1 AND execution_key = :p2
+            """), {"p0": owner_user_id, "p1": event_id, "p2": execution_key}).mappings().fetchone()
     return _row_to_dict(row)
 
 
@@ -673,24 +539,24 @@ def list_event_execution_history(
     limit: int = 100,
 ) -> list[dict]:
     """Return recent auditable event outcomes for condition evaluation."""
-    with get_conn() as conn:
+    with db_session() as conn:
         query = """
             SELECT execution_id, execution_key, event_id, character_id,
                    session_id, trigger_source, status, error, duration_ms,
                    created_at, completed_at
             FROM event_execution
-            WHERE owner_user_id = ?
+            WHERE owner_user_id = :owner_user_id
         """
-        params: list[Any] = [owner_user_id]
+        params: dict[str, Any] = {"owner_user_id": owner_user_id}
         if character_id:
-            query += " AND character_id = ?"
-            params.append(character_id)
+            query += " AND character_id = :character_id"
+            params["character_id"] = character_id
         if event_id:
-            query += " AND event_id = ?"
-            params.append(event_id)
-        query += " ORDER BY completed_at DESC LIMIT ?"
-        params.append(max(1, min(limit, 1000)))
-        rows = conn.execute(query, params).fetchall()
+            query += " AND event_id = :event_id"
+            params["event_id"] = event_id
+        query += " ORDER BY completed_at DESC LIMIT :limit"
+        params["limit"] = max(1, min(limit, 1000))
+        rows = conn.execute(text(query), params).mappings().fetchall()
     return [dict(row) for row in rows]
 
 
@@ -706,30 +572,45 @@ def _insert_long_term_fact_in_transaction(conn, memory: dict) -> dict | None:
         "long_term_fact",
         "fact_text",
         fact_text,
-        "character_id = ? AND player_id = ?",
-        (character_id, player_id),
+        "character_id = :character_id AND player_id = :player_id",
+        {"character_id": character_id, "player_id": player_id},
         threshold=0.75,
     )
     now = _now()
     if existing:
         conn.execute(
-            "UPDATE long_term_fact SET importance = ?, last_referenced = ? WHERE id = ?",
-            (max(existing.get("importance", 0), importance), now, existing["id"]),
+            text(
+                "UPDATE long_term_fact SET importance = :importance, "
+                "last_referenced = :last_referenced WHERE id = :id"
+            ),
+            {
+                "importance": max(existing.get("importance", 0), importance),
+                "last_referenced": now,
+                "id": existing["id"],
+            },
         )
         return None
 
     insert_sql = """
         INSERT INTO long_term_fact
         (character_id, player_id, fact_text, importance, created_at, last_referenced)
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (:character_id, :player_id, :fact_text, :importance,
+                :created_at, :last_referenced)
     """
     if _is_postgres_enabled():
         insert_sql += " RETURNING id"
     cursor = conn.execute(
-        insert_sql,
-        (character_id, player_id, fact_text, importance, now, now),
+        text(insert_sql),
+        {
+            "character_id": character_id,
+            "player_id": player_id,
+            "fact_text": fact_text,
+            "importance": importance,
+            "created_at": now,
+            "last_referenced": now,
+        },
     )
-    fact_id = cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
+    fact_id = cursor.mappings().fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
     return {
         "fact_id": fact_id,
         "character_id": character_id,
@@ -746,29 +627,15 @@ def _complete_event_schedule_in_transaction(
     schedule_completion: dict,
     now: str,
 ) -> None:
-    completed = conn.execute(
-        """
+    completed = conn.execute(text("""
         UPDATE event_schedule_state
-        SET last_checked_at = ?, last_run_at = ?, next_run_at = ?,
-            next_due_real_at = ?, missed_count = ?,
+        SET last_checked_at = :p0, last_run_at = :p1, next_run_at = :p2,
+            next_due_real_at = :p3, missed_count = :p4,
             lease_owner = NULL, lease_expires_at = NULL,
-            last_error = NULL, last_failed_at = NULL, updated_at = ?
-        WHERE event_id = ? AND character_id = ? AND player_id = ?
-          AND lease_owner = ?
-        """,
-        (
-            schedule_completion["last_checked_at"],
-            schedule_completion["last_run_at"],
-            schedule_completion["next_run_at"],
-            schedule_completion.get("next_due_real_at"),
-            int(schedule_completion.get("missed_count") or 0),
-            now,
-            schedule_completion["event_id"],
-            schedule_completion["character_id"],
-            player_id,
-            schedule_completion["lease_owner"],
-        ),
-    )
+            last_error = NULL, last_failed_at = NULL, updated_at = :p5
+        WHERE event_id = :p6 AND character_id = :p7 AND player_id = :p8
+          AND lease_owner = :p9
+        """), {"p0": schedule_completion["last_checked_at"], "p1": schedule_completion["last_run_at"], "p2": schedule_completion["next_run_at"], "p3": schedule_completion.get("next_due_real_at"), "p4": int(schedule_completion.get("missed_count") or 0), "p5": now, "p6": schedule_completion["event_id"], "p7": schedule_completion["character_id"], "p8": player_id, "p9": schedule_completion["lease_owner"]})
     if completed.rowcount != 1:
         raise RuntimeError("schedule lease was lost before atomic completion")
 
@@ -790,22 +657,16 @@ def claim_dialogue_turn(
     now_iso = now.isoformat()
     lease_owner = uuid.uuid4().hex
     lease_expires_at = (now + timedelta(seconds=max(30, lease_seconds))).isoformat()
-    with get_conn() as conn:
+    with db_session() as conn:
         if _is_postgres_enabled():
-            conn.execute(
-                "SELECT session_id FROM session WHERE session_id = ? FOR UPDATE",
-                (session_id,),
-            ).fetchone()
+            conn.execute(text("""SELECT session_id FROM session WHERE session_id = :p0 FOR UPDATE"""), {"p0": session_id}).mappings().fetchone()
         else:
-            conn.execute("BEGIN IMMEDIATE")
+            _lock_sqlite_write(conn)
 
-        existing = conn.execute(
-            """
+        existing = conn.execute(text("""
             SELECT * FROM dialogue_turn
-            WHERE session_id = ? AND request_id = ?
-            """,
-            (session_id, request_id),
-        ).fetchone()
+            WHERE session_id = :p0 AND request_id = :p1
+            """), {"p0": session_id, "p1": request_id}).mappings().fetchone()
         if existing and existing["status"] == "completed":
             return {
                 "completed": True,
@@ -824,26 +685,22 @@ def claim_dialogue_turn(
         ):
             raise DialogueTurnConflictError("该请求正在处理中")
 
-        active = conn.execute(
-            """
+        active = conn.execute(text("""
             SELECT request_id
             FROM dialogue_turn
-            WHERE session_id = ? AND status = 'processing'
-              AND lease_expires_at > ? AND request_id <> ?
+            WHERE session_id = :p0 AND status = 'processing'
+              AND lease_expires_at > :p1 AND request_id <> :p2
             LIMIT 1
-            """,
-            (session_id, now_iso, request_id),
-        ).fetchone()
+            """), {"p0": session_id, "p1": now_iso, "p2": request_id}).mappings().fetchone()
         if active:
             raise DialogueTurnConflictError("该会话已有消息正在处理中")
 
-        conn.execute(
-            """
+        conn.execute(text("""
             INSERT INTO dialogue_turn
             (session_id, request_id, player_id, turn_kind, status,
              lease_owner, lease_expires_at, response_data, error,
              created_at, updated_at, completed_at)
-            VALUES (?, ?, ?, ?, 'processing', ?, ?, NULL, NULL, ?, ?, NULL)
+            VALUES (:p0, :p1, :p2, :p3, 'processing', :p4, :p5, NULL, NULL, :p6, :p7, NULL)
             ON CONFLICT(session_id, request_id)
             DO UPDATE SET
                 status='processing',
@@ -853,18 +710,7 @@ def claim_dialogue_turn(
                 error=NULL,
                 updated_at=excluded.updated_at,
                 completed_at=NULL
-            """,
-            (
-                session_id,
-                request_id,
-                player_id,
-                turn_kind,
-                lease_owner,
-                lease_expires_at,
-                now_iso,
-                now_iso,
-            ),
-        )
+            """), {"p0": session_id, "p1": request_id, "p2": player_id, "p3": turn_kind, "p4": lease_owner, "p5": lease_expires_at, "p6": now_iso, "p7": now_iso})
     return {
         "completed": False,
         "lease_owner": lease_owner,
@@ -878,17 +724,14 @@ def fail_dialogue_turn(
     lease_owner: str,
     error: str,
 ) -> None:
-    with get_conn() as conn:
-        conn.execute(
-            """
+    with db_session() as conn:
+        conn.execute(text("""
             UPDATE dialogue_turn
             SET status = 'failed', lease_owner = NULL, lease_expires_at = NULL,
-                error = ?, updated_at = ?
-            WHERE session_id = ? AND request_id = ?
-              AND status = 'processing' AND lease_owner = ?
-            """,
-            (error[:1000], _now(), session_id, request_id, lease_owner),
-        )
+                error = :p0, updated_at = :p1
+            WHERE session_id = :p2 AND request_id = :p3
+              AND status = 'processing' AND lease_owner = :p4
+            """), {"p0": error[:1000], "p1": _now(), "p2": session_id, "p3": request_id, "p4": lease_owner})
 
 
 def _save_runtime_states_in_transaction(
@@ -925,72 +768,58 @@ def _save_runtime_state_in_transaction(
     state_changes: list[dict] | None = None,
 ) -> None:
     if state_changes:
-        conn.execute(
-            """
+        conn.execute(text("""
             INSERT INTO relationship_state
             (character_id, player_id, affection_level, trust_level,
              current_mood, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (:p0, :p1, :p2, :p3, :p4, :p5)
             ON CONFLICT(character_id, player_id) DO NOTHING
-            """,
-            (
-                character_id,
-                player_id,
-                affection_level,
-                trust_level,
-                current_mood,
-                now,
-            ),
-        )
+            """), {"p0": character_id, "p1": player_id, "p2": affection_level, "p3": trust_level, "p4": current_mood, "p5": now})
         for changes in state_changes:
             assignments: list[str] = []
-            parameters: list[Any] = []
+            parameters: dict[str, Any] = {}
             if "affection_level" in changes:
                 delta = float(changes["affection_level"])
+                parameters["affection_delta"] = delta
                 assignments.append(
                     """
                     affection_level = CASE
-                        WHEN affection_level + ? < -100 THEN -100
-                        WHEN affection_level + ? > 100 THEN 100
-                        ELSE affection_level + ?
+                        WHEN affection_level + :affection_delta < -100 THEN -100
+                        WHEN affection_level + :affection_delta > 100 THEN 100
+                        ELSE affection_level + :affection_delta
                     END
                     """
                 )
-                parameters.extend([delta, delta, delta])
             if "trust_level" in changes:
                 delta = float(changes["trust_level"])
+                parameters["trust_delta"] = delta
                 assignments.append(
                     """
                     trust_level = CASE
-                        WHEN trust_level + ? < 0 THEN 0
-                        WHEN trust_level + ? > 100 THEN 100
-                        ELSE trust_level + ?
+                        WHEN trust_level + :trust_delta < 0 THEN 0
+                        WHEN trust_level + :trust_delta > 100 THEN 100
+                        ELSE trust_level + :trust_delta
                     END
                     """
                 )
-                parameters.extend([delta, delta, delta])
             if "current_mood" in changes:
-                assignments.append("current_mood = ?")
-                parameters.append(str(changes["current_mood"]))
+                assignments.append("current_mood = :current_mood")
+                parameters["current_mood"] = str(changes["current_mood"])
             if not assignments:
                 continue
-            parameters.extend([now, character_id, player_id])
-            conn.execute(
-                f"""
+            parameters["updated_at"] = now
+            parameters["character_id"] = character_id
+            parameters["player_id"] = player_id
+            conn.execute(text(f"""
                 UPDATE relationship_state
-                SET {", ".join(assignments)}, updated_at = ?
-                WHERE character_id = ? AND player_id = ?
-                """,
-                parameters,
-            )
-        row = conn.execute(
-            """
+                SET {", ".join(assignments)}, updated_at = :updated_at
+                WHERE character_id = :character_id AND player_id = :player_id
+                """), parameters)
+        row = conn.execute(text("""
             SELECT affection_level, trust_level, current_mood
             FROM relationship_state
-            WHERE character_id = ? AND player_id = ?
-            """,
-            (character_id, player_id),
-        ).fetchone()
+            WHERE character_id = :p0 AND player_id = :p1
+            """), {"p0": character_id, "p1": player_id}).mappings().fetchone()
         affection_level = row["affection_level"]
         trust_level = row["trust_level"]
         current_mood = row["current_mood"]
@@ -1006,24 +835,14 @@ def _save_runtime_state_in_transaction(
                 updated_at=excluded.updated_at
             """
         )
-        conn.execute(
-            f"""
+        conn.execute(text(f"""
             INSERT INTO relationship_state
             (character_id, player_id, affection_level, trust_level,
              current_mood, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (:p0, :p1, :p2, :p3, :p4, :p5)
             ON CONFLICT(character_id, player_id)
             {relationship_state_conflict}
-            """,
-            (
-                character_id,
-                player_id,
-                affection_level,
-                trust_level,
-                current_mood,
-                now,
-            ),
-        )
+            """), {"p0": character_id, "p1": player_id, "p2": affection_level, "p3": trust_level, "p4": current_mood, "p5": now})
     player_id_node, character_id_node = _normalize_relationship_pair(
         player_node_id(player_id),
         character_id,
@@ -1037,24 +856,14 @@ def _save_runtime_state_in_transaction(
             updated_at=excluded.updated_at
         """
     )
-    conn.execute(
-        f"""
+    conn.execute(text(f"""
         INSERT INTO character_relationship
         (owner_user_id, character_id_a, character_id_b, relationship_type,
          affinity, description, created_at, updated_at)
-        VALUES (?, ?, ?, '相识', ?, NULL, ?, ?)
+        VALUES (:p0, :p1, :p2, '相识', :p3, NULL, :p4, :p5)
         ON CONFLICT(owner_user_id, character_id_a, character_id_b)
         {relationship_conflict}
-        """,
-        (
-            player_id,
-            player_id_node,
-            character_id_node,
-            affection_level,
-            now,
-            now,
-        ),
-    )
+        """), {"p0": player_id, "p1": player_id_node, "p2": character_id_node, "p3": affection_level, "p4": now, "p5": now})
 
 
 def _commit_dialogue_turn_in_transaction(
@@ -1066,14 +875,11 @@ def _commit_dialogue_turn_in_transaction(
     session_id = dialogue_turn["session_id"]
     request_id = dialogue_turn["request_id"]
     lease_owner = dialogue_turn["lease_owner"]
-    row = conn.execute(
-        """
+    row = conn.execute(text("""
         SELECT status, lease_owner, lease_expires_at, response_data
         FROM dialogue_turn
-        WHERE session_id = ? AND request_id = ?
-        """,
-        (session_id, request_id),
-    ).fetchone()
+        WHERE session_id = :p0 AND request_id = :p1
+        """), {"p0": session_id, "p1": request_id}).mappings().fetchone()
     if not row:
         raise RuntimeError("dialogue turn claim does not exist")
     if row["status"] == "completed":
@@ -1099,36 +905,43 @@ def _commit_dialogue_turn_in_transaction(
              current_trust, current_mood, event_notification,
              knowledge_sources, reply_to_message_id, reply_to_character_id,
              intent, topic, trigger_source, created_at, world_created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (:session_id, :role, :content, :character_id, :character_name,
+                    :action, :affinity_delta, :trust_delta, :current_affinity,
+                    :current_trust, :current_mood, :event_notification,
+                    :knowledge_sources, :reply_to_message_id,
+                    :reply_to_character_id, :intent, :topic, :trigger_source,
+                    :created_at, :world_created_at)
         """
         if _is_postgres_enabled():
             insert_sql += " RETURNING id"
         cursor = conn.execute(
-            insert_sql,
-            (
-                session_id,
-                message["role"],
-                message["content"],
-                message.get("character_id"),
-                message.get("character_name"),
-                message.get("action"),
-                message.get("affinity_delta"),
-                message.get("trust_delta"),
-                message.get("current_affinity"),
-                message.get("current_trust"),
-                message.get("current_mood"),
-                message.get("event_notification"),
-                _encode_knowledge_sources(message.get("knowledge_sources")),
-                reply_to_message_id,
-                message.get("reply_to_character_id"),
-                message.get("intent"),
-                message.get("topic"),
-                message.get("trigger_source"),
-                now,
-                message.get("world_created_at"),
-            ),
+            text(insert_sql),
+            {
+                "session_id": session_id,
+                "role": message["role"],
+                "content": message["content"],
+                "character_id": message.get("character_id"),
+                "character_name": message.get("character_name"),
+                "action": message.get("action"),
+                "affinity_delta": message.get("affinity_delta"),
+                "trust_delta": message.get("trust_delta"),
+                "current_affinity": message.get("current_affinity"),
+                "current_trust": message.get("current_trust"),
+                "current_mood": message.get("current_mood"),
+                "event_notification": message.get("event_notification"),
+                "knowledge_sources": _encode_knowledge_sources(
+                    message.get("knowledge_sources")
+                ),
+                "reply_to_message_id": reply_to_message_id,
+                "reply_to_character_id": message.get("reply_to_character_id"),
+                "intent": message.get("intent"),
+                "topic": message.get("topic"),
+                "trigger_source": message.get("trigger_source"),
+                "created_at": now,
+                "world_created_at": message.get("world_created_at"),
+            },
         )
-        message_id = cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
+        message_id = cursor.mappings().fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
         temporary_id = message.get("temporary_id")
         if isinstance(temporary_id, int):
             temporary_ids[temporary_id] = message_id
@@ -1144,14 +957,11 @@ def _commit_dialogue_turn_in_transaction(
         ):
             response[response_index][response_field] = message_id
         if message.get("character_id"):
-            conn.execute(
-                """
+            conn.execute(text("""
                 UPDATE multi_session_participant
-                SET last_spoke_at = ?, message_count = message_count + 1
-                WHERE session_id = ? AND character_id = ?
-                """,
-                (now, session_id, message["character_id"]),
-            )
+                SET last_spoke_at = :p0, message_count = message_count + 1
+                WHERE session_id = :p1 AND character_id = :p2
+                """), {"p0": now, "p1": session_id, "p2": message["character_id"]})
 
     if isinstance(response, list):
         for item in response:
@@ -1171,15 +981,14 @@ def _commit_dialogue_turn_in_transaction(
             if isinstance(message_id, int) and message_id < 0:
                 mapped_hook["message_id"] = temporary_ids.get(message_id)
             unresolved_hooks.append(mapped_hook)
-        conn.execute(
-            """
+        conn.execute(text("""
             INSERT INTO group_dialogue_state
             (group_thread_id, player_id, current_topic, topic_source,
              last_reply_to_message_id, last_reply_to_character_id,
              last_speaker_id, waiting_for_player, unresolved_hooks,
              last_autonomous_pulse_at, last_autonomous_world_at,
              daily_message_date, daily_message_count, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (:p0, :p1, :p2, :p3, :p4, :p5, :p6, :p7, :p8, :p9, :p10, :p11, :p12, :p13, :p14)
             ON CONFLICT(group_thread_id)
             DO UPDATE SET
                 current_topic=excluded.current_topic,
@@ -1194,25 +1003,7 @@ def _commit_dialogue_turn_in_transaction(
                 daily_message_date=excluded.daily_message_date,
                 daily_message_count=excluded.daily_message_count,
                 updated_at=excluded.updated_at
-            """,
-            (
-                group_state["group_thread_id"],
-                dialogue_turn["player_id"],
-                group_state.get("current_topic"),
-                group_state.get("topic_source"),
-                last_reply_to_message_id,
-                group_state.get("last_reply_to_character_id"),
-                group_state.get("last_speaker_id"),
-                int(bool(group_state.get("waiting_for_player"))),
-                json.dumps(unresolved_hooks, ensure_ascii=False),
-                group_state.get("last_autonomous_pulse_at"),
-                group_state.get("last_autonomous_world_at"),
-                group_state.get("daily_message_date"),
-                int(group_state.get("daily_message_count") or 0),
-                now,
-                now,
-            ),
-        )
+            """), {"p0": group_state["group_thread_id"], "p1": dialogue_turn["player_id"], "p2": group_state.get("current_topic"), "p3": group_state.get("topic_source"), "p4": last_reply_to_message_id, "p5": group_state.get("last_reply_to_character_id"), "p6": group_state.get("last_speaker_id"), "p7": int(bool(group_state.get("waiting_for_player"))), "p8": json.dumps(unresolved_hooks, ensure_ascii=False), "p9": group_state.get("last_autonomous_pulse_at"), "p10": group_state.get("last_autonomous_world_at"), "p11": group_state.get("daily_message_date"), "p12": int(group_state.get("daily_message_count") or 0), "p13": now, "p14": now})
 
     for background_job in dialogue_turn.get("background_jobs") or []:
         _enqueue_background_job_in_transaction(
@@ -1225,25 +1016,14 @@ def _commit_dialogue_turn_in_transaction(
         )
 
     response_data = json.dumps(response, ensure_ascii=False)
-    completed = conn.execute(
-        """
+    completed = conn.execute(text("""
         UPDATE dialogue_turn
         SET status = 'completed', lease_owner = NULL, lease_expires_at = NULL,
-            response_data = ?, error = NULL, updated_at = ?, completed_at = ?
-        WHERE session_id = ? AND request_id = ?
-          AND status = 'processing' AND lease_owner = ?
-          AND lease_expires_at > ?
-        """,
-        (
-            response_data,
-            now,
-            now,
-            session_id,
-            request_id,
-            lease_owner,
-            now,
-        ),
-    )
+            response_data = :p0, error = NULL, updated_at = :p1, completed_at = :p2
+        WHERE session_id = :p3 AND request_id = :p4
+          AND status = 'processing' AND lease_owner = :p5
+          AND lease_expires_at > :p6
+        """), {"p0": response_data, "p1": now, "p2": now, "p3": session_id, "p4": request_id, "p5": lease_owner, "p6": now})
     if completed.rowcount != 1:
         raise DialogueTurnConflictError("对话轮次租约已失效")
     return response
@@ -1256,7 +1036,7 @@ def commit_dialogue_turn(
 ) -> dict | list:
     """Atomically persist a turn without an event execution batch."""
     now = _now()
-    with get_conn() as conn:
+    with db_session() as conn:
         _save_runtime_states_in_transaction(
             conn,
             player_id=dialogue_turn["player_id"],
@@ -1288,33 +1068,24 @@ def commit_event_execution_batch(
         batch_status = "failed"
     else:
         batch_status = "partial"
-    with get_conn() as conn:
-        cursor = conn.execute(
-            """
+    with db_session() as conn:
+        cursor = conn.execute(text("""
             INSERT INTO event_execution_batch
             (player_id, execution_key, trigger_source, status, results_data,
              deduplicated_count, created_at, completed_at)
-            VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+            VALUES (:p0, :p1, :p2, :p3, :p4, 0, :p5, :p6)
             ON CONFLICT(player_id, execution_key) DO NOTHING
-            """,
-            (player_id, execution_key, trigger_source, batch_status, results_data, now, now),
-        )
+            """), {"p0": player_id, "p1": execution_key, "p2": trigger_source, "p3": batch_status, "p4": results_data, "p5": now, "p6": now})
         if cursor.rowcount == 0:
-            conn.execute(
-                """
+            conn.execute(text("""
                 UPDATE event_execution_batch
                 SET deduplicated_count = COALESCE(deduplicated_count, 0) + 1
-                WHERE player_id = ? AND execution_key = ?
-                """,
-                (player_id, execution_key),
-            )
-            row = conn.execute(
-                """
+                WHERE player_id = :p0 AND execution_key = :p1
+                """), {"p0": player_id, "p1": execution_key})
+            row = conn.execute(text("""
                 SELECT * FROM event_execution_batch
-                WHERE player_id = ? AND execution_key = ?
-                """,
-                (player_id, execution_key),
-            ).fetchone()
+                WHERE player_id = :p0 AND execution_key = :p1
+                """), {"p0": player_id, "p1": execution_key}).mappings().fetchone()
             if schedule_completion:
                 _complete_event_schedule_in_transaction(
                     conn,
@@ -1325,40 +1096,23 @@ def commit_event_execution_batch(
             for execution in executions:
                 claim_token = execution.get("trigger_claim_token")
                 if claim_token:
-                    conn.execute(
-                        """
+                    conn.execute(text("""
                         UPDATE event_trigger_guard
-                        SET claim_token = NULL, claim_expires_at = NULL, updated_at = ?
-                        WHERE player_id = ? AND event_id = ? AND character_scope = ?
-                          AND claim_token = ?
-                        """,
-                        (
-                            now,
-                            player_id,
-                            execution["event_id"],
-                            execution.get("trigger_character_scope") or "",
-                            claim_token,
-                        ),
-                    )
+                        SET claim_token = NULL, claim_expires_at = NULL, updated_at = :p0
+                        WHERE player_id = :p1 AND event_id = :p2 AND character_scope = :p3
+                          AND claim_token = :p4
+                        """), {"p0": now, "p1": player_id, "p2": execution["event_id"], "p3": execution.get("trigger_character_scope") or "", "p4": claim_token})
                 exclusive_claim_token = execution.get(
                     "exclusive_group_claim_token"
                 )
                 if exclusive_claim_token:
-                    conn.execute(
-                        """
+                    conn.execute(text("""
                         UPDATE event_exclusive_group_guard
                         SET claim_token = NULL, claim_expires_at = NULL,
-                            updated_at = ?
-                        WHERE player_id = ? AND exclusive_group = ?
-                          AND selected_event_id IS NULL AND claim_token = ?
-                        """,
-                        (
-                            now,
-                            player_id,
-                            execution["exclusive_group"],
-                            exclusive_claim_token,
-                        ),
-                    )
+                            updated_at = :p0
+                        WHERE player_id = :p1 AND exclusive_group = :p2
+                          AND selected_event_id IS NULL AND claim_token = :p3
+                        """), {"p0": now, "p1": player_id, "p2": execution["exclusive_group"], "p3": exclusive_claim_token})
             dialogue_response = (
                 _commit_dialogue_turn_in_transaction(conn, dialogue_turn, now=now)
                 if dialogue_turn
@@ -1372,54 +1126,26 @@ def commit_event_execution_batch(
             }
 
         for execution in executions:
-            conn.execute(
-                """
+            conn.execute(text("""
                 INSERT INTO event_execution
                 (execution_id, execution_key, owner_user_id, event_id, character_id,
                  session_id, trigger_source, status, effects_data, result_data,
                  error, duration_ms, created_at, completed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    execution["execution_id"],
-                    execution_key,
-                    player_id,
-                    execution["event_id"],
-                    execution["character_id"],
-                    execution["session_id"],
-                    trigger_source,
-                    execution["status"],
-                    execution["effects_data"],
-                    execution["result_data"],
-                    execution.get("error"),
-                    float(execution.get("duration_ms") or 0.0),
-                    now,
-                    now,
-                ),
-            )
+                VALUES (:p0, :p1, :p2, :p3, :p4, :p5, :p6, :p7, :p8, :p9, :p10, :p11, :p12, :p13)
+                """), {"p0": execution["execution_id"], "p1": execution_key, "p2": player_id, "p3": execution["event_id"], "p4": execution["character_id"], "p5": execution["session_id"], "p6": trigger_source, "p7": execution["status"], "p8": execution["effects_data"], "p9": execution["result_data"], "p10": execution.get("error"), "p11": float(execution.get("duration_ms") or 0.0), "p12": now, "p13": now})
 
             if execution["status"] != "succeeded":
                 continue
 
             claim_token = execution.get("trigger_claim_token")
             if claim_token:
-                consumed = conn.execute(
-                    """
+                consumed = conn.execute(text("""
                     UPDATE event_trigger_guard
-                    SET last_triggered_at = ?, claim_token = NULL,
-                        claim_expires_at = NULL, updated_at = ?
-                    WHERE player_id = ? AND event_id = ? AND character_scope = ?
-                      AND claim_token = ?
-                    """,
-                    (
-                        now,
-                        now,
-                        player_id,
-                        execution["event_id"],
-                        execution.get("trigger_character_scope") or "",
-                        claim_token,
-                    ),
-                )
+                    SET last_triggered_at = :p0, claim_token = NULL,
+                        claim_expires_at = NULL, updated_at = :p1
+                    WHERE player_id = :p2 AND event_id = :p3 AND character_scope = :p4
+                      AND claim_token = :p5
+                    """), {"p0": now, "p1": now, "p2": player_id, "p3": execution["event_id"], "p4": execution.get("trigger_character_scope") or "", "p5": claim_token})
                 if consumed.rowcount != 1:
                     raise RuntimeError(
                         "event trigger claim was lost before atomic completion"
@@ -1429,100 +1155,61 @@ def commit_event_execution_batch(
                 "exclusive_group_claim_token"
             )
             if exclusive_claim_token:
-                selected = conn.execute(
-                    """
+                selected = conn.execute(text("""
                     UPDATE event_exclusive_group_guard
-                    SET selected_event_id = ?, claim_token = NULL,
-                        claim_expires_at = NULL, updated_at = ?
-                    WHERE player_id = ? AND exclusive_group = ?
-                      AND selected_event_id IS NULL AND claim_token = ?
+                    SET selected_event_id = :p0, claim_token = NULL,
+                        claim_expires_at = NULL, updated_at = :p1
+                    WHERE player_id = :p2 AND exclusive_group = :p3
+                      AND selected_event_id IS NULL AND claim_token = :p4
                       AND EXISTS (
                           SELECT 1
                           FROM event_definition
-                          WHERE owner_user_id = ?
-                            AND event_id = ?
+                          WHERE owner_user_id = :p5
+                            AND event_id = :p6
                             AND exclusive_scope = 'player'
-                            AND exclusive_group = ?
+                            AND exclusive_group = :p7
                       )
-                    """,
-                    (
-                        execution["event_id"],
-                        now,
-                        player_id,
-                        execution["exclusive_group"],
-                        exclusive_claim_token,
-                        player_id,
-                        execution["event_id"],
-                        execution["exclusive_group"],
-                    ),
-                )
+                    """), {"p0": execution["event_id"], "p1": now, "p2": player_id, "p3": execution["exclusive_group"], "p4": exclusive_claim_token, "p5": player_id, "p6": execution["event_id"], "p7": execution["exclusive_group"]})
                 if selected.rowcount != 1:
-                    released_stale = conn.execute(
-                        """
+                    released_stale = conn.execute(text("""
                         UPDATE event_exclusive_group_guard
                         SET claim_token = NULL, claim_expires_at = NULL,
-                            updated_at = ?
-                        WHERE player_id = ? AND exclusive_group = ?
-                          AND selected_event_id IS NULL AND claim_token = ?
+                            updated_at = :p0
+                        WHERE player_id = :p1 AND exclusive_group = :p2
+                          AND selected_event_id IS NULL AND claim_token = :p3
                           AND NOT EXISTS (
                               SELECT 1
                               FROM event_definition
-                              WHERE owner_user_id = ?
-                                AND event_id = ?
+                              WHERE owner_user_id = :p4
+                                AND event_id = :p5
                                 AND exclusive_scope = 'player'
-                                AND exclusive_group = ?
+                                AND exclusive_group = :p6
                           )
-                        """,
-                        (
-                            now,
-                            player_id,
-                            execution["exclusive_group"],
-                            exclusive_claim_token,
-                            player_id,
-                            execution["event_id"],
-                            execution["exclusive_group"],
-                        ),
-                    )
+                        """), {"p0": now, "p1": player_id, "p2": execution["exclusive_group"], "p3": exclusive_claim_token, "p4": player_id, "p5": execution["event_id"], "p6": execution["exclusive_group"]})
                     if released_stale.rowcount != 1:
                         raise RuntimeError(
                             "event exclusive group claim was lost before atomic completion"
                         )
 
-            conn.execute(
-                """
+            conn.execute(text("""
                 INSERT INTO event_trigger_log
                 (event_id, character_id, player_id, session_id, triggered_at,
                  context_snapshot, effects_applied, execution_id, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'succeeded')
-                """,
-                (
-                    execution["event_id"],
-                    execution["character_id"],
-                    player_id,
-                    execution["session_id"],
-                    now,
-                    execution["context_snapshot"],
-                    execution["effects_applied"],
-                    execution["execution_id"],
-                ),
-            )
-            conn.execute(
-                """
+                VALUES (:p0, :p1, :p2, :p3, :p4, :p5, :p6, :p7, 'succeeded')
+                """), {"p0": execution["event_id"], "p1": execution["character_id"], "p2": player_id, "p3": execution["session_id"], "p4": now, "p5": execution["context_snapshot"], "p6": execution["effects_applied"], "p7": execution["execution_id"]})
+            conn.execute(text("""
                 UPDATE event_definition
-                SET trigger_count = trigger_count + 1, last_triggered_at = ?
-                WHERE owner_user_id = ? AND event_id = ?
-                """,
-                (now, player_id, execution["event_id"]),
-            )
+                SET trigger_count = trigger_count + 1, last_triggered_at = :p0
+                WHERE owner_user_id = :p1 AND event_id = :p2
+                """), {"p0": now, "p1": player_id, "p2": execution["event_id"]})
 
             context_state = execution.get("context_state")
             if context_state:
-                conn.execute(
-                    """
+                conn.execute(text("""
                     INSERT INTO event_context_state
                     (event_id, character_id, player_id, context_data, status,
                      progress, last_session_id, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (:p0, :p1, :p2, :p3, :p4, :p5, :p6, :p7, :p8)
                     ON CONFLICT(event_id, character_id, player_id)
                     DO UPDATE SET
                         context_data=excluded.context_data,
@@ -1530,36 +1217,15 @@ def commit_event_execution_batch(
                         progress=excluded.progress,
                         last_session_id=excluded.last_session_id,
                         updated_at=excluded.updated_at
-                    """,
-                    (
-                        execution["event_id"],
-                        execution["character_id"],
-                        player_id,
-                        context_state["context_data"],
-                        context_state["status"],
-                        context_state["progress"],
-                        execution["session_id"],
-                        now,
-                        now,
-                    ),
-                )
+                    """), {"p0": execution["event_id"], "p1": execution["character_id"], "p2": player_id, "p3": context_state["context_data"], "p4": context_state["status"], "p5": context_state["progress"], "p6": execution["session_id"], "p7": now, "p8": now})
 
             for unlock_key in execution.get("unlock_keys") or []:
-                conn.execute(
-                    """
+                conn.execute(text("""
                     INSERT INTO event_unlock
                     (player_id, character_id, unlock_key, event_id, unlocked_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    VALUES (:p0, :p1, :p2, :p3, :p4)
                     ON CONFLICT(player_id, character_id, unlock_key) DO NOTHING
-                    """,
-                    (
-                        player_id,
-                        execution["character_id"],
-                        unlock_key,
-                        execution["event_id"],
-                        now,
-                    ),
-                )
+                    """), {"p0": player_id, "p1": execution["character_id"], "p2": unlock_key, "p3": execution["event_id"], "p4": now})
 
             for memory in execution.get("memories") or []:
                 inserted = _insert_long_term_fact_in_transaction(conn, memory)
@@ -1628,76 +1294,41 @@ def commit_event_execution_batch(
                 )
 
             for inbox_item in execution.get("inbox_items") or []:
-                conn.execute(
-                    """
+                conn.execute(text("""
                     INSERT INTO player_event_inbox
                     (player_id, event_id, character_id, session_id, event_type,
                      title, content, payload, world_created_at, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        player_id,
-                        execution["event_id"],
-                        execution["character_id"],
-                        inbox_item.get("session_id"),
-                        inbox_item.get("event_type", "event"),
-                        inbox_item.get("title"),
-                        inbox_item["content"],
-                        inbox_item.get("payload"),
-                        inbox_item.get("world_created_at"),
-                        now,
-                    ),
-                )
+                    VALUES (:p0, :p1, :p2, :p3, :p4, :p5, :p6, :p7, :p8, :p9)
+                    """), {"p0": player_id, "p1": execution["event_id"], "p2": execution["character_id"], "p3": inbox_item.get("session_id"), "p4": inbox_item.get("event_type", "event"), "p5": inbox_item.get("title"), "p6": inbox_item["content"], "p7": inbox_item.get("payload"), "p8": inbox_item.get("world_created_at"), "p9": now})
 
             for message in execution.get("proactive_messages") or []:
-                target = conn.execute(
-                    """
+                target = conn.execute(text("""
                     SELECT 1
                     FROM session s
                     INNER JOIN multi_session_participant p
                       ON p.session_id = s.session_id
-                     AND p.character_id = ?
+                     AND p.character_id = :p0
                      AND p.is_active = 1
-                    WHERE s.session_id = ?
-                      AND s.player_id = ?
+                    WHERE s.session_id = :p1
+                      AND s.player_id = :p2
                       AND s.is_multi_character = 1
                       AND s.status <> 'ended'
-                    """,
-                    (
-                        message["character_id"],
-                        message["session_id"],
-                        player_id,
-                    ),
-                ).fetchone()
+                    """), {"p0": message["character_id"], "p1": message["session_id"], "p2": player_id}).mappings().fetchone()
                 if target is None:
                     raise RuntimeError(
                         "proactive dialogue target is not an owned active group participant"
                     )
-                conn.execute(
-                    """
+                conn.execute(text("""
                     INSERT INTO short_term_message
                     (session_id, role, content, character_id, character_name,
                      created_at, knowledge_sources, world_created_at)
-                    VALUES (?, 'assistant', ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        message["session_id"],
-                        message["content"],
-                        message["character_id"],
-                        message.get("character_name"),
-                        now,
-                        _encode_knowledge_sources(message.get("knowledge_sources")),
-                        message.get("world_created_at"),
-                    ),
-                )
-                conn.execute(
-                    """
+                    VALUES (:p0, 'assistant', :p1, :p2, :p3, :p4, :p5, :p6)
+                    """), {"p0": message["session_id"], "p1": message["content"], "p2": message["character_id"], "p3": message.get("character_name"), "p4": now, "p5": _encode_knowledge_sources(message.get("knowledge_sources")), "p6": message.get("world_created_at")})
+                conn.execute(text("""
                     UPDATE multi_session_participant
-                    SET last_spoke_at = ?, message_count = message_count + 1
-                    WHERE session_id = ? AND character_id = ?
-                    """,
-                    (now, message["session_id"], message["character_id"]),
-                )
+                    SET last_spoke_at = :p0, message_count = message_count + 1
+                    WHERE session_id = :p1 AND character_id = :p2
+                    """), {"p0": now, "p1": message["session_id"], "p2": message["character_id"]})
 
         _save_runtime_states_in_transaction(
             conn,
@@ -1740,15 +1371,12 @@ def commit_event_execution_batch(
 
 
 def list_event_unlocks(player_id: str, character_id: str) -> list[str]:
-    with get_conn() as conn:
-        rows = conn.execute(
-            """
+    with db_session() as conn:
+        rows = conn.execute(text("""
             SELECT unlock_key FROM event_unlock
-            WHERE player_id = ? AND character_id = ?
+            WHERE player_id = :p0 AND character_id = :p1
             ORDER BY unlocked_at ASC, unlock_key ASC
-            """,
-            (player_id, character_id),
-        ).fetchall()
+            """), {"p0": player_id, "p1": character_id}).mappings().fetchall()
     return [row["unlock_key"] for row in rows]
 
 
@@ -1756,14 +1384,13 @@ def get_event_execution_metrics(
     owner_user_id: str,
     event_id: str | None = None,
 ) -> dict:
-    with get_conn() as conn:
-        where = "owner_user_id = ?"
-        params: list = [owner_user_id]
+    with db_session() as conn:
+        where = "owner_user_id = :owner_user_id"
+        params: dict = {"owner_user_id": owner_user_id}
         if event_id:
-            where += " AND event_id = ?"
-            params.append(event_id)
-        aggregate = conn.execute(
-            f"""
+            where += " AND event_id = :event_id"
+            params["event_id"] = event_id
+        aggregate = conn.execute(text(f"""
             SELECT
                 COUNT(*) AS matched_count,
                 SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END) AS succeeded_count,
@@ -1774,40 +1401,29 @@ def get_event_execution_metrics(
                 MAX(completed_at) AS last_execution_at
             FROM event_execution
             WHERE {where}
-            """,
-            tuple(params),
-        ).fetchone()
-        last_error = conn.execute(
-            f"""
+            """), params).mappings().fetchone()
+        last_error = conn.execute(text(f"""
             SELECT error FROM event_execution
             WHERE {where} AND error IS NOT NULL
             ORDER BY completed_at DESC LIMIT 1
-            """,
-            tuple(params),
-        ).fetchone()
+            """), params).mappings().fetchone()
         if event_id:
-            deduplicated = conn.execute(
-                """
+            deduplicated = conn.execute(text("""
                 SELECT COALESCE(SUM(batch.deduplicated_count), 0) AS count
                 FROM event_execution_batch AS batch
-                WHERE batch.player_id = ?
+                WHERE batch.player_id = :p0
                   AND EXISTS (
                       SELECT 1 FROM event_execution AS execution
                       WHERE execution.owner_user_id = batch.player_id
                         AND execution.execution_key = batch.execution_key
-                        AND execution.event_id = ?
+                        AND execution.event_id = :p1
                   )
-                """,
-                (owner_user_id, event_id),
-            ).fetchone()
+                """), {"p0": owner_user_id, "p1": event_id}).mappings().fetchone()
         else:
-            deduplicated = conn.execute(
-                """
+            deduplicated = conn.execute(text("""
                 SELECT COALESCE(SUM(deduplicated_count), 0) AS count
-                FROM event_execution_batch WHERE player_id = ?
-                """,
-                (owner_user_id,),
-            ).fetchone()
+                FROM event_execution_batch WHERE player_id = :p0
+                """), {"p0": owner_user_id}).mappings().fetchone()
     return {
         "matched_count": int(aggregate["matched_count"] or 0),
         "succeeded_count": int(aggregate["succeeded_count"] or 0),
@@ -1829,29 +1445,20 @@ def delete_trigger_history(
     删除某事件对特定玩家的所有触发记录
     返回删除的行数
     """
-    with get_conn() as conn:
-        cur = conn.execute(
-            """
+    with db_session() as conn:
+        cur = conn.execute(text("""
             DELETE FROM event_trigger_log
-            WHERE event_id = ? AND character_id = ? AND player_id = ?
-            """,
-            (event_id, character_id, player_id),
-        )
-        conn.execute(
-            """
+            WHERE event_id = :p0 AND character_id = :p1 AND player_id = :p2
+            """), {"p0": event_id, "p1": character_id, "p2": player_id})
+        conn.execute(text("""
             DELETE FROM event_trigger_guard
-            WHERE event_id = ? AND player_id = ?
-              AND character_scope IN (?, '')
-            """,
-            (event_id, player_id, character_id),
-        )
-        conn.execute(
-            """
+            WHERE event_id = :p0 AND player_id = :p1
+              AND character_scope IN (:p2, '')
+            """), {"p0": event_id, "p1": player_id, "p2": character_id})
+        conn.execute(text("""
             DELETE FROM event_exclusive_group_guard
-            WHERE player_id = ? AND selected_event_id = ?
-            """,
-            (player_id, event_id),
-        )
+            WHERE player_id = :p0 AND selected_event_id = :p1
+            """), {"p0": player_id, "p1": event_id})
         return cur.rowcount
 
 
@@ -1869,13 +1476,12 @@ def save_event_context_state(
 ) -> bool:
     """保存事件进度上下文，同一 event+character+player 只保留一条。"""
     try:
-        with get_conn() as conn:
-            conn.execute(
-                """
+        with db_session() as conn:
+            conn.execute(text("""
                 INSERT INTO event_context_state
                 (event_id, character_id, player_id, context_data, status, progress,
                  last_session_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (:p0, :p1, :p2, :p3, :p4, :p5, :p6, :p7, :p8)
                 ON CONFLICT(event_id, character_id, player_id)
                 DO UPDATE SET
                     context_data=excluded.context_data,
@@ -1883,10 +1489,7 @@ def save_event_context_state(
                     progress=excluded.progress,
                     last_session_id=excluded.last_session_id,
                     updated_at=excluded.updated_at
-                """,
-                (event_id, character_id, player_id, context_data, status, progress,
-                 last_session_id, _now(), _now()),
-            )
+                """), {"p0": event_id, "p1": character_id, "p2": player_id, "p3": context_data, "p4": status, "p5": progress, "p6": last_session_id, "p7": _now(), "p8": _now()})
         return True
     except Exception as e:
         logger.error(f"保存事件上下文失败: {e}")
@@ -1895,14 +1498,11 @@ def save_event_context_state(
 
 def get_event_context_state(event_id: str, character_id: str, player_id: str) -> dict | None:
     """获取指定事件上下文。"""
-    with get_conn() as conn:
-        row = conn.execute(
-            """
+    with db_session() as conn:
+        row = conn.execute(text("""
             SELECT * FROM event_context_state
-            WHERE event_id = ? AND character_id = ? AND player_id = ?
-            """,
-            (event_id, character_id, player_id),
-        ).fetchone()
+            WHERE event_id = :p0 AND character_id = :p1 AND player_id = :p2
+            """), {"p0": event_id, "p1": character_id, "p2": player_id}).mappings().fetchone()
     return _row_to_dict(row)
 
 
@@ -1913,21 +1513,21 @@ def list_event_context_states(
     limit: int = 100,
 ) -> list[dict]:
     """列出事件上下文，可按角色、玩家和状态过滤。"""
-    with get_conn() as conn:
+    with db_session() as conn:
         query = "SELECT * FROM event_context_state WHERE 1=1"
-        params = []
+        params: dict[str, Any] = {}
         if character_id:
-            query += " AND character_id = ?"
-            params.append(character_id)
+            query += " AND character_id = :character_id"
+            params["character_id"] = character_id
         if player_id:
-            query += " AND player_id = ?"
-            params.append(player_id)
+            query += " AND player_id = :player_id"
+            params["player_id"] = player_id
         if status:
-            query += " AND status = ?"
-            params.append(status)
-        query += " ORDER BY updated_at DESC LIMIT ?"
-        params.append(limit)
-        rows = conn.execute(query, params).fetchall()
+            query += " AND status = :status"
+            params["status"] = status
+        query += " ORDER BY updated_at DESC LIMIT :limit"
+        params["limit"] = limit
+        rows = conn.execute(text(query), params).mappings().fetchall()
     return [dict(r) for r in rows]
 
 
@@ -1946,13 +1546,12 @@ def _save_event_schedule_state_in_transaction(
     missed_count: int = 0,
 ) -> None:
     now = _now()
-    conn.execute(
-        """
+    conn.execute(text("""
         INSERT INTO event_schedule_state
         (event_id, character_id, player_id, schedule, last_checked_at,
          last_run_at, next_run_at, next_due_real_at, missed_count,
          status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (:p0, :p1, :p2, :p3, :p4, :p5, :p6, :p7, :p8, :p9, :p10, :p11)
         ON CONFLICT(event_id, character_id, player_id)
         DO UPDATE SET
             schedule=excluded.schedule,
@@ -1963,22 +1562,51 @@ def _save_event_schedule_state_in_transaction(
             missed_count=excluded.missed_count,
             status=excluded.status,
             updated_at=excluded.updated_at
-        """,
-        (
+        """), {"p0": event_id, "p1": character_id, "p2": player_id, "p3": schedule, "p4": last_checked_at, "p5": last_run_at, "p6": next_run_at, "p7": next_due_real_at, "p8": missed_count, "p9": status, "p10": now, "p11": now})
+
+
+def _preserve_schedule_history(
+    conn,
+    owner_user_id: str,
+    event_id: str,
+    schedule: str | None,
+) -> None:
+    """保存定义保存时的调度历史：调度存在时保留注册的调度行。
+
+    - 若定义带 schedule（直接保存），按定义重建调度行（upsert）。
+    - 若定义不带 schedule 但已存在注册的调度行，保留原行（不删除）。
+    - 若定义不带 schedule 且无注册调度，保留原行为（无调度）。
+    """
+    if schedule:
+        _save_event_schedule_state_in_transaction(
+            conn,
+            event_id=event_id,
+            character_id=None,
+            player_id=owner_user_id,
+            schedule=schedule,
+        )
+        return
+    with conn.execute(text("""
+        SELECT schedule FROM event_schedule_state
+        WHERE event_id = :p0 AND player_id = :p1
+        """), {"p0": event_id, "p1": owner_user_id}).mappings() as rows:
+        existing = rows.fetchall()
+    if not existing:
+        return
+    if len(existing) > 1:
+        logger.warning(
+            "事件 %s 存在多条调度记录，定义保存仅保留一条",
             event_id,
-            character_id,
-            player_id,
-            schedule,
-            last_checked_at,
-            last_run_at,
-            next_run_at,
-            next_due_real_at,
-            missed_count,
-            status,
-            now,
-            now,
-        ),
-    )
+        )
+        conn.execute(text("""
+            DELETE FROM event_schedule_state
+            WHERE event_id = :p0 AND player_id = :p1
+              AND rowid NOT IN (
+                SELECT MIN(rowid) FROM event_schedule_state
+                WHERE event_id = :p0 AND player_id = :p1
+              )
+            """), {"p0": event_id, "p1": owner_user_id})
+    # 保留注册的调度行（不删除）
 
 
 def save_event_schedule_state(
@@ -1995,7 +1623,7 @@ def save_event_schedule_state(
 ) -> bool:
     """保存时间驱动事件的调度状态。"""
     try:
-        with get_conn() as conn:
+        with db_session() as conn:
             _save_event_schedule_state_in_transaction(
                 conn,
                 event_id=event_id,
@@ -2037,7 +1665,7 @@ def save_event_definition_with_schedule(
 ) -> bool:
     """Atomically save an event definition and its single schedule state."""
     try:
-        with get_conn() as conn:
+        with db_session() as conn:
             _save_event_definition_in_transaction(
                 conn,
                 owner_user_id=owner_user_id,
@@ -2063,15 +1691,10 @@ def save_event_definition_with_schedule(
                 if schedule_state.get("player_id") != owner_user_id:
                     raise ValueError("Schedule player_id does not match definition owner")
 
-            conn.execute(
-                """
-                DELETE FROM event_schedule_state
-                WHERE event_id = ? AND player_id = ?
-                """,
-                (event_id, owner_user_id),
-            )
             if schedule_state is not None:
                 _save_event_schedule_state_in_transaction(conn, **schedule_state)
+            else:
+                _preserve_schedule_history(conn, owner_user_id, event_id, schedule)
         return True
     except Exception as e:
         logger.error(f"原子保存事件定义和调度失败: {e}")
@@ -2085,30 +1708,35 @@ def list_due_event_schedules(
     after: tuple[str, str, str, str] | None = None,
 ) -> list[dict]:
     """List schedules due against indexed real UTC time."""
-    with get_conn() as conn:
+    with db_session() as conn:
         query = """
             SELECT * FROM event_schedule_state
             WHERE status = 'active'
               AND next_run_at IS NOT NULL
               AND next_due_real_at IS NOT NULL
-              AND next_due_real_at <= ?
+              AND next_due_real_at <= :now_iso
         """
-        params = [now_iso]
+        params: dict[str, Any] = {"now_iso": now_iso}
         if player_id:
-            query += " AND player_id = ?"
-            params.append(player_id)
+            query += " AND player_id = :player_id"
+            params["player_id"] = player_id
         if after:
             query += """
                 AND (next_due_real_at, event_id, character_id, player_id)
-                    > (?, ?, ?, ?)
+                    > (:after_0, :after_1, :after_2, :after_3)
             """
-            params.extend(after)
+            params.update({
+                "after_0": after[0],
+                "after_1": after[1],
+                "after_2": after[2],
+                "after_3": after[3],
+            })
         query += """
             ORDER BY next_due_real_at, event_id, character_id, player_id
-            LIMIT ?
+            LIMIT :limit
         """
-        params.append(limit)
-        rows = conn.execute(query, params).fetchall()
+        params["limit"] = limit
+        rows = conn.execute(text(query), params).mappings().fetchall()
     return [dict(r) for r in rows]
 
 
@@ -2117,18 +1745,18 @@ def list_active_event_schedules(
     player_id: str | None = None,
 ) -> list[dict]:
     """List active schedules for per-player world-time evaluation."""
-    with get_conn() as conn:
+    with db_session() as conn:
         query = """
             SELECT * FROM event_schedule_state
             WHERE status = 'active' AND next_run_at IS NOT NULL
         """
-        params: list[Any] = []
+        params: dict[str, Any] = {}
         if player_id:
-            query += " AND player_id = ?"
-            params.append(player_id)
-        query += " ORDER BY next_run_at ASC LIMIT ?"
-        params.append(limit)
-        rows = conn.execute(query, params).fetchall()
+            query += " AND player_id = :player_id"
+            params["player_id"] = player_id
+        query += " ORDER BY next_run_at ASC LIMIT :limit"
+        params["limit"] = limit
+        rows = conn.execute(text(query), params).mappings().fetchall()
     return [dict(row) for row in rows]
 
 
@@ -2138,18 +1766,18 @@ def list_event_schedules(
     status: str | None = None,
     limit: int = 200,
 ) -> list[dict]:
-    with get_conn() as conn:
-        query = "SELECT * FROM event_schedule_state WHERE player_id = ?"
-        params: list[Any] = [player_id]
+    with db_session() as conn:
+        query = "SELECT * FROM event_schedule_state WHERE player_id = :player_id"
+        params: dict[str, Any] = {"player_id": player_id}
         if event_id:
-            query += " AND event_id = ?"
-            params.append(event_id)
+            query += " AND event_id = :event_id"
+            params["event_id"] = event_id
         if status:
-            query += " AND status = ?"
-            params.append(status)
-        query += " ORDER BY next_run_at ASC, updated_at DESC LIMIT ?"
-        params.append(max(1, min(limit, 1000)))
-        rows = conn.execute(query, params).fetchall()
+            query += " AND status = :status"
+            params["status"] = status
+        query += " ORDER BY next_run_at ASC, updated_at DESC LIMIT :limit"
+        params["limit"] = max(1, min(limit, 1000))
+        rows = conn.execute(text(query), params).mappings().fetchall()
     return [dict(row) for row in rows]
 
 
@@ -2158,14 +1786,11 @@ def get_event_schedule(
     character_id: str,
     player_id: str,
 ) -> dict | None:
-    with get_conn() as conn:
-        row = conn.execute(
-            """
+    with db_session() as conn:
+        row = conn.execute(text("""
             SELECT * FROM event_schedule_state
-            WHERE event_id = ? AND character_id = ? AND player_id = ?
-            """,
-            (event_id, character_id, player_id),
-        ).fetchone()
+            WHERE event_id = :p0 AND character_id = :p1 AND player_id = :p2
+            """), {"p0": event_id, "p1": character_id, "p2": player_id}).mappings().fetchone()
     return _row_to_dict(row)
 
 
@@ -2179,34 +1804,21 @@ def set_event_schedule_status(
 ) -> bool:
     if status not in {"active", "paused"}:
         raise ValueError("schedule status must be active or paused")
-    with get_conn() as conn:
+    with db_session() as conn:
         if next_run_at is None:
-            cursor = conn.execute(
-                """
+            cursor = conn.execute(text("""
                 UPDATE event_schedule_state
-                SET status = ?, lease_owner = NULL, lease_expires_at = NULL,
-                    updated_at = ?
-                WHERE event_id = ? AND character_id = ? AND player_id = ?
-                """,
-                (status, _now(), event_id, character_id, player_id),
-            )
+                SET status = :p0, lease_owner = NULL, lease_expires_at = NULL,
+                    updated_at = :p1
+                WHERE event_id = :p2 AND character_id = :p3 AND player_id = :p4
+                """), {"p0": status, "p1": _now(), "p2": event_id, "p3": character_id, "p4": player_id})
         else:
-            cursor = conn.execute(
-                """
+            cursor = conn.execute(text("""
                 UPDATE event_schedule_state
-                SET status = ?, next_run_at = ?, lease_owner = NULL,
-                    lease_expires_at = NULL, updated_at = ?
-                WHERE event_id = ? AND character_id = ? AND player_id = ?
-                """,
-                (
-                    status,
-                    next_run_at,
-                    _now(),
-                    event_id,
-                    character_id,
-                    player_id,
-                ),
-            )
+                SET status = :p0, next_run_at = :p1, lease_owner = NULL,
+                    lease_expires_at = NULL, updated_at = :p2
+                WHERE event_id = :p3 AND character_id = :p4 AND player_id = :p5
+                """), {"p0": status, "p1": next_run_at, "p2": _now(), "p3": event_id, "p4": character_id, "p5": player_id})
     return cursor.rowcount == 1
 
 
@@ -2216,20 +1828,14 @@ def delete_event_schedules(
     character_id: str | None = None,
 ) -> int:
     """Delete schedules owned by a player, optionally for one character."""
-    with get_conn() as conn:
+    with db_session() as conn:
         if character_id is None:
-            cursor = conn.execute(
-                "DELETE FROM event_schedule_state WHERE event_id = ? AND player_id = ?",
-                (event_id, player_id),
-            )
+            cursor = conn.execute(text("""DELETE FROM event_schedule_state WHERE event_id = :p0 AND player_id = :p1"""), {"p0": event_id, "p1": player_id})
         else:
-            cursor = conn.execute(
-                """
+            cursor = conn.execute(text("""
                 DELETE FROM event_schedule_state
-                WHERE event_id = ? AND character_id = ? AND player_id = ?
-                """,
-                (event_id, character_id, player_id),
-            )
+                WHERE event_id = :p0 AND character_id = :p1 AND player_id = :p2
+                """), {"p0": event_id, "p1": character_id, "p2": player_id})
     return cursor.rowcount
 
 
@@ -2244,34 +1850,31 @@ def claim_event_schedule(
     expected_next_run_at: str,
     expected_next_due_real_at: str | None = None,
 ) -> bool:
-    """Conditionally claim a schedule using a real-UTC lease."""
-    with get_conn() as conn:
-        cursor = conn.execute(
-            """
+    """Conditionally claim a schedule using a real-UTC lease.
+
+    若上次执行失败（``last_failed_at`` 在 60 秒内），拒绝立即重试，
+    避免失败调度以 30 秒间隔无限重跑烧 LLM。
+    """
+    backoff_cutoff = (
+        datetime.now(timezone.utc) - timedelta(seconds=60)
+    ).isoformat()
+    with db_session() as conn:
+        cursor = conn.execute(text("""
             UPDATE event_schedule_state
-            SET lease_owner = ?, lease_expires_at = ?, updated_at = ?
-            WHERE event_id = ? AND character_id = ? AND player_id = ?
+            SET lease_owner = :p0, lease_expires_at = :p1, updated_at = :p2
+            WHERE event_id = :p3 AND character_id = :p4 AND player_id = :p5
               AND status = 'active'
-              AND next_run_at = ?
+              AND next_run_at = :p6
               AND (
-                next_due_real_at = ?
-                OR (next_due_real_at IS NULL AND ? IS NULL)
+                next_due_real_at = :p7
+                OR (next_due_real_at IS NULL AND CAST(:p8 AS TEXT) IS NULL)
               )
-              AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
-            """,
-            (
-                lease_owner,
-                lease_expires_at,
-                real_now_iso,
-                event_id,
-                character_id,
-                player_id,
-                expected_next_run_at,
-                expected_next_due_real_at,
-                expected_next_due_real_at,
-                real_now_iso,
-            ),
-        )
+              AND (lease_expires_at IS NULL OR lease_expires_at <= :p9)
+              AND (
+                last_failed_at IS NULL
+                OR last_failed_at <= :p10
+              )
+            """), {"p0": lease_owner, "p1": lease_expires_at, "p2": real_now_iso, "p3": event_id, "p4": character_id, "p5": player_id, "p6": expected_next_run_at, "p7": expected_next_due_real_at, "p8": expected_next_due_real_at, "p9": real_now_iso, "p10": backoff_cutoff})
     return cursor.rowcount == 1
 
 
@@ -2287,65 +1890,45 @@ def complete_event_schedule(
     next_due_real_at: str | None = None,
     missed_count: int = 0,
 ) -> bool:
-    with get_conn() as conn:
-        cursor = conn.execute(
-            """
+    with db_session() as conn:
+        cursor = conn.execute(text("""
             UPDATE event_schedule_state
-            SET last_checked_at = ?, last_run_at = ?, next_run_at = ?,
-                next_due_real_at = ?, missed_count = ?,
+            SET last_checked_at = :p0, last_run_at = :p1, next_run_at = :p2,
+                next_due_real_at = :p3, missed_count = :p4,
                 lease_owner = NULL, lease_expires_at = NULL,
-                last_error = NULL, last_failed_at = NULL, updated_at = ?
-            WHERE event_id = ? AND character_id = ? AND player_id = ?
-              AND lease_owner = ?
-            """,
-            (
-                last_checked_at,
-                last_run_at,
-                next_run_at,
-                next_due_real_at,
-                missed_count,
-                _now(),
-                event_id,
-                character_id,
-                player_id,
-                lease_owner,
-            ),
-        )
+                last_error = NULL, last_failed_at = NULL, updated_at = :p5
+            WHERE event_id = :p6 AND character_id = :p7 AND player_id = :p8
+              AND lease_owner = :p9
+            """), {"p0": last_checked_at, "p1": last_run_at, "p2": next_run_at, "p3": next_due_real_at, "p4": missed_count, "p5": _now(), "p6": event_id, "p7": character_id, "p8": player_id, "p9": lease_owner})
     return cursor.rowcount == 1
 
 
 def get_next_event_schedule(player_id: str) -> dict | None:
     """Return the player's earliest active schedule for clock UI display."""
-    with get_conn() as conn:
-        row = conn.execute(
-            """
+    with db_session() as conn:
+        row = conn.execute(text("""
             SELECT s.*, d.event_name
             FROM event_schedule_state s
             LEFT JOIN event_definition d
               ON d.owner_user_id = s.player_id AND d.event_id = s.event_id
-            WHERE s.player_id = ? AND s.status = 'active'
+            WHERE s.player_id = :p0 AND s.status = 'active'
               AND s.next_run_at IS NOT NULL
             ORDER BY
               CASE WHEN s.next_due_real_at IS NULL THEN 1 ELSE 0 END,
               s.next_due_real_at ASC,
               s.next_run_at ASC
             LIMIT 1
-            """,
-            (player_id,),
-        ).fetchone()
+            """), {"p0": player_id}).mappings().fetchone()
     return _row_to_dict(row)
 
 
 def list_event_schedules_for_player(player_id: str) -> list[dict]:
-    with get_conn() as conn:
-        rows = conn.execute(
-            """
+    with db_session() as conn:
+        rows = conn.execute(text("""
             SELECT * FROM event_schedule_state
-            WHERE player_id = ?
+            WHERE player_id = :p0
             ORDER BY next_run_at ASC
-            """,
-            (player_id,),
-        ).fetchall()
+            """), {"p0": player_id}).mappings().fetchall()
     return [dict(row) for row in rows]
 
 
@@ -2353,19 +1936,19 @@ def list_event_schedules_missing_due_projection(
     player_id: str | None = None,
 ) -> list[dict]:
     """Return active schedules that need a real-time due projection."""
-    with get_conn() as conn:
+    with db_session() as conn:
         query = """
             SELECT * FROM event_schedule_state
             WHERE status = 'active'
               AND next_run_at IS NOT NULL
               AND next_due_real_at IS NULL
         """
-        params: list[Any] = []
+        params: dict[str, Any] = {}
         if player_id:
-            query += " AND player_id = ?"
-            params.append(player_id)
+            query += " AND player_id = :player_id"
+            params["player_id"] = player_id
         query += " ORDER BY player_id, next_run_at"
-        rows = conn.execute(query, params).fetchall()
+        rows = conn.execute(text(query), params).mappings().fetchall()
     return [dict(row) for row in rows]
 
 
@@ -2378,25 +1961,15 @@ def set_event_schedule_due_projection(
     next_due_real_at: str,
 ) -> bool:
     """Backfill a missing projection without changing schedule ownership."""
-    with get_conn() as conn:
-        cursor = conn.execute(
-            """
+    with db_session() as conn:
+        cursor = conn.execute(text("""
             UPDATE event_schedule_state
-            SET next_due_real_at = ?, updated_at = ?
-            WHERE event_id = ? AND character_id = ? AND player_id = ?
+            SET next_due_real_at = :p0, updated_at = :p1
+            WHERE event_id = :p2 AND character_id = :p3 AND player_id = :p4
               AND status = 'active'
-              AND next_run_at = ?
+              AND next_run_at = :p5
               AND next_due_real_at IS NULL
-            """,
-            (
-                next_due_real_at,
-                _now(),
-                event_id,
-                character_id,
-                player_id,
-                expected_next_run_at,
-            ),
-        )
+            """), {"p0": next_due_real_at, "p1": _now(), "p2": event_id, "p3": character_id, "p4": player_id, "p5": expected_next_run_at})
     return cursor.rowcount == 1
 
 
@@ -2410,25 +1983,14 @@ def fail_event_schedule(
     failed_at: str,
 ) -> bool:
     """Record a scheduler failure and release only the current worker's lease."""
-    with get_conn() as conn:
-        cursor = conn.execute(
-            """
+    with db_session() as conn:
+        cursor = conn.execute(text("""
             UPDATE event_schedule_state
-            SET last_error = ?, last_failed_at = ?, lease_owner = NULL,
-                lease_expires_at = NULL, updated_at = ?
-            WHERE event_id = ? AND character_id = ? AND player_id = ?
-              AND lease_owner = ?
-            """,
-            (
-                error[:2000],
-                failed_at,
-                _now(),
-                event_id,
-                character_id,
-                player_id,
-                lease_owner,
-            ),
-        )
+            SET last_error = :p0, last_failed_at = :p1, lease_owner = NULL,
+                lease_expires_at = NULL, updated_at = :p2
+            WHERE event_id = :p3 AND character_id = :p4 AND player_id = :p5
+              AND lease_owner = :p6
+            """), {"p0": error[:2000], "p1": failed_at, "p2": _now(), "p3": event_id, "p4": character_id, "p5": player_id, "p6": lease_owner})
     return cursor.rowcount == 1
 
 
@@ -2439,24 +2001,20 @@ def release_event_schedule(
     *,
     lease_owner: str,
 ) -> bool:
-    with get_conn() as conn:
-        cursor = conn.execute(
-            """
+    with db_session() as conn:
+        cursor = conn.execute(text("""
             UPDATE event_schedule_state
-            SET lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
-            WHERE event_id = ? AND character_id = ? AND player_id = ?
-              AND lease_owner = ?
-            """,
-            (_now(), event_id, character_id, player_id, lease_owner),
-        )
+            SET lease_owner = NULL, lease_expires_at = NULL, updated_at = :p0
+            WHERE event_id = :p1 AND character_id = :p2 AND player_id = :p3
+              AND lease_owner = :p4
+            """), {"p0": _now(), "p1": event_id, "p2": character_id, "p3": player_id, "p4": lease_owner})
     return cursor.rowcount == 1
 
 
 def get_latest_active_multi_session(player_id: str) -> dict | None:
     """Return the player's most recently active group session."""
-    with get_conn() as conn:
-        row = conn.execute(
-            """
+    with db_session() as conn:
+        row = conn.execute(text("""
             SELECT
                 s.*,
                 (
@@ -2467,14 +2025,15 @@ def get_latest_active_multi_session(player_id: str) -> dict | None:
                     LIMIT 1
                 ) AS last_message_at
             FROM session s
-            WHERE s.player_id = ?
+            WHERE s.player_id = :p0
               AND s.status = 'active'
               AND COALESCE(s.is_multi_character, 0) = 1
-            ORDER BY COALESCE(last_message_at, s.created_at) DESC
+            ORDER BY COALESCE(
+                (SELECT created_at FROM short_term_message
+                 WHERE session_id = s.session_id ORDER BY id DESC LIMIT 1),
+                s.created_at) DESC
             LIMIT 1
-            """,
-            (player_id,),
-        ).fetchone()
+            """), {"p0": player_id}).mappings().fetchone()
     return _row_to_dict(row)
 
 
@@ -2492,34 +2051,36 @@ def enqueue_player_event(
     payload: str | None = None,
     world_created_at: str | None = None,
 ) -> int:
-    with get_conn() as conn:
+    with db_session() as conn:
         sql = """
             INSERT INTO player_event_inbox
             (player_id, event_id, character_id, session_id, event_type,
              group_thread_id, unread_count, title, content, payload,
              world_created_at, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (:player_id, :event_id, :character_id, :session_id,
+                    :event_type, :group_thread_id, :unread_count, :title,
+                    :content, :payload, :world_created_at, :created_at)
         """
         if _is_postgres_enabled():
             sql += " RETURNING id"
         cursor = conn.execute(
-            sql,
-            (
-                player_id,
-                event_id,
-                character_id,
-                session_id,
-                event_type,
-                group_thread_id,
-                max(0, int(unread_count or 0)),
-                title,
-                content,
-                payload,
-                world_created_at,
-                _now(),
-            ),
+            text(sql),
+            {
+                "player_id": player_id,
+                "event_id": event_id,
+                "character_id": character_id,
+                "session_id": session_id,
+                "event_type": event_type,
+                "group_thread_id": group_thread_id,
+                "unread_count": max(0, int(unread_count or 0)),
+                "title": title,
+                "content": content,
+                "payload": payload,
+                "world_created_at": world_created_at,
+                "created_at": _now(),
+            },
         )
-        return cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
+        return cursor.mappings().fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
 
 
 def _upsert_group_message_notification_in_transaction(
@@ -2537,68 +2098,55 @@ def _upsert_group_message_notification_in_transaction(
     if increment <= 0:
         return 0
 
-    row = conn.execute(
-        """
+    row = conn.execute(text("""
         SELECT id, unread_count
         FROM player_event_inbox
-        WHERE player_id = ? AND event_type = 'group_message'
-          AND group_thread_id = ? AND read_at IS NULL
+        WHERE player_id = :p0 AND event_type = 'group_message'
+          AND group_thread_id = :p1 AND read_at IS NULL
         ORDER BY id DESC
         LIMIT 1
-        """,
-        (player_id, group_thread_id),
-    ).fetchone()
+        """), {"p0": player_id, "p1": group_thread_id}).mappings().fetchone()
     if row:
         unread_count = int(row["unread_count"] or 0) + increment
-        conn.execute(
-            """
+        conn.execute(text("""
             UPDATE player_event_inbox
-            SET session_id = ?, unread_count = ?, content = ?, title = ?,
-                world_created_at = ?, created_at = ?, payload = ?
-            WHERE id = ?
-            """,
-            (
-                session_id,
-                unread_count,
-                f"群聊中有 {unread_count} 条新消息",
-                group_name or "群聊新消息",
-                world_created_at,
-                _now(),
-                json.dumps(
+            SET session_id = :p0, unread_count = :p1, content = :p2, title = :p3,
+                world_created_at = :p4, created_at = :p5, payload = :p6
+            WHERE id = :p7
+            """), {"p0": session_id, "p1": unread_count, "p2": f"群聊中有 {unread_count} 条新消息", "p3": group_name or "群聊新消息", "p4": world_created_at, "p5": _now(), "p6": json.dumps(
                     {"group_thread_id": group_thread_id, "unread_count": unread_count},
                     ensure_ascii=False,
-                ),
-                row["id"],
-            ),
-        )
+                ), "p7": row["id"]})
         return int(row["id"])
 
     sql = """
         INSERT INTO player_event_inbox
         (player_id, session_id, event_type, group_thread_id, unread_count,
          title, content, payload, world_created_at, created_at)
-        VALUES (?, ?, 'group_message', ?, ?, ?, ?, ?, ?, ?)
+        VALUES (:player_id, :session_id, 'group_message', :group_thread_id,
+                :unread_count, :title, :content, :payload, :world_created_at,
+                :created_at)
     """
     if _is_postgres_enabled():
         sql += " RETURNING id"
     cursor = conn.execute(
-        sql,
-        (
-            player_id,
-            session_id,
-            group_thread_id,
-            increment,
-            group_name or "群聊新消息",
-            f"群聊中有 {increment} 条新消息",
-            json.dumps(
+        text(sql),
+        {
+            "player_id": player_id,
+            "session_id": session_id,
+            "group_thread_id": group_thread_id,
+            "unread_count": increment,
+            "title": group_name or "群聊新消息",
+            "content": f"群聊中有 {increment} 条新消息",
+            "payload": json.dumps(
                 {"group_thread_id": group_thread_id, "unread_count": increment},
                 ensure_ascii=False,
             ),
-            world_created_at,
-            _now(),
-        ),
+            "world_created_at": world_created_at,
+            "created_at": _now(),
+        },
     )
-    return int(cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid)
+    return int(cursor.mappings().fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid)
 
 
 def upsert_group_message_notification(
@@ -2610,7 +2158,7 @@ def upsert_group_message_notification(
     group_name: str | None = None,
     world_created_at: str | None = None,
 ) -> int:
-    with get_conn() as conn:
+    with db_session() as conn:
         return _upsert_group_message_notification_in_transaction(
             conn,
             player_id,
@@ -2628,44 +2176,35 @@ def list_player_event_inbox(
     unread_only: bool = True,
     limit: int = 50,
 ) -> list[dict]:
-    with get_conn() as conn:
+    with db_session() as conn:
         unread_clause = "AND read_at IS NULL" if unread_only else ""
-        rows = conn.execute(
-            f"""
+        rows = conn.execute(text(f"""
             SELECT * FROM player_event_inbox
-            WHERE player_id = ? {unread_clause}
+            WHERE player_id = :p0 {unread_clause}
             ORDER BY id DESC
-            LIMIT ?
-            """,
-            (player_id, limit),
-        ).fetchall()
+            LIMIT :p1
+            """), {"p0": player_id, "p1": limit}).mappings().fetchall()
     return [dict(row) for row in rows]
 
 
 def mark_player_event_read(player_id: str, inbox_id: int) -> bool:
-    with get_conn() as conn:
-        cursor = conn.execute(
-            """
+    with db_session() as conn:
+        cursor = conn.execute(text("""
             UPDATE player_event_inbox
-            SET read_at = COALESCE(read_at, ?)
-            WHERE id = ? AND player_id = ?
-            """,
-            (_now(), inbox_id, player_id),
-        )
+            SET read_at = COALESCE(read_at, :p0)
+            WHERE id = :p1 AND player_id = :p2
+            """), {"p0": _now(), "p1": inbox_id, "p2": player_id})
     return cursor.rowcount == 1
 
 
 def mark_group_thread_notifications_read(player_id: str, group_thread_id: str) -> int:
-    with get_conn() as conn:
-        cursor = conn.execute(
-            """
+    with db_session() as conn:
+        cursor = conn.execute(text("""
             UPDATE player_event_inbox
-            SET read_at = COALESCE(read_at, ?)
-            WHERE player_id = ? AND event_type = 'group_message'
-              AND group_thread_id = ? AND read_at IS NULL
-            """,
-            (_now(), player_id, group_thread_id),
-        )
+            SET read_at = COALESCE(read_at, :p0)
+            WHERE player_id = :p1 AND event_type = 'group_message'
+              AND group_thread_id = :p2 AND read_at IS NULL
+            """), {"p0": _now(), "p1": player_id, "p2": group_thread_id})
     return cursor.rowcount
 
 
@@ -2680,13 +2219,12 @@ def save_event_template(
 ) -> bool:
     """保存事件模板。"""
     try:
-        with get_conn() as conn:
-            conn.execute(
-                """
+        with db_session() as conn:
+            conn.execute(text("""
                 INSERT INTO event_template
                 (template_id, template_name, category, description, trigger_config,
                  effects_config, metadata, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (:p0, :p1, :p2, :p3, :p4, :p5, :p6, :p7, :p8)
                 ON CONFLICT(template_id)
                 DO UPDATE SET
                     template_name=excluded.template_name,
@@ -2696,10 +2234,7 @@ def save_event_template(
                     effects_config=excluded.effects_config,
                     metadata=excluded.metadata,
                     updated_at=excluded.updated_at
-                """,
-                (template_id, template_name, category, description, trigger_config,
-                 effects_config, metadata, _now(), _now()),
-            )
+                """), {"p0": template_id, "p1": template_name, "p2": category, "p3": description, "p4": trigger_config, "p5": effects_config, "p6": metadata, "p7": _now(), "p8": _now()})
         return True
     except Exception as e:
         logger.error(f"保存事件模板失败: {e}")
@@ -2708,32 +2243,26 @@ def save_event_template(
 
 def list_event_templates(category: str = None) -> list[dict]:
     """列出事件模板。"""
-    with get_conn() as conn:
+    with db_session() as conn:
         query = "SELECT * FROM event_template WHERE 1=1"
-        params = []
+        params: dict[str, Any] = {}
         if category:
-            query += " AND category = ?"
-            params.append(category)
+            query += " AND category = :category"
+            params["category"] = category
         query += " ORDER BY category ASC, template_name ASC"
-        rows = conn.execute(query, params).fetchall()
+        rows = conn.execute(text(query), params).mappings().fetchall()
     return [dict(r) for r in rows]
 
 
 def get_event_template(template_id: str) -> dict | None:
     """获取事件模板。"""
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM event_template WHERE template_id = ?",
-            (template_id,),
-        ).fetchone()
+    with db_session() as conn:
+        row = conn.execute(text("""SELECT * FROM event_template WHERE template_id = :p0"""), {"p0": template_id}).mappings().fetchone()
     return _row_to_dict(row)
 
 
 def delete_event_template(template_id: str) -> bool:
     """删除事件模板。"""
-    with get_conn() as conn:
-        cursor = conn.execute(
-            "DELETE FROM event_template WHERE template_id = ?",
-            (template_id,),
-        )
+    with db_session() as conn:
+        cursor = conn.execute(text("""DELETE FROM event_template WHERE template_id = :p0"""), {"p0": template_id})
     return cursor.rowcount > 0

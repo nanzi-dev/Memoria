@@ -31,7 +31,9 @@ def remove_stored_knowledge_file(storage_path: str | None) -> None:
         path = Path(storage_path)
         root = Path(configs.knowledge_storage_path).resolve()
         resolved = path.resolve()
-        if resolved.parent != root:
+        # 拒绝删除知识目录以外的文件：路径必须落在知识根目录内
+        # （或等于根目录本身，防止 symlink 逃逸后误删任意文件）。
+        if not resolved.is_relative_to(root) or resolved == root:
             logger.warning("拒绝删除知识目录以外的文件: %s", resolved)
             return
         resolved.unlink(missing_ok=True)

@@ -26,6 +26,7 @@ from memoria.core.fact_claim_policy import (
     normalize_evidence_entry,
     normalize_fact_text,
 )
+from sqlalchemy import text
 
 try:
     import psycopg
@@ -73,61 +74,75 @@ def _insert_multi_character_session_in_transaction(
     thread_id = requested_thread_id or _new_group_thread_id()
     if clean_story_id is None and requested_thread_id:
         story_row = conn.execute(
-            """
+            text("""
             SELECT story_id
             FROM session
-            WHERE player_id = ?
-              AND group_thread_id = ?
+            WHERE player_id = :player_id
+              AND group_thread_id = :thread_id
               AND COALESCE(story_id, '') <> ''
             ORDER BY created_at DESC, session_id DESC
             LIMIT 1
-            """,
-            (player_id, thread_id),
-        ).fetchone()
+            """),
+            {"player_id": player_id, "thread_id": thread_id},
+        ).mappings().fetchone()
         if story_row:
             clean_story_id = str(story_row["story_id"]).strip() or None
 
     created_at = _now()
     conn.execute(
-        """
+        text("""
         INSERT INTO session
         (session_id, character_id, player_id, player_name, created_at, status,
          group_name, group_thread_id, story_id, is_multi_character, locale)
-        VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, 1, ?)
-        """,
-        (
-            session_id,
-            character_ids[0],
-            player_id,
-            player_name,
-            created_at,
-            clean_group_name,
-            thread_id,
-            clean_story_id,
-            locale,
-        ),
+        VALUES (:session_id, :character_id, :player_id, :player_name,
+                :created_at, 'active', :group_name, :thread_id, :story_id,
+                1, :locale)
+        """),
+        {
+            "session_id": session_id,
+            "character_id": character_ids[0],
+            "player_id": player_id,
+            "player_name": player_name,
+            "created_at": created_at,
+            "group_name": clean_group_name,
+            "thread_id": thread_id,
+            "story_id": clean_story_id,
+            "locale": locale,
+        },
     )
 
     for idx, char_id in enumerate(character_ids):
         conn.execute(
-            """
+            text("""
             INSERT INTO multi_session_participant
             (session_id, character_id, join_order, speak_frequency, is_active, created_at)
-            VALUES (?, ?, ?, ?, 1, ?)
-            """,
-            (session_id, char_id, idx, 1.0, created_at),
+            VALUES (:session_id, :character_id, :join_order,
+                    :speak_frequency, 1, :created_at)
+            """),
+            {
+                "session_id": session_id,
+                "character_id": char_id,
+                "join_order": idx,
+                "speak_frequency": 1.0,
+                "created_at": created_at,
+            },
         )
 
     conn.execute(
-        """
+        text("""
         INSERT INTO group_dialogue_state
         (group_thread_id, player_id, created_at, updated_at)
-        VALUES (?, ?, ?, ?)
+        VALUES (:thread_id, :player_id, :created_at, :updated_at)
         ON CONFLICT(group_thread_id) DO UPDATE SET
             player_id = excluded.player_id,
             updated_at = excluded.updated_at
-        """,
-        (thread_id, player_id, created_at, created_at),
+        """),
+        {
+            "thread_id": thread_id,
+            "player_id": player_id,
+            "created_at": created_at,
+            "updated_at": created_at,
+        },
     )
     return thread_id
 
@@ -159,7 +174,7 @@ def create_multi_character_session(
         return False
     
     try:
-        with get_conn() as conn:
+        with db_session() as conn:
             _insert_multi_character_session_in_transaction(
                 conn,
                 session_id=session_id,
@@ -198,24 +213,24 @@ def get_or_create_active_multi_character_session(
     if not clean_thread_id:
         raise ValueError("继续群聊必须提供 group_thread_id")
 
-    with get_conn() as conn:
+    with db_session() as conn:
         _lock_session_creation(
             conn,
             f"active-multi-session:{clean_thread_id}",
         )
         row = conn.execute(
-            """
+            text("""
             SELECT *
             FROM session
-            WHERE player_id = ?
-              AND group_thread_id = ?
+            WHERE player_id = :player_id
+              AND group_thread_id = :group_thread_id
               AND status = 'active'
               AND is_multi_character = 1
             ORDER BY created_at DESC, session_id DESC
             LIMIT 1
-            """,
-            (player_id, clean_thread_id),
-        ).fetchone()
+            """),
+            {"player_id": player_id, "group_thread_id": clean_thread_id},
+        ).mappings().fetchone()
         if row is not None:
             return dict(row), False
 
@@ -231,9 +246,9 @@ def get_or_create_active_multi_character_session(
             story_id=story_id,
         )
         row = conn.execute(
-            "SELECT * FROM session WHERE session_id = ?",
-            (session_id,),
-        ).fetchone()
+            text("SELECT * FROM session WHERE session_id = :session_id"),
+            {"session_id": session_id},
+        ).mappings().fetchone()
         return dict(row), True
 
 
@@ -248,7 +263,7 @@ def get_session_participants(session_id: str, only_active: bool = True) -> list[
     Returns:
         list[dict]: 参与者信息列表
     """
-    with get_conn() as conn:
+    with db_session() as conn:
         query = """
             SELECT
                 p.session_id,
@@ -270,7 +285,7 @@ def get_session_participants(session_id: str, only_active: bool = True) -> list[
             LEFT JOIN character_card c
               ON c.owner_user_id = s.player_id
              AND c.character_id = p.character_id
-            WHERE p.session_id = ?
+            WHERE p.session_id = :session_id
         """
         
         if only_active:
@@ -278,7 +293,7 @@ def get_session_participants(session_id: str, only_active: bool = True) -> list[
         
         query += " ORDER BY p.join_order ASC"
         
-        rows = conn.execute(query, (session_id,)).fetchall()
+        rows = conn.execute(text(query), {"session_id": session_id}).mappings().fetchall()
     
     return [dict(r) for r in rows]
 
@@ -294,36 +309,44 @@ def get_group_thread_id(session_id: str) -> str | None:
 
     generated_thread_id = _new_group_thread_id()
     now = _now()
-    with get_conn() as conn:
+    with db_session() as conn:
         conn.execute(
-            """
+            text("""
             UPDATE session
-            SET group_thread_id = ?
-            WHERE session_id = ?
+            SET group_thread_id = :generated_thread_id
+            WHERE session_id = :session_id
               AND COALESCE(group_thread_id, '') = ''
-            """,
-            (generated_thread_id, session_id),
+            """),
+            {
+                "generated_thread_id": generated_thread_id,
+                "session_id": session_id,
+            },
         )
         row = conn.execute(
-            """
+            text("""
             SELECT group_thread_id
             FROM session
-            WHERE session_id = ?
-            """,
-            (session_id,),
-        ).fetchone()
+            WHERE session_id = :session_id
+            """),
+            {"session_id": session_id},
+        ).mappings().fetchone()
         thread_id = str(row["group_thread_id"] or "").strip() if row else ""
         if thread_id:
             conn.execute(
-                """
+                text("""
                 INSERT INTO group_dialogue_state
                 (group_thread_id, player_id, created_at, updated_at)
-                VALUES (?, ?, ?, ?)
+                VALUES (:thread_id, :player_id, :created_at, :updated_at)
                 ON CONFLICT(group_thread_id) DO UPDATE SET
                     player_id = excluded.player_id,
                     updated_at = excluded.updated_at
-                """,
-                (thread_id, session["player_id"], now, now),
+                """),
+                {
+                    "thread_id": thread_id,
+                    "player_id": session["player_id"],
+                    "created_at": now,
+                    "updated_at": now,
+                },
             )
     return thread_id or None
 
@@ -336,18 +359,18 @@ def get_multi_character_thread_sessions(session_id: str) -> list[dict]:
     thread_id = session.get("group_thread_id") or session["session_id"]
     if not thread_id:
         return []
-    with get_conn() as conn:
+    with db_session() as conn:
         rows = conn.execute(
-            """
+            text("""
             SELECT session_id, status, group_name, group_thread_id, locale, created_at, ended_at
             FROM session
-            WHERE player_id = ?
+            WHERE player_id = :player_id
               AND COALESCE(is_multi_character, 0) = 1
-              AND COALESCE(group_thread_id, session_id) = ?
+              AND COALESCE(group_thread_id, session_id) = :thread_id
             ORDER BY created_at ASC, session_id ASC
-            """,
-            (session["player_id"], thread_id),
-        ).fetchall()
+            """),
+            {"player_id": session["player_id"], "thread_id": thread_id},
+        ).mappings().fetchall()
     return [dict(r) for r in rows]
 
 
@@ -359,15 +382,19 @@ def update_participant_speak_time(session_id: str, character_id: str):
         session_id: 会话 ID
         character_id: 角色 ID
     """
-    with get_conn() as conn:
+    with db_session() as conn:
         conn.execute(
-            """
+            text("""
             UPDATE multi_session_participant
-            SET last_spoke_at = ?,
+            SET last_spoke_at = :last_spoke_at,
                 message_count = message_count + 1
-            WHERE session_id = ? AND character_id = ?
-            """,
-            (_now(), session_id, character_id),
+            WHERE session_id = :session_id AND character_id = :character_id
+            """),
+            {
+                "last_spoke_at": _now(),
+                "session_id": session_id,
+                "character_id": character_id,
+            },
         )
 
 
@@ -398,46 +425,56 @@ def append_multi_character_message(
         runtime_state: 可选，随消息在同一事务内写入的角色状态
             （需包含 player_id/affection_level/trust_level/current_mood）
     """
-    with get_conn() as conn:
+    with db_session() as conn:
         insert_sql = """
             INSERT INTO short_term_message
             (session_id, role, content, character_id, character_name, created_at,
              knowledge_sources, world_created_at, reply_to_message_id,
              reply_to_character_id, intent, topic, trigger_source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (:session_id, :role, :content, :character_id,
+                    :character_name, :created_at, :knowledge_sources,
+                    :world_created_at, :reply_to_message_id,
+                    :reply_to_character_id, :intent, :topic, :trigger_source)
         """
         if _is_postgres_enabled():
             insert_sql += " RETURNING id"
         cursor = conn.execute(
-            insert_sql,
-            (
-                session_id,
-                role,
-                content,
-                character_id,
-                character_name,
-                _now(),
-                _encode_knowledge_sources(knowledge_sources),
-                world_created_at,
-                reply_to_message_id,
-                reply_to_character_id,
-                intent,
-                topic,
-                trigger_source,
-            ),
+            text(insert_sql),
+            {
+                "session_id": session_id,
+                "role": role,
+                "content": content,
+                "character_id": character_id,
+                "character_name": character_name,
+                "created_at": _now(),
+                "knowledge_sources": _encode_knowledge_sources(knowledge_sources),
+                "world_created_at": world_created_at,
+                "reply_to_message_id": reply_to_message_id,
+                "reply_to_character_id": reply_to_character_id,
+                "intent": intent,
+                "topic": topic,
+                "trigger_source": trigger_source,
+            },
         )
-        message_id = cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
+        if _is_postgres_enabled():
+            message_id = cursor.mappings().fetchone()["id"]
+        else:
+            message_id = cursor.lastrowid
 
         # 如果是角色发言，在同一事务内更新参与者统计，保证原子性
         if role == "assistant" and character_id:
             conn.execute(
-                """
+                text("""
                 UPDATE multi_session_participant
-                SET last_spoke_at = ?,
+                SET last_spoke_at = :last_spoke_at,
                     message_count = message_count + 1
-                WHERE session_id = ? AND character_id = ?
-                """,
-                (_now(), session_id, character_id),
+                WHERE session_id = :session_id AND character_id = :character_id
+                """),
+                {
+                    "last_spoke_at": _now(),
+                    "session_id": session_id,
+                    "character_id": character_id,
+                },
             )
 
         if runtime_state and character_id:
@@ -469,36 +506,37 @@ def update_multi_character_message(
     trigger_source: str | None = None,
 ) -> bool:
     """更新群聊脉冲中已落库的角色消息，不重复增加参与者发言计数。"""
-    with get_conn() as conn:
+    with db_session() as conn:
         cursor = conn.execute(
-            """
+            text("""
             UPDATE short_term_message
-            SET content = ?,
-                character_id = ?,
-                character_name = ?,
-                knowledge_sources = ?,
-                world_created_at = ?,
-                reply_to_message_id = ?,
-                reply_to_character_id = ?,
-                intent = ?,
-                topic = ?,
-                trigger_source = ?
-            WHERE id = ? AND session_id = ? AND role = 'assistant'
-            """,
-            (
-                content,
-                character_id,
-                character_name,
-                _encode_knowledge_sources(knowledge_sources),
-                world_created_at,
-                reply_to_message_id,
-                reply_to_character_id,
-                intent,
-                topic,
-                trigger_source,
-                int(message_id),
-                session_id,
-            ),
+            SET content = :content,
+                character_id = :character_id,
+                character_name = :character_name,
+                knowledge_sources = :knowledge_sources,
+                world_created_at = :world_created_at,
+                reply_to_message_id = :reply_to_message_id,
+                reply_to_character_id = :reply_to_character_id,
+                intent = :intent,
+                topic = :topic,
+                trigger_source = :trigger_source
+            WHERE id = :message_id AND session_id = :session_id
+              AND role = 'assistant'
+            """),
+            {
+                "content": content,
+                "character_id": character_id,
+                "character_name": character_name,
+                "knowledge_sources": _encode_knowledge_sources(knowledge_sources),
+                "world_created_at": world_created_at,
+                "reply_to_message_id": reply_to_message_id,
+                "reply_to_character_id": reply_to_character_id,
+                "intent": intent,
+                "topic": topic,
+                "trigger_source": trigger_source,
+                "message_id": int(message_id),
+                "session_id": session_id,
+            },
         )
         return cursor.rowcount > 0
 
@@ -520,43 +558,43 @@ def get_multi_character_history(
         list[dict]: 消息列表，包含 role, content, character_id, character_name
     """
     created_after_clause = ""
-    base_params = [session_id]
+    base_params = {"session_id": session_id}
     if created_after:
-        created_after_clause = "AND created_at >= ?"
-        base_params.append(created_after)
+        created_after_clause = "AND created_at >= :created_after"
+        base_params["created_after"] = created_after
 
-    with get_conn() as conn:
+    with db_session() as conn:
         if limit_messages is None:
             rows = conn.execute(
-                f"""
+                text(f"""
                 SELECT id AS message_id, session_id, role, content, character_id,
                        character_name, knowledge_sources, reply_to_message_id,
                        reply_to_character_id, intent, topic, trigger_source,
                        created_at, world_created_at
                 FROM short_term_message
-                WHERE session_id = ?
+                WHERE session_id = :session_id
                   {created_after_clause}
                 ORDER BY id ASC
-                """,
-                tuple(base_params),
-            ).fetchall()
+                """),
+                base_params,
+            ).mappings().fetchall()
             return [_decode_message_row(r) for r in rows]
 
-        params = [*base_params, limit_messages]
+        params = {**base_params, "limit_messages": limit_messages}
         rows = conn.execute(
-            f"""
+            text(f"""
             SELECT id AS message_id, session_id, role, content, character_id,
                    character_name, knowledge_sources, reply_to_message_id,
                    reply_to_character_id, intent, topic, trigger_source,
                    created_at, world_created_at
             FROM short_term_message
-            WHERE session_id = ?
+            WHERE session_id = :session_id
               {created_after_clause}
             ORDER BY id DESC
-            LIMIT ?
-            """,
-            tuple(params),
-        ).fetchall()
+            LIMIT :limit_messages
+            """),
+            params,
+        ).mappings().fetchall()
 
     messages = [_decode_message_row(r) for r in rows]
     messages.reverse()  # 按时间正序返回
@@ -578,15 +616,18 @@ def get_multi_character_thread_history(
     if not thread_id:
         return []
     created_after_clause = ""
-    base_params = [session["player_id"], thread_id]
+    base_params = {
+        "player_id": session["player_id"],
+        "thread_id": thread_id,
+    }
     if created_after:
-        created_after_clause = "AND m.created_at >= ?"
-        base_params.append(created_after)
+        created_after_clause = "AND m.created_at >= :created_after"
+        base_params["created_after"] = created_after
 
-    with get_conn() as conn:
+    with db_session() as conn:
         if limit_messages is None:
             rows = conn.execute(
-                f"""
+                text(f"""
                 SELECT m.id AS message_id, m.session_id, m.role, m.content,
                        m.character_id, m.character_name, m.knowledge_sources,
                        m.reply_to_message_id, m.reply_to_character_id,
@@ -594,19 +635,19 @@ def get_multi_character_thread_history(
                        m.created_at, m.world_created_at
                 FROM short_term_message m
                 INNER JOIN session s ON s.session_id = m.session_id
-                WHERE s.player_id = ?
+                WHERE s.player_id = :player_id
                   AND COALESCE(s.is_multi_character, 0) = 1
-                  AND COALESCE(s.group_thread_id, s.session_id) = ?
+                  AND COALESCE(s.group_thread_id, s.session_id) = :thread_id
                   {created_after_clause}
                 ORDER BY m.id ASC
-                """,
-                tuple(base_params),
-            ).fetchall()
+                """),
+                base_params,
+            ).mappings().fetchall()
             return [_decode_message_row(r) for r in rows]
 
-        params = [*base_params, limit_messages]
+        params = {**base_params, "limit_messages": limit_messages}
         rows = conn.execute(
-            f"""
+            text(f"""
             SELECT m.id AS message_id, m.session_id, m.role, m.content,
                    m.character_id, m.character_name, m.knowledge_sources,
                    m.reply_to_message_id, m.reply_to_character_id,
@@ -614,15 +655,15 @@ def get_multi_character_thread_history(
                    m.created_at, m.world_created_at
             FROM short_term_message m
             INNER JOIN session s ON s.session_id = m.session_id
-            WHERE s.player_id = ?
+            WHERE s.player_id = :player_id
               AND COALESCE(s.is_multi_character, 0) = 1
-              AND COALESCE(s.group_thread_id, s.session_id) = ?
+              AND COALESCE(s.group_thread_id, s.session_id) = :thread_id
               {created_after_clause}
             ORDER BY m.id DESC
-            LIMIT ?
-            """,
-            tuple(params),
-        ).fetchall()
+            LIMIT :limit_messages
+            """),
+            params,
+        ).mappings().fetchall()
 
     messages = [_decode_message_row(r) for r in rows]
     messages.reverse()
@@ -646,9 +687,9 @@ def get_multi_character_thread_history_paginated(
     thread_id = session.get("group_thread_id") or session["session_id"]
     if not thread_id:
         return [], False
-    with get_conn() as conn:
+    with db_session() as conn:
         rows = conn.execute(
-            """
+            text("""
             SELECT m.id AS message_id, m.session_id, m.role, m.content,
                    m.character_id, m.character_name, m.knowledge_sources,
                    m.reply_to_message_id, m.reply_to_character_id,
@@ -656,20 +697,20 @@ def get_multi_character_thread_history_paginated(
                    m.created_at, m.world_created_at
             FROM short_term_message m
             INNER JOIN session s ON s.session_id = m.session_id
-            WHERE s.player_id = ?
+            WHERE s.player_id = :player_id
               AND COALESCE(s.is_multi_character, 0) = 1
-              AND COALESCE(s.group_thread_id, s.session_id) = ?
+              AND COALESCE(s.group_thread_id, s.session_id) = :thread_id
             ORDER BY m.id DESC
-            LIMIT ?
-            OFFSET ?
-            """,
-            (
-                session["player_id"],
-                thread_id,
-                limit + 1,
-                offset,
-            ),
-        ).fetchall()
+            LIMIT :limit
+            OFFSET :offset
+            """),
+            {
+                "player_id": session["player_id"],
+                "thread_id": thread_id,
+                "limit": limit + 1,
+                "offset": offset,
+            },
+        ).mappings().fetchall()
 
     has_more = len(rows) > limit
     return [_decode_message_row(row) for row in reversed(rows[:limit])], has_more
@@ -688,20 +729,20 @@ def get_multi_character_thread_history_after(
     thread_id = session.get("group_thread_id") or session["session_id"]
     after_id = max(0, int(after_message_id or 0))
 
-    with get_conn() as conn:
+    with db_session() as conn:
         latest_row = conn.execute(
-            """
+            text("""
             SELECT MAX(m.id) AS latest_message_id
             FROM short_term_message m
             INNER JOIN session s ON s.session_id = m.session_id
-            WHERE s.player_id = ?
+            WHERE s.player_id = :player_id
               AND COALESCE(s.is_multi_character, 0) = 1
-              AND COALESCE(s.group_thread_id, s.session_id) = ?
-            """,
-            (session["player_id"], thread_id),
-        ).fetchone()
+              AND COALESCE(s.group_thread_id, s.session_id) = :thread_id
+            """),
+            {"player_id": session["player_id"], "thread_id": thread_id},
+        ).mappings().fetchone()
         rows = conn.execute(
-            """
+            text("""
             SELECT m.id AS message_id, m.session_id, m.role, m.content,
                    m.character_id, m.character_name, m.knowledge_sources,
                    m.reply_to_message_id, m.reply_to_character_id,
@@ -709,20 +750,20 @@ def get_multi_character_thread_history_after(
                    m.created_at, m.world_created_at
             FROM short_term_message m
             INNER JOIN session s ON s.session_id = m.session_id
-            WHERE s.player_id = ?
+            WHERE s.player_id = :player_id
               AND COALESCE(s.is_multi_character, 0) = 1
-              AND COALESCE(s.group_thread_id, s.session_id) = ?
-              AND m.id > ?
+              AND COALESCE(s.group_thread_id, s.session_id) = :thread_id
+              AND m.id > :after_id
             ORDER BY m.id ASC
-            LIMIT ?
-            """,
-            (
-                session["player_id"],
-                thread_id,
-                after_id,
-                limit + 1,
-            ),
-        ).fetchall()
+            LIMIT :limit
+            """),
+            {
+                "player_id": session["player_id"],
+                "thread_id": thread_id,
+                "after_id": after_id,
+                "limit": limit + 1,
+            },
+        ).mappings().fetchall()
 
     has_more = len(rows) > limit
     messages = [_decode_message_row(row) for row in rows[:limit]]
@@ -746,11 +787,14 @@ def _decode_group_dialogue_state(row) -> dict | None:
 
 
 def get_group_dialogue_state(group_thread_id: str) -> dict | None:
-    with get_conn() as conn:
+    with db_session() as conn:
         row = conn.execute(
-            "SELECT * FROM group_dialogue_state WHERE group_thread_id = ?",
-            (group_thread_id,),
-        ).fetchone()
+            text(
+                "SELECT * FROM group_dialogue_state "
+                "WHERE group_thread_id = :group_thread_id"
+            ),
+            {"group_thread_id": group_thread_id},
+        ).mappings().fetchone()
     return _decode_group_dialogue_state(row)
 
 
@@ -767,15 +811,18 @@ def save_group_dialogue_state(
     unresolved_hooks: list[dict] | None = None,
 ) -> bool:
     now = _now()
-    with get_conn() as conn:
+    with db_session() as conn:
         conn.execute(
-            """
+            text("""
             INSERT INTO group_dialogue_state
             (group_thread_id, player_id, current_topic, topic_source,
              last_reply_to_message_id, last_reply_to_character_id,
              last_speaker_id, waiting_for_player, unresolved_hooks,
              created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (:group_thread_id, :player_id, :current_topic, :topic_source,
+                    :last_reply_to_message_id, :last_reply_to_character_id,
+                    :last_speaker_id, :waiting_for_player, :unresolved_hooks,
+                    :created_at, :updated_at)
             ON CONFLICT(group_thread_id) DO UPDATE SET
                 player_id = excluded.player_id,
                 current_topic = excluded.current_topic,
@@ -786,34 +833,36 @@ def save_group_dialogue_state(
                 waiting_for_player = excluded.waiting_for_player,
                 unresolved_hooks = excluded.unresolved_hooks,
                 updated_at = excluded.updated_at
-            """,
-            (
-                group_thread_id,
-                player_id,
-                current_topic,
-                topic_source,
-                last_reply_to_message_id,
-                last_reply_to_character_id,
-                last_speaker_id,
-                1 if waiting_for_player else 0,
-                json.dumps(unresolved_hooks or [], ensure_ascii=False),
-                now,
-                now,
-            ),
+            """),
+            {
+                "group_thread_id": group_thread_id,
+                "player_id": player_id,
+                "current_topic": current_topic,
+                "topic_source": topic_source,
+                "last_reply_to_message_id": last_reply_to_message_id,
+                "last_reply_to_character_id": last_reply_to_character_id,
+                "last_speaker_id": last_speaker_id,
+                "waiting_for_player": 1 if waiting_for_player else 0,
+                "unresolved_hooks": json.dumps(
+                    unresolved_hooks or [], ensure_ascii=False
+                ),
+                "created_at": now,
+                "updated_at": now,
+            },
         )
     return True
 
 
 def list_group_dialogue_states(limit: int = 500) -> list[dict]:
-    with get_conn() as conn:
+    with db_session() as conn:
         rows = conn.execute(
-            """
+            text("""
             SELECT * FROM group_dialogue_state
             ORDER BY COALESCE(last_autonomous_pulse_at, created_at) ASC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+            LIMIT :limit
+            """),
+            {"limit": limit},
+        ).mappings().fetchall()
     return [_decode_group_dialogue_state(row) for row in rows]
 
 
@@ -825,21 +874,22 @@ def claim_group_dialogue_state(
     real_now_iso: str,
 ) -> bool:
     """使用现实 UTC 租约原子领取一个逻辑群聊脉冲。"""
-    with get_conn() as conn:
+    with db_session() as conn:
         cursor = conn.execute(
-            """
+            text("""
             UPDATE group_dialogue_state
-            SET lease_owner = ?, lease_expires_at = ?, updated_at = ?
-            WHERE group_thread_id = ?
-              AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
-            """,
-            (
-                lease_owner,
-                lease_expires_at,
-                real_now_iso,
-                group_thread_id,
-                real_now_iso,
-            ),
+            SET lease_owner = :lease_owner,
+                lease_expires_at = :lease_expires_at,
+                updated_at = :real_now_iso
+            WHERE group_thread_id = :group_thread_id
+              AND (lease_expires_at IS NULL OR lease_expires_at <= :real_now_iso)
+            """),
+            {
+                "lease_owner": lease_owner,
+                "lease_expires_at": lease_expires_at,
+                "real_now_iso": real_now_iso,
+                "group_thread_id": group_thread_id,
+            },
         )
     return cursor.rowcount == 1
 
@@ -861,7 +911,7 @@ def complete_group_dialogue_pulse(
     unresolved_hooks: list[dict] | None,
 ) -> bool:
     """完成自主脉冲并在持有租约时提交线程状态和每日计数。"""
-    with get_conn() as conn:
+    with db_session() as conn:
         return _complete_group_dialogue_pulse_in_transaction(
             conn,
             group_thread_id,
@@ -898,38 +948,42 @@ def _complete_group_dialogue_pulse_in_transaction(
     unresolved_hooks: list[dict] | None,
 ) -> bool:
     cursor = conn.execute(
-        """
+        text("""
         UPDATE group_dialogue_state
-        SET current_topic = ?, topic_source = ?,
-            last_reply_to_message_id = ?, last_reply_to_character_id = ?,
-            last_speaker_id = ?, waiting_for_player = ?, unresolved_hooks = ?,
-            last_autonomous_pulse_at = ?, last_autonomous_world_at = ?,
-            daily_message_date = ?,
+        SET current_topic = :current_topic, topic_source = :topic_source,
+            last_reply_to_message_id = :last_reply_to_message_id,
+            last_reply_to_character_id = :last_reply_to_character_id,
+            last_speaker_id = :last_speaker_id,
+            waiting_for_player = :waiting_for_player,
+            unresolved_hooks = :unresolved_hooks,
+            last_autonomous_pulse_at = :real_now_iso,
+            last_autonomous_world_at = :world_now_iso,
+            daily_message_date = :daily_message_date,
             daily_message_count = CASE
-                WHEN daily_message_date = ? THEN daily_message_count + ?
-                ELSE ?
+                WHEN daily_message_date = :daily_message_date
+                    THEN daily_message_count + :autonomous_message_count
+                ELSE :autonomous_message_count
             END,
-            lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
-        WHERE group_thread_id = ? AND lease_owner = ?
-        """,
-        (
-            current_topic,
-            topic_source,
-            last_reply_to_message_id,
-            last_reply_to_character_id,
-            last_speaker_id,
-            1 if waiting_for_player else 0,
-            json.dumps(unresolved_hooks or [], ensure_ascii=False),
-            real_now_iso,
-            world_now_iso,
-            daily_message_date,
-            daily_message_date,
-            autonomous_message_count,
-            autonomous_message_count,
-            real_now_iso,
-            group_thread_id,
-            lease_owner,
-        ),
+            lease_owner = NULL, lease_expires_at = NULL, updated_at = :real_now_iso
+        WHERE group_thread_id = :group_thread_id AND lease_owner = :lease_owner
+        """),
+        {
+            "current_topic": current_topic,
+            "topic_source": topic_source,
+            "last_reply_to_message_id": last_reply_to_message_id,
+            "last_reply_to_character_id": last_reply_to_character_id,
+            "last_speaker_id": last_speaker_id,
+            "waiting_for_player": 1 if waiting_for_player else 0,
+            "unresolved_hooks": json.dumps(
+                unresolved_hooks or [], ensure_ascii=False
+            ),
+            "real_now_iso": real_now_iso,
+            "world_now_iso": world_now_iso,
+            "daily_message_date": daily_message_date,
+            "autonomous_message_count": autonomous_message_count,
+            "group_thread_id": group_thread_id,
+            "lease_owner": lease_owner,
+        },
     )
     return cursor.rowcount == 1
 
@@ -967,24 +1021,27 @@ def commit_group_dialogue_pulse(
             raise ValueError(f"未解析的群聊临时消息 ID: {value}")
         return message_id_map[value]
 
-    with get_conn() as conn:
+    with db_session() as conn:
         for response in candidate_responses:
             temporary_message_id = response.get("message_id")
             reply_to_message_id = resolved_message_id(
                 response.get("reply_to_message_id")
             )
             recent_rows = conn.execute(
-                """
+                text("""
                 SELECT id, content, reply_to_message_id
                 FROM short_term_message
-                WHERE session_id = ?
+                WHERE session_id = :session_id
                   AND role = 'assistant'
-                  AND character_id = ?
+                  AND character_id = :character_id
                 ORDER BY id DESC
                 LIMIT 20
-                """,
-                (session_id, response.get("character_id")),
-            ).fetchall()
+                """),
+                {
+                    "session_id": session_id,
+                    "character_id": response.get("character_id"),
+                },
+            ).mappings().fetchall()
             duplicate_message_id = next(
                 (
                     int(row["id"])
@@ -1014,29 +1071,38 @@ def commit_group_dialogue_pulse(
                 (session_id, role, content, character_id, character_name, created_at,
                  knowledge_sources, world_created_at, reply_to_message_id,
                  reply_to_character_id, intent, topic, trigger_source)
-                VALUES (?, 'assistant', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (:session_id, 'assistant', :content, :character_id,
+                        :character_name, :created_at, :knowledge_sources,
+                        :world_created_at, :reply_to_message_id,
+                        :reply_to_character_id, :intent, :topic,
+                        :trigger_source)
             """
             if _is_postgres_enabled():
                 insert_sql += " RETURNING id"
             cursor = conn.execute(
-                insert_sql,
-                (
-                    session_id,
-                    response.get("dialogue", ""),
-                    response.get("character_id"),
-                    response.get("character_name"),
-                    real_now_iso,
-                    _encode_knowledge_sources(response.get("knowledge_sources") or []),
-                    response.get("world_created_at") or world_now_iso,
-                    reply_to_message_id,
-                    response.get("reply_to_character_id"),
-                    response.get("intent"),
-                    response.get("topic"),
-                    response.get("trigger_source"),
-                ),
+                text(insert_sql),
+                {
+                    "session_id": session_id,
+                    "content": response.get("dialogue", ""),
+                    "character_id": response.get("character_id"),
+                    "character_name": response.get("character_name"),
+                    "created_at": real_now_iso,
+                    "knowledge_sources": _encode_knowledge_sources(
+                        response.get("knowledge_sources") or []
+                    ),
+                    "world_created_at": response.get("world_created_at")
+                    or world_now_iso,
+                    "reply_to_message_id": reply_to_message_id,
+                    "reply_to_character_id": response.get("reply_to_character_id"),
+                    "intent": response.get("intent"),
+                    "topic": response.get("topic"),
+                    "trigger_source": response.get("trigger_source"),
+                },
             )
             message_id = int(
-                cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
+                cursor.mappings().fetchone()["id"]
+                if _is_postgres_enabled()
+                else cursor.lastrowid
             )
             if isinstance(temporary_message_id, int) and temporary_message_id < 0:
                 message_id_map[temporary_message_id] = message_id
@@ -1059,37 +1125,43 @@ def commit_group_dialogue_pulse(
 
         for character_id, response in latest_relationships.items():
             conn.execute(
-                """
+                text("""
                 INSERT INTO relationship_state
                 (character_id, player_id, affection_level, trust_level,
                  current_mood, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (:character_id, :player_id, :affection_level,
+                        :trust_level, :current_mood, :updated_at)
                 ON CONFLICT(character_id, player_id)
                 DO UPDATE SET
                     affection_level = excluded.affection_level,
                     trust_level = excluded.trust_level,
                     current_mood = excluded.current_mood,
                     updated_at = excluded.updated_at
-                """,
-                (
-                    character_id,
-                    player_id,
-                    response["current_affinity"],
-                    response["current_trust"],
-                    response["current_mood"],
-                    real_now_iso,
-                ),
+                """),
+                {
+                    "character_id": character_id,
+                    "player_id": player_id,
+                    "affection_level": response["current_affinity"],
+                    "trust_level": response["current_trust"],
+                    "current_mood": response["current_mood"],
+                    "updated_at": real_now_iso,
+                },
             )
 
         for character_id, message_count in participant_counts.items():
             conn.execute(
-                """
+                text("""
                 UPDATE multi_session_participant
-                SET last_spoke_at = ?,
-                    message_count = message_count + ?
-                WHERE session_id = ? AND character_id = ?
-                """,
-                (real_now_iso, message_count, session_id, character_id),
+                SET last_spoke_at = :real_now_iso,
+                    message_count = message_count + :message_count
+                WHERE session_id = :session_id AND character_id = :character_id
+                """),
+                {
+                    "real_now_iso": real_now_iso,
+                    "message_count": message_count,
+                    "session_id": session_id,
+                    "character_id": character_id,
+                },
             )
 
         resolved_hooks = []
@@ -1137,29 +1209,34 @@ def commit_group_dialogue_pulse(
 
 
 def release_group_dialogue_state(group_thread_id: str, *, lease_owner: str) -> bool:
-    with get_conn() as conn:
+    with db_session() as conn:
         cursor = conn.execute(
-            """
+            text("""
             UPDATE group_dialogue_state
-            SET lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
-            WHERE group_thread_id = ? AND lease_owner = ?
-            """,
-            (_now(), group_thread_id, lease_owner),
+            SET lease_owner = NULL, lease_expires_at = NULL,
+                updated_at = :updated_at
+            WHERE group_thread_id = :group_thread_id AND lease_owner = :lease_owner
+            """),
+            {
+                "updated_at": _now(),
+                "group_thread_id": group_thread_id,
+                "lease_owner": lease_owner,
+            },
         )
     return cursor.rowcount == 1
 
 
 def get_latest_group_thread_session(group_thread_id: str) -> dict | None:
-    with get_conn() as conn:
+    with db_session() as conn:
         row = conn.execute(
-            """
+            text("""
             SELECT * FROM session
             WHERE COALESCE(is_multi_character, 0) = 1
-              AND COALESCE(group_thread_id, session_id) = ?
+              AND COALESCE(group_thread_id, session_id) = :group_thread_id
             ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END,
                      created_at DESC, session_id DESC
             LIMIT 1
-            """,
-            (group_thread_id,),
-        ).fetchone()
+            """),
+            {"group_thread_id": group_thread_id},
+        ).mappings().fetchone()
     return _row_to_dict(row)

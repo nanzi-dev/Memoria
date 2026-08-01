@@ -49,6 +49,13 @@ def _character_card(character_id: str, *, voice: str = "alloy") -> CharacterCard
 
 
 def _save_card(owner_user_id: str, card: CharacterCard) -> None:
+    # PG 强制外键：character_card.owner_user_id 引用 users，需确保用户存在
+    if not repository.get_user_by_id(owner_user_id):
+        repository.create_user(
+            owner_user_id,
+            f"speech_user_{uuid.uuid4().hex[:8]}",
+            "test-hash",
+        )
     assert repository.save_character_card_to_db(
         owner_user_id,
         card.character_id,

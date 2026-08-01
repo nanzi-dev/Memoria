@@ -69,6 +69,7 @@ class _DialogueJsonStream:
         self._in_value = False
         self._value_escaped = False
         self._done = False
+        self._mode = "pending"
 
     @staticmethod
     def _complete_prefix_length(raw_value: str) -> int:
@@ -153,6 +154,18 @@ class _DialogueJsonStream:
     def feed(self, text: str) -> list[str]:
         if self._done or not text:
             return []
+        if self._mode == "plain":
+            return [_replace_unpaired_surrogates(text)]
+        if self._mode == "pending":
+            stripped = text.lstrip()
+            if not stripped:
+                return []
+            if stripped[0] == "{":
+                self._mode = "json"
+                text = stripped
+            else:
+                self._mode = "plain"
+                return [_replace_unpaired_surrogates(text)]
         if self._in_value:
             return self._feed_value(text)
 
@@ -223,7 +236,7 @@ def _consume_role_stream(
     response,
     on_dialogue_delta: Callable[[str], None],
     request_started_at: float,
-) -> tuple[str, str | None, Exception | None]:
+) -> tuple[str, str | None, Exception | None, str]:
     raw_parts = []
     dialogue_stream = _DialogueJsonStream()
     ttft_recorded = False
@@ -261,12 +274,25 @@ def _consume_role_stream(
         performance.increment("llm.stream.interrupted")
         logger.warning("LLM 流式响应中断，使用已接收的部分输出: %s", exc)
     _record_provider_usage(usage, task_name="role_turn")
-    return "".join(raw_parts), dialogue_stream.authoritative_dialogue, stream_error
+    return (
+        "".join(raw_parts),
+        dialogue_stream.authoritative_dialogue,
+        stream_error,
+        dialogue_stream._mode,
+    )
 
 
-def _finalize_role_turn_result(result, streamed_dialogue: str | None):
+def _finalize_role_turn_result(
+    result,
+    streamed_dialogue: str | None,
+    stream_mode: str = "json",
+):
     result = _replace_unpaired_surrogates(result)
-    if streamed_dialogue is not None and isinstance(result, dict):
+    if (
+        streamed_dialogue is not None
+        and isinstance(result, dict)
+        and stream_mode != "plain"
+    ):
         result = dict(result)
         result["dialogue"] = streamed_dialogue
     return result
@@ -459,10 +485,26 @@ def _extract_json(raw_text: str) -> Optional[dict]:
     # -------------------------
     # 情况3：提取第一个 JSON 对象（非贪婪）
     # -------------------------
+    balanced = _extract_balanced_json_object(text)
+    if balanced:
+        try:
+            return json.loads(balanced)
+        except json.JSONDecodeError:
+            pass
+
+    # 平衡括号失败时再尝试贪婪提取，兼容前后无额外花括号的输出。
     brace_match = re.search(r"\{[\s\S]*\}", text)
     if brace_match:
         try:
             return json.loads(brace_match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    # 最后尝试清理常见的损坏：智能引号、尾逗号、Markdown 围栏等。
+    cleaned = _cleanup_jsonish_text(text)
+    if cleaned != text:
+        try:
+            return json.loads(cleaned)
         except json.JSONDecodeError:
             pass
     
@@ -663,6 +705,7 @@ def _plain_text_fallback(raw_text: str, default_action: str = "neutral") -> dict
         "mood_after": None,  # 保持当前情绪
         "memory_worth_keeping": None,
         "_fallback_mode": True,
+        "_fallback_parser": "plain_text",
     }
     
 
@@ -770,6 +813,7 @@ def call_role_turn(
     streamed_dialogue = None
     response_format_unsupported = False
     stream_error = None
+    stream_mode = "json"
     response_format_name = "json_object" if supports_response_format else "none"
     with tracing.start_span("llm.role_turn", **{"llm.model": model, "llm.response_format": response_format_name}):
         with performance.measure("llm.role_turn"):
@@ -798,7 +842,12 @@ def call_role_turn(
                             raise
                     else:
                         if on_dialogue_delta is not None:
-                            raw_text, streamed_dialogue, stream_error = _consume_role_stream(
+                            (
+                                raw_text,
+                                streamed_dialogue,
+                                stream_error,
+                                stream_mode,
+                            ) = _consume_role_stream(
                                 response,
                                 on_dialogue_delta,
                                 request_started_at,
@@ -819,7 +868,12 @@ def call_role_turn(
                 raise
             else:
                 if on_dialogue_delta is not None:
-                    raw_text, streamed_dialogue, stream_error = _consume_role_stream(
+                    (
+                        raw_text,
+                        streamed_dialogue,
+                        stream_error,
+                        stream_mode,
+                    ) = _consume_role_stream(
                         response,
                         on_dialogue_delta,
                         request_started_at,
@@ -851,7 +905,12 @@ def call_role_turn(
                     performance.increment("llm.calls.failed")
                     raise
                 if on_dialogue_delta is not None:
-                    raw_text, streamed_dialogue, stream_error = _consume_role_stream(
+                    (
+                        raw_text,
+                        streamed_dialogue,
+                        stream_error,
+                        stream_mode,
+                    ) = _consume_role_stream(
                         response,
                         on_dialogue_delta,
                         request_started_at,
@@ -874,7 +933,11 @@ def call_role_turn(
     # =========================
     result = _extract_json(raw_text)
     if isinstance(result, dict):
-        result = _finalize_role_turn_result(result, streamed_dialogue)
+        result = _finalize_role_turn_result(
+            result,
+            streamed_dialogue,
+            stream_mode,
+        )
         if debug:
             _emit_debug(debug_sink, "role_turn.parsed_response", result)
         return result
@@ -888,6 +951,7 @@ def call_role_turn(
     result = _finalize_role_turn_result(
         _plain_text_fallback(raw_text),
         streamed_dialogue,
+        stream_mode,
     )
     if debug:
         _emit_debug(debug_sink, "role_turn.fallback_response", result)

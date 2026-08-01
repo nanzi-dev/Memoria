@@ -5,7 +5,7 @@
 ```
 Memoria/
 ├── src/memoria/                # 源代码
-│   ├── api/                    # REST API 路由层
+│   ├── api/                    # REST API 路由与辅助层
 │   │   ├── dialogue.py         # 对话相关 API（角色列表、会话、对话轮次）
 │   │   ├── streaming.py        # 同步对话工作器到 SSE 的线程/队列桥接
 │   │   ├── character_admin.py  # 角色卡管理 API（CRUD、导入导出）
@@ -13,10 +13,13 @@ Memoria/
 │   │   ├── multi_dialogue.py   # 多角色对话 API（群聊、互动、逻辑线程同步）
 │   │   ├── relationship.py     # 角色关系 API（关系CRUD、网络查询）
 │   │   ├── knowledge.py        # 知识库、文档、绑定和检索预览 API
+│   │   ├── knowledge_models.py # 知识库、文档、绑定等 API 数据模型
 │   │   ├── speech.py           # STT、TTS 与角色自定义声音 API
+│   │   ├── story.py            # 剧情状态投影 API
 │   │   ├── developer.py        # 回放、性能指标、质量评分等开发者 API
-│   │   ├── avatar_fetcher.py    # 远程头像 SSRF 防护与固定 IP 下载
-│   │   ├── avatar_image.py      # 头像格式、像素和尺寸规范化
+│   │   ├── avatar_fetcher.py   # 远程头像 SSRF 防护与固定 IP 下载
+│   │   ├── avatar_image.py     # 头像格式、像素和尺寸规范化
+│   │   ├── upload_utils.py     # 上传文件校验与磁盘保存工具
 │   │   └── user.py             # 用户注册、登录、资料和头像 API
 │   ├── characters/             # 角色卡 JSON 配置文件
 │   │   ├── npc_luo_xiaohei.json
@@ -47,20 +50,29 @@ Memoria/
 │   │   ├── event_runtime.py    # 事件上下文、检测、规划与执行协调
 │   │   ├── event_schema.py     # 事件数据模型
 │   │   ├── multi_character_orchestrator.py  # 多角色对话编排
+│   │   ├── multi_character_turn.py          # 多角色轮次执行与讨论决策
+│   │   ├── multi_character_context.py       # 多角色上下文构建与决策模型
+│   │   ├── multi_character_helpers.py       # 多角色共享工具函数
 │   │   ├── multi_character_memory.py        # 多角色记忆管理
-│   │   ├── group_dialogue_runtime.py         # 逻辑群聊自主/事件脉冲运行时
-│   │   ├── background_jobs.py                # 持久化 checkpoint 记忆任务工作器
-│   │   ├── domain_events.py                  # 领域事件账本与剧情状态投影
-│   │   ├── fact_claims.py                    # 事实声明写入与状态维护
-│   │   ├── fact_claim_policy.py              # 事实声明规范化与冲突策略
-│   │   ├── output_safety.py  # 完整回复与流式增量输出安全过滤
-│   │   ├── csrf.py           # Cookie 会话双提交 CSRF
-│   │   ├── performance.py      # 开发者性能采样
-│   │   ├── replay.py           # 会话回放构建
-│   │   ├── quality_scorer.py   # 对话质量评分
-│   │   ├── tracing.py          # OpenTelemetry 可选追踪封装
+│   │   ├── multi_character_memory_ops.py    # 多角色记忆读写与摘要保存
+│   │   ├── relationship_context.py          # 关系图谱上下文与修订过滤
+│   │   ├── relationship_delta_policy.py     # 好感/信任增量确定性与兜底规则
+│   │   ├── group_dialogue_runtime.py        # 逻辑群聊自主/事件脉冲运行时
+│   │   ├── background_jobs.py               # 持久化 checkpoint 记忆任务工作器
+│   │   ├── cron_schedule.py                 # cron 调度解析与下次运行时间
+│   │   ├── domain_events.py                 # 领域事件账本与剧情状态投影
+│   │   ├── fact_claims.py                   # 事实声明写入与状态维护
+│   │   ├── fact_claim_policy.py             # 事实声明规范化与冲突策略
+│   │   ├── output_safety.py                 # 完整回复与流式增量输出安全过滤
+│   │   ├── csrf.py                          # Cookie 会话双提交 CSRF
+│   │   ├── performance.py                   # 开发者性能采样
+│   │   ├── replay.py                        # 会话回放构建
+│   │   ├── quality_scorer.py                # 对话质量评分
+│   │   ├── tracing.py                       # OpenTelemetry 可选追踪封装
 │   │   └── speaking_strategy.py             # 智能/混合发言选择策略
 │   ├── db/                     # 数据持久化层
+│   │   ├── engine.py           # SQLAlchemy Engine / Session 生命周期管理
+│   │   ├── models.py           # SQLAlchemy ORM 模型
 │   │   └── repository/         # SQLite / PostgreSQL 持久化包
 │   │       ├── __init__.py     # 兼容 facade：`from memoria.db import repository`
 │   │       ├── _common.py      # 连接、schema 初始化、共享工具
@@ -74,8 +86,10 @@ Memoria/
 │   │       ├── state_and_memory.py
 │   │       ├── fact_claims.py
 │   │       ├── memory_curve.py # 曲线状态与幂等强化旁路投影
-│   │       ├── story.py / domain_events.py
-│   │       ├── world_clock.py / background_jobs.py
+│   │       ├── story.py        # 剧情状态投影查询与写入
+│   │       ├── domain_events.py
+│   │       ├── world_clock.py
+│   │       └── background_jobs.py
 │   └── main.py                 # FastAPI 应用入口
 ├── tests/                      # 测试（pytest）
 ├── data/                       # 运行时数据
@@ -102,6 +116,8 @@ Memoria/
 │   ├── .env.example
 │   └── settings.yaml           # 兼容性/参考标记，不参与运行时加载
 ├── pyproject.toml              # 项目配置 (src layout)
+├── alembic.ini                 # Alembic 迁移配置
+├── alembic/                    # Alembic 迁移脚本
 └── requirements.txt
 ```
 
@@ -186,7 +202,7 @@ API 写操作通过速率限制中间件保护（默认 60 请求 / 60 秒窗口
 FastAPI `lifespan` 按以下顺序启动运行时组件：
 
 1. 校验 LLM 等配置并记录警告。
-2. 初始化 SQLite/PostgreSQL schema 与轻量迁移。
+2. 初始化 SQLite/PostgreSQL schema（`Base.metadata.create_all` + 兼容性迁移钩子）。
 3. 写入缺失的默认事件模板。
 4. 根据玩家世界时钟补齐事件调度的现实到期时间。
 5. 启动世界时钟调度协程。
@@ -209,10 +225,21 @@ FastAPI `lifespan` 按以下顺序启动运行时组件：
 | `VECTOR_SEARCH_TOP_K` | 10 |
 | `KNOWLEDGE_RETRIEVAL_TOP_K` | 4 |
 | `KNOWLEDGE_SIMILARITY_THRESHOLD` | 0.60 |
+| `MEMORIA_RELATIONSHIP_DELTA_ENABLED` | true |
+| `MEMORIA_RELATIONSHIP_DELTA_MIN` | 0.0 |
+| `MEMORIA_RELATIONSHIP_DELTA_MAX` | 10.0 |
 
 ## 核心架构模式
 
 ### 对话编排器 (Orchestrator)
+
+单聊与多角色共享一套编排核心。多角色编排器 `MultiCharacterOrchestrator` 由三个 mixin 组合而成，职责单一、无重复实现：
+
+- `MultiCharacterTurnMixin`（`multi_character_turn.py`）：玩家轮次、讨论模式、发言决策与角色回复生成
+- `MultiCharacterContextMixin`（`multi_character_context.py`）：上下文构建、历史格式化与决策模型（`DialogueDecision` / `GroupTurnContext`）
+- `MultiCharacterMemoryOpsMixin`（`multi_character_memory_ops.py`）：记忆读写、事件结果应用与摘要保存
+
+`multi_character_helpers.py` 提供两个 mixin 与编排器共享的纯工具函数。创建多角色会话（`start_multi_character_session`）**不再生成开场白**——`opening` 恒为 `null`，对话由玩家第一条消息触发；`start_conversation()` / `_generate_opening()` 保留但未被调用。多角色历史在送入 LLM 前以自然语言剧本格式格式化（如 `王奔奔（nd_wang_benben）回应玩家，意图回答，话题……：台词`），避免机器化元数据（`消息 #id`）被模型复述进回复。
 
 单角色对话的核心流程：
 
@@ -235,6 +262,10 @@ FastAPI `lifespan` 按以下顺序启动运行时组件：
 ```
 
 事件系统异常只会记录日志，不会阻断对话状态和短期消息的持久化。对话/上下文检测触发的 once 与 cooldown 事件会先竞争 `event_trigger_guard`，成功执行时再在效果事务内消费 claim 并更新时间；并发请求只有一个可以提交副作用。
+
+单聊与多角色轮次的好感度/信任度增量统一由 `core/relationship_delta_policy.py` 的 `resolve_relationship_delta()` 计算。LLM 返回非零增量时保留并 clip 到 `[-10, 10]`；LLM 返回 0 或缺失且 `MEMORIA_RELATIONSHIP_DELTA_ENABLED=true` 时，按文本、动作和关系类型做确定性兜底：明确升温/信任内容给有界正增量，冲突/拒绝给 0 或负值，中性内容为 0。默认增量下限为 `MEMORIA_RELATIONSHIP_DELTA_MIN=0.0`、上限为 `MEMORIA_RELATIONSHIP_DELTA_MAX=10.0`，避免中性轮次或数值暴涨改变状态。
+
+事件触发条件支持跨角色聚合：`aggregation=any` 保持单角色旧语义（默认）；多角色轮次可传 `aggregation=all` 要求指定角色全部满足，或 `aggregation=count` 配合 `min_characters` 要求至少 N 个角色满足。`character_ids` 为空时取当前参与角色。该能力由事件检测器接收本轮全部 scoped contexts 后评估，旧事件无需迁移。
 
 `POST /api/v1/dialogue/turn/stream` 复用同一编排流程，通过 `api/streaming.py` 在线程中执行同步工作器，并以 SSE 发送 `turn_started`、`stage`、`character_started`、`dialogue_delta`、`character_completed`、`turn_completed` 或 `error`。最终 `turn_completed.response` 与普通 REST 结果等价。
 
@@ -262,7 +293,7 @@ FastAPI `lifespan` 按以下顺序启动运行时组件：
 
 每次创建、更新、删除角色关系都会刷新 `character_relationship_revision`。单聊编排器会读取该角色相关关系，群聊编排器会取参与角色两两关系的最新修订时间作为截止点：长期记忆、角色间共享记忆和群体记忆会先读取候选记录，再只剔除修订时间之前的关系相关旧事实；普通玩家事实、共同经历和世界事实不会因为图谱更新而消失。跨 session 原始群聊历史和群聊结束摘要提取仍使用同一截止点，避免旧发言把旧关系状态重新写回长期记忆。当前实现不会在每个玩家轮次写入群体记忆；群聊结束且有效消息数大于 6 条、摘要模型返回非空内容时，系统会将整场对话摘要写入 `session_summary`，并同步保存到 `group_memory` 供后续单聊和群聊召回。
 
-玩家群聊轮次的 `max_responses` 请求值允许 1-5，但实际人数还受参与人数、语境判定和内部上限约束，当前最多提交 3 个角色回复。编排器固定使用混合发言策略：先处理关键词触发和角色点名，再按关系、发言频率、均衡性、最近发言和少量随机因子评分。
+玩家群聊轮次的 `max_responses` 请求值允许 1-5，但实际人数还受参与人数、语境判定和内部上限约束，当前最多提交 3 个角色回复。高情绪、高利害、问句、多角色提及、长文本或高关系压力场景会保证至少 2 个角色接话（`max(2, min(cap, participant_count - 1))`），短 ack 仍可只返回单个回复；强参与场景下如果已有回应不足，fallback 决策会继续发言而不是 `wait`。编排器固定使用混合发言策略：先处理关键词触发和角色点名，再按关系、发言频率、均衡性、最近发言和少量随机因子评分。
 
 `POST /api/v1/multi-dialogue/turn/stream` 复用同一编排器，以 `stream_id` 区分多个角色的开始、增量文本和完成事件。当前群聊流不发送显式 `stage` 事件。
 
@@ -493,7 +524,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 
 **主键：** `PRIMARY KEY (character_id, player_id)`
 
-> 注意：此表使用显式列存储运行时状态，与其他表中使用 JSON 字段存储配置的模式不同。好感度和信任度值在对话过程中由 Orchestrator 实时更新。
+> 注意：此表使用显式列存储运行时状态，与其他表中使用 JSON 字段存储配置的模式不同。好感度和信任度值在对话过程中由 Orchestrator 经 `relationship_delta_policy` 计算并实时更新。
 
 ---
 
@@ -1378,7 +1409,7 @@ Memoria 默认使用 SQLite (WAL 模式)，生产部署可通过 `DATABASE_URL=p
 8. **世界时间与通知持久化** — `player_world_clock` 保存带修订号的用户世界时间锚点，Web 单调应用时钟修订；调度表保存真实到期时间和租约，`player_event_inbox` 保存单聊或群聊聚合通知
 9. **事务一致性、幂等与恢复** — `dialogue_turn` 为单聊和群聊轮次保存请求幂等结果与租约；群聊脉冲消息/状态/通知、事件定义/调度分别原子提交；`event_trigger_guard` 串行化 once/cooldown 副作用，`event_exclusive_group_guard` 串行化互斥事件选择；`background_job`、`knowledge_vector_cleanup`、`group_dialogue_state` 和事件执行表保存可恢复任务状态、幂等结果与租约
 10. **记忆曲线旁路投影** — `memory_curve_state` 按用户、角色与记忆隔离曲线，`memory_curve_reinforcement` 以证据 ID 幂等强化；遗忘只影响召回，不删除原始记录或改写事实账本
-11. **轻量迁移** — 启动时为旧库补齐角色、会话、事件、认证、世界时钟、通知收件箱、关系修订和知识库相关结构；`owner_user_id` 相关主键重建不做旧数据迁移，升级前需要删除旧 SQLite 数据库或手动重建表
+11. **数据库层与迁移** — `db/engine.py` 管理 SQLAlchemy Engine/Session，`db/models.py` 定义 ORM 模型，启动时通过 `Base.metadata.create_all` 和兼容性迁移钩子补齐旧库结构；仓库同时提供 Alembic 迁移骨架（`alembic.ini` / `alembic/`）用于正式 schema 演进。`owner_user_id` 相关主键重建不做旧数据迁移，升级前需要删除旧 SQLite 数据库或手动重建表
 12. **完整索引覆盖** — 41 个显式索引覆盖常用查询、领域事件投影、对话幂等、后台任务、调度和恢复路径
 13. **可迁移性** — `db/repository` 包适配 SQLite/PostgreSQL 占位符、自增主键和少量 UPSERT 差异；对外保持 `from memoria.db import repository` 的 facade，并对 monkeypatch 同步到各领域子模块，便于测试与渐进拆分
 14. **认证与输出边界** — Cookie 会话写路径强制 CSRF 双提交；Bearer 客户端与登录/注册引导路径豁免；模型输出经 `output_safety` 过滤后再返回 REST 或 SSE

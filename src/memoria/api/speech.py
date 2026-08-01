@@ -130,7 +130,9 @@ async def group_message_audio(
 
 
 @router.get("/speech/configuration")
-def get_speech_configuration():
+def get_speech_configuration(
+    current_user_id: str = Depends(require_current_user_id),
+):
     return speech_service.provider_configuration()
 
 

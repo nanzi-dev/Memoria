@@ -29,9 +29,9 @@ class TestHealthEndpoints:
                 return False
 
             def execute(self, query):
-                assert query == "SELECT 1"
+                assert str(query) == "SELECT 1"
 
-        monkeypatch.setattr("memoria.db.repository.get_conn", lambda: Conn())
+        monkeypatch.setattr("memoria.db.repository.db_session", lambda: Conn())
 
         data = asyncio.run(ready())
         assert data == {"status": "ready", "database": "ok"}
@@ -39,10 +39,10 @@ class TestHealthEndpoints:
     def test_ready_db_fail(self, monkeypatch):
         from memoria.main import ready
 
-        def fail_conn():
+        def fail_session():
             raise Exception("DB down")
 
-        monkeypatch.setattr("memoria.db.repository.get_conn", fail_conn)
+        monkeypatch.setattr("memoria.db.repository.db_session", fail_session)
 
         response = asyncio.run(ready())
         assert response.status_code == 503

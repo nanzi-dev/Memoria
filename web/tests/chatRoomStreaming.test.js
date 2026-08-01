@@ -112,7 +112,7 @@ test('stream failure cleanup removes only placeholders created by the failed tur
   ]);
 });
 
-test('legacy reconcile is allowed before or after the first dialogue delta', () => {
+test('legacy reconcile runs only when the stream failed before producing any delta', () => {
   assert.equal(shouldFallbackFromDialogueStream(false), true);
-  assert.equal(shouldFallbackFromDialogueStream(true), true);
+  assert.equal(shouldFallbackFromDialogueStream(true), false);
 });

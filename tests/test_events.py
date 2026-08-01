@@ -412,6 +412,89 @@ class TestEventDetectorMore:
         assert EventDetector().check_events(context, [event]) == [event]
 
 
+class TestEventDetectorGroupAggregation:
+    def _context(self, character_id: str, affinity: float):
+        from memoria.core.event_schema import EventContext
+
+        return EventContext(
+            character_id=character_id,
+            player_id="p",
+            session_id="s",
+            current_affinity=affinity,
+            current_trust=0,
+            current_mood="neutral",
+            player_message="",
+            dialogue_count=1,
+            total_dialogue_count=1,
+            session_duration_minutes=1,
+        )
+
+    def _condition(self, **updates):
+        from memoria.core.event_schema import TriggerCondition, TriggerType
+
+        values = {
+            "trigger_type": TriggerType.AFFINITY_THRESHOLD,
+            "threshold": 40,
+            "aggregation": "count",
+            "min_characters": 2,
+            "character_ids": ["a", "b", "c", "d"],
+        }
+        values.update(updates)
+        return TriggerCondition(**values)
+
+    def test_group_affinity_count_triggers_when_two_npcs_match(self):
+        from memoria.core.event_detector import EventDetector
+
+        contexts = [
+            self._context("a", 50),
+            self._context("b", 45),
+            self._context("c", 10),
+            self._context("d", 20),
+        ]
+
+        assert EventDetector()._check_trigger_condition(
+            self._condition(),
+            contexts[0],
+            contexts,
+        )
+
+    def test_group_affinity_count_does_not_trigger_with_one_match(self):
+        from memoria.core.event_detector import EventDetector
+
+        contexts = [
+            self._context("a", 50),
+            self._context("b", 10),
+            self._context("c", 20),
+            self._context("d", 30),
+        ]
+
+        assert not EventDetector()._check_trigger_condition(
+            self._condition(),
+            contexts[0],
+            contexts,
+        )
+
+    def test_group_affinity_count_without_group_context_does_not_trigger(self):
+        from memoria.core.event_detector import EventDetector
+
+        detector = EventDetector()
+        condition = self._condition()
+
+        assert not detector._check_trigger_condition(
+            condition,
+            self._context("a", 50),
+        )
+
+    def test_group_affinity_any_keeps_single_context_behavior(self):
+        from memoria.core.event_detector import EventDetector
+
+        detector = EventDetector()
+        condition = self._condition(aggregation="any", min_characters=None)
+
+        assert detector._check_trigger_condition(condition, self._context("a", 50))
+        assert not detector._check_trigger_condition(condition, self._context("a", 20))
+
+
 class TestEventDeepIntegration:
     def _context(self):
         from memoria.core.event_schema import EventContext
@@ -620,6 +703,46 @@ class TestEventDeepIntegration:
         deleted = event_admin.delete_event_template(tid, current_user_id="test-user")
         assert deleted.success is True
         assert repository.get_event_template(tid) is None
+
+    def test_toggle_event_preserves_registered_schedule(self):
+        """regression: 注册的 cron 调度不应被定义更新/切换静默删除。"""
+        import uuid
+        from memoria.core import event_runtime
+        from memoria.db import repository
+
+        owner = f"toggle_owner_{uuid.uuid4().hex[:8]}"
+        character_id = f"toggle_char_{uuid.uuid4().hex[:8]}"
+        event_id = f"toggle_ev_{uuid.uuid4().hex[:8]}"
+
+        # 创建事件定义（无 schedule）
+        assert repository.save_event_definition(
+            owner, event_id, "ToggleEvent", "{}", "[]"
+        )
+        # 通过专用端点注册 cron 调度（只写 event_schedule_state）
+        assert event_runtime.register_time_event_schedule(
+            event_id=event_id,
+            character_id=character_id,
+            player_id=owner,
+            schedule="0 9 * * *",
+        )
+        assert repository.get_event_schedule(event_id, character_id, owner) is not None
+
+        # 模拟 toggle_event：定义保存时不带 schedule（schedule_state=None）
+        assert repository.save_event_definition_with_schedule(
+            owner_user_id=owner,
+            event_id=event_id,
+            event_name="ToggleEvent",
+            trigger_config="{}",
+            effects_config="[]",
+            schedule_state=None,
+            character_id=character_id,
+            is_active=False,
+        )
+
+        # 注册的调度必须保留
+        schedule = repository.get_event_schedule(event_id, character_id, owner)
+        assert schedule is not None, "toggle 不应删除已注册的调度"
+        assert schedule["schedule"] == "0 9 * * *"
 
 
 class TestEventReliability:
@@ -1131,10 +1254,12 @@ class TestEventReliability:
             self._event(f"tail_{index}", [], priority=10 - index, max_triggers_per_turn=limit)
             for index, limit in enumerate([20, 20, 1])
         ]
+        # 修复后语义：每个事件的 max_triggers_per_turn 只约束自身，
+        # tail_2（limit=1）仍可触发一次；不会因其他事件占满全局配额而被跳过
         assert [
             event.event_id
             for event in EventDetector().check_events(context, events_low_priority_last)
-        ] == ["tail_0", "tail_1"]
+        ] == ["tail_0", "tail_1", "tail_2"]
 
     def test_new_condition_sources_and_conflict_rules(self):
         from memoria.core.event_detector import EventDetector
@@ -1352,11 +1477,13 @@ class TestEventReliability:
             definitions,
         )
 
+        # 修复后语义：max_triggers_per_turn 只约束自身，limit 事件（limit=2）可触发
         assert [result.event_id for result in results] == [
             global_event.event_id,
             character_event.event_id,
+            excluded_by_limit.event_id,
         ]
-        assert [result.character_id for result in results] == [character_a, character_b]
+        assert [result.character_id for result in results] == [character_a, character_b, character_a]
         for result in results:
             assert [item.message for item in result.notifications] == [
                 f"{result.event_id}-notice-a",

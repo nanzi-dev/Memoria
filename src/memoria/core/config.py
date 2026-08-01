@@ -171,6 +171,31 @@ class Configs(BaseSettings):
             "memory_curve_forgotten_cleanup_days",
         ),
     )
+    relationship_delta_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "MEMORIA_RELATIONSHIP_DELTA_ENABLED",
+            "relationship_delta_enabled",
+        ),
+    )
+    relationship_delta_min: float = Field(
+        default=0.0,
+        ge=-10.0,
+        le=10.0,
+        validation_alias=AliasChoices(
+            "MEMORIA_RELATIONSHIP_DELTA_MIN",
+            "relationship_delta_min",
+        ),
+    )
+    relationship_delta_max: float = Field(
+        default=10.0,
+        ge=-10.0,
+        le=10.0,
+        validation_alias=AliasChoices(
+            "MEMORIA_RELATIONSHIP_DELTA_MAX",
+            "relationship_delta_max",
+        ),
+    )
     max_output_tokens: int = Field(default = 400, ge = 1, le = 4096)
     world_clock_default_timezone: str = "UTC"
     world_clock_scheduler_interval_seconds: float = Field(default=30.0, gt=0)

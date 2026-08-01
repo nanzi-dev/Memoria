@@ -43,6 +43,9 @@ class TriggerConditionDTO(BaseModel):
     keywords: Optional[list[str]] = None
     match_mode: Optional[str] = "any"
     crossing: bool = False
+    aggregation: Literal["any", "all", "count"] = "any"
+    min_characters: Optional[int] = None
+    character_ids: Optional[list[str]] = None
     count: Optional[int] = None
     duration_minutes: Optional[int] = None
     schedule: Optional[str] = None
@@ -342,6 +345,29 @@ def _validate_condition_semantics(
     if condition.trigger_type in {TriggerType.AFFINITY_THRESHOLD, TriggerType.TRUST_THRESHOLD, TriggerType.STATE_DELTA}:
         if condition.threshold is None:
             raise HTTPException(status_code=400, detail="阈值触发条件必须提供 threshold")
+    if condition.aggregation not in {"any", "all", "count"}:
+        raise HTTPException(status_code=400, detail="跨角色聚合模式无效")
+    if condition.aggregation == "count":
+        if condition.min_characters is None or condition.min_characters < 1:
+            raise HTTPException(
+                status_code=400,
+                detail="count 聚合必须提供大于 0 的 min_characters",
+            )
+    elif condition.aggregation == "any":
+        condition.min_characters = None
+        condition.character_ids = None
+    if condition.character_ids:
+        cleaned_character_ids = [
+            character_id.strip()
+            for character_id in condition.character_ids
+            if character_id and str(character_id).strip()
+        ]
+        if not cleaned_character_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="character_ids 不能全为空",
+            )
+        condition.character_ids = cleaned_character_ids
     if condition.trigger_type == TriggerType.DIALOGUE_COUNT:
         if condition.count is None or condition.count < 0:
             raise HTTPException(status_code=400, detail="对话次数条件必须提供非负 count")
@@ -656,22 +682,22 @@ def create_event(
 
     character_id = _require_owned_character(current_user_id, req.character_id)
 
-    _validate_event_configuration(
+    validated_condition, validated_effects = _validate_event_configuration(
         req.trigger_condition,
         req.effects,
         current_user_id,
     )
     schedule = sanitize_schedule(req.schedule) or sanitize_schedule(
-        req.trigger_condition.schedule
+        validated_condition.schedule
     )
     if schedule:
         _validate_cron(schedule)
         if not character_id:
             raise HTTPException(status_code=400, detail="定时事件必须绑定角色")
 
-    trigger_json = req.trigger_condition.model_dump_json()
+    trigger_json = validated_condition.model_dump_json()
     effects_json = json.dumps(
-        [e.model_dump() for e in req.effects], ensure_ascii=False
+        [e.model_dump() for e in validated_effects], ensure_ascii=False
     )
 
     schedule_state = _build_definition_schedule_state(
@@ -780,10 +806,12 @@ def update_event(
             EventEffectDTO.model_validate(item)
             for item in json.loads(existing["effects_config"])
         ]
-    _validate_event_configuration(condition_dto, effects_dto, current_user_id)
-    trigger_json = condition_dto.model_dump_json()
+    validated_condition, validated_effects = _validate_event_configuration(
+        condition_dto, effects_dto, current_user_id
+    )
+    trigger_json = validated_condition.model_dump_json()
     effects_json = json.dumps(
-        [effect.model_dump() for effect in effects_dto],
+        [effect.model_dump() for effect in validated_effects],
         ensure_ascii=False,
     )
     if schedule:
@@ -1301,9 +1329,9 @@ def simulate_event(
 def run_due_event_schedules(
     # 该接口在请求内同步执行事件（含 LLM 主动对白），上限必须比纯查询接口更严。
     limit: int = Query(default=50, ge=1, le=50),
-    current_user_id: str = Depends(require_current_user_id),
+    current_user_id: str = Depends(require_admin_user_id),
 ):
-    """手动检查并执行到期的时间驱动事件。"""
+    """手动检查并执行到期的时间驱动事件。仅管理员可触发，防止被用来刷 LLM 预算。"""
     try:
         results = event_runtime.run_due_time_events(limit=limit, player_id=current_user_id)
     except Exception:

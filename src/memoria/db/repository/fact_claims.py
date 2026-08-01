@@ -37,8 +37,11 @@ except ImportError:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 # Import shared helpers / connection / schema. Private names included.
+from sqlalchemy import text
+
 from memoria.db.repository._common import *  # noqa: F403
 from memoria.db.repository import _common as _common_mod
+from memoria.db.repository._common import _lock_sqlite_write, db_session
 
 # Ensure private helpers from _common are visible as bare names.
 for _name, _value in vars(_common_mod).items():
@@ -79,26 +82,27 @@ def _get_fact_claim_in_transaction(
     claim_id: str,
 ) -> dict | None:
     row = conn.execute(
-        """
+        text("""
         SELECT *
         FROM fact_claim
-        WHERE owner_user_id = ? AND claim_id = ?
-        """,
-        (owner_user_id, claim_id),
-    ).fetchone()
+        WHERE owner_user_id = :owner_user_id AND claim_id = :claim_id
+        """),
+        {"owner_user_id": owner_user_id, "claim_id": claim_id},
+    ).mappings().fetchone()
     return _decode_fact_claim_row(row)
 
 
 def _begin_fact_claim_write(conn) -> None:
-    if isinstance(conn, sqlite3.Connection) and not conn.in_transaction:
-        conn.execute("BEGIN IMMEDIATE")
+    _lock_sqlite_write(conn)
 
 
 def _lock_fact_claim_for_write(conn, claim_id: str) -> None:
     if _is_postgres_enabled():
         conn.execute(
-            "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))",
-            (claim_id,),
+            text(
+                "SELECT pg_advisory_xact_lock(hashtextextended(:claim_id, 0))"
+            ),
+            {"claim_id": claim_id},
         )
 
 
@@ -184,7 +188,7 @@ def _insert_fact_claim_from_event(
         allow_nan=False,
     )
     cursor = conn.execute(
-        """
+        text("""
         INSERT INTO fact_claim (
             claim_id,
             owner_user_id,
@@ -206,25 +210,29 @@ def _insert_fact_claim_from_event(
             verified_at,
             retracted_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'candidate', ?, ?, ?, NULL, NULL, ?, ?, ?, NULL, NULL)
+        VALUES (:claim_id, :owner_user_id, :scope_type, :scope_id,
+                :fact_text, :normalized_fact_text, :content_hash,
+                :normalized_content_hash, 'candidate', :source_kind,
+                :provenance, :source_ids, NULL, NULL, :ledger_version,
+                :created_at, :updated_at, NULL, NULL)
         ON CONFLICT DO NOTHING
-        """,
-        (
-            payload["claim_id"],
-            payload["owner_user_id"],
-            payload["scope_type"],
-            payload["scope_id"],
-            payload["fact_text"],
-            payload["normalized_fact_text"],
-            payload["content_hash"],
-            payload["normalized_content_hash"],
-            payload["source_kind"],
-            encoded_provenance,
-            encoded_source_ids,
-            event.aggregate_version,
-            event.recorded_at,
-            event.recorded_at,
-        ),
+        """),
+        {
+            "claim_id": payload["claim_id"],
+            "owner_user_id": payload["owner_user_id"],
+            "scope_type": payload["scope_type"],
+            "scope_id": payload["scope_id"],
+            "fact_text": payload["fact_text"],
+            "normalized_fact_text": payload["normalized_fact_text"],
+            "content_hash": payload["content_hash"],
+            "normalized_content_hash": payload["normalized_content_hash"],
+            "source_kind": payload["source_kind"],
+            "provenance": encoded_provenance,
+            "source_ids": encoded_source_ids,
+            "ledger_version": event.aggregate_version,
+            "created_at": event.recorded_at,
+            "updated_at": event.recorded_at,
+        },
     )
     if cursor.rowcount == 1:
         return _get_fact_claim_in_transaction(
@@ -353,34 +361,34 @@ def _project_fact_claim_event_in_transaction(
             for source_id in item.get("source_ids") or []
         })
         cursor = conn.execute(
-            """
+            text("""
             UPDATE fact_claim
-            SET provenance = ?,
-                source_ids = ?,
-                ledger_version = ?,
-                updated_at = ?
-            WHERE owner_user_id = ?
-              AND claim_id = ?
-              AND ledger_version = ?
+            SET provenance = :provenance,
+                source_ids = :source_ids,
+                ledger_version = :ledger_version,
+                updated_at = :updated_at
+            WHERE owner_user_id = :owner_user_id
+              AND claim_id = :claim_id
+              AND ledger_version = :old_ledger_version
               AND status IN ('candidate', 'verified')
-            """,
-            (
-                json.dumps(
+            """),
+            {
+                "provenance": json.dumps(
                     {"evidence": evidence_entries},
                     ensure_ascii=False,
                     allow_nan=False,
                 ),
-                json.dumps(
+                "source_ids": json.dumps(
                     source_ids,
                     ensure_ascii=False,
                     allow_nan=False,
                 ),
-                event.aggregate_version,
-                event.recorded_at,
-                event.owner_user_id,
-                event.aggregate_id,
-                claim["ledger_version"],
-            ),
+                "ledger_version": event.aggregate_version,
+                "updated_at": event.recorded_at,
+                "owner_user_id": event.owner_user_id,
+                "claim_id": event.aggregate_id,
+                "old_ledger_version": claim["ledger_version"],
+            },
         )
         _guard_fact_claim_update(
             cursor,
@@ -437,39 +445,39 @@ def _project_fact_claim_event_in_transaction(
         if source_ids != decision["source_ids"]:
             raise ValueError(
                 "fact claim verification source_ids do not match evidence"
-            )
+        )
         cursor = conn.execute(
-            """
+            text("""
             UPDATE fact_claim
             SET status = 'verified',
-                provenance = ?,
-                source_ids = ?,
-                ledger_version = ?,
-                updated_at = ?,
-                verified_at = ?
-            WHERE owner_user_id = ?
-              AND claim_id = ?
-              AND ledger_version = ?
+                provenance = :provenance,
+                source_ids = :source_ids,
+                ledger_version = :ledger_version,
+                updated_at = :updated_at,
+                verified_at = :verified_at
+            WHERE owner_user_id = :owner_user_id
+              AND claim_id = :claim_id
+              AND ledger_version = :old_ledger_version
               AND status = 'candidate'
-            """,
-            (
-                json.dumps(
+            """),
+            {
+                "provenance": json.dumps(
                     {"evidence": evidence_entries},
                     ensure_ascii=False,
                     allow_nan=False,
                 ),
-                json.dumps(
+                "source_ids": json.dumps(
                     source_ids,
                     ensure_ascii=False,
                     allow_nan=False,
                 ),
-                event.aggregate_version,
-                event.recorded_at,
-                event.recorded_at,
-                event.owner_user_id,
-                event.aggregate_id,
-                claim["ledger_version"],
-            ),
+                "ledger_version": event.aggregate_version,
+                "updated_at": event.recorded_at,
+                "verified_at": event.recorded_at,
+                "owner_user_id": event.owner_user_id,
+                "claim_id": event.aggregate_id,
+                "old_ledger_version": claim["ledger_version"],
+            },
         )
         _guard_fact_claim_update(
             cursor,
@@ -485,26 +493,26 @@ def _project_fact_claim_event_in_transaction(
                 "fact claim replacement cannot be retracted"
             )
         cursor = conn.execute(
-            """
+            text("""
             UPDATE fact_claim
             SET status = 'retracted',
-                ledger_version = ?,
-                updated_at = ?,
-                retracted_at = ?
-            WHERE owner_user_id = ?
-              AND claim_id = ?
-              AND ledger_version = ?
+                ledger_version = :ledger_version,
+                updated_at = :updated_at,
+                retracted_at = :retracted_at
+            WHERE owner_user_id = :owner_user_id
+              AND claim_id = :claim_id
+              AND ledger_version = :old_ledger_version
               AND status IN ('candidate', 'verified')
               AND supersedes_claim_id IS NULL
-            """,
-            (
-                event.aggregate_version,
-                event.recorded_at,
-                event.recorded_at,
-                event.owner_user_id,
-                event.aggregate_id,
-                claim["ledger_version"],
-            ),
+            """),
+            {
+                "ledger_version": event.aggregate_version,
+                "updated_at": event.recorded_at,
+                "retracted_at": event.recorded_at,
+                "owner_user_id": event.owner_user_id,
+                "claim_id": event.aggregate_id,
+                "old_ledger_version": claim["ledger_version"],
+            },
         )
         _guard_fact_claim_update(
             cursor,
@@ -549,53 +557,52 @@ def _project_fact_claim_event_in_transaction(
                 "fact claim replacement already supersedes another claim"
             )
         cursor = conn.execute(
-            """
+            text("""
             UPDATE fact_claim
             SET status = 'superseded',
-                superseded_by_claim_id = ?,
-                ledger_version = ?,
-                updated_at = ?
-            WHERE owner_user_id = ?
-              AND claim_id = ?
-              AND ledger_version = ?
+                superseded_by_claim_id = :replacement_id,
+                ledger_version = :ledger_version,
+                updated_at = :updated_at
+            WHERE owner_user_id = :owner_user_id
+              AND claim_id = :claim_id
+              AND ledger_version = :old_ledger_version
               AND status IN ('candidate', 'verified')
               AND superseded_by_claim_id IS NULL
-            """,
-            (
-                replacement_id,
-                event.aggregate_version,
-                event.recorded_at,
-                event.owner_user_id,
-                event.aggregate_id,
-                claim["ledger_version"],
-            ),
+            """),
+            {
+                "replacement_id": replacement_id,
+                "ledger_version": event.aggregate_version,
+                "updated_at": event.recorded_at,
+                "owner_user_id": event.owner_user_id,
+                "claim_id": event.aggregate_id,
+                "old_ledger_version": claim["ledger_version"],
+            },
         )
         _guard_fact_claim_update(
             cursor,
             "fact claim supersede projection changed concurrently",
         )
         cursor = conn.execute(
-            """
+            text("""
             UPDATE fact_claim
-            SET supersedes_claim_id = ?,
-                updated_at = ?
-            WHERE owner_user_id = ?
-              AND claim_id = ?
-              AND ledger_version = ?
+            SET supersedes_claim_id = :event_aggregate_id,
+                updated_at = :updated_at
+            WHERE owner_user_id = :owner_user_id
+              AND claim_id = :replacement_id
+              AND ledger_version = :replacement_ledger_version
               AND status IN ('candidate', 'verified')
               AND (
                     supersedes_claim_id IS NULL
-                    OR supersedes_claim_id = ?
+                    OR supersedes_claim_id = :event_aggregate_id
               )
-            """,
-            (
-                event.aggregate_id,
-                event.recorded_at,
-                event.owner_user_id,
-                replacement_id,
-                replacement["ledger_version"],
-                event.aggregate_id,
-            ),
+            """),
+            {
+                "event_aggregate_id": event.aggregate_id,
+                "updated_at": event.recorded_at,
+                "owner_user_id": event.owner_user_id,
+                "replacement_id": replacement_id,
+                "replacement_ledger_version": replacement["ledger_version"],
+            },
         )
         _guard_fact_claim_update(
             cursor,
@@ -619,7 +626,7 @@ def _project_fact_claim_event(
 ) -> dict:
     if conn is not None:
         return _project_fact_claim_event_in_transaction(conn, event)
-    with get_conn() as transaction:
+    with db_session() as transaction:
         _begin_fact_claim_write(transaction)
         _lock_fact_claim_for_write(transaction, event.aggregate_id)
         return _project_fact_claim_event_in_transaction(transaction, event)
@@ -649,13 +656,13 @@ def _get_projection_checkpoint_in_transaction(
     owner_user_id: str,
 ) -> dict | None:
     row = conn.execute(
-        """
+        text("""
         SELECT projector_name, owner_user_id, last_sequence, updated_at
         FROM projection_checkpoint
-        WHERE projector_name = ? AND owner_user_id = ?
-        """,
-        (projector_name, owner_user_id),
-    ).fetchone()
+        WHERE projector_name = :projector_name AND owner_user_id = :owner_user_id
+        """),
+        {"projector_name": projector_name, "owner_user_id": owner_user_id},
+    ).mappings().fetchone()
     if row is None:
         return None
     checkpoint = dict(row)
@@ -672,7 +679,7 @@ def get_projection_checkpoint(
     owner_user_id = str(owner_user_id or "").strip()
     if not projector_name or not owner_user_id:
         raise ValueError("projector_name and owner_user_id must not be blank")
-    with get_conn() as conn:
+    with db_session() as conn:
         return _get_projection_checkpoint_in_transaction(
             conn,
             projector_name,
@@ -687,25 +694,25 @@ def _save_projection_checkpoint_in_transaction(
     last_sequence: int,
 ) -> None:
     conn.execute(
-        """
+        text("""
         INSERT INTO projection_checkpoint (
             projector_name,
             owner_user_id,
             last_sequence,
             updated_at
         )
-        VALUES (?, ?, ?, ?)
+        VALUES (:projector_name, :owner_user_id, :last_sequence, :updated_at)
         ON CONFLICT(projector_name, owner_user_id)
         DO UPDATE SET
             last_sequence=excluded.last_sequence,
             updated_at=excluded.updated_at
-        """,
-        (
-            projector_name,
-            owner_user_id,
-            int(last_sequence),
-            _now(),
-        ),
+        """),
+        {
+            "projector_name": projector_name,
+            "owner_user_id": owner_user_id,
+            "last_sequence": int(last_sequence),
+            "updated_at": _now(),
+        },
     )
 
 
@@ -733,36 +740,36 @@ def rebuild_domain_projections(owner_user_id: str) -> dict:
         for projector_name, _project in projectors.values()
     }
 
-    with get_conn() as conn:
+    with db_session() as conn:
         conn.execute(
-            "DELETE FROM fact_claim WHERE owner_user_id = ?",
-            (owner_user_id,),
+            text("DELETE FROM fact_claim WHERE owner_user_id = :owner_user_id"),
+            {"owner_user_id": owner_user_id},
         )
         conn.execute(
-            "DELETE FROM story_state WHERE owner_user_id = ?",
-            (owner_user_id,),
+            text("DELETE FROM story_state WHERE owner_user_id = :owner_user_id"),
+            {"owner_user_id": owner_user_id},
         )
         conn.execute(
-            """
+            text("""
             DELETE FROM projection_checkpoint
-            WHERE owner_user_id = ?
-              AND projector_name IN (?, ?)
-            """,
-            (
-                owner_user_id,
-                FACT_CLAIM_PROJECTOR,
-                STORY_STATE_PROJECTOR,
-            ),
+            WHERE owner_user_id = :owner_user_id
+              AND projector_name IN (:fact_projector, :story_projector)
+            """),
+            {
+                "owner_user_id": owner_user_id,
+                "fact_projector": FACT_CLAIM_PROJECTOR,
+                "story_projector": STORY_STATE_PROJECTOR,
+            },
         )
         rows = conn.execute(
-            """
+            text("""
             SELECT *
             FROM domain_event
-            WHERE owner_user_id = ?
+            WHERE owner_user_id = :owner_user_id
             ORDER BY sequence ASC
-            """,
-            (owner_user_id,),
-        ).fetchall()
+            """),
+            {"owner_user_id": owner_user_id},
+        ).mappings().fetchall()
 
         for row in rows:
             event = _domain_event_from_row(row)
@@ -919,7 +926,7 @@ def _record_fact_claim(
     verification_policy: Callable[[list[dict[str, Any]]], dict[str, Any]],
 ) -> dict:
     """Append claim lifecycle events and update the projection atomically."""
-    with get_conn() as conn:
+    with db_session() as conn:
         return _record_fact_claim_in_transaction(
             conn,
             claim_id=claim_id,
@@ -942,7 +949,7 @@ def get_fact_claim(
     owner_user_id: str,
     claim_id: str,
 ) -> dict | None:
-    with get_conn() as conn:
+    with db_session() as conn:
         return _get_fact_claim_in_transaction(
             conn,
             owner_user_id,
@@ -956,7 +963,7 @@ def _retract_fact_claim(
     *,
     reason: str | None = None,
 ) -> dict:
-    with get_conn() as conn:
+    with db_session() as conn:
         _begin_fact_claim_write(conn)
         _lock_fact_claim_for_write(conn, claim_id)
         claim = _get_fact_claim_in_transaction(
@@ -997,7 +1004,7 @@ def _supersede_fact_claim(
     *,
     reason: str | None = None,
 ) -> dict:
-    with get_conn() as conn:
+    with db_session() as conn:
         _begin_fact_claim_write(conn)
         for locked_claim_id in sorted((claim_id, superseded_by_claim_id)):
             _lock_fact_claim_for_write(conn, locked_claim_id)
@@ -1056,18 +1063,22 @@ def list_fact_claims(
     scope_type: str,
     scope_id: str,
 ) -> list[dict]:
-    with get_conn() as conn:
+    with db_session() as conn:
         rows = conn.execute(
-            """
+            text("""
             SELECT *
             FROM fact_claim
-            WHERE owner_user_id = ?
-              AND scope_type = ?
-              AND scope_id = ?
+            WHERE owner_user_id = :owner_user_id
+              AND scope_type = :scope_type
+              AND scope_id = :scope_id
             ORDER BY created_at ASC, claim_id ASC
-            """,
-            (owner_user_id, scope_type, scope_id),
-        ).fetchall()
+            """),
+            {
+                "owner_user_id": owner_user_id,
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+            },
+        ).mappings().fetchall()
     return [_decode_fact_claim_row(row) for row in rows]
 
 
@@ -1076,19 +1087,23 @@ def list_verified_fact_claims(
     scope_type: str,
     scope_id: str,
 ) -> list[dict]:
-    with get_conn() as conn:
+    with db_session() as conn:
         rows = conn.execute(
-            """
+            text("""
             SELECT *
             FROM fact_claim
-            WHERE owner_user_id = ?
-              AND scope_type = ?
-              AND scope_id = ?
+            WHERE owner_user_id = :owner_user_id
+              AND scope_type = :scope_type
+              AND scope_id = :scope_id
               AND status = 'verified'
             ORDER BY created_at ASC, claim_id ASC
-            """,
-            (owner_user_id, scope_type, scope_id),
-        ).fetchall()
+            """),
+            {
+                "owner_user_id": owner_user_id,
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+            },
+        ).mappings().fetchall()
     return [_decode_fact_claim_row(row) for row in rows]
 
 
@@ -1098,15 +1113,15 @@ LONG_TERM_FACT_BACKFILL_MIGRATION = (
 
 
 def has_data_migration(migration_key: str) -> bool:
-    with get_conn() as conn:
+    with db_session() as conn:
         row = conn.execute(
-            """
+            text("""
             SELECT 1
             FROM data_migration
-            WHERE migration_key = ?
-            """,
-            (migration_key,),
-        ).fetchone()
+            WHERE migration_key = :migration_key
+            """),
+            {"migration_key": migration_key},
+        ).mappings().fetchone()
     return row is not None
 
 
@@ -1158,16 +1173,16 @@ def _legacy_long_term_fact_claim_event(row: dict) -> NewDomainEvent:
 
 def backfill_legacy_long_term_fact_events() -> dict:
     """Backfill legacy facts into candidate claim events without deleting sources."""
-    with get_conn() as conn:
+    with db_session() as conn:
         _begin_fact_claim_write(conn)
         existing = conn.execute(
-            """
+            text("""
             SELECT metadata, applied_at
             FROM data_migration
-            WHERE migration_key = ?
-            """,
-            (LONG_TERM_FACT_BACKFILL_MIGRATION,),
-        ).fetchone()
+            WHERE migration_key = :migration_key
+            """),
+            {"migration_key": LONG_TERM_FACT_BACKFILL_MIGRATION},
+        ).mappings().fetchone()
         if existing is not None:
             metadata = json.loads(existing["metadata"])
             return {
@@ -1179,13 +1194,13 @@ def backfill_legacy_long_term_fact_events() -> dict:
         rows = [
             dict(row)
             for row in conn.execute(
-                """
+                text("""
                 SELECT id, character_id, player_id, fact_text, importance,
                        created_at, last_referenced
                 FROM long_term_fact
                 ORDER BY id ASC
-                """
-            ).fetchall()
+                """)
+            ).mappings().fetchall()
         ]
         for row in rows:
             stored_event = append_domain_event(
@@ -1203,20 +1218,23 @@ def backfill_legacy_long_term_fact_events() -> dict:
             "event_count": len(rows),
         }
         conn.execute(
-            """
+            text("""
             INSERT INTO data_migration (migration_key, metadata, applied_at)
-            VALUES (?, ?, ?)
-            """,
-            (
-                LONG_TERM_FACT_BACKFILL_MIGRATION,
-                json.dumps(metadata, ensure_ascii=False, allow_nan=False),
-                applied_at,
-            ),
+            VALUES (:migration_key, :metadata, :applied_at)
+            """),
+            {
+                "migration_key": LONG_TERM_FACT_BACKFILL_MIGRATION,
+                "metadata": json.dumps(
+                    metadata,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ),
+                "applied_at": applied_at,
+            },
         )
         return {
             **metadata,
             "applied_at": applied_at,
             "already_applied": False,
         }
-
 

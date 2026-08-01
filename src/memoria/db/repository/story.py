@@ -14,6 +14,8 @@ from urllib.parse import urlsplit
 import re
 from difflib import SequenceMatcher
 
+from sqlalchemy import text
+
 from memoria.core.config import configs
 from memoria.core import performance, tracing
 from memoria.core.domain_events import NewDomainEvent, StoredDomainEvent
@@ -39,6 +41,7 @@ logger = logging.getLogger(__name__)
 # Import shared helpers / connection / schema. Private names included.
 from memoria.db.repository._common import *  # noqa: F403
 from memoria.db.repository import _common as _common_mod
+from memoria.db.repository._common import db_session
 
 # Ensure private helpers from _common are visible as bare names.
 for _name, _value in vars(_common_mod).items():
@@ -78,13 +81,13 @@ def _get_story_state_in_transaction(
     story_id: str,
 ) -> dict | None:
     row = conn.execute(
-        """
+        text("""
         SELECT *
         FROM story_state
-        WHERE owner_user_id = ? AND story_id = ?
-        """,
-        (owner_user_id, story_id),
-    ).fetchone()
+        WHERE owner_user_id = :owner_user_id AND story_id = :story_id
+        """),
+        {"owner_user_id": owner_user_id, "story_id": story_id},
+    ).mappings().fetchone()
     return _decode_story_state_row(row)
 
 
@@ -128,7 +131,7 @@ def _project_story_event_in_transaction(
             raise StoryStateTransitionError("story has already started")
         progress = _clamp_story_progress(payload.get("progress", 0.0))
         conn.execute(
-            """
+            text("""
             INSERT INTO story_state (
                 owner_user_id,
                 story_id,
@@ -141,16 +144,17 @@ def _project_story_event_in_transaction(
                 completed_at,
                 failed_at
             )
-            VALUES (?, ?, 'active', ?, NULL, ?, ?, ?, NULL, NULL)
-            """,
-            (
-                event.owner_user_id,
-                event.aggregate_id,
-                progress,
-                event.aggregate_version,
-                event.recorded_at,
-                event.recorded_at,
-            ),
+            VALUES (:owner_user_id, :story_id, 'active', :progress, NULL,
+                    :ledger_version, :started_at, :updated_at, NULL, NULL)
+            """),
+            {
+                "owner_user_id": event.owner_user_id,
+                "story_id": event.aggregate_id,
+                "progress": progress,
+                "ledger_version": event.aggregate_version,
+                "started_at": event.recorded_at,
+                "updated_at": event.recorded_at,
+            },
         )
     elif event.event_type == "story.progressed.v1":
         if state is None:
@@ -166,23 +170,23 @@ def _project_story_event_in_transaction(
                 state["progress"] + float(payload.get("progress_delta", 0.0))
             )
         conn.execute(
-            """
+            text("""
             UPDATE story_state
-            SET progress = ?,
-                ledger_version = ?,
-                updated_at = ?
-            WHERE owner_user_id = ?
-              AND story_id = ?
-              AND ledger_version = ?
-            """,
-            (
-                progress,
-                event.aggregate_version,
-                event.recorded_at,
-                event.owner_user_id,
-                event.aggregate_id,
-                state["ledger_version"],
-            ),
+            SET progress = :progress,
+                ledger_version = :ledger_version,
+                updated_at = :updated_at
+            WHERE owner_user_id = :owner_user_id
+              AND story_id = :story_id
+              AND ledger_version = :old_ledger_version
+            """),
+            {
+                "progress": progress,
+                "ledger_version": event.aggregate_version,
+                "updated_at": event.recorded_at,
+                "owner_user_id": event.owner_user_id,
+                "story_id": event.aggregate_id,
+                "old_ledger_version": state["ledger_version"],
+            },
         )
     else:
         if state is None:
@@ -203,31 +207,31 @@ def _project_story_event_in_transaction(
         )
         reason = str(payload.get("reason") or "").strip() or None
         conn.execute(
-            """
+            text("""
             UPDATE story_state
-            SET status = ?,
-                progress = ?,
-                terminal_reason = ?,
-                ledger_version = ?,
-                updated_at = ?,
-                completed_at = ?,
-                failed_at = ?
-            WHERE owner_user_id = ?
-              AND story_id = ?
-              AND ledger_version = ?
-            """,
-            (
-                status,
-                progress,
-                reason,
-                event.aggregate_version,
-                event.recorded_at,
-                event.recorded_at if status == "completed" else None,
-                event.recorded_at if status == "failed" else None,
-                event.owner_user_id,
-                event.aggregate_id,
-                state["ledger_version"],
-            ),
+            SET status = :status,
+                progress = :progress,
+                terminal_reason = :terminal_reason,
+                ledger_version = :ledger_version,
+                updated_at = :updated_at,
+                completed_at = :completed_at,
+                failed_at = :failed_at
+            WHERE owner_user_id = :owner_user_id
+              AND story_id = :story_id
+              AND ledger_version = :old_ledger_version
+            """),
+            {
+                "status": status,
+                "progress": progress,
+                "terminal_reason": reason,
+                "ledger_version": event.aggregate_version,
+                "updated_at": event.recorded_at,
+                "completed_at": event.recorded_at if status == "completed" else None,
+                "failed_at": event.recorded_at if status == "failed" else None,
+                "owner_user_id": event.owner_user_id,
+                "story_id": event.aggregate_id,
+                "old_ledger_version": state["ledger_version"],
+            },
         )
 
     projected = _get_story_state_in_transaction(
@@ -277,8 +281,8 @@ def append_story_event(
     if event_id is not None:
         event_values["event_id"] = event_id
     event = NewDomainEvent(**event_values)
-    with get_conn() as conn:
-        return _append_and_project_story_event_in_transaction(conn, event)
+    with db_session() as session:
+        return _append_and_project_story_event_in_transaction(session, event)
 
 
 def _append_and_project_story_event_in_transaction(
@@ -407,9 +411,9 @@ def get_story_state(
     story_id: str,
 ) -> dict | None:
     """在租户边界内读取规范化剧情状态。"""
-    with get_conn() as conn:
+    with db_session() as session:
         return _get_story_state_in_transaction(
-            conn,
+            session,
             owner_user_id,
             story_id,
         )

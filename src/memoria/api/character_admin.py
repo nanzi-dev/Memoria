@@ -25,6 +25,22 @@ from memoria.db import repository
 logger = logging.getLogger(__name__)
 router = APIRouter(dependencies=[Depends(require_current_user_id)])
 
+# 角色卡数据会拼进每轮 LLM 系统提示词，必须限制体积防止成本放大。
+MAX_CHARACTER_DATA_CHARS = 200_000
+
+
+def _require_character_data_within_limit(character_data: dict) -> None:
+    """拒绝超过体积上限的角色卡数据（序列化后按字符数计）。"""
+    size = len(json.dumps(character_data, ensure_ascii=False))
+    if size > MAX_CHARACTER_DATA_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"角色卡数据过大（{size} 字符），超过 {MAX_CHARACTER_DATA_CHARS} "
+                "字符上限，请精简后重试"
+            ),
+        )
+
 
 # =========================
 # 请求/响应模型
@@ -160,9 +176,10 @@ def create_character(
         req: 包含完整角色卡数据的请求
     """
     try:
-        # 使用 Pydantic 验证数据格式
+        # 先做体积上限检查，再使用 Pydantic 验证数据格式
+        _require_character_data_within_limit(req.character_data)
         card = CharacterCard.model_validate(req.character_data)
-        
+
         # 检查角色 ID 是否已存在
         existing = repository.get_character_card_from_db(current_user_id, card.character_id)
         if existing:
@@ -231,7 +248,8 @@ def update_character(
         req: 包含完整角色卡数据的请求
     """
     try:
-        # 验证数据格式
+        # 先做体积上限检查，再验证数据格式
+        _require_character_data_within_limit(req.character_data)
         card = CharacterCard.model_validate(req.character_data)
         
         # 检查角色 ID 是否匹配

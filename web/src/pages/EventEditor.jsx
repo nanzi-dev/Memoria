@@ -118,6 +118,9 @@ const DEFAULT_SUB_CONDITION = {
   keywords: [],
   match_mode: 'any',
   crossing: false,
+  aggregation: 'any',
+  min_characters: null,
+  character_ids: [],
   state_field: 'affinity',
   event_id: '',
   event_status: 'succeeded',
@@ -222,6 +225,18 @@ function sanitizeCondition(condition) {
   if (Array.isArray(cleaned.weekdays) && cleaned.weekdays.length === 0) {
     cleaned.weekdays = null;
   }
+  if (Array.isArray(cleaned.character_ids)) {
+    const characterIds = cleaned.character_ids
+      .map(value => String(value || '').trim())
+      .filter(Boolean);
+    cleaned.character_ids = characterIds.length ? characterIds : null;
+  }
+  if (cleaned.aggregation !== 'count') {
+    cleaned.min_characters = null;
+  }
+  if (cleaned.aggregation === 'any') {
+    cleaned.character_ids = null;
+  }
   return cleaned;
 }
 
@@ -284,6 +299,13 @@ function validateEventForm(form) {
       && current.threshold == null
     ) {
       errors.push(`${label}需要填写阈值`);
+    }
+    if (
+      ['affinity_threshold', 'trust_threshold'].includes(triggerType)
+      && current.aggregation === 'count'
+      && Number(current.min_characters) < 1
+    ) {
+      errors.push(`${label}的 count 聚合需要填写大于 0 的最少角色数`);
     }
     if (triggerType === 'state_delta' && !['affinity', 'trust'].includes(current.state_field)) {
       errors.push(`${label}需要选择好感度或信任度变化量`);
@@ -421,6 +443,8 @@ function PipelinePreview({ triggerCondition, effects }) {
       {(t === 'affinity_threshold' || t === 'trust_threshold') && (
         <span className="text-muted-foreground">
           {triggerCondition?.comparison || 'gte'} {triggerCondition?.threshold ?? '?'}
+          {' '}{triggerCondition?.aggregation === 'all' && '（全部）'}
+          {triggerCondition?.aggregation === 'count' && `（${triggerCondition?.min_characters || 1}+）`}
         </span>
       )}
       {t === 'dialogue_count' && (
@@ -538,15 +562,58 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
       )}
 
       {(t === 'affinity_threshold' || t === 'trust_threshold') && (
-        <label className="flex min-h-11 items-center gap-2 text-[10px] font-archive-mono text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={Boolean(condition.crossing)}
-            onChange={e => update('crossing', e.target.checked)}
-            className="accent-primary"
-          />
-          仅在本轮首次跨过阈值时触发
-        </label>
+        <div className="space-y-3">
+          <label className="flex min-h-11 items-center gap-2 text-[10px] font-archive-mono text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={Boolean(condition.crossing)}
+              onChange={e => update('crossing', e.target.checked)}
+              className="accent-primary"
+            />
+            仅在本轮首次跨过阈值时触发
+          </label>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="text-[10px] font-archive-mono text-muted-foreground">
+              <span className="mb-1 block">跨角色聚合</span>
+              <select
+                value={condition.aggregation || 'any'}
+                onChange={e => update('aggregation', e.target.value)}
+                className="min-h-11 w-full rounded border border-border bg-background px-3 text-xs text-primary"
+              >
+                <option value="any">任一角色满足</option>
+                <option value="all">全部角色满足</option>
+                <option value="count">至少 N 个角色满足</option>
+              </select>
+            </label>
+            <label className="text-[10px] font-archive-mono text-muted-foreground">
+              <span className="mb-1 block">最少满足角色数（count）</span>
+              <input
+                type="number"
+                min="1"
+                value={condition.aggregation === 'count' ? (condition.min_characters ?? '') : ''}
+                disabled={condition.aggregation !== 'count'}
+                onChange={e => update('min_characters', e.target.value === '' ? null : Math.max(1, Number(e.target.value)))}
+                placeholder="2"
+                className="min-h-11 w-full rounded border border-border bg-background px-3 text-xs text-primary disabled:opacity-50 focus:border-primary/40 focus:outline-none"
+              />
+            </label>
+          </div>
+          {(condition.aggregation === 'all' || condition.aggregation === 'count') && (
+            <label className="block text-[10px] font-archive-mono text-muted-foreground">
+              <span className="mb-1 block">参与聚合角色 ID（逗号分隔，留空表示当前参与角色）</span>
+              <input
+                type="text"
+                value={(condition.character_ids || []).join(', ')}
+                onChange={e => update(
+                  'character_ids',
+                  e.target.value.split(',').map(value => value.trim()).filter(Boolean)
+                )}
+                placeholder="nd_chen_dazhuang, nd_lin_xiaoxi"
+                className="min-h-11 w-full rounded border border-border bg-background px-3 text-xs font-archive-mono text-primary focus:border-primary/40 focus:outline-none"
+              />
+            </label>
+          )}
+        </div>
       )}
 
       {t === 'state_delta' && (
@@ -802,7 +869,7 @@ function TagInput({ tags, onChange, placeholder }) {
   const [input, setInput] = useState('');
 
   function handleKeyDown(e) {
-    if (e.key === 'Enter' && input.trim()) {
+    if (e.key === 'Enter' && !e.nativeEvent.isComposing && input.trim()) {
       e.preventDefault();
       if (!tags.includes(input.trim())) {
         onChange([...tags, input.trim()]);

@@ -32,6 +32,7 @@ from memoria.core.output_safety import (
     DialogueSafetyStream,
     safety_check as _safety_check,
 )
+from memoria.core.relationship_delta_policy import resolve_relationship_delta
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
@@ -919,9 +920,10 @@ def _run_dialogue_turn(
             )
         if result.get("_fallback_mode"):
             logger.warning(
-                "LLM JSON降级触发 (character_id=%s, session_id=%s)",
+                "LLM JSON降级触发 (character_id=%s, session_id=%s, parser=%s)",
                 character_id,
                 session_id,
+                result.get("_fallback_parser") or "unknown",
             )
 
         raw_dialogue = result.get("dialogue", "")
@@ -941,8 +943,20 @@ def _run_dialogue_turn(
         if valid_actions and action not in valid_actions:
             action = card.action_vocabulary.default_action
 
-        affinity_delta = _clip(_safe_float(result.get("affinity_delta", 0)), -10, 10)
-        trust_delta = _clip(_safe_float(result.get("trust_delta", 0)), -10, 10)
+        affinity_delta = resolve_relationship_delta(
+            result.get("affinity_delta", 0),
+            f"{result.get('dialogue', '')}\n{player_message}",
+            result.get("action", ""),
+            previous_affinity,
+            "affinity",
+        )
+        trust_delta = resolve_relationship_delta(
+            result.get("trust_delta", 0),
+            f"{result.get('dialogue', '')}\n{player_message}",
+            result.get("action", ""),
+            previous_trust,
+            "trust",
+        )
         base_affinity = _clip(previous_affinity + affinity_delta, -100, 100)
         base_trust = _clip(previous_trust + trust_delta, 0, 100)
         base_mood = result.get("mood_after") or runtime_state.get(

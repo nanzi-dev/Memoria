@@ -499,7 +499,7 @@ export default function UserSettingsModal({ onClose }) {
                       type="text"
                       value={avatarUrl}
                       onChange={event => setAvatarUrl(event.target.value)}
-                      onKeyDown={event => event.key === 'Enter' && handleAvatarUrl()}
+                      onKeyDown={event => event.key === 'Enter' && !event.nativeEvent.isComposing && handleAvatarUrl()}
                       placeholder="或粘贴图片 URL 设置头像"
                       className="min-w-0 flex-1"
                     />

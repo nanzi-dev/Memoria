@@ -48,6 +48,11 @@ class TriggerCondition(BaseModel):
     keywords: Optional[list[str]] = None           # 关键词列表
     match_mode: Optional[str] = "any"              # any（任一匹配）或 all（全部匹配）
     crossing: bool = False                          # 仅在本轮跨过阈值时触发
+
+    # 跨角色聚合
+    aggregation: Literal["any", "all", "count"] = "any"
+    min_characters: Optional[int] = None           # count 聚合需要的最少满足角色数
+    character_ids: Optional[list[str]] = None      # 参与聚合的角色；空列表表示当前参与角色
     
     # 计数条件
     count: Optional[int] = None                    # 目标计数

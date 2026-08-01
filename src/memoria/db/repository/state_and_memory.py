@@ -14,6 +14,8 @@ from urllib.parse import urlsplit
 import re
 from difflib import SequenceMatcher
 
+from sqlalchemy import text
+
 from memoria.core.config import configs
 from memoria.core import performance, tracing
 from memoria.core.domain_events import NewDomainEvent, StoredDomainEvent
@@ -39,6 +41,7 @@ logger = logging.getLogger(__name__)
 # Import shared helpers / connection / schema. Private names included.
 from memoria.db.repository._common import *  # noqa: F403
 from memoria.db.repository import _common as _common_mod
+from memoria.db.repository._common import _lock_sqlite_write, db_session
 
 # Ensure private helpers from _common are visible as bare names.
 for _name, _value in vars(_common_mod).items():
@@ -69,15 +72,15 @@ def get_runtime_state(
         query_context: 查询上下文（用于向量检索长期记忆）
         memory_created_after: 只加载该时间之后保存的长期记忆
     """
-     with get_conn() as conn:
-         row = conn.execute(
-             """
+     with db_session() as session:
+         row = session.execute(
+             text("""
              SELECT affection_level, trust_level, current_mood
              FROM relationship_state
-             WHERE character_id = ? AND player_id = ?
-             """,
-             (character_id, player_id),
-         ).fetchone()
+             WHERE character_id = :character_id AND player_id = :player_id
+             """),
+             {"character_id": character_id, "player_id": player_id},
+         ).mappings().fetchone()
          
          if row:
              state = {
@@ -95,30 +98,31 @@ def get_runtime_state(
                  "current_mood": getattr(mood_schema, "default_mood", "neutral"),
              }
              
-             conn.execute(
-                """
+             session.execute(
+                text("""
                 INSERT INTO relationship_state
                 (character_id, player_id, affection_level, trust_level, current_mood, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (:character_id, :player_id, :affection_level,
+                        :trust_level, :current_mood, :updated_at)
                 ON CONFLICT(character_id, player_id) DO NOTHING
-                """,
-                (
-                    character_id,
-                    player_id,
-                    state["affection_level"],
-                    state["trust_level"],
-                    state["current_mood"],
-                    _now(),
-                ),
+                """),
+                {
+                    "character_id": character_id,
+                    "player_id": player_id,
+                    "affection_level": state["affection_level"],
+                    "trust_level": state["trust_level"],
+                    "current_mood": state["current_mood"],
+                    "updated_at": _now(),
+                },
              )
-             row = conn.execute(
-                 """
+             row = session.execute(
+                 text("""
                  SELECT affection_level, trust_level, current_mood
                  FROM relationship_state
-                 WHERE character_id = ? AND player_id = ?
-                 """,
-                 (character_id, player_id),
-             ).fetchone()
+                 WHERE character_id = :character_id AND player_id = :player_id
+                 """),
+                 {"character_id": character_id, "player_id": player_id},
+             ).mappings().fetchone()
              state = {
                  "affection_level": row["affection_level"],
                  "trust_level": row["trust_level"],
@@ -135,14 +139,14 @@ def get_runtime_state(
                  query_context=query_context,
                  created_after=memory_created_after
              )
-         unlock_rows = conn.execute(
-             """
+         unlock_rows = session.execute(
+             text("""
              SELECT unlock_key FROM event_unlock
-             WHERE player_id = ? AND character_id = ?
+             WHERE player_id = :player_id AND character_id = :character_id
              ORDER BY unlocked_at ASC, unlock_key ASC
-             """,
-             (player_id, character_id),
-         ).fetchall()
+             """),
+             {"player_id": player_id, "character_id": character_id},
+         ).mappings().fetchall()
          state["unlocked_content"] = [row["unlock_key"] for row in unlock_rows]
          return state
      
@@ -150,9 +154,9 @@ def get_runtime_state(
 def save_runtime_state(character_id: str, player_id: str, affection_level: float, trust_level: float, current_mood: str):
     """更新角色状态"""
     now = _now()
-    with get_conn() as conn:
+    with db_session() as session:
         _save_runtime_state_in_transaction(
-            conn,
+            session,
             character_id=character_id,
             player_id=player_id,
             affection_level=affection_level,
@@ -229,17 +233,28 @@ def get_long_term_fact_records(
                 fact_ids = [r.get("fact_id") for r in vector_results if r.get("fact_id") is not None]
                 records_by_id = {}
                 if fact_ids:
-                    placeholders = ",".join(["?"] * len(fact_ids))
-                    with get_conn() as conn:
-                        rows = conn.execute(
-                            f"""
+                    placeholders = ",".join(
+                        [f":fact_id_{index}" for index in range(len(fact_ids))]
+                    )
+                    fact_params = {
+                        f"fact_id_{index}": fact_id
+                        for index, fact_id in enumerate(fact_ids)
+                    }
+                    with db_session() as session:
+                        rows = session.execute(
+                            text(f"""
                             SELECT id, fact_text, importance, created_at, last_referenced
                             FROM long_term_fact
                             WHERE id IN ({placeholders})
-                              AND character_id = ? AND player_id = ?
-                            """,
-                            tuple(fact_ids) + (character_id, player_id),
-                        ).fetchall()
+                              AND character_id = :character_id
+                              AND player_id = :player_id
+                            """),
+                            {
+                                **fact_params,
+                                "character_id": character_id,
+                                "player_id": player_id,
+                            },
+                        ).mappings().fetchall()
                     records_by_id = {row["id"]: dict(row) for row in rows}
 
                 records = []
@@ -265,23 +280,26 @@ def get_long_term_fact_records(
             logger.warning(f"向量检索失败，回退到传统查询: {e}")
     
     # 传统查询（按重要性和最近引用排序）
-    where_clause = "character_id = ? AND player_id = ?"
-    params = [character_id, player_id]
+    where_clause = "character_id = :character_id AND player_id = :player_id"
+    params = {
+        "character_id": character_id,
+        "player_id": player_id,
+    }
     if created_after:
-        where_clause += " AND created_at >= ?"
-        params.append(created_after)
-    params.append(limit)
-    with get_conn() as conn:
-        rows = conn.execute(
-            f"""
+        where_clause += " AND created_at >= :created_after"
+        params["created_after"] = created_after
+    params["limit"] = limit
+    with db_session() as session:
+        rows = session.execute(
+            text(f"""
             SELECT id, fact_text, importance, created_at, last_referenced
             FROM long_term_fact
             WHERE {where_clause}
             ORDER BY importance DESC, last_referenced DESC
-            LIMIT ?
-            """,
-            tuple(params),
-        ).fetchall()
+            LIMIT :limit
+            """),
+            params,
+        ).mappings().fetchall()
         
     return [dict(r) for r in rows]
 
@@ -456,19 +474,28 @@ def save_long_term_fact(
         logger.debug("跳过空长期记忆写入")
         return None
 
-    with get_conn() as conn:
+    with db_session() as session:
+        _lock_sqlite_write(session)
         # 去重检查
         existing = _dedup_check(
-            conn, "long_term_fact", "fact_text", fact_text,
-            "character_id = ? AND player_id = ?",
-            (character_id, player_id),
+            session, "long_term_fact", "fact_text", fact_text,
+            "character_id = :character_id AND player_id = :player_id",
+            {"character_id": character_id, "player_id": player_id},
             threshold=0.75
         )
         if existing:
             new_imp = max(existing.get("importance", 0), importance)
-            conn.execute(
-                "UPDATE long_term_fact SET importance = ?, last_referenced = ? WHERE id = ?",
-                (new_imp, _now(), existing["id"]),
+            session.execute(
+                text(
+                    "UPDATE long_term_fact "
+                    "SET importance = :importance, last_referenced = :last_referenced "
+                    "WHERE id = :id"
+                ),
+                {
+                    "importance": new_imp,
+                    "last_referenced": _now(),
+                    "id": existing["id"],
+                },
             )
             logger.debug(f"长期记忆去重: id={existing['id']}")
             return existing["id"]
@@ -476,15 +503,26 @@ def save_long_term_fact(
         insert_sql = """
             INSERT INTO long_term_fact
             (character_id, player_id, fact_text, importance, created_at, last_referenced)
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (:character_id, :player_id, :fact_text, :importance,
+                    :created_at, :last_referenced)
             """
         if _is_postgres_enabled():
             insert_sql += " RETURNING id"
-        cursor = conn.execute(
-            insert_sql,
-            (character_id, player_id, fact_text, importance, _now(), _now()),
+        cursor = session.execute(
+            text(insert_sql),
+            {
+                "character_id": character_id,
+                "player_id": player_id,
+                "fact_text": fact_text,
+                "importance": importance,
+                "created_at": _now(),
+                "last_referenced": _now(),
+            },
         )
-        fact_id = cursor.fetchone()["id"] if _is_postgres_enabled() else cursor.lastrowid
+        if _is_postgres_enabled():
+            fact_id = cursor.mappings().fetchone()["id"]
+        else:
+            fact_id = cursor.lastrowid
         
     # 同步到向量数据库
     try:

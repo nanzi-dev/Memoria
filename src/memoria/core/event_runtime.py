@@ -340,6 +340,7 @@ def _plan_event_roots(
     definitions_by_id: dict[str, EventDefinition],
     *,
     enforce_cooldown: bool = False,
+    group_contexts: list[EventContext] | None = None,
 ) -> tuple[list[EventTriggerResult], list[dict[str, Any]]]:
     executor = get_event_executor()
     results: list[EventTriggerResult] = []
@@ -494,6 +495,7 @@ def _plan_event_roots(
                 event,
                 event_context,
                 execution_key=chain_context.execution_key,
+                group_contexts=group_contexts,
             )
         except Exception:
             if claim_token:
@@ -923,20 +925,29 @@ def detect_and_execute_event_contexts(
         for context in scoped_contexts:
             if not detector._check_cooldown(event, context):
                 continue
-            if detector._check_trigger_condition(event.trigger_condition, context):
+            if detector._check_trigger_condition(
+                event.trigger_condition,
+                context,
+                scoped_contexts,
+            ):
                 candidates.append((event, context))
                 break
 
     candidates.sort(key=lambda pair: pair[0].priority, reverse=True)
     roots: list[tuple[EventDefinition, EventContext]] = []
     exclusive_groups: set[str] = set()
+    per_event_count: dict[str, int] = {}
     for event, context in candidates:
         if event.exclusive_group and event.exclusive_group in exclusive_groups:
             continue
         # max_triggers_per_turn 只约束自身，避免单个低优先级事件压制全局配额
-        if len(roots) >= max(1, event.max_triggers_per_turn or 3):
+        event_limit = max(1, event.max_triggers_per_turn or 3)
+        if per_event_count.get(event.event_id, 0) >= event_limit:
             continue
         roots.append((event, context))
+        per_event_count[event.event_id] = (
+            per_event_count.get(event.event_id, 0) + 1
+        )
         if event.exclusive_group:
             exclusive_groups.add(event.exclusive_group)
         if event.stop_processing:
@@ -946,6 +957,7 @@ def detect_and_execute_event_contexts(
         roots,
         definitions_by_id,
         enforce_cooldown=True,
+        group_contexts=normalized_contexts,
     )
     root_contexts = {event.event_id: context for event, context in roots}
     try:

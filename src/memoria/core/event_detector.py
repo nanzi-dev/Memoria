@@ -66,14 +66,19 @@ class EventDetector:
 
         triggered_events = []
         exclusive_groups: set[str] = set()
+        per_event_count: dict[str, int] = {}
         for event in matched_events:
             if event.exclusive_group and event.exclusive_group in exclusive_groups:
                 continue
             # 每个事件的 max_triggers_per_turn 只约束自身：
-            # 若本回合已触发数达到该事件的上限，则跳过该事件而非终止全部
-            if len(triggered_events) >= max(1, event.max_triggers_per_turn or 3):
+            # 统计每个事件本回合已触发次数，达到该事件上限则跳过而非终止全部
+            event_limit = max(1, event.max_triggers_per_turn or 3)
+            if per_event_count.get(event.event_id, 0) >= event_limit:
                 continue
             triggered_events.append(event)
+            per_event_count[event.event_id] = (
+                per_event_count.get(event.event_id, 0) + 1
+            )
             if event.exclusive_group:
                 exclusive_groups.add(event.exclusive_group)
             if event.stop_processing:
@@ -117,9 +122,43 @@ class EventDetector:
     def _check_trigger_condition(
         self,
         condition: TriggerCondition,
-        context: EventContext
+        context: EventContext,
+        group_contexts: list[EventContext] | None = None,
     ) -> bool:
-        """检查单个触发条件"""
+        """Check one trigger condition, applying cross-character aggregation."""
+        if group_contexts is None:
+            group_contexts = [context]
+
+        relevant_contexts = group_contexts
+        if condition.character_ids:
+            requested_ids = set(condition.character_ids)
+            relevant_contexts = [
+                item
+                for item in group_contexts
+                if item.character_id in requested_ids
+            ]
+        if not relevant_contexts:
+            return False
+
+        matches = [
+            self._check_condition_for_context(condition, item, group_contexts)
+            for item in relevant_contexts
+        ]
+        if condition.aggregation == "all":
+            return all(matches)
+        if condition.aggregation == "count":
+            return sum(1 for matched in matches if matched) >= int(
+                condition.min_characters or 1
+            )
+        return any(matches)
+
+    def _check_condition_for_context(
+        self,
+        condition: TriggerCondition,
+        context: EventContext,
+        group_contexts: list[EventContext] | None = None,
+    ) -> bool:
+        """检查单个触发条件（不含跨角色聚合）"""
         
         trigger_type = condition.trigger_type
         
@@ -226,7 +265,11 @@ class EventDetector:
         
         # 复合条件
         if trigger_type == TriggerType.COMPOSITE:
-            return self._check_composite_condition(condition, context)
+            return self._check_composite_condition(
+                condition,
+                context,
+                group_contexts,
+            )
         
         # 其他类型暂不支持
         logger.warning(f"不支持的触发类型: {trigger_type}")
@@ -369,14 +412,15 @@ class EventDetector:
     def _check_composite_condition(
         self,
         condition: TriggerCondition,
-        context: EventContext
+        context: EventContext,
+        group_contexts: list[EventContext] | None = None,
     ) -> bool:
         """检查复合条件"""
         if not condition.sub_conditions:
             return False
         
         results = [
-            self._check_trigger_condition(sub_cond, context)
+            self._check_trigger_condition(sub_cond, context, group_contexts)
             for sub_cond in condition.sub_conditions
         ]
         

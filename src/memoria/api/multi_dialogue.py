@@ -55,7 +55,7 @@ class StartMultiSessionResponse(BaseModel):
     session_id: str
     group_name: Optional[str] = None
     group_thread_id: Optional[str] = None
-    opening: dict = Field(..., description="开场白信息")
+    opening: Optional[dict] = Field(default=None, description="开场白信息（已停用，恒为 None）")
     locale: Locale = DEFAULT_LOCALE
 
 
@@ -464,7 +464,8 @@ async def start_multi_session(
 
     except ValueError as e:
         logger.error(f"创建多角色会话失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        # 异常消息可能包含会话 ID 等内部信息，不直接回传。
+        raise HTTPException(status_code=400, detail="创建多角色会话失败") from e
     
     except Exception as e:
         logger.error(f"创建多角色会话异常: {e}", exc_info=True)
@@ -562,7 +563,8 @@ async def multi_dialogue_turn(
         raise
 
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # 异常消息可能包含角色 ID 等内部信息，不直接回传。
+        raise HTTPException(status_code=400, detail="多角色对话处理失败") from e
 
     except repository.DialogueTurnConflictError as e:
         raise HTTPException(status_code=409, detail=str(e))
@@ -672,12 +674,13 @@ async def trigger_interaction(
         )
         
         return result
-    
+
     except HTTPException:
         raise
 
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        # 异常消息可能包含角色 ID 等内部信息，不直接回传。
+        raise HTTPException(status_code=400, detail="触发角色互动失败") from e
     
     except Exception as e:
         logger.error(f"触发角色互动异常: {e}", exc_info=True)

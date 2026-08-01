@@ -216,7 +216,14 @@
       "trigger_type": "affinity_threshold",
       "threshold": 40,
       "comparison": "gte",
-      "crossing": true,
+      "aggregation": "count",
+      "min_characters": 2,
+      "character_ids": [
+        "nd_chen_dazhuang",
+        "nd_lin_xiaoxi",
+        "nd_su_tang",
+        "nd_wang_benben"
+      ],
       "cooldown_hours": 24
     },
     "effects": [

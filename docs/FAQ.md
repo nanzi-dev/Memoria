@@ -184,6 +184,10 @@ curl -c memoria-admin.cookies \
 
 运行时配置由 `src/memoria/core/config.py` 的 Pydantic Settings 从环境变量和仓库根目录 `.env` 读取。`config/settings.yaml` 仅保留为兼容性/参考标记，当前服务不会从该文件加载运行时配置。
 
+### Q: 好感度/信任度增量如何计算
+
+单聊和群聊都会先使用 LLM 返回的增量，非零值保留并限制在 `[-10, 10]`。若 LLM 返回 0 或缺失，默认启用 `MEMORIA_RELATIONSHIP_DELTA_ENABLED=true` 的确定性兜底：按本轮文本、动作和关系类型判断，明确升温/信任内容给正增量，冲突/拒绝给 0 或负值，中性内容为 0。可用 `MEMORIA_RELATIONSHIP_DELTA_MIN` / `MEMORIA_RELATIONSHIP_DELTA_MAX` 限制兜底值，默认分别为 `0.0` / `10.0`。关闭兜底后，LLM 返回 0 或缺失时本轮关系保持原值。
+
 ---
 
 ### Q: 语音转写或播放返回 503
@@ -322,7 +326,7 @@ DATABASE_URL=postgresql://memoria:password@127.0.0.1:5432/memoria
 PYTHONPATH=src uvicorn memoria.main:app --host 127.0.0.1 --port 8001
 ```
 
-首次启动会自动创建表并补齐轻量迁移。已有 SQLite 数据不会自动搬迁，需要单独导出导入。
+首次启动会通过 SQLAlchemy `Base.metadata.create_all` 自动创建表，并执行兼容性迁移钩子。仓库提供 Alembic 迁移骨架（`alembic.ini` / `alembic/`）用于正式 schema 演进。已有 SQLite 数据不会自动搬迁，需要单独导出导入。
 
 用户隔离版将 `character_card`、`event_definition`、`character_relationship` 改为带 `owner_user_id` 的复合主键/唯一约束；这类主键变化不会自动迁移旧 SQLite 表。升级到该版本前请先删除旧开发库，让系统按新 schema 重建：
 

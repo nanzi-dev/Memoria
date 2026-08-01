@@ -1188,6 +1188,42 @@ def test_player_fallback_prefers_character_with_matching_expertise():
     assert decision.speaker_id == "c1"
 
 
+def test_strong_participation_fallback_continues_speaking_when_response_is_short():
+    from memoria.core.multi_character_context import GroupTurnContext
+
+    orchestrator = _orchestrator()
+    previous_response = {
+        "character_id": "c1",
+        "character_name": "甲",
+        "dialogue": "先侦查。",
+    }
+    turn_context = GroupTurnContext(
+        player_character={"character_id": "player"},
+        character_relationships={},
+        group_thread_id=None,
+        authorized_knowledge_base_ids={},
+    )
+
+    decision = orchestrator._fallback_dialogue_decision(
+        history=[
+            {
+                "message_id": 10,
+                "role": "assistant",
+                "content": "大家快逃，这个计划太危险了，马上行动",
+                "character_id": "c1",
+            }
+        ],
+        trigger_text="",
+        trigger_message_id=10,
+        initial_speaker_id=None,
+        previous_responses=[previous_response],
+        turn_context=turn_context,
+    )
+
+    assert decision.action == "speak"
+    assert decision.speaker_id == "c2"
+
+
 def test_dialogue_pulse_memory_secret_is_not_broadcast(monkeypatch):
     from memoria.core import memory_extractor, multi_character_memory
 

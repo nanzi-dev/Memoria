@@ -62,13 +62,14 @@
 - **来源可追溯**：对话响应返回 `knowledge_sources`，管理页支持检索预览、失败原因展示和重试
 
 ### 关系与情感追踪
-- **好感度系统**：根据对话内容动态调整角色对玩家的好感度（-100 ~ 100）
+- **好感度系统**：根据对话内容动态调整角色对玩家的好感度（-100 ~ 100）；LLM 未返回增量时按文本和动作做有界确定性兜底，避免自然升温轮次关系完全不变化
 - **信任度机制**：追踪角色对玩家的信任程度，影响话题开放度
 - **情绪状态**：实时跟踪角色当前情绪，影响对话表现和反应
 - **角色关系网络**：支持当前用户私有的角色间关系定义并提供网络查询 API；关系类型是可自定义文本，不限制固定枚举。单聊和群聊都以当前关系图谱为最高优先级，缺失关系边表示未定义关系；`affinity` 在 prompt 中作为中性的关系强度呈现，具体含义以关系类型和说明为准
 
 ### 多角色对话系统
 - **群聊模式**：每个群聊至少需要 2 个不重复 NPC；公开 API 当前不设置参与人数上限
+- **无自动开场白**：创建会话不再生成开场白（`opening` 恒为 `null`），对话由玩家第一条消息触发，避免每次会话角色重复自我介绍
 - **讨论模式**：角色可以连续发言，`max_responses` 接受 1-5，编排器按上下文动态决定回应人数，当前每个玩家轮次最多 3 个角色回应
 - **智能发言策略**：固定使用混合策略，优先处理关键词与角色点名，再综合关系、发言频率、均衡性和最近发言上下文选择角色
 - **角色间互动**：角色会相互回应和讨论
@@ -84,7 +85,7 @@
 - **角色声音**：支持内置声音与自定义声音授权、创建、状态查询和解绑；自定义声音不可用时回退内置声音
 
 ### 事件系统
-- **多类型触发条件**：好感度阈值、信任度阈值、关键词匹配、对话次数、时间、情绪、复合条件
+- **多类型触发条件**：好感度阈值、信任度阈值、关键词匹配、对话次数、时间、情绪、复合条件；阈值条件支持按指定角色做 `any` / `all` / `count` 跨角色聚合
 - **丰富的事件效果**：状态修改、内容解锁、对话触发、记忆添加、情绪改变、玩家通知、关系修改、事件链、NPC 主动对话
 - **事件检测引擎**：自动检测触发条件并按优先级执行
 - **冷却时间管理**：支持事件冷却和触发次数限制
@@ -128,8 +129,13 @@ Memoria/
 │   │   ├── multi_dialogue.py   # 多角色对话 API
 │   │   ├── relationship.py     # 角色关系 API
 │   │   ├── knowledge.py        # 知识库、文档与检索预览 API
+│   │   ├── knowledge_models.py # 知识库、文档、绑定等 API 数据模型
 │   │   ├── speech.py           # STT、TTS 与角色自定义声音 API
+│   │   ├── story.py            # 剧情状态投影 API
 │   │   ├── developer.py        # 回放、性能指标、质量评分等开发者 API
+│   │   ├── avatar_fetcher.py   # 远程头像 SSRF 防护与固定 IP 下载
+│   │   ├── avatar_image.py     # 头像格式、像素和尺寸规范化
+│   │   ├── upload_utils.py     # 上传文件校验与磁盘保存工具
 │   │   └── user.py             # 用户注册、登录、资料和头像 API
 │   ├── characters/              # 角色卡 JSON 配置文件
 │   │   ├── npc_luo_xiaohei.json
@@ -158,8 +164,15 @@ Memoria/
 │   │   ├── event_runtime.py    # 事件上下文、检测、规划与执行协调
 │   │   ├── event_schema.py     # 事件数据模型
 │   │   ├── multi_character_orchestrator.py  # 多角色对话编排
+│   │   ├── multi_character_turn.py          # 多角色轮次执行与讨论决策
+│   │   ├── multi_character_context.py       # 多角色上下文构建与决策模型
+│   │   ├── multi_character_helpers.py       # 多角色共享工具函数
 │   │   ├── multi_character_memory.py        # 多角色记忆管理
-│   │   ├── group_dialogue_runtime.py         # 逻辑群聊自主/事件脉冲运行时
+│   │   ├── multi_character_memory_ops.py    # 多角色记忆读写与摘要保存
+│   │   ├── relationship_context.py          # 关系图谱上下文与修订过滤
+│   │   ├── relationship_delta_policy.py     # 好感/信任增量确定性与兜底规则
+│   │   ├── group_dialogue_runtime.py        # 逻辑群聊自主/事件脉冲运行时
+│   │   ├── cron_schedule.py                 # cron 调度解析与下次运行时间
 │   │   ├── background_jobs.py                # 持久化 checkpoint 记忆任务工作器
 │   │   ├── domain_events.py                  # 领域事件账本与剧情状态投影
 │   │   ├── fact_claims.py / fact_claim_policy.py  # 事实声明与冲突策略
@@ -167,14 +180,25 @@ Memoria/
 │   │   ├── csrf.py                         # Cookie 会话双提交 CSRF
 │   │   └── speaking_strategy.py             # 发言策略系统
 │   ├── db/                     # 数据持久化层
+│   │   ├── engine.py           # SQLAlchemy Engine / Session 生命周期管理
+│   │   ├── models.py           # SQLAlchemy ORM 模型
 │   │   └── repository/         # SQLite / PostgreSQL 持久化包（facade + 领域子模块）
 │   │       ├── __init__.py     # 兼容 facade：`from memoria.db import repository`
 │   │       ├── _common.py      # 连接、schema、共享工具
-│   │       ├── users.py / characters.py / sessions_and_messages.py
-│   │       ├── events.py / relationships.py / multi_session.py
-│   │       ├── knowledge.py / state_and_memory.py / fact_claims.py
+│   │       ├── users.py        # 用户与 auth_token
+│   │       ├── characters.py   # 角色卡
+│   │       ├── sessions_and_messages.py  # 会话、短期消息、对话轮次
+│   │       ├── events.py       # 事件定义、调度、触发
+│   │       ├── relationships.py
+│   │       ├── multi_session.py
+│   │       ├── knowledge.py
+│   │       ├── state_and_memory.py
+│   │       ├── fact_claims.py
 │   │       ├── memory_curve.py # 记忆曲线状态与幂等强化投影
-│   │       ├── story.py / domain_events.py / world_clock.py / background_jobs.py
+│   │       ├── story.py
+│   │       ├── domain_events.py
+│   │       ├── world_clock.py
+│   │       └── background_jobs.py
 │   └── main.py                 # 应用入口
 ├── tests/                      # pytest 测试（核心、API、安全、知识库、世界时钟等）
 ├── docs/                       # 项目文档
@@ -208,6 +232,8 @@ Memoria/
 │   └── settings.yaml           # 兼容性/参考标记，不参与运行时加载
 ├── pyproject.toml              # 项目配置
 ├── requirements.txt            # Python 依赖
+├── alembic.ini                 # Alembic 迁移配置
+├── alembic/                    # Alembic 迁移脚本
 └── README.md
 ```
 
@@ -434,14 +460,27 @@ URL 头像下载默认关闭环境代理继承，并只连接经过校验的公�
 # 安装开发依赖
 pip install -e ".[dev]"
 
-# 运行全部测试（841 用例，约 30s）
+# 运行全部测试（867 用例，约 45s）
 bash scripts/run_tests.sh
+
+# 可选：对真实 PostgreSQL 运行全量测试（Docker 示例）
+# docker run -d --name memoria-pg-test -e POSTGRES_USER=memoria \
+#   -e POSTGRES_PASSWORD=memoria_dev_pw -e POSTGRES_DB=memoria_test \
+#   -p 127.0.0.1:5432:5432 postgres:16-alpine
+# MEMORIA_PG_TEST_URL="postgresql+psycopg://memoria:memoria_dev_pw@127.0.0.1:5432/memoria_test" \
+#   PYTHONPATH=src pytest tests/ -q
+# PG 模式下 conftest 会 DROP 并重建全部表、预建共享测试用户，并绕过外键检查
+# （唯一约束与 NOT NULL 仍生效）；tests/test_postgres_real_integration.py 单独验证
+# PG 专属行为（BIGSERIAL、部分索引、UPDATE 中的标量钳制等）。
 
 # 按模块运行
 PYTHONPATH=src pytest tests/test_core.py -v               # 核心模块 (73)
 PYTHONPATH=src pytest tests/test_repository.py -v          # 数据库层 (87)
-PYTHONPATH=src pytest tests/test_events.py -v              # 事件系统 (59)
-PYTHONPATH=src pytest tests/test_memory_extractor.py -v    # 记忆萃取 (47)
+PYTHONPATH=src pytest tests/test_events.py -v              # 事件系统 (63)
+PYTHONPATH=src pytest tests/test_event_e2e.py -v           # 事件端到端 (4)
+PYTHONPATH=src pytest tests/test_relationship_delta_policy.py -v  # 关系增量兜底 (7)
+PYTHONPATH=src pytest tests/test_relationships.py -v       # 关系 API 与策略 (2)
+PYTHONPATH=src pytest tests/test_memory_extractor.py -v    # 记忆萃取 (49)
 PYTHONPATH=src pytest tests/test_multi_dialogue_api.py -v  # 多角色 API (23)
 PYTHONPATH=src pytest tests/test_csrf.py -v                # Cookie CSRF (11)
 PYTHONPATH=src pytest tests/test_output_safety.py -v       # 输出安全 (5)
@@ -455,7 +494,7 @@ PYTHONPATH=src pytest tests/test_memory_curve.py -v        # 记忆曲线 (35)
 PYTHONPATH=src pytest tests/test_speech.py -v              # 语音模块 (20)
 ```
 
-当前测试集合共 **841 用例**，覆盖核心编排、`db/repository` 包、事件、单聊/群聊 API、CSRF、输出安全、知识库、语音、向量存储、世界时钟、事实声明、安全修复、记忆曲线和系统端点。前端测试由 `npm test` 收集。
+当前测试集合共 **863 用例**（以 `pytest --collect-only -q` 为准），覆盖核心编排、关系增量兜底、跨角色事件聚合、`db/repository` 包、事件、单聊/群聊 API、CSRF、输出安全、知识库、语音、向量存储、世界时钟、事实声明、安全修复、记忆曲线和系统端点。前端测试由 `npm test` 收集。
 
 ---
 

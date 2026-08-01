@@ -93,6 +93,90 @@ def test_dialogue_json_stream_ignores_nested_dialogue_fields():
     assert parser.authoritative_dialogue == "顶层对白"
 
 
+def test_dialogue_json_stream_streams_plain_text_as_dialogue():
+    from memoria.core.llm_client import _DialogueJsonStream
+
+    parser = _DialogueJsonStream()
+    emitted = []
+    chunks = [
+        "[开心地点头] 那我也来帮你！",
+        "我最喜欢学新东西了！[眼睛亮晶晶地]",
+    ]
+    for chunk in chunks:
+        emitted.extend(parser.feed(chunk))
+
+    assert "".join(emitted) == "".join(chunks)
+    assert parser.authoritative_dialogue is None
+
+
+def test_dialogue_json_stream_handles_leading_whitespace_before_json():
+    from memoria.core.llm_client import _DialogueJsonStream
+
+    parser = _DialogueJsonStream()
+    emitted = []
+    for chunk in [
+        "\n  {",
+        '"dialogue":"你',
+        '好","action":"idle"}',
+    ]:
+        emitted.extend(parser.feed(chunk))
+
+    assert "".join(emitted) == "你好"
+    assert parser.authoritative_dialogue == "你好"
+
+
+def test_call_role_turn_streams_plain_text_fallback(monkeypatch):
+    from memoria.core import llm_client
+
+    calls = []
+    chunks = [
+        "[开心地点头] 那我也来帮你！",
+        "我最喜欢学新东西了！[眼睛亮晶晶地]",
+    ]
+    fake_client = _stream_client(chunks, calls)
+    monkeypatch.setattr(llm_client, "_get_client", lambda: fake_client)
+    deltas = []
+
+    result = llm_client.call_role_turn(
+        "system",
+        [{"role": "user", "content": "hello"}],
+        on_dialogue_delta=deltas.append,
+    )
+
+    assert "".join(deltas) == "".join(chunks)
+    assert result["dialogue"] == "".join(chunks)
+    assert result["_fallback_mode"] is True
+    assert result["_fallback_parser"] == "plain_text"
+
+
+def test_call_role_turn_prefers_parsed_json_when_plain_stream_has_explanation(
+    monkeypatch,
+):
+    from memoria.core import llm_client
+
+    calls = []
+    fake_client = _stream_client(
+        [
+            "好的：{",
+            '"dialogue":"你好","action":"idle"}',
+            "]",
+        ],
+        calls,
+    )
+    monkeypatch.setattr(llm_client, "_get_client", lambda: fake_client)
+    deltas = []
+
+    result = llm_client.call_role_turn(
+        "system",
+        [{"role": "user", "content": "hello"}],
+        on_dialogue_delta=deltas.append,
+    )
+
+    assert "".join(deltas) == "好的：{\"dialogue\":\"你好\",\"action\":\"idle\"}]"
+    assert result["dialogue"] == "你好"
+    assert result["action"] == "idle"
+
+
 def test_call_role_turn_keeps_first_top_level_dialogue_authoritative(monkeypatch):
     from memoria.core import llm_client
 

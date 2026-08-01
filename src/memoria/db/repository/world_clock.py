@@ -1,51 +1,12 @@
 """Domain repository functions (split from monolith)."""
 from __future__ import annotations
 
-# Standard/third-party imports used across repository domains.
-from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
-import hashlib
-import json
-import logging
-import sqlite3
-import uuid
-from typing import Any, Callable
-from urllib.parse import urlsplit
-import re
-from difflib import SequenceMatcher
+from typing import Callable
 
-from memoria.core.config import configs
-from memoria.core import performance, tracing
-from memoria.core.domain_events import NewDomainEvent, StoredDomainEvent
-from memoria.core.fact_claim_policy import (
-    ADMIN_VERIFICATION_SOURCE_KIND,
-    CLAIM_SOURCE_KINDS,
-    clean_source_ids,
-    derive_fact_claim_identity,
-    evaluate_verification,
-    normalize_evidence_entry,
-    normalize_fact_text,
-)
+from sqlalchemy import select, text
 
-try:
-    import psycopg
-    from psycopg.rows import dict_row
-except ImportError:  # pragma: no cover
-    psycopg = None
-    dict_row = None
-
-logger = logging.getLogger(__name__)
-
-# Import shared helpers / connection / schema. Private names included.
-from memoria.db.repository._common import *  # noqa: F403
-from memoria.db.repository import _common as _common_mod
-
-# Ensure private helpers from _common are visible as bare names.
-for _name, _value in vars(_common_mod).items():
-    if _name.startswith('__'):
-        continue
-    globals().setdefault(_name, _value)
-del _name, _value, _common_mod
+from memoria.db.models import EventScheduleState, PlayerWorldClock
+from memoria.db.repository._common import _row_to_dict, db_session
 
 # =========================
 # player world clock
@@ -56,30 +17,34 @@ def get_or_create_player_world_clock(
     real_now_iso: str,
 ) -> dict:
     """Return a player's clock row, creating a real-time 1x clock if absent."""
-    with get_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO player_world_clock
-            (player_id, timezone, timezone_mode, anchor_real_utc, anchor_world_utc,
-             time_scale, clock_revision, updated_at)
-            VALUES (?, ?, 'fixed', ?, ?, 1, 1, ?)
-            ON CONFLICT(player_id) DO NOTHING
-            """,
-            (player_id, timezone_name, real_now_iso, real_now_iso, real_now_iso),
+    with db_session() as session:
+        session.execute(
+            text("""
+                INSERT INTO player_world_clock
+                (player_id, timezone, timezone_mode, anchor_real_utc, anchor_world_utc,
+                 time_scale, clock_revision, updated_at)
+                VALUES (:pid, :tz, 'fixed', :anchor_r, :anchor_w, 1, 1, :now)
+                ON CONFLICT(player_id) DO NOTHING
+            """),
+            {
+                "pid": player_id,
+                "tz": timezone_name,
+                "anchor_r": real_now_iso,
+                "anchor_w": real_now_iso,
+                "now": real_now_iso,
+            },
         )
-        row = conn.execute(
-            "SELECT * FROM player_world_clock WHERE player_id = ?",
-            (player_id,),
-        ).fetchone()
-    return dict(row)
+        row = session.execute(
+            select(PlayerWorldClock).where(PlayerWorldClock.player_id == player_id)
+        ).scalar_one()
+    return _row_to_dict(row)
 
 
 def get_player_world_clock(player_id: str) -> dict | None:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM player_world_clock WHERE player_id = ?",
-            (player_id,),
-        ).fetchone()
+    with db_session() as session:
+        row = session.execute(
+            select(PlayerWorldClock).where(PlayerWorldClock.player_id == player_id)
+        ).scalar_one_or_none()
     return _row_to_dict(row)
 
 
@@ -104,64 +69,61 @@ def update_player_world_clock_and_schedules(
     resolve_schedule: Callable[[dict], tuple[str | None, str | None]],
 ) -> dict:
     """Atomically update a clock and all active schedules derived from it."""
-    with get_conn() as conn:
-        cursor = conn.execute(
-            """
-            UPDATE player_world_clock
-            SET timezone = ?, timezone_mode = ?, anchor_real_utc = ?,
-                anchor_world_utc = ?, time_scale = ?,
-                clock_revision = clock_revision + 1, updated_at = ?
-            WHERE player_id = ? AND clock_revision = ?
-            """,
-            (
-                timezone_name,
-                timezone_mode,
-                anchor_real_utc,
-                anchor_world_utc,
-                time_scale,
-                updated_at,
-                player_id,
-                expected_revision,
-            ),
+    with db_session() as session:
+        result = session.execute(
+            text("""
+                UPDATE player_world_clock
+                SET timezone = :tz, timezone_mode = :tz_mode, anchor_real_utc = :anchor_r,
+                    anchor_world_utc = :anchor_w, time_scale = :scale,
+                    clock_revision = clock_revision + 1, updated_at = :updated_at
+                WHERE player_id = :pid AND clock_revision = :rev
+            """),
+            {
+                "tz": timezone_name,
+                "tz_mode": timezone_mode,
+                "anchor_r": anchor_real_utc,
+                "anchor_w": anchor_world_utc,
+                "scale": time_scale,
+                "updated_at": updated_at,
+                "pid": player_id,
+                "rev": expected_revision,
+            },
         )
-        if cursor.rowcount != 1:
+        if result.rowcount != 1:
             raise ClockRevisionConflictError("world clock revision is stale")
 
-        schedules = conn.execute(
-            """
-            SELECT * FROM event_schedule_state
-            WHERE player_id = ? AND status = 'active'
-              AND next_run_at IS NOT NULL
-            """,
-            (player_id,),
-        ).fetchall()
-        for raw_schedule in schedules:
-            schedule = dict(raw_schedule)
+        schedules = session.execute(
+            text("""
+                SELECT * FROM event_schedule_state
+                WHERE player_id = :pid AND status = 'active'
+                  AND next_run_at IS NOT NULL
+            """),
+            {"pid": player_id},
+        ).mappings().all()
+        for schedule in schedules:
+            schedule = dict(schedule)
             lease_expires_at = schedule.get("lease_expires_at")
             if lease_expires_at and lease_expires_at > updated_at:
                 raise ClockScheduleBusyError("a scheduled event is currently executing")
             next_run_at, next_due_real_at = resolve_schedule(schedule)
-            conn.execute(
-                """
-                UPDATE event_schedule_state
-                SET next_run_at = ?, next_due_real_at = ?,
-                    lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
-                WHERE event_id = ? AND character_id = ? AND player_id = ?
-                """,
-                (
-                    next_run_at,
-                    next_due_real_at,
-                    updated_at,
-                    schedule["event_id"],
-                    schedule["character_id"],
-                    player_id,
-                ),
+            session.execute(
+                text("""
+                    UPDATE event_schedule_state
+                    SET next_run_at = :next_run, next_due_real_at = :next_due,
+                        lease_owner = NULL, lease_expires_at = NULL, updated_at = :updated_at
+                    WHERE event_id = :eid AND character_id = :cid AND player_id = :pid
+                """),
+                {
+                    "next_run": next_run_at,
+                    "next_due": next_due_real_at,
+                    "updated_at": updated_at,
+                    "eid": schedule["event_id"],
+                    "cid": schedule["character_id"],
+                    "pid": player_id,
+                },
             )
 
-        row = conn.execute(
-            "SELECT * FROM player_world_clock WHERE player_id = ?",
-            (player_id,),
-        ).fetchone()
-    return dict(row)
-
-
+        row = session.execute(
+            select(PlayerWorldClock).where(PlayerWorldClock.player_id == player_id)
+        ).scalar_one()
+    return _row_to_dict(row)

@@ -135,6 +135,7 @@ export function reconcileTurn(state, finalResponse) {
   const workingState = state.filter(message => (
     message.stream_id != null
     || message.message_id == null
+    || message._pending === true
     || !finalIds.has(String(message.message_id))
   ));
   const placeholderIndexes = workingState

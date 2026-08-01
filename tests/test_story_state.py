@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -120,6 +121,19 @@ def test_event_effects_project_fact_and_story_atomically():
             ),
         ],
     )
+    # PG 强制外键：event_trigger_log 引用 event_definition，需先落库事件定义
+    repository.save_event_definition(
+        owner_user_id=user_id,
+        event_id=event.event_id,
+        event_name=event.event_name,
+        character_id=event.character_id,
+        trigger_config=event.trigger_condition.model_dump_json(),
+        effects_config=json.dumps(
+            [effect.model_dump(mode="json") for effect in event.effects],
+            ensure_ascii=False,
+        ),
+        story_id=story_id,
+    )
     context = EventContext(
         character_id=f"archivist-{suffix}",
         player_id=user_id,
@@ -208,6 +222,19 @@ def test_event_effect_commit_failure_rolls_back_all_projections(monkeypatch):
                 event_status="completed",
             ),
         ],
+    )
+    # PG 强制外键：event_trigger_log 引用 event_definition，需先落库事件定义
+    repository.save_event_definition(
+        owner_user_id=user_id,
+        event_id=event.event_id,
+        event_name=event.event_name,
+        character_id=event.character_id,
+        trigger_config=event.trigger_condition.model_dump_json(),
+        effects_config=json.dumps(
+            [effect.model_dump(mode="json") for effect in event.effects],
+            ensure_ascii=False,
+        ),
+        story_id=story_id,
     )
     context = EventContext(
         character_id=character_id,

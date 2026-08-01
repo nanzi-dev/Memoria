@@ -16,7 +16,7 @@
 ## 播种
 
 ```bash
-python scripts/seed_next_door_demo.py --password '<choose-a-strong-password>'
+python scripts/seed_next_door_demo.py --password 'a1008611'
 ```
 
 也可以先设置 `MEMORIA_DEMO_PASSWORD`。账户已存在时不会修改密码。

@@ -458,7 +458,8 @@ def session_start(
             req.character_id, req.player_id, req.player_name, req.locale
         )
     except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        # 异常消息可能包含服务器本地路径等内部信息，不直接回传。
+        raise HTTPException(status_code=404, detail="对话会话不存在") from e
 
 # =========================
 # Dialogue turn
@@ -479,8 +480,10 @@ def dialogue_turn(
         return DialogueTurnResponse(**result)
 
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        # 异常消息可能包含会话 ID 等内部信息，不直接回传。
+        raise HTTPException(status_code=404, detail="对话会话不存在") from e
     except repository.DialogueTurnConflictError as e:
+        # 冲突错误消息为固定业务文案，可直接回传。
         raise HTTPException(status_code=409, detail=str(e))
 
 

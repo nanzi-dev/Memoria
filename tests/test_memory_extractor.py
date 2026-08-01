@@ -369,11 +369,23 @@ class TestLLMClient:
         r = _extract_json('```json\n{"dialogue":"test","action":"a","affinity_delta":0}\n```')
         assert r is not None
 
+    def test_extract_json_from_text_surrounding_json(self):
+        from memoria.core.llm_client import _extract_json
+        r = _extract_json('好的：{"dialogue":"你好","action":"idle"} 结束')
+        assert r == {"dialogue": "你好", "action": "idle"}
+
     def test_plain_text_fallback(self):
         from memoria.core.llm_client import _plain_text_fallback
         r = _plain_text_fallback("你好，我是小黑")
         assert r["dialogue"] == "你好，我是小黑"
         assert r["_fallback_mode"] is True
+
+    def test_plain_text_fallback_keeps_stage_direction(self):
+        from memoria.core.llm_client import _plain_text_fallback
+        raw = "[开心地点头] 那我也来帮你！我最喜欢学新东西了！[眼睛亮晶晶地]"
+        r = _plain_text_fallback(raw)
+        assert r["dialogue"] == raw
+        assert r["_fallback_parser"] == "plain_text"
 
     def test_plain_text_fallback_extracts_jsonish_role_fields(self):
         from memoria.core.llm_client import _plain_text_fallback

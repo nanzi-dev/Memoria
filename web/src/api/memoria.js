@@ -137,12 +137,15 @@ async function requestStream(url, options = {}, onEvent = undefined) {
   let buffer = '';
   let terminalResponse;
   let terminalReceived = false;
+  let streamError = null;
 
   const dispatchFrame = frame => {
     const event = parseSseFrame(frame);
     if (!event) return;
     onEvent?.(event);
-    if (event.type === 'error') throw streamEventError(event.data);
+    if (event.type === 'error' && streamError == null) {
+      streamError = streamEventError(event.data);
+    }
     if (event.type === 'turn_completed') {
       terminalReceived = true;
       terminalResponse = event.data?.response ?? event.data;
@@ -169,6 +172,7 @@ async function requestStream(url, options = {}, onEvent = undefined) {
     buffer += decoder.decode();
     drainFrames();
     if (buffer.trim()) dispatchFrame(buffer);
+    if (streamError != null) throw streamError;
   } catch (error) {
     await reader.cancel().catch(() => {});
     throw error;

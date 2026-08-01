@@ -32,6 +32,7 @@ class EventExecutor:
         *,
         execution_id: str | None = None,
         execution_key: str | None = None,
+        group_contexts: list[EventContext] | None = None,
     ) -> tuple[EventTriggerResult, dict[str, Any]]:
         started = time.perf_counter()
         result = EventTriggerResult(
@@ -66,6 +67,7 @@ class EventExecutor:
                     context,
                     result,
                     operations,
+                    group_contexts=group_contexts,
                 )
                 result.effects.append(detail)
                 result.effects_applied.append(
@@ -179,6 +181,8 @@ class EventExecutor:
         context: EventContext,
         result: EventTriggerResult,
         operations: dict[str, Any],
+        *,
+        group_contexts: list[EventContext] | None = None,
     ) -> tuple[str, dict[str, Any]]:
         effect_type = effect.effect_type
 
@@ -285,7 +289,11 @@ class EventExecutor:
             return "后续事件已加入执行链", {"next_event_id": event_id}
 
         if effect_type == EffectType.BRANCH_EVENT:
-            event_id = self._select_branch_event(effect, context)
+            event_id = self._select_branch_event(
+                effect,
+                context,
+                group_contexts=group_contexts,
+            )
             if not event_id:
                 return "没有分支条件命中", {}
             result.chained_events.append(event_id)
@@ -333,7 +341,13 @@ class EventExecutor:
 
         raise ValueError(f"不支持的效果类型: {effect_type.value}")
 
-    def _select_branch_event(self, effect: EventEffect, context: EventContext) -> str | None:
+    def _select_branch_event(
+        self,
+        effect: EventEffect,
+        context: EventContext,
+        *,
+        group_contexts: list[EventContext] | None = None,
+    ) -> str | None:
         if not effect.branch_conditions:
             raise ValueError("分支事件缺少 branch_conditions")
         from memoria.core.event_detector import EventDetector
@@ -346,7 +360,11 @@ class EventExecutor:
             if not event_id or not condition_data:
                 continue
             condition = TriggerCondition.model_validate(condition_data)
-            if detector._check_trigger_condition(condition, context):
+            if detector._check_trigger_condition(
+                condition,
+                context,
+                group_contexts,
+            ):
                 return str(event_id)
         return str(effect.next_event_id).strip() if effect.next_event_id else None
 

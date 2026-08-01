@@ -6,7 +6,7 @@ export default function TagInput({ tags = [], onChange, placeholder = 'Add item.
   const inputRef = useRef(null);
 
   function handleKeyDown(e) {
-    if (e.key === 'Enter' && inputValue.trim()) {
+    if (e.key === 'Enter' && !e.nativeEvent.isComposing && inputValue.trim()) {
       e.preventDefault();
       onChange([...tags, inputValue.trim()]);
       setInputValue('');

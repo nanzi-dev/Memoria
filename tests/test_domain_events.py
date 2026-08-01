@@ -10,6 +10,11 @@ from uuid import uuid4
 from memoria.db import repository
 
 
+def _pg_enabled() -> bool:
+    from memoria.core.config import configs
+    return bool((configs.database_url or "").strip())
+
+
 def _event(**overrides):
     from memoria.core.domain_events import NewDomainEvent
 
@@ -374,7 +379,7 @@ def test_append_domain_events_is_atomic_when_external_transaction_catches_confli
         payload={},
     )
 
-    with repository.get_conn() as conn:
+    with repository.db_session() as session:
         with pytest.raises(repository.DomainEventConcurrencyError):
             repository.append_domain_events(
                 [
@@ -384,7 +389,7 @@ def test_append_domain_events_is_atomic_when_external_transaction_catches_confli
                 expected_versions={
                     (test_user, "story", "test-story"): 0,
                 },
-                conn=conn,
+                conn=session,
             )
         repository.append_domain_event(
             _event(
@@ -394,7 +399,7 @@ def test_append_domain_events_is_atomic_when_external_transaction_catches_confli
                 event_type="story.started.v1",
                 payload={},
             ),
-            conn=conn,
+            conn=session,
         )
 
     assert repository.list_domain_events(
@@ -466,6 +471,10 @@ def _run_sqlite_domain_event_race(
     return second_read_while_first_held, results, errors
 
 
+@pytest.mark.skipif(
+    _pg_enabled(),
+    reason="SQLite 专属并发语义（BEGIN IMMEDIATE 序列化）在 PG 上不适用",
+)
 def test_sqlite_concurrent_expected_version_writers_are_serialized(
     test_user,
     monkeypatch,
@@ -502,6 +511,10 @@ def test_sqlite_concurrent_expected_version_writers_are_serialized(
     )
 
 
+@pytest.mark.skipif(
+    _pg_enabled(),
+    reason="SQLite 专属幂等语义在 PG 上不适用",
+)
 def test_sqlite_concurrent_duplicate_event_id_returns_existing(
     test_user,
     monkeypatch,
@@ -565,6 +578,10 @@ def test_list_domain_events_rejects_invalid_limit(
         )
 
 
+@pytest.mark.skipif(
+    _pg_enabled(),
+    reason="sqlite_master 是 SQLite 专属系统表，PG 上不适用",
+)
 def test_domain_event_schema_and_indexes_are_additive():
     with repository.get_conn() as conn:
         tables = {
@@ -730,8 +747,7 @@ def test_legacy_fact_backfill_is_idempotent_and_non_destructive(test_user):
         )
         legacy_fact_ids = []
         for character_id, fact_text in zip(character_ids, fact_texts):
-            cursor = conn.execute(
-                """
+            insert_sql = """
                 INSERT INTO long_term_fact (
                     character_id,
                     player_id,
@@ -741,7 +757,11 @@ def test_legacy_fact_backfill_is_idempotent_and_non_destructive(test_user):
                     last_referenced
                 )
                 VALUES (?, ?, ?, 5, ?, ?)
-                """,
+            """
+            if _pg_enabled():
+                insert_sql += " RETURNING id"
+            cursor = conn.execute(
+                insert_sql,
                 (
                     character_id,
                     test_user,
@@ -750,7 +770,10 @@ def test_legacy_fact_backfill_is_idempotent_and_non_destructive(test_user):
                     "2026-07-15T00:00:00+00:00",
                 ),
             )
-            legacy_fact_ids.append(cursor.lastrowid)
+            if _pg_enabled():
+                legacy_fact_ids.append(cursor.fetchone()["id"])
+            else:
+                legacy_fact_ids.append(cursor.lastrowid)
 
     try:
         repository.backfill_legacy_long_term_fact_events()
@@ -816,6 +839,9 @@ class _FakeCursor:
     def __init__(self, row=None):
         self._row = row
 
+    def mappings(self):
+        return self
+
     def fetchone(self):
         return self._row
 
@@ -827,7 +853,8 @@ class _AbortingPostgresConnection:
         self.existing_after_rollback = existing_after_rollback
 
     def execute(self, sql, params=None):
-        normalized = " ".join(sql.split())
+        sql_text = getattr(sql, "text", sql)
+        normalized = " ".join(sql_text.split())
         if normalized.startswith("ROLLBACK TO SAVEPOINT"):
             self.aborted = False
             self.rolled_back_to_savepoint = True
@@ -839,7 +866,7 @@ class _AbortingPostgresConnection:
         if normalized.startswith("RELEASE SAVEPOINT"):
             return _FakeCursor()
         if normalized.startswith(
-            "SELECT * FROM domain_event WHERE event_id = ?"
+            "SELECT * FROM domain_event WHERE event_id = :event_id"
         ):
             row = (
                 self.existing_after_rollback
@@ -863,7 +890,8 @@ class _MixedRecoveryPostgresConnection:
         self.insert_attempts = []
 
     def execute(self, sql, params=None):
-        normalized = " ".join(sql.split())
+        sql_text = getattr(sql, "text", sql)
+        normalized = " ".join(sql_text.split())
         if normalized.startswith("ROLLBACK TO SAVEPOINT"):
             self.aborted = False
             self.recovered_event_visible = True
@@ -875,9 +903,9 @@ class _MixedRecoveryPostgresConnection:
         if normalized.startswith("RELEASE SAVEPOINT"):
             return _FakeCursor()
         if normalized.startswith(
-            "SELECT * FROM domain_event WHERE event_id = ?"
+            "SELECT * FROM domain_event WHERE event_id = :event_id"
         ):
-            event_id = params[0]
+            event_id = params["event_id"]
             row = None
             if (
                 self.recovered_event_visible
@@ -888,8 +916,8 @@ class _MixedRecoveryPostgresConnection:
         if "SELECT COALESCE(MAX(aggregate_version), 0)" in normalized:
             return _FakeCursor({"aggregate_version": 0})
         if normalized.startswith("INSERT INTO domain_event"):
-            event_id = params[0]
-            aggregate_version = params[4]
+            event_id = params["event_id"]
+            aggregate_version = params["aggregate_version"]
             self.insert_attempts.append((event_id, aggregate_version))
             if event_id == self.recovered_event["event_id"]:
                 self.aborted = True

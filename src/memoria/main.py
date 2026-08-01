@@ -262,9 +262,10 @@ async def health():
 async def ready():
     """就绪检查：数据库等依赖是否可用"""
     try:
-        from memoria.db.repository import get_conn
-        with get_conn() as conn:
-            conn.execute("SELECT 1")
+        from sqlalchemy import text
+        from memoria.db.repository import db_session
+        with db_session() as session:
+            session.execute(text("SELECT 1"))
         return {"status": "ready", "database": "ok"}
     except Exception:
         logger.exception("数据库就绪检查失败")

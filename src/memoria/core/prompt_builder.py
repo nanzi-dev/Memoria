@@ -580,8 +580,7 @@ def build_multi_character_system_prompt(
     if dialogue_target:
         prompt_parts.extend([
             "# 本条发言的明确目标",
-            f"- 回复消息 ID：{dialogue_target.get('reply_to_message_id')}",
-            f"- 回复目标身份：{dialogue_target.get('reply_to_name') or dialogue_target.get('reply_to_character_id') or player_name}",
+            f"- 回复目标：{dialogue_target.get('reply_to_name') or dialogue_target.get('reply_to_character_id') or player_name}",
             f"- 目标原话：{dialogue_target.get('message') or ''}",
             f"- 发言意图：{dialogue_target.get('intent') or 'answer'}",
             f"- 当前话题：{dialogue_target.get('topic') or '延续当前话题'}",

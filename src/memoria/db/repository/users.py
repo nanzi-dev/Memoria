@@ -1,56 +1,27 @@
-"""Domain repository functions (split from monolith)."""
+"""用户注册、登录与资料管理 — ORM 仓库。"""
 from __future__ import annotations
 
-# Standard/third-party imports used across repository domains.
-from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
-import hashlib
-import json
 import logging
 import random
-import sqlite3
-import uuid
-from typing import Any, Callable
-from urllib.parse import urlsplit
-import re
-from difflib import SequenceMatcher
+from typing import Any
 
-from memoria.core.config import configs
-from memoria.core import performance, tracing
-from memoria.core.domain_events import NewDomainEvent, StoredDomainEvent
-from memoria.core.fact_claim_policy import (
-    ADMIN_VERIFICATION_SOURCE_KIND,
-    CLAIM_SOURCE_KINDS,
-    clean_source_ids,
-    derive_fact_claim_identity,
-    evaluate_verification,
-    normalize_evidence_entry,
-    normalize_fact_text,
+from sqlalchemy import delete, func, select, update
+
+from memoria.db.models import AuthToken, SystemBootstrapClaim, User, UserCharacterCard
+from memoria.db.repository._common import (
+    AdminBootstrapUnavailable,
+    _auth_token_storage_key,
+    _now,
+    _row_to_dict,
+    db_session,
 )
 
-try:
-    import psycopg
-    from psycopg.rows import dict_row
-except ImportError:  # pragma: no cover
-    psycopg = None
-    dict_row = None
-
 logger = logging.getLogger(__name__)
-
-# Import shared helpers / connection / schema. Private names included.
-from memoria.db.repository._common import *  # noqa: F403
-from memoria.db.repository import _common as _common_mod
-
-# Ensure private helpers from _common are visible as bare names.
-for _name, _value in vars(_common_mod).items():
-    if _name.startswith('__'):
-        continue
-    globals().setdefault(_name, _value)
-del _name, _value, _common_mod
 
 # =========================
 # 用户管理
 # =========================
+
 def player_node_id(user_id: str) -> str:
     return f"player:{user_id}"
 
@@ -59,23 +30,19 @@ def is_player_node_id(node_id: str) -> bool:
     return isinstance(node_id, str) and node_id.startswith("player:")
 
 
-def _insert_default_user_character_card(
-    conn,
-    *,
-    user_id: str,
-    display_name: str,
-    gender: str,
-    now: str,
-) -> None:
-    conn.execute(
-        """
-        INSERT INTO user_character_card
-        (user_id, display_name, gender, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(user_id) DO NOTHING
-        """,
-        (user_id, display_name, gender or "unknown", now, now),
-    )
+def _ensure_user_character_card(session, *, user_id: str, display_name: str, gender: str, now: str) -> None:
+    """确保 user_character_card 存在（INSERT ... ON CONFLICT DO NOTHING）。"""
+    exists = session.execute(
+        select(UserCharacterCard).where(UserCharacterCard.user_id == user_id)
+    ).scalar_one_or_none()
+    if not exists:
+        session.add(UserCharacterCard(
+            user_id=user_id,
+            display_name=display_name,
+            gender=gender or "unknown",
+            created_at=now,
+            updated_at=now,
+        ))
 
 
 def create_user(
@@ -86,35 +53,34 @@ def create_user(
     *,
     bootstrap_admin: bool = False,
 ) -> bool:
-    """创建新用户"""
+    """创建新用户。返回是否为管理员。"""
     now = _now()
-    with get_conn() as conn:
+    with db_session() as session:
         is_admin = False
         if bootstrap_admin:
-            claimed = conn.execute(
-                """
-                INSERT INTO system_bootstrap_claim
-                (claim_key, claimed_by_user_id, claimed_at)
-                SELECT 'admin', ?, ?
-                WHERE NOT EXISTS (SELECT 1 FROM users WHERE is_admin = 1)
-                ON CONFLICT (claim_key) DO NOTHING
-                """,
-                (user_id, now),
-            )
-            if claimed.rowcount != 1:
+            has_admin = session.execute(
+                select(func.count()).select_from(User).where(User.is_admin == 1)
+            ).scalar()
+            if has_admin:
                 raise AdminBootstrapUnavailable("管理员已完成初始化")
+            session.add(SystemBootstrapClaim(
+                claim_key="admin",
+                claimed_by_user_id=user_id,
+                claimed_at=now,
+            ))
             is_admin = True
 
-        conn.execute(
-            """
-            INSERT INTO users
-            (user_id, username, password_hash, is_admin, gender, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (user_id, username, password_hash, int(is_admin), gender, now, now),
-        )
-        _insert_default_user_character_card(
-            conn,
+        session.add(User(
+            user_id=user_id,
+            username=username,
+            password_hash=password_hash,
+            is_admin=int(is_admin),
+            gender=gender,
+            created_at=now,
+            updated_at=now,
+        ))
+        _ensure_user_character_card(
+            session,
             user_id=user_id,
             display_name=username,
             gender=gender,
@@ -124,114 +90,94 @@ def create_user(
 
 
 def get_user_character_card(user_id: str) -> dict | None:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM user_character_card WHERE user_id = ?",
-            (user_id,),
-        ).fetchone()
+    with db_session() as session:
+        row = session.execute(
+            select(UserCharacterCard).where(UserCharacterCard.user_id == user_id)
+        ).scalar_one_or_none()
         return _row_to_dict(row)
 
 
 def get_or_create_user_character_card(user_id: str) -> dict | None:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM user_character_card WHERE user_id = ?",
-            (user_id,),
-        ).fetchone()
-        if row:
-            return _row_to_dict(row)
-        user = conn.execute(
-            "SELECT username, gender FROM users WHERE user_id = ?",
-            (user_id,),
-        ).fetchone()
+    with db_session() as session:
+        card = session.execute(
+            select(UserCharacterCard).where(UserCharacterCard.user_id == user_id)
+        ).scalar_one_or_none()
+        if card:
+            return _row_to_dict(card)
+        user = session.execute(
+            select(User).where(User.user_id == user_id)
+        ).scalar_one_or_none()
         if not user:
             return None
         now = _now()
-        _insert_default_user_character_card(
-            conn,
+        _ensure_user_character_card(
+            session,
             user_id=user_id,
-            display_name=user["username"],
-            gender=user["gender"] or "unknown",
+            display_name=user.username,
+            gender=user.gender or "unknown",
             now=now,
         )
-        row = conn.execute(
-            "SELECT * FROM user_character_card WHERE user_id = ?",
-            (user_id,),
-        ).fetchone()
-        return _row_to_dict(row)
+        session.flush()
+        card = session.execute(
+            select(UserCharacterCard).where(UserCharacterCard.user_id == user_id)
+        ).scalar_one_or_none()
+        return _row_to_dict(card)
 
 
 def update_user_character_card(user_id: str, fields: dict) -> dict | None:
     allowed = {
-        "display_name",
-        "avatar_url",
-        "gender",
-        "pronouns",
-        "age",
-        "species",
-        "occupation",
-        "appearance",
-        "personality",
-        "background",
-        "goals",
+        "display_name", "avatar_url", "gender", "pronouns", "age",
+        "species", "occupation", "appearance", "personality", "background", "goals",
     }
-    updates = {key: value for key, value in fields.items() if key in allowed}
-    with get_conn() as conn:
-        user = conn.execute(
-            "SELECT username, gender FROM users WHERE user_id = ?",
-            (user_id,),
-        ).fetchone()
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    with db_session() as session:
+        user = session.execute(
+            select(User).where(User.user_id == user_id)
+        ).scalar_one_or_none()
         if not user:
             return None
         now = _now()
-        _insert_default_user_character_card(
-            conn,
+        _ensure_user_character_card(
+            session,
             user_id=user_id,
-            display_name=user["username"],
-            gender=user["gender"] or "unknown",
+            display_name=user.username,
+            gender=user.gender or "unknown",
             now=now,
         )
         if updates:
-            assignments = ", ".join(f"{key} = ?" for key in updates)
-            conn.execute(
-                f"""
-                UPDATE user_character_card
-                SET {assignments}, updated_at = ?
-                WHERE user_id = ?
-                """,
-                (*updates.values(), now, user_id),
+            session.execute(
+                update(UserCharacterCard)
+                .where(UserCharacterCard.user_id == user_id)
+                .values(**updates, updated_at=now)
             )
-        card = conn.execute(
-            "SELECT * FROM user_character_card WHERE user_id = ?",
-            (user_id,),
-        ).fetchone()
+        card = session.execute(
+            select(UserCharacterCard).where(UserCharacterCard.user_id == user_id)
+        ).scalar_one_or_none()
         return _row_to_dict(card)
 
 
 def get_user_by_username(username: str) -> dict | None:
-    """根据用户名查找用户"""
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM users WHERE username = ?", (username,)
-        ).fetchone()
+    with db_session() as session:
+        row = session.execute(
+            select(User).where(User.username == username)
+        ).scalar_one_or_none()
         return _row_to_dict(row)
 
 
 def get_user_by_id(user_id: str) -> dict | None:
-    """根据 user_id 查找用户"""
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM users WHERE user_id = ?", (user_id,)
-        ).fetchone()
+    with db_session() as session:
+        row = session.execute(
+            select(User).where(User.user_id == user_id)
+        ).scalar_one_or_none()
         return _row_to_dict(row)
 
 
 def update_user_password_hash(user_id: str, password_hash: str):
-    """更新用户密码哈希。"""
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE users SET password_hash = ?, updated_at = ? WHERE user_id = ?",
-            (password_hash, _now(), user_id),
+    with db_session() as session:
+        session.execute(
+            update(User)
+            .where(User.user_id == user_id)
+            .values(password_hash=password_hash, updated_at=_now())
         )
 
 
@@ -239,27 +185,19 @@ _UNSET = object()
 
 
 def update_user_profile(user_id: str, username: str = None, gender: str = None, avatar_url=_UNSET):
-    """更新用户资料"""
-    fields = []
-    params = []
+    values: dict[str, Any] = {}
     if username is not None:
-        fields.append("username = ?")
-        params.append(username)
+        values["username"] = username
     if gender is not None:
-        fields.append("gender = ?")
-        params.append(gender)
+        values["gender"] = gender
     if avatar_url is not _UNSET:
-        fields.append("avatar_url = ?")
-        params.append(avatar_url)
-    if not fields:
+        values["avatar_url"] = avatar_url
+    if not values:
         return
-    fields.append("updated_at = ?")
-    params.append(_now())
-    params.append(user_id)
-    with get_conn() as conn:
-        conn.execute(
-            f"UPDATE users SET {', '.join(fields)} WHERE user_id = ?",
-            params,
+    values["updated_at"] = _now()
+    with db_session() as session:
+        session.execute(
+            update(User).where(User.user_id == user_id).values(**values)
         )
 
 
@@ -269,75 +207,85 @@ def update_user_speech_settings(
     tts_auto_play: bool,
     stt_auto_send: bool,
 ) -> None:
-    with get_conn() as conn:
-        conn.execute(
-            """
-            UPDATE users
-            SET tts_auto_play = ?, stt_auto_send = ?, updated_at = ?
-            WHERE user_id = ?
-            """,
-            (int(tts_auto_play), int(stt_auto_send), _now(), user_id),
+    with db_session() as session:
+        session.execute(
+            update(User)
+            .where(User.user_id == user_id)
+            .values(
+                tts_auto_play=int(tts_auto_play),
+                stt_auto_send=int(stt_auto_send),
+                updated_at=_now(),
+            )
         )
 
 
 def create_auth_token(token: str, user_id: str, expires_at: str):
-    """持久化登录 token。"""
     storage_key = _auth_token_storage_key(token)
-    with get_conn() as conn:
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO auth_token (token, user_id, created_at, expires_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (storage_key, user_id, _now(), expires_at),
-        )
+    now = _now()
+    with db_session() as session:
+        existing = session.execute(
+            select(AuthToken).where(AuthToken.token == storage_key)
+        ).scalar_one_or_none()
+        if existing:
+            existing.user_id = user_id
+            existing.created_at = now
+            existing.expires_at = expires_at
+        else:
+            session.add(AuthToken(
+                token=storage_key,
+                user_id=user_id,
+                created_at=now,
+                expires_at=expires_at,
+            ))
 
 
 def get_user_id_for_auth_token(token: str) -> str | None:
-    """返回有效 token 对应的 user_id；过期或不存在返回 None。"""
     if not token:
         return None
     now = _now()
     storage_key = _auth_token_storage_key(token)
-    with get_conn() as conn:
-        row = conn.execute(
-            """
-            SELECT token, user_id, created_at, expires_at
-            FROM auth_token
-            WHERE token IN (?, ?) AND expires_at > ?
-            ORDER BY CASE WHEN token = ? THEN 0 ELSE 1 END
-            LIMIT 1
-            """,
-            (storage_key, token, now, storage_key),
-        ).fetchone()
+    with db_session() as session:
+        row = session.execute(
+            select(AuthToken)
+            .where(AuthToken.token.in_([storage_key, token]))
+            .where(AuthToken.expires_at > now)
+            .order_by(AuthToken.token == storage_key)  # prefer storage_key
+        ).scalar_one_or_none()
         if row:
-            if row["token"] == token:
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO auth_token
-                    (token, user_id, created_at, expires_at)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (storage_key, row["user_id"], row["created_at"], row["expires_at"]),
-                )
-                conn.execute("DELETE FROM auth_token WHERE token = ?", (token,))
-            return row["user_id"]
-        # 只删除当前无效 token；过期 token 的批量清理低概率触发，
-        # 避免恶意无效请求放大成每次全表扫描的写压力。
-        conn.execute(
-            "DELETE FROM auth_token WHERE token IN (?, ?) AND expires_at <= ?",
-            (storage_key, token, now),
+            if row.token == token:
+                # Migrate legacy plaintext token to hashed
+                existing = session.execute(
+                    select(AuthToken).where(AuthToken.token == storage_key)
+                ).scalar_one_or_none()
+                if existing:
+                    existing.user_id = row.user_id
+                    existing.created_at = row.created_at
+                    existing.expires_at = row.expires_at
+                else:
+                    session.add(AuthToken(
+                        token=storage_key,
+                        user_id=row.user_id,
+                        created_at=row.created_at,
+                        expires_at=row.expires_at,
+                    ))
+                session.execute(delete(AuthToken).where(AuthToken.token == token))
+            return row.user_id
+
+        session.execute(
+            delete(AuthToken)
+            .where(AuthToken.token.in_([storage_key, token]))
+            .where(AuthToken.expires_at <= now)
         )
         if random.random() < 0.01:
-            conn.execute("DELETE FROM auth_token WHERE expires_at <= ?", (now,))
+            session.execute(
+                delete(AuthToken).where(AuthToken.expires_at <= now)
+            )
     return None
 
 
 def delete_auth_token(token: str):
-    """删除登录 token。"""
     storage_key = _auth_token_storage_key(token)
-    with get_conn() as conn:
-        conn.execute(
-            "DELETE FROM auth_token WHERE token IN (?, ?)",
-            (storage_key, token),
+    with db_session() as session:
+        session.execute(
+            delete(AuthToken).where(AuthToken.token.in_([storage_key, token]))
         )
