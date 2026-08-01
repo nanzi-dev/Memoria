@@ -380,7 +380,6 @@ python scripts/seed_next_door_demo.py --password '<choose-a-strong-password>'
 | [API 文档](docs/API.md) | 完整 REST API 参考（对话/角色卡/事件/关系/多角色/知识库/语音/用户/系统管理），含请求/响应示例 |
 | [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、数据库表结构、记忆、知识检索与语音架构、角色卡开发规范 |
 | [记忆曲线](docs/MEMORY_CURVE.md) | 基于世界时间的记忆衰减、证据强化、确定性召回和只读诊断说明 |
-| [知识检索评测](docs/KNOWLEDGE_RETRIEVAL_EVALUATION.md) | 检索基线、嵌入模型对比和 Graytide 场景级评测夹具 |
 | [开发路线图](docs/ROADMAP.md) | 已完成功能和未来规划 |
 | [故障排查](docs/FAQ.md) | 常见问题解决方案、调试技巧、性能优化建议 |
 | [贡献指南](docs/CONTRIBUTING.md) | 如何贡献代码、Commit 规范、代码审查标准 |
