@@ -9,6 +9,7 @@
 # =========================
 .vscode/
 .codex/
+.claude/
 .agents/
 .github/
 .codegraph
