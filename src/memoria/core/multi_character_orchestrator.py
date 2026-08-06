@@ -660,7 +660,7 @@ class MultiCharacterOrchestrator(
             ),
         )
         
-        dialogue = result.get("dialogue", "")
+        dialogue = safety_check(result.get("dialogue", ""))
         action = result.get("action", card.action_vocabulary.default_action)
         
         # 记录消息
@@ -797,7 +797,7 @@ class MultiCharacterOrchestrator(
             history=messages
         )
         
-        dialogue = result.get("dialogue", "")
+        dialogue = safety_check(result.get("dialogue", ""))
         action = result.get("action", card.action_vocabulary.default_action)
         
         # 记录消息

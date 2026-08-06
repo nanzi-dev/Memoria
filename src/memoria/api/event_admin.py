@@ -607,8 +607,9 @@ def list_events(
             ))
         return result
     except Exception as e:
-        logger.error(f"列出事件失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"列出事件失败: {e}", exc_info=True)
+        # 内部异常信息（SQL 片段/文件路径等）不直接回传客户端
+        raise HTTPException(status_code=500, detail="列出事件失败")
 
 
 # =========================

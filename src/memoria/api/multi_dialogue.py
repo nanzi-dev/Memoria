@@ -393,7 +393,7 @@ def finish_multi_character_session(
 # =========================
 
 @router.post("/session/start", response_model=StartMultiSessionResponse)
-async def start_multi_session(
+def start_multi_session(
     request: StartMultiSessionRequest,
     current_user_id: str = Depends(require_current_user_id),
 ):
@@ -473,7 +473,7 @@ async def start_multi_session(
 
 
 @router.post("/turn")
-async def multi_dialogue_turn(
+def multi_dialogue_turn(
     request: MultiDialogueTurnRequest,
     current_user_id: str = Depends(require_current_user_id),
 ):
@@ -601,7 +601,7 @@ def _serialize_multi_turn_result(
 
 
 @router.post("/turn/stream")
-async def multi_dialogue_turn_stream(
+def multi_dialogue_turn_stream(
     request: MultiDialogueTurnRequest,
     current_user_id: str = Depends(require_current_user_id),
 ):
@@ -636,7 +636,7 @@ async def multi_dialogue_turn_stream(
 
 
 @router.post("/interaction/trigger")
-async def trigger_interaction(
+def trigger_interaction(
     request: TriggerInteractionRequest,
     current_user_id: str = Depends(require_current_user_id),
 ):
@@ -688,7 +688,7 @@ async def trigger_interaction(
 
 
 @router.get("/session/{session_id}", response_model=MultiSessionInfo)
-async def get_multi_session_info(
+def get_multi_session_info(
     session_id: str,
     current_user_id: str = Depends(require_current_user_id),
 ):
@@ -731,7 +731,7 @@ async def get_multi_session_info(
 
 
 @router.post("/session/{session_id}/continue", response_model=ContinueMultiSessionResponse)
-async def continue_multi_session(
+def continue_multi_session(
     session_id: str,
     current_user_id: str = Depends(require_current_user_id),
 ):
@@ -804,7 +804,7 @@ async def continue_multi_session(
 
 
 @router.get("/history/{session_id}", response_model=MultiDialogueHistory)
-async def get_multi_dialogue_history(
+def get_multi_dialogue_history(
     session_id: str,
     offset: int = Query(0, ge=0, description="已加载消息数量"),
     limit: int = Query(50, ge=1, le=200, description="消息数量限制"),
@@ -880,7 +880,7 @@ async def get_multi_dialogue_history(
     "/thread/{group_thread_id}/read",
     response_model=MarkGroupThreadReadResponse,
 )
-async def mark_group_thread_read(
+def mark_group_thread_read(
     group_thread_id: str,
     current_user_id: str = Depends(require_current_user_id),
 ):
@@ -900,7 +900,7 @@ async def mark_group_thread_read(
 
 
 @router.post("/session/end")
-async def end_multi_session(
+def end_multi_session(
     request: EndMultiSessionRequest,
     background_tasks: BackgroundTasks,
     current_user_id: str = Depends(require_current_user_id),

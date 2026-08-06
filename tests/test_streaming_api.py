@@ -518,7 +518,7 @@ async def test_multi_dialogue_stream_returns_authoritative_group_shape(monkeypat
         fake_turn,
     )
 
-    response = await multi_dialogue.multi_dialogue_turn_stream(
+    response = multi_dialogue.multi_dialogue_turn_stream(
         multi_dialogue.MultiDialogueTurnRequest(
             session_id="session-1",
             player_message="行动",

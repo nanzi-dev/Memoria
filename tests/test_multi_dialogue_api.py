@@ -150,7 +150,7 @@ async def test_multi_dialogue_history_returns_paginated_thread_messages(monkeypa
         lambda session_id: [],
     )
 
-    response = await multi_dialogue.get_multi_dialogue_history(
+    response = multi_dialogue.get_multi_dialogue_history(
         "session-1",
         offset=20,
         limit=10,
@@ -216,7 +216,7 @@ async def test_multi_dialogue_history_uses_incremental_message_id(monkeypatch):
         lambda session_id: [],
     )
 
-    response = await multi_dialogue.get_multi_dialogue_history(
+    response = multi_dialogue.get_multi_dialogue_history(
         "session-1",
         offset=99,
         limit=3,
@@ -245,7 +245,7 @@ async def test_mark_group_thread_read_handles_not_found_forbidden_and_success(mo
         lambda group_thread_id: None,
     )
     with pytest.raises(HTTPException) as missing:
-        await multi_dialogue.mark_group_thread_read(
+        multi_dialogue.mark_group_thread_read(
             "missing-thread",
             current_user_id="player-1",
         )
@@ -257,7 +257,7 @@ async def test_mark_group_thread_read_handles_not_found_forbidden_and_success(mo
         lambda group_thread_id: _multi_session("session-1"),
     )
     with pytest.raises(HTTPException) as forbidden:
-        await multi_dialogue.mark_group_thread_read(
+        multi_dialogue.mark_group_thread_read(
             "thread-1",
             current_user_id="other-player",
         )
@@ -272,7 +272,7 @@ async def test_mark_group_thread_read_handles_not_found_forbidden_and_success(mo
             group_thread_id=group_thread_id,
         ) or 2,
     )
-    response = await multi_dialogue.mark_group_thread_read(
+    response = multi_dialogue.mark_group_thread_read(
         "thread-1",
         current_user_id="player-1",
     )
@@ -289,7 +289,7 @@ async def test_start_multi_session_rejects_duplicate_group_name(monkeypatch):
     monkeypatch.setattr(multi_dialogue.repository, "player_group_name_exists", lambda player_id, group_name: True)
 
     with pytest.raises(HTTPException) as exc:
-        await multi_dialogue.start_multi_session(
+        multi_dialogue.start_multi_session(
             multi_dialogue.StartMultiSessionRequest(
                 player_id="player-1",
                 player_name="Player",
@@ -314,7 +314,7 @@ async def test_start_multi_session_rejects_disabled_character(monkeypatch):
     )
 
     with pytest.raises(HTTPException) as exc:
-        await multi_dialogue.start_multi_session(
+        multi_dialogue.start_multi_session(
             multi_dialogue.StartMultiSessionRequest(
                 player_id="player-1",
                 player_name="Player",
@@ -333,7 +333,7 @@ async def test_start_multi_session_rejects_duplicate_characters(monkeypatch):
     from memoria.api import multi_dialogue
 
     with pytest.raises(HTTPException) as exc:
-        await multi_dialogue.start_multi_session(
+        multi_dialogue.start_multi_session(
             multi_dialogue.StartMultiSessionRequest(
                 player_id="player-1",
                 player_name="Player",
@@ -363,7 +363,7 @@ async def test_end_multi_session_accepts_json_body(monkeypatch):
     )
 
     tasks = FakeBackgroundTasks()
-    response = await multi_dialogue.end_multi_session(
+    response = multi_dialogue.end_multi_session(
         multi_dialogue.EndMultiSessionRequest(session_id="session-1"),
         tasks,
         current_user_id="player-1",
@@ -441,7 +441,7 @@ async def test_end_multi_session_backfills_summary_when_already_ended(monkeypatc
     monkeypatch.setattr(multi_dialogue.repository, "end_session", fake_end_session)
 
     tasks = FakeBackgroundTasks()
-    response = await multi_dialogue.end_multi_session(
+    response = multi_dialogue.end_multi_session(
         multi_dialogue.EndMultiSessionRequest(session_id="session-1"),
         tasks,
         current_user_id="player-1",
@@ -483,7 +483,7 @@ async def test_end_multi_session_summary_failure_does_not_block_end(monkeypatch)
     monkeypatch.setattr(multi_dialogue.repository, "end_session", fake_end_session)
 
     tasks = FakeBackgroundTasks()
-    response = await multi_dialogue.end_multi_session(
+    response = multi_dialogue.end_multi_session(
         multi_dialogue.EndMultiSessionRequest(session_id="session-1"),
         tasks,
         current_user_id="player-1",
@@ -523,7 +523,7 @@ async def test_end_multi_session_empty_summary_still_processes_impressions(monke
     monkeypatch.setattr(multi_dialogue.repository, "end_session", lambda session_id: None)
 
     tasks = FakeBackgroundTasks()
-    response = await multi_dialogue.end_multi_session(
+    response = multi_dialogue.end_multi_session(
         multi_dialogue.EndMultiSessionRequest(session_id="session-1"),
         tasks,
         current_user_id="player-1",
@@ -571,7 +571,7 @@ async def test_end_multi_session_skips_summary_when_message_count_not_enough(mon
     )
 
     tasks = FakeBackgroundTasks()
-    response = await multi_dialogue.end_multi_session(
+    response = multi_dialogue.end_multi_session(
         multi_dialogue.EndMultiSessionRequest(session_id="session-1"),
         tasks,
         current_user_id="player-1",
@@ -662,7 +662,7 @@ async def test_end_multi_session_chunks_long_history_before_saving_summary(monke
     )
 
     tasks = FakeBackgroundTasks()
-    response = await multi_dialogue.end_multi_session(
+    response = multi_dialogue.end_multi_session(
         multi_dialogue.EndMultiSessionRequest(session_id="session-1"),
         tasks,
         current_user_id="player-1",
@@ -800,7 +800,7 @@ async def test_continue_multi_session_creates_new_active_session_without_reactiv
         fake_get_or_create_active_multi_character_session,
     )
 
-    response = await multi_dialogue.continue_multi_session(
+    response = multi_dialogue.continue_multi_session(
         "old-session",
         current_user_id="player-1",
     )
@@ -861,7 +861,7 @@ async def test_continue_multi_session_reuses_session_created_after_initial_looku
         lambda **kwargs: (concurrent_session, False),
     )
 
-    response = await multi_dialogue.continue_multi_session(
+    response = multi_dialogue.continue_multi_session(
         "old-session",
         current_user_id="player-1",
     )
@@ -918,7 +918,7 @@ async def test_continue_multi_session_rejects_disabled_participants(monkeypatch)
     )
 
     with pytest.raises(HTTPException) as exc:
-        await multi_dialogue.continue_multi_session(
+        multi_dialogue.continue_multi_session(
             "old-session",
             current_user_id="player-1",
         )
@@ -976,7 +976,7 @@ async def test_continue_multi_session_reuses_existing_active_thread_session(monk
         fake_get_or_create_active_multi_character_session,
     )
 
-    response = await multi_dialogue.continue_multi_session(
+    response = multi_dialogue.continue_multi_session(
         "old-session",
         current_user_id="player-1",
     )
@@ -1023,7 +1023,7 @@ async def test_multi_dialogue_turn_wraps_discussion_response(monkeypatch):
         ],
     )
 
-    response = await multi_dialogue.multi_dialogue_turn(
+    response = multi_dialogue.multi_dialogue_turn(
         multi_dialogue.MultiDialogueTurnRequest(
             session_id="session-1",
             player_message="制定计划",
@@ -1063,7 +1063,7 @@ async def test_multi_dialogue_turn_rejects_disabled_participant(monkeypatch):
     )
 
     with pytest.raises(HTTPException) as exc:
-        await multi_dialogue.multi_dialogue_turn(
+        multi_dialogue.multi_dialogue_turn(
             multi_dialogue.MultiDialogueTurnRequest(
                 session_id="session-1",
                 player_message="继续",
@@ -1086,7 +1086,7 @@ async def test_trigger_interaction_rejects_ended_session(monkeypatch):
     )
 
     with pytest.raises(HTTPException) as exc:
-        await multi_dialogue.trigger_interaction(
+        multi_dialogue.trigger_interaction(
             multi_dialogue.TriggerInteractionRequest(session_id="session-1"),
             current_user_id="player-1",
         )
@@ -1102,7 +1102,7 @@ async def test_multi_dialogue_turn_rejects_other_player_session(monkeypatch):
     monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: _multi_session(session_id))
 
     with pytest.raises(HTTPException) as exc_info:
-        await multi_dialogue.multi_dialogue_turn(
+        multi_dialogue.multi_dialogue_turn(
             multi_dialogue.MultiDialogueTurnRequest(
                 session_id="session-1",
                 player_message="制定计划",

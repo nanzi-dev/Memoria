@@ -646,6 +646,15 @@ class PlayerEventInbox(Base):
     __table_args__ = (
         Index("idx_player_event_inbox_unread", "player_id", "read_at", "id"),
         Index("idx_player_group_inbox_unread", "player_id", "group_thread_id", "read_at", "id"),
+        # 运行时部分唯一索引（迁移/init_db 亦创建）：群聊未读聚合按行去重
+        Index(
+            "idx_inbox_group_unread",
+            "player_id",
+            "group_thread_id",
+            unique=True,
+            sqlite_where=text("event_type = 'group_message' AND read_at IS NULL"),
+            postgresql_where=text("event_type = 'group_message' AND read_at IS NULL"),
+        ),
     )
 
 
@@ -698,6 +707,14 @@ class SessionSummary(Base):
     __table_args__ = (
         Index("idx_summary_lookup", "session_id", "created_at"),
         Index("idx_summary_player", "character_id", "player_id", "created_at"),
+        # 唯一索引（迁移/init_db 亦创建）：ON CONFLICT(session_id, character_id, player_id) 依赖
+        Index(
+            "idx_summary_unique",
+            "session_id",
+            "character_id",
+            "player_id",
+            unique=True,
+        ),
     )
 
 
