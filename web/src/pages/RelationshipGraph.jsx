@@ -59,7 +59,6 @@ import {
   ZoomOut,
 } from 'lucide-react';
 
-const RELATION_TYPE_STORAGE_KEY = 'memoria.relationshipTypes';
 const RELATION_FILTER_ALL = '__all_relationship_types__';
 const RELATION_TYPE_COLORS = [
   '#A7EF9E', '#EF4444', '#F59E0B', '#F97316', '#7C3AED',
@@ -89,9 +88,14 @@ function normalizeRelationTypeName(value) {
   return String(value || '').trim();
 }
 
-function loadRelationTypes() {
+function relationTypeStorageKey(userId) {
+  return `memoria.relationshipTypes.${userId}`;
+}
+
+function loadRelationTypes(userId) {
+  if (!userId) return DEFAULT_RELATION_TYPES;
   try {
-    const parsed = JSON.parse(localStorage.getItem(RELATION_TYPE_STORAGE_KEY) || 'null');
+    const parsed = JSON.parse(localStorage.getItem(relationTypeStorageKey(userId)) || 'null');
     if (Array.isArray(parsed)) {
       return parsed
         .map((item) => ({
@@ -103,6 +107,13 @@ function loadRelationTypes() {
     }
   } catch (e) {}
   return DEFAULT_RELATION_TYPES;
+}
+
+function persistRelationTypes(userId, types) {
+  if (!userId) return;
+  try {
+    localStorage.setItem(relationTypeStorageKey(userId), JSON.stringify(types));
+  } catch (e) {}
 }
 
 function mergeRelationTypes(baseTypes, edges = []) {
@@ -893,6 +904,7 @@ export default function RelationshipGraph() {
   const { setPrimaryAction } = useArchiveShell();
   const { theme } = useArchiveTheme();
   const { user, loading: userLoading } = useUser();
+  const userId = user?.user_id;
   const svgRef = useRef(null);
   const containerRef = useRef(null);
   const simulationRef = useRef(null);
@@ -909,7 +921,7 @@ export default function RelationshipGraph() {
   const [network, setNetwork] = useState({ nodes: [], edges: [] });
   const [characters, setCharacters] = useState([]);
   const [graphSize, setGraphSize] = useState({ width: 0, height: 0 });
-  const [relationTypes, setRelationTypes] = useState(loadRelationTypes);
+  const [relationTypes, setRelationTypes] = useState(() => loadRelationTypes(userId));
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [editEdge, setEditEdge] = useState(null);
@@ -935,9 +947,14 @@ export default function RelationshipGraph() {
     return () => setPrimaryAction(null);
   }, [primaryAction, setPrimaryAction]);
 
+  // 用户切换时加载该用户的关系类型，避免不同用户在同一个浏览器串号
   useEffect(() => {
-    localStorage.setItem(RELATION_TYPE_STORAGE_KEY, JSON.stringify(relationTypes));
-  }, [relationTypes]);
+    setRelationTypes(loadRelationTypes(userId));
+  }, [userId]);
+
+  useEffect(() => {
+    persistRelationTypes(userId, relationTypes);
+  }, [relationTypes, userId]);
 
   useEffect(() => {
     if (

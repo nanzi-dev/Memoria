@@ -420,6 +420,7 @@ select.memoria-form-control {
   --archive-graph-player: hsl(346 43% 58%);
   --archive-graph-surface: hsl(154 17% 10%);
   --archive-graph-wall: hsl(24 20% 17%);
+  --archive-graph-wall-line: hsl(24 28% 7% / 0.12);
   --archive-graph-paper: hsl(43 31% 88%);
   --archive-graph-paper-muted: hsl(40 22% 78%);
   --archive-graph-ink: hsl(153 22% 12%);
@@ -459,6 +460,7 @@ select.memoria-form-control {
   --archive-graph-player: hsl(346 49% 42%);
   --archive-graph-surface: hsl(45 45% 97%);
   --archive-graph-wall: hsl(30 29% 62%);
+  --archive-graph-wall-line: hsl(26 22% 42% / 0.10);
   --archive-graph-paper: hsl(44 43% 94%);
   --archive-graph-paper-muted: hsl(43 24% 83%);
   --archive-graph-ink: hsl(151 30% 13%);
@@ -498,7 +500,7 @@ select.memoria-form-control {
       97deg,
       transparent 0,
       transparent 14px,
-      hsl(24 28% 7% / 0.12) 15px,
+      var(--archive-graph-wall-line) 15px,
       transparent 17px
     );
   background-size: 31px 23px, 43px 37px;
@@ -508,7 +510,6 @@ select.memoria-form-control {
 }
 
 .archive-theme-light .archive-clue-wall {
-  background-blend-mode: soft-light, multiply;
   box-shadow:
     inset 0 0 0 1px hsl(var(--border) / 0.32),
     inset 0 0 82px hsl(26 31% 21% / 0.2);
