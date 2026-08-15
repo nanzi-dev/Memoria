@@ -122,6 +122,81 @@ def test_validate_csrf_skips_login_endpoint():
     assert validate_csrf(request) is None
 
 
+def test_validate_csrf_allows_safe_method_from_vite_dev_proxy():
+    """Vite dev 前端 localhost:5173 → 后端 127.0.0.1:8001 的 GET 不应被 403。"""
+    from memoria.core.csrf import validate_csrf
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/api/v1/user/me",
+        "raw_path": b"/api/v1/user/me",
+        "query_string": b"",
+        "headers": [
+            (b"host", b"127.0.0.1:8001"),
+            (b"origin", b"http://localhost:5173"),
+            (b"referer", b"http://localhost:5173/"),
+        ],
+        "client": ("127.0.0.1", 123),
+        "server": ("test", 80),
+    }
+    request = Request(scope)
+    assert validate_csrf(request) is None
+
+
+def test_validate_csrf_allows_loopback_dev_proxy_login():
+    from memoria.core.csrf import validate_csrf
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/v1/user/login",
+        "raw_path": b"/api/v1/user/login",
+        "query_string": b"",
+        "headers": [
+            (b"host", b"127.0.0.1:8001"),
+            (b"origin", b"http://localhost:5173"),
+            (b"referer", b"http://localhost:5173/"),
+        ],
+        "client": ("127.0.0.1", 123),
+        "server": ("test", 80),
+    }
+    request = Request(scope)
+    assert validate_csrf(request) is None
+
+
+def test_validate_csrf_blocks_cross_site_login():
+    from memoria.core.csrf import validate_csrf
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "https",
+        "path": "/api/v1/user/login",
+        "raw_path": b"/api/v1/user/login",
+        "query_string": b"",
+        "headers": [
+            (b"host", b"api.example.com"),
+            (b"origin", b"https://evil.example"),
+        ],
+        "client": ("203.0.113.7", 123),
+        "server": ("api.example.com", 443),
+    }
+    request = Request(scope)
+    blocked = validate_csrf(request)
+    assert blocked is not None
+    assert blocked.status_code == 403
+
+
+
 
 
 def _csrf_scope(path: str, query_string: bytes = b"", headers=None):

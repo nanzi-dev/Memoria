@@ -81,17 +81,50 @@ def _normalized_path(path: str) -> str:
     return path
 
 
+_LOOPBACK_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _authority_parts(url_value: str):
+    """Return (lowercased hostname, effective port) for an Origin/Referer URL."""
+    parsed = urlsplit(url_value)
+    hostname = (parsed.hostname or "").rstrip(".").lower()
+    port = parsed.port
+    if port is None:
+        port = 443 if parsed.scheme == "https" else 80
+    return hostname, port
+
+
+def _host_parts(host_header: str):
+    """Parse the Host header into (lowercased hostname, effective port)."""
+    parsed = urlsplit(f"//{host_header}")
+    hostname = (parsed.hostname or "").rstrip(".").lower()
+    port = parsed.port
+    if port is None:
+        port = 443 if parsed.scheme == "https" else 80
+    return hostname, port
+
+
 def _same_origin(url_value: str, host_header: str) -> bool:
-    """Compare an Origin/Referer URL authority against the request Host header."""
+    """Compare an Origin/Referer URL authority against the request Host header.
+
+    ``localhost``/``127.0.0.1``/``::1`` are treated as one loopback family and
+    port differences are ignored, so the Vite dev proxy
+    (``http://localhost:5173`` → ``127.0.0.1:8001``) is not treated as an
+    attacker-controlled cross-origin request. Non-loopback hosts still require
+    exact hostname and port match.
+    """
     if not url_value or not host_header:
         return True
     try:
-        parsed = urlsplit(url_value)
+        origin_host, origin_port = _authority_parts(url_value)
+        host_name, host_port = _host_parts(host_header)
     except ValueError:
         return False
-    if not parsed.netloc:
+    if not origin_host or not host_name:
         return True
-    return parsed.netloc == host_header
+    if origin_host in _LOOPBACK_HOSTNAMES and host_name in _LOOPBACK_HOSTNAMES:
+        return True
+    return origin_host == host_name and origin_port == host_port
 
 
 def _exempt_path_origin_allowed(request: Request) -> bool:
@@ -140,7 +173,13 @@ def uses_bearer_auth(request: Request) -> bool:
 def validate_csrf(request: Request) -> JSONResponse | None:
     """Return a 403 response when cookie-session write lacks a valid CSRF pair."""
     if is_csrf_exempt(request.url.path, request.method):
-        if not _exempt_path_origin_allowed(request):
+        # 只有显式豁免的登录/注册写端点需要做 Origin/Referer 同源复核；
+        # GET 等安全方法不能被当成“豁免端点”拦截，否则 Vite 开发代理的
+        # 跨端口请求也会被 403。
+        if (
+            request.method.upper() not in _SAFE_METHODS
+            and not _exempt_path_origin_allowed(request)
+        ):
             return JSONResponse(
                 status_code=403,
                 content={"detail": "请求来源不被允许"},
