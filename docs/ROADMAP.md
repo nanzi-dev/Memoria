@@ -139,7 +139,7 @@
 
 ## 测试覆盖
 
-当前测试覆盖角色与事件模型、`db/repository` 包、单聊/群聊编排、SSE、群聊脉冲、后台任务、关系图谱、知识库 API 与文档处理恢复、语音、CSRF、输出安全、向量存储、世界时钟、系统端点、开发者体验和 PostgreSQL 兼容。实时数量以 `pytest --collect-only -q` 为准；前端测试由 `npm test` 收集。
+当前测试覆盖角色与事件模型、`db/repository` 包、单聊/群聊编排、SSE、群聊脉冲、后台任务、关系图谱、知识库 API 与文档处理恢复、语音、CSRF、输出安全、向量存储、世界时钟、系统端点、开发者体验和 PostgreSQL 兼容。CI 同时运行 SQLite 全量测试与 PostgreSQL 全量测试；前端测试由 `npm test` 收集并在 CI 中执行。实时数量以 `pytest --collect-only -q` 为准。
 
 ## 版本规划
 
