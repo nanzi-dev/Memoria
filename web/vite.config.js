@@ -18,14 +18,12 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          'three-vendor': [
-            'three',
-            '@react-three/fiber',
-            '@react-three/drei',
-            '@react-three/rapier',
-            'meshline',
-            'ogl',
-          ],
+          three: ['three'],
+          'react-three-fiber': ['@react-three/fiber'],
+          'react-three-drei': ['@react-three/drei'],
+          'react-three-rapier': ['@react-three/rapier'],
+          meshline: ['meshline'],
+          ogl: ['ogl'],
         },
       },
     },
