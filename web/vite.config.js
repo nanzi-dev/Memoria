@@ -15,6 +15,20 @@ export default defineConfig({
     // 保持 Vite 默认的 1600 KB 告警阈值。不要为了消除告警调高阈值：
     // Lanyard 等依赖生成的大 chunk 是后续需要按需拆分/懒加载的债务。
     chunkSizeWarningLimit: 1600,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'three-vendor': [
+            'three',
+            '@react-three/fiber',
+            '@react-three/drei',
+            '@react-three/rapier',
+            'meshline',
+            'ogl',
+          ],
+        },
+      },
+    },
   },
   server: {
     port: 5173,

@@ -69,7 +69,10 @@ class VectorMemoryStore:
             )
             
             # 初始化嵌入模型（轻量级，适合本地部署）
-            self.embedding_model = SentenceTransformer(configs.embedding_model)
+            _model_kwargs = {}
+            if configs.embedding_model_revision:
+                _model_kwargs["revision"] = configs.embedding_model_revision
+            self.embedding_model = SentenceTransformer(configs.embedding_model, **_model_kwargs)
             self.embedding_device = str(getattr(self.embedding_model, "device", "auto"))
             self.embedding_disabled = False
             
@@ -107,7 +110,10 @@ class VectorMemoryStore:
                 from sentence_transformers import SentenceTransformer
 
                 logger.warning("嵌入模型 CUDA 运行失败，切换到 CPU 后重试")
-                self.embedding_model = SentenceTransformer(configs.embedding_model, device="cpu")
+                _fallback_model_kwargs = {}
+                if configs.embedding_model_revision:
+                    _fallback_model_kwargs["revision"] = configs.embedding_model_revision
+                self.embedding_model = SentenceTransformer(configs.embedding_model, device="cpu", **_fallback_model_kwargs)
                 self.embedding_device = "cpu"
                 self.embedding_disabled = False
                 return True

@@ -36,6 +36,9 @@ jobs:
       - name: Type check
         run: mypy src/memoria
 
+      - name: Security lint
+        run: bandit -q -r src -ll -c pyproject.toml
+
       - name: Run SQLite test suite
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY || 'test-key' }}

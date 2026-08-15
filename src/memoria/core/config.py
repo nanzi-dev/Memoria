@@ -205,6 +205,7 @@ class Configs(BaseSettings):
     # 向量数据库配置
     vector_db_path: str = "./data/chroma_db"
     embedding_model: str = "./models/sentence-transformers/all-MiniLM-L6-v2"
+    embedding_model_revision: str = ""
     vector_search_top_k: int = Field(default = 10, ge = 1, le = 50)
 
     # 世界观知识库 / RAG 配置

@@ -509,7 +509,10 @@ def build_chunk_index_text(
 def _get_default_tokenizer():
     from transformers import AutoTokenizer
 
-    return AutoTokenizer.from_pretrained(configs.embedding_model)
+    return AutoTokenizer.from_pretrained(
+        configs.embedding_model,
+        revision=configs.embedding_model_revision or None,
+    )
 
 
 class _TokenizerCodec:

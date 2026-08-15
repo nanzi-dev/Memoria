@@ -36,7 +36,10 @@ class KnowledgeVectorStore:
             name=self.collection_name,
             metadata={"hnsw:space": "cosine"},
         )
-        self.embedding_model = SentenceTransformer(configs.embedding_model)
+        _model_kwargs = {}
+        if configs.embedding_model_revision:
+            _model_kwargs["revision"] = configs.embedding_model_revision
+        self.embedding_model = SentenceTransformer(configs.embedding_model, **_model_kwargs)
 
     @property
     def tokenizer(self):

@@ -35,6 +35,7 @@ dev = [
     "alembic==1.18.5",
     "ruff==0.16.3",
     "mypy==2.3.1",
+    "bandit==1.9.4",
 ]
 
 [tool.setuptools.packages.find]
@@ -72,3 +73,8 @@ disable_error_code = [
   "union-attr",
   "var-annotated",
 ]
+
+[tool.bandit]
+# B608 是大量“由内部常量拼接 where_clause/子查询”的动态 SQL 低置信告警；
+# 本仓库已审计这些拼接值不来自用户输入，暂时跳过。其余中高危仍会拦截。
+skips = ["B608"]
