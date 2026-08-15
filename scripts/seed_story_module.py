@@ -57,13 +57,12 @@ def load_story_module(module_root: Path) -> dict[str, Any]:
         raise ValueError("故事模块群聊 thread_id 必须唯一")
     player_character_path = module_root / manifest["player_character"]
     player_character_raw = _read_json(player_character_path)
-    unknown_player_fields = (
-        set(player_character_raw) - set(UserCharacterCardUpdate.model_fields)
+    unknown_player_fields = set(player_character_raw) - set(
+        UserCharacterCardUpdate.model_fields
     )
     if unknown_player_fields:
         raise ValueError(
-            "玩家角色卡包含不支持的字段: "
-            + ", ".join(sorted(unknown_player_fields))
+            "玩家角色卡包含不支持的字段: " + ", ".join(sorted(unknown_player_fields))
         )
     player_character = UserCharacterCardUpdate.model_validate(
         player_character_raw
@@ -104,8 +103,7 @@ def _ensure_demo_user(
         return existing, False
     if not password:
         raise ValueError(
-            f"首次创建 {module_label} 演示账户需要 "
-            "--password 或 MEMORIA_DEMO_PASSWORD"
+            f"首次创建 {module_label} 演示账户需要 --password 或 MEMORIA_DEMO_PASSWORD"
         )
     _validate_password(password)
     user_id = _deterministic_user_id(username)
@@ -194,10 +192,7 @@ def _seed_relationships(
             description=relationship.get("description"),
         )
         if not success:
-            raise RuntimeError(
-                "保存角色关系失败: "
-                f"{character_id_a}/{character_id_b}"
-            )
+            raise RuntimeError(f"保存角色关系失败: {character_id_a}/{character_id_b}")
 
 
 def _ensure_group_session(
@@ -232,9 +227,7 @@ def _ensure_group_session(
     repository.end_session(group["session_id"])
     created = repository.get_session(group["session_id"])
     if not created:
-        raise RuntimeError(
-            f"创建 {module_label} 群聊后无法读取会话: {group['name']}"
-        )
+        raise RuntimeError(f"创建 {module_label} 群聊后无法读取会话: {group['name']}")
     return created
 
 
@@ -297,9 +290,7 @@ def _delete_document(
         return
     if vector_store is not None:
         vector_store.delete_document(owner_user_id, document["document_id"])
-        repository.complete_knowledge_vector_cleanup(
-            deleted.get("vector_cleanup_id")
-        )
+        repository.complete_knowledge_vector_cleanup(deleted.get("vector_cleanup_id"))
     remove_stored_knowledge_file(deleted.get("storage_path"))
 
 
@@ -318,9 +309,7 @@ def _delete_knowledge_base(
         vector_store.delete_knowledge_base(
             owner_user_id, knowledge_base["knowledge_base_id"]
         )
-        repository.complete_knowledge_vector_cleanup(
-            deleted.get("vector_cleanup_id")
-        )
+        repository.complete_knowledge_vector_cleanup(deleted.get("vector_cleanup_id"))
     for document in deleted.get("documents", []):
         remove_stored_knowledge_file(document.get("storage_path"))
 
@@ -500,8 +489,7 @@ def reset_story_module(
     player_relationship_token = manifest["player_relationship_token"]
     source = f"{manifest['module_id']}-demo"
     definitions_by_name = {
-        definition["name"]: definition
-        for definition in manifest["knowledge_bases"]
+        definition["name"]: definition for definition in manifest["knowledge_bases"]
     }
     for knowledge_base in repository.list_knowledge_bases(owner_user_id):
         definition = definitions_by_name.get(knowledge_base["name"])
@@ -512,16 +500,12 @@ def reset_story_module(
             knowledge_base["knowledge_base_id"],
         )
         module_documents = [
-            document
-            for document in documents
-            if document["source_type"] == source
+            document for document in documents if document["source_type"] == source
         ]
         if not module_documents:
             continue
         unrelated_documents = [
-            document
-            for document in documents
-            if document["source_type"] != source
+            document for document in documents if document["source_type"] != source
         ]
         declared_bindings = {
             (binding["target_type"], binding.get("target_id") or "")
@@ -575,9 +559,7 @@ def reset_story_module(
             owner_user_id, card.character_id, soft_delete=False
         )
 
-    declared_thread_ids = {
-        group["thread_id"] for group in manifest["groups"]
-    }
+    declared_thread_ids = {group["thread_id"] for group in manifest["groups"]}
     owner_group_sessions = {
         session["group_thread_id"]: session
         for session in repository.get_all_player_sessions(owner_user_id)
@@ -659,25 +641,19 @@ def seed_story_module(
         "events": len(module["events"]),
         "active_events": sum(event.is_active for event in module["events"]),
         "knowledge_bases": len(knowledge_bases),
-        "knowledge_documents": sum(
-            len(item["documents"]) for item in knowledge_bases
-        ),
+        "knowledge_documents": sum(len(item["documents"]) for item in knowledge_bases),
         "knowledge_indexed": not skip_knowledge_index,
         "group_session_ids": [
             group_session["session_id"] for group_session in group_sessions
         ],
-        "group_thread_ids": [
-            group["thread_id"] for group in manifest["groups"]
-        ],
+        "group_thread_ids": [group["thread_id"] for group in manifest["groups"]],
         "group_session_id": group_sessions[0]["session_id"],
         "group_thread_id": manifest["groups"][0]["thread_id"],
     }
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="播种 Memoria 故事模块演示数据。"
-    )
+    parser = argparse.ArgumentParser(description="播种 Memoria 故事模块演示数据。")
     parser.add_argument(
         "module_root",
         type=Path,

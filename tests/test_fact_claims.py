@@ -10,6 +10,7 @@ from memoria.db import repository
 
 def _pg_enabled() -> bool:
     from memoria.core.config import configs
+
     return bool((configs.database_url or "").strip())
 
 
@@ -87,14 +88,19 @@ def test_model_inference_is_always_candidate(owner_user_id):
     )
 
     assert claim["status"] == "candidate"
-    assert [event.event_type for event in _events(owner_user_id, claim["claim_id"])] == [
+    assert [
+        event.event_type for event in _events(owner_user_id, claim["claim_id"])
+    ] == [
         "fact.claimed.v1",
     ]
-    assert repository.list_verified_fact_claims(
-        owner_user_id,
-        "story",
-        "test-scope",
-    ) == []
+    assert (
+        repository.list_verified_fact_claims(
+            owner_user_id,
+            "story",
+            "test-scope",
+        )
+        == []
+    )
 
 
 def test_generated_single_character_memory_is_character_candidate(
@@ -228,9 +234,7 @@ def test_continued_group_session_inherits_thread_story_scope(owner_user_id):
         session_id=second_session_id,
         limit=5,
     )
-    assert story_claim["fact_text"] in [
-        record["fact_text"] for record in records
-    ]
+    assert story_claim["fact_text"] in [record["fact_text"] for record in records]
 
 
 def test_prompt_memory_merges_only_applicable_verified_claims(
@@ -789,7 +793,9 @@ def test_authored_event_is_verified_immediately(owner_user_id):
     assert claim["provenance"]["evidence"][0]["details"] == {
         "event_version": 3,
     }
-    assert [event.event_type for event in _events(owner_user_id, claim["claim_id"])] == [
+    assert [
+        event.event_type for event in _events(owner_user_id, claim["claim_id"])
+    ] == [
         "fact.claimed.v1",
         "fact.verified.v1",
     ]
@@ -816,8 +822,7 @@ def test_admin_verification_can_verify_an_existing_candidate(owner_user_id):
     assert verified["status"] == "verified"
     assert verified["source_ids"] == ["admin-user-1", "model-turn-1"]
     assert [
-        event.event_type
-        for event in _events(owner_user_id, candidate["claim_id"])
+        event.event_type for event in _events(owner_user_id, candidate["claim_id"])
     ] == [
         "fact.claimed.v1",
         "fact.claimed.v1",
@@ -944,8 +949,7 @@ def test_same_source_can_upgrade_from_indirect_to_direct(owner_user_id):
     assert first["status"] == "candidate"
     assert second["status"] == "verified"
     assert [
-        event.event_type
-        for event in _events(owner_user_id, first["claim_id"])
+        event.event_type for event in _events(owner_user_id, first["claim_id"])
     ] == [
         "fact.claimed.v1",
         "fact.claimed.v1",
@@ -1013,7 +1017,9 @@ def test_new_source_merges_and_verifies_high_risk_claim_once(owner_user_id):
     assert second["fact_text"] == "塞拉斯本人签署并批准了秘密订单。"
     assert second["source_ids"] == ["chunk-1", "chunk-2"]
     assert second["status"] == "verified"
-    assert [event.event_type for event in _events(owner_user_id, first["claim_id"])] == [
+    assert [
+        event.event_type for event in _events(owner_user_id, first["claim_id"])
+    ] == [
         "fact.claimed.v1",
         "fact.claimed.v1",
         "fact.verified.v1",
@@ -1094,15 +1100,11 @@ def test_claimed_and_verified_events_replay_verified_projection(owner_user_id):
         "fact.verified.v1",
     ]
     assert verified_event.payload["reason"] == "deterministic_policy"
-    assert list(
-        verified_event.payload["verification_snapshot"]["source_ids"]
-    ) == [
+    assert list(verified_event.payload["verification_snapshot"]["source_ids"]) == [
         "authored-2",
         "chunk-1",
     ]
-    assert len(
-        verified_event.payload["verification_snapshot"]["evidence"]
-    ) == 2
+    assert len(verified_event.payload["verification_snapshot"]["evidence"]) == 2
 
     replayed = _replay_fact_claim(owner_user_id, first["claim_id"])
 
@@ -1174,12 +1176,17 @@ def test_retract_removes_claim_from_verified_projection(owner_user_id):
     assert retracted["status"] == "retracted"
     assert repeated == retracted
     assert retracted["retracted_at"] is not None
-    assert repository.list_verified_fact_claims(
-        owner_user_id,
-        "story",
-        "test-scope",
-    ) == []
-    assert [event.event_type for event in _events(owner_user_id, claim["claim_id"])] == [
+    assert (
+        repository.list_verified_fact_claims(
+            owner_user_id,
+            "story",
+            "test-scope",
+        )
+        == []
+    )
+    assert [
+        event.event_type for event in _events(owner_user_id, claim["claim_id"])
+    ] == [
         "fact.claimed.v1",
         "fact.verified.v1",
         "fact.retracted.v1",
@@ -1222,9 +1229,7 @@ def test_supersede_links_claims_and_removes_old_verified_projection(
         "test-scope",
     )
     projected_replacement = next(
-        claim
-        for claim in claims
-        if claim["claim_id"] == replacement["claim_id"]
+        claim for claim in claims if claim["claim_id"] == replacement["claim_id"]
     )
 
     assert repeated == superseded
@@ -1236,10 +1241,13 @@ def test_supersede_links_claims_and_removes_old_verified_projection(
         "story",
         "test-scope",
     ) == [projected_replacement]
-    assert [event.event_type for event in _events(
-        owner_user_id,
-        old_claim["claim_id"],
-    )] == [
+    assert [
+        event.event_type
+        for event in _events(
+            owner_user_id,
+            old_claim["claim_id"],
+        )
+    ] == [
         "fact.claimed.v1",
         "fact.verified.v1",
         "fact.superseded.v1",
@@ -1321,11 +1329,14 @@ def test_superseded_claim_cannot_be_retracted_or_change_replacement(
         replacement["claim_id"],
     )
 
-    assert supersede_claim(
-        owner_user_id,
-        original["claim_id"],
-        replacement["claim_id"],
-    ) == terminal
+    assert (
+        supersede_claim(
+            owner_user_id,
+            original["claim_id"],
+            replacement["claim_id"],
+        )
+        == terminal
+    )
     with pytest.raises(ValueError, match="terminal"):
         retract_claim(owner_user_id, original["claim_id"])
     with pytest.raises(ValueError, match="replacement"):
@@ -1344,8 +1355,8 @@ def test_superseded_claim_cannot_be_retracted_or_change_replacement(
         )
     }
     assert claims[original["claim_id"]] == terminal
-    assert claims[replacement["claim_id"]]["supersedes_claim_id"] == (
-        original["claim_id"]
+    assert (
+        claims[replacement["claim_id"]]["supersedes_claim_id"] == (original["claim_id"])
     )
     assert claims[other_replacement["claim_id"]]["supersedes_claim_id"] is None
 
@@ -1375,10 +1386,13 @@ def test_linked_replacement_cannot_be_retracted(owner_user_id):
     with pytest.raises(ValueError, match="replacement"):
         retract_claim(owner_user_id, replacement["claim_id"])
 
-    assert repository.get_fact_claim(
-        owner_user_id,
-        replacement["claim_id"],
-    )["status"] == "verified"
+    assert (
+        repository.get_fact_claim(
+            owner_user_id,
+            replacement["claim_id"],
+        )["status"]
+        == "verified"
+    )
     assert _events(owner_user_id, replacement["claim_id"]) == events_before
 
 
@@ -1634,8 +1648,7 @@ def test_projector_replay_rejects_list_shaped_verification_snapshot(
     event_values["payload"] = {
         **event_values["payload"],
         "verification_snapshot": [
-            [key, value]
-            for key, value in valid_snapshot.items()
+            [key, value] for key, value in valid_snapshot.items()
         ],
     }
     forged_event = StoredDomainEvent(**event_values)
@@ -1682,9 +1695,7 @@ def test_projector_replay_rejects_list_shaped_verification_evidence(
     event_values = verified_event.model_dump()
     snapshot = dict(event_values["payload"]["verification_snapshot"])
     valid_evidence = snapshot["evidence"][0]
-    snapshot["evidence"] = [
-        [[key, value] for key, value in valid_evidence.items()]
-    ]
+    snapshot["evidence"] = [[[key, value] for key, value in valid_evidence.items()]]
     event_values["event_id"] = uuid4().hex
     event_values["payload"] = {
         **event_values["payload"],
@@ -1760,10 +1771,13 @@ def test_projector_rejects_retraction_of_linked_replacement(owner_user_id):
     ):
         repository._project_fact_claim_event(forged_event)
 
-    assert repository.get_fact_claim(
-        owner_user_id,
-        replacement["claim_id"],
-    ) == linked_replacement
+    assert (
+        repository.get_fact_claim(
+            owner_user_id,
+            replacement["claim_id"],
+        )
+        == linked_replacement
+    )
 
 
 def test_projector_replay_rejects_cross_scope_supersession(owner_user_id):
@@ -1804,14 +1818,20 @@ def test_projector_replay_rejects_cross_scope_supersession(owner_user_id):
     with pytest.raises(ValueError, match="scope"):
         repository._project_fact_claim_event(forged_event)
 
-    assert repository.get_fact_claim(
-        owner_user_id,
-        original["claim_id"],
-    ) == original
-    assert repository.get_fact_claim(
-        owner_user_id,
-        replacement["claim_id"],
-    ) == replacement
+    assert (
+        repository.get_fact_claim(
+            owner_user_id,
+            original["claim_id"],
+        )
+        == original
+    )
+    assert (
+        repository.get_fact_claim(
+            owner_user_id,
+            replacement["claim_id"],
+        )
+        == replacement
+    )
 
 
 @pytest.mark.parametrize(
@@ -1856,11 +1876,14 @@ def test_projector_rejects_invalid_claimed_event_source_ids(
     with pytest.raises(ValueError, match="source_ids"):
         repository._project_fact_claim_event(event)
 
-    assert repository.list_fact_claims(
-        owner_user_id,
-        "story",
-        "test-scope",
-    ) == []
+    assert (
+        repository.list_fact_claims(
+            owner_user_id,
+            "story",
+            "test-scope",
+        )
+        == []
+    )
 
 
 @pytest.mark.parametrize(
@@ -1909,11 +1932,14 @@ def test_projector_replay_rejects_forged_fact_identity(
         with pytest.raises(ValueError, match=field_name):
             repository._project_fact_claim_event(forged_event, conn=conn)
 
-    assert repository.list_fact_claims(
-        owner_user_id,
-        "story",
-        "test-scope",
-    ) == []
+    assert (
+        repository.list_fact_claims(
+            owner_user_id,
+            "story",
+            "test-scope",
+        )
+        == []
+    )
 
 
 def test_postgres_initial_projection_conflict_reloads_concurrent_row(monkeypatch):
@@ -2005,8 +2031,7 @@ def test_postgres_initial_projection_conflict_reloads_concurrent_row(monkeypatch
     assert projected["claim_id"] == event.aggregate_id
     assert select_count == 2
     insert_sql = next(
-        sql for sql, _params in statements
-        if sql.startswith("INSERT INTO fact_claim")
+        sql for sql, _params in statements if sql.startswith("INSERT INTO fact_claim")
     )
     assert "ON CONFLICT DO NOTHING" in insert_sql
 
@@ -2140,11 +2165,14 @@ def test_ledger_and_projection_rollback_together_on_projector_failure(
         with repository.get_conn() as conn:
             conn.execute("DROP TRIGGER fail_fact_claim_projection")
 
-    assert repository.list_fact_claims(
-        owner_user_id,
-        "story",
-        "test-scope",
-    ) == []
+    assert (
+        repository.list_fact_claims(
+            owner_user_id,
+            "story",
+            "test-scope",
+        )
+        == []
+    )
     assert repository.list_domain_events(owner_user_id) == []
 
 
@@ -2158,9 +2186,8 @@ def test_fact_claim_schema_is_additive_and_postgres_compatible():
     # Verify fact_claim CHECK constraint on scope_type is present in the model
     fact_table = Base.metadata.tables["fact_claim"]
     from sqlalchemy import CheckConstraint
+
     check_texts = [
-        str(c.sqltext)
-        for c in fact_table.constraints
-        if isinstance(c, CheckConstraint)
+        str(c.sqltext) for c in fact_table.constraints if isinstance(c, CheckConstraint)
     ]
     assert any("scope_type" in t for t in check_texts)

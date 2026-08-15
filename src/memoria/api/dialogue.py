@@ -36,12 +36,13 @@ class SessionStartRequest(BaseModel):
     player_id: str
     player_name: str = "旅行者"
     locale: Locale = DEFAULT_LOCALE
-    
+
+
 class DialogueTurnRequest(BaseModel):
     session_id: str
     player_message: str = Field(..., max_length=8000)
     request_id: str | None = None
-    
+
 
 # =========================
 # 响应模型
@@ -93,13 +94,16 @@ class DialogueTurnResponse(BaseModel):
     world_created_at: str | None = None
     knowledge_sources: list[KnowledgeSource] = Field(default_factory=list)
 
+
 class SessionEndRequest(BaseModel):
     session_id: str
+
 
 class SessionEndResponse(BaseModel):
     session_id: str
     summary: str | None
     message_count: int
+
 
 class SessionSummaryInfo(BaseModel):
     id: int
@@ -146,13 +150,14 @@ class HistoryResponse(BaseModel):
     current_trust: float
     current_mood: str
     locale: Locale = DEFAULT_LOCALE
-    
+
 
 # =========================
 # Session recovery（断线恢复）
 # =========================
 class SessionRecoveryResponse(BaseModel):
     """恢复最近 active session 的响应"""
+
     found: bool = False
     session_id: str | None = None
     character_id: str | None = None
@@ -174,7 +179,9 @@ def _parse_iso_datetime(value: str | None) -> datetime | None:
 
 
 def _session_activity_at(session: dict) -> datetime | None:
-    return _parse_iso_datetime(session.get("last_message_at") or session.get("created_at"))
+    return _parse_iso_datetime(
+        session.get("last_message_at") or session.get("created_at")
+    )
 
 
 def _messages_for_session(session_id: str, limit: int = 100) -> list[HistoryMessage]:
@@ -191,7 +198,9 @@ def _load_character_card(character_id: str, player_id: str, locale: Locale):
     try:
         return character_loader.load_character_card(character_id, player_id, locale)
     except TypeError as exc:
-        if "positional" not in str(exc) and "unexpected keyword argument" not in str(exc):
+        if "positional" not in str(exc) and "unexpected keyword argument" not in str(
+            exc
+        ):
             raise
         return character_loader.load_character_card(character_id, player_id)
 
@@ -211,7 +220,12 @@ def _current_character_state(
         current_trust = runtime_state.get("trust_level", 0)
         current_mood = runtime_state.get("current_mood", "neutral")
     except Exception as exc:
-        logger.debug("读取角色状态失败: character=%s player=%s err=%s", character_id, player_id, exc)
+        logger.debug(
+            "读取角色状态失败: character=%s player=%s err=%s",
+            character_id,
+            player_id,
+            exc,
+        )
     return current_affinity, current_trust, current_mood
 
 
@@ -282,7 +296,9 @@ def _recovered_session_response(
         None,
     )
     if world_created_at is None:
-        world_created_at = world_clock.get_clock_snapshot(player_id).world_now.isoformat()
+        world_created_at = world_clock.get_clock_snapshot(
+            player_id
+        ).world_now.isoformat()
     return SessionStartResponse(
         session_id=active_session["session_id"],
         opening_line="",
@@ -333,13 +349,15 @@ def _generate_session_summary(session_id: str) -> None:
             player_id=session["player_id"],
             summary_text=summary_text,
             message_count=len(history),
-            summary_status="completed"
+            summary_status="completed",
         )
     except Exception as e:
         logger.error("Failed to save summary: %s", e, exc_info=True)
 
 
-def _end_session(session_id: str, background_tasks: BackgroundTasks | None = None) -> SessionEndResponse:
+def _end_session(
+    session_id: str, background_tasks: BackgroundTasks | None = None
+) -> SessionEndResponse:
     """快速结束会话，并把摘要生成交给后台任务。"""
     session = repository.get_session(session_id)
     if not session:
@@ -347,11 +365,14 @@ def _end_session(session_id: str, background_tasks: BackgroundTasks | None = Non
 
     if session.get("is_multi_character"):
         from memoria.api.multi_dialogue import finish_multi_character_session
+
         result = finish_multi_character_session(session_id, background_tasks)
         summary = repository.get_session_summary(session_id)
         return SessionEndResponse(
             session_id=result["session_id"],
-            summary=summary.get("summary_text") if summary and summary.get("summary_status") == "completed" else None,
+            summary=summary.get("summary_text")
+            if summary and summary.get("summary_status") == "completed"
+            else None,
             message_count=summary.get("message_count", 0) if summary else 0,
         )
 
@@ -360,7 +381,9 @@ def _end_session(session_id: str, background_tasks: BackgroundTasks | None = Non
         return SessionEndResponse(
             session_id=session_id,
             summary=existing_summary.get("summary_text") if existing_summary else None,
-            message_count=existing_summary.get("message_count", 0) if existing_summary else 0
+            message_count=existing_summary.get("message_count", 0)
+            if existing_summary
+            else 0,
         )
 
     history = repository.get_short_term_history(session_id, limit_turns=1000)
@@ -371,13 +394,13 @@ def _end_session(session_id: str, background_tasks: BackgroundTasks | None = Non
         background_tasks.add_task(_generate_session_summary, session_id)
 
     return SessionEndResponse(
-        session_id=session_id,
-        summary=None,
-        message_count=len(history)
+        session_id=session_id, summary=None, message_count=len(history)
     )
 
 
-def _close_idle_sessions(player_id: str, background_tasks: BackgroundTasks | None = None) -> None:
+def _close_idle_sessions(
+    player_id: str, background_tasks: BackgroundTasks | None = None
+) -> None:
     """懒清理：进入列表/恢复前关闭 5 分钟未活跃的 active session。"""
     now = datetime.now(timezone.utc)
     for session in repository.get_all_player_sessions(player_id):
@@ -414,26 +437,29 @@ def _get_owned_session(session_id: str, current_user_id: str) -> dict:
 # =========================
 # Characters
 # =========================
-@router.get("/characters", response_model = list[CharacterSummary])
+@router.get("/characters", response_model=list[CharacterSummary])
 def list_characters(current_user_id: str = Depends(require_current_user_id)):
     """获取所有角色摘要"""
-    
+
     results = []
-    
+
     for cid in character_loader.list_character_ids(current_user_id):
         try:
             card = character_loader.load_character_card(cid, current_user_id)
-            
-            results.append(CharacterSummary(
-                character_id = card.character_id,
-                name = card.meta.name,
-                display_name = card.meta.display_name,
-                core_identity_summary = card.identity.core_identity_summary,
-            ))
+
+            results.append(
+                CharacterSummary(
+                    character_id=card.character_id,
+                    name=card.meta.name,
+                    display_name=card.meta.display_name,
+                    core_identity_summary=card.identity.core_identity_summary,
+                )
+            )
         except Exception:
             logger.warning("加载角色摘要失败: %s", cid, exc_info=True)
             continue
     return results
+
 
 # =========================
 # Session start
@@ -447,7 +473,9 @@ def session_start(
     try:
         _require_player_access(req.player_id, current_user_id)
         _close_idle_sessions(req.player_id, background_tasks)
-        active_session = repository.get_latest_active_session(req.player_id, req.character_id)
+        active_session = repository.get_latest_active_session(
+            req.player_id, req.character_id
+        )
         if active_session:
             return _recovered_session_response(
                 active_session,
@@ -461,6 +489,7 @@ def session_start(
     except FileNotFoundError as e:
         # 异常消息可能包含服务器本地路径等内部信息，不直接回传。
         raise HTTPException(status_code=404, detail="对话会话不存在") from e
+
 
 # =========================
 # Dialogue turn
@@ -515,10 +544,11 @@ async def dialogue_turn_stream(
             "request_id": request_id,
             "turn_kind": "single",
         },
-        completion_mapper=lambda result: DialogueTurnResponse(
-            **result
-        ).model_dump(mode="json"),
+        completion_mapper=lambda result: DialogueTurnResponse(**result).model_dump(
+            mode="json"
+        ),
     )
+
 
 # =========================
 # Session list
@@ -532,10 +562,7 @@ def get_sessions(
     """获取玩家与角色的所有会话"""
     _require_player_access(player_id, current_user_id)
 
-    sessions = repository.get_sessions_by_player_and_character(
-        character_id,
-        player_id
-    )
+    sessions = repository.get_sessions_by_player_and_character(character_id, player_id)
 
     # SQLite Row → dict 安全转换
     return [SessionInfo(**dict(s)) for s in sessions]
@@ -622,6 +649,7 @@ def get_history(
         locale=locale,
     )
 
+
 # =========================
 # Session end
 # =========================
@@ -648,11 +676,9 @@ def get_summaries(
 ):
     """获取角色与玩家的最近会话摘要"""
     _require_player_access(player_id, current_user_id)
-    
+
     summaries = repository.get_recent_summaries(
-        character_id=character_id,
-        player_id=player_id,
-        limit=limit
+        character_id=character_id, player_id=player_id, limit=limit
     )
-    
+
     return [SessionSummaryInfo(**s) for s in summaries]

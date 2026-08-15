@@ -10,6 +10,7 @@ Requires a running PostgreSQL reachable at ``MEMORIA_PG_TEST_URL``
 (default: ``postgresql+psycopg://memoria:memoria_dev_pw@127.0.0.1:5432/memoria_test``).
 Skipped when the server is unreachable.
 """
+
 import os
 
 import pytest
@@ -114,9 +115,11 @@ def test_real_pg_partial_inbox_index(pg_repo_env, pg_conn):
     from sqlalchemy import text
 
     with pg_conn.connect() as conn:
-        rows = conn.execute(text(
-            "SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_inbox_group_unread'"
-        )).fetchall()
+        rows = conn.execute(
+            text(
+                "SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_inbox_group_unread'"
+            )
+        ).fetchall()
     assert rows, "idx_inbox_group_unread not created"
     assert "WHERE" in rows[0][0], f"expected partial index, got: {rows[0][0]}"
 
@@ -126,28 +129,39 @@ def test_real_pg_bigint_columns(pg_repo_env, pg_conn):
     from sqlalchemy import text
 
     with pg_conn.connect() as conn:
-        rows = conn.execute(text("""
+        rows = conn.execute(
+            text("""
             SELECT column_name, data_type, column_default
             FROM information_schema.columns
             WHERE table_name = 'domain_event'
               AND column_name IN ('sequence', 'aggregate_version', 'source_message_id')
-        """)).fetchall()
+        """)
+        ).fetchall()
         by_name = {r[0]: r for r in rows}
-        assert by_name["sequence"][1] == "bigint", f"sequence is {by_name['sequence'][1]}"
+        assert by_name["sequence"][1] == "bigint", (
+            f"sequence is {by_name['sequence'][1]}"
+        )
         assert by_name["aggregate_version"][1] == "bigint"
         assert by_name["source_message_id"][1] == "bigint"
 
         # projection_checkpoint.last_sequence
-        rows = conn.execute(text("""
+        rows = conn.execute(
+            text("""
             SELECT data_type FROM information_schema.columns
             WHERE table_name = 'projection_checkpoint' AND column_name = 'last_sequence'
-        """)).fetchall()
+        """)
+        ).fetchall()
         assert rows[0][0] == "bigint"
 
         # fact_claim / story_state ledger_version
         for table_name in ("fact_claim", "story_state"):
-            rows = conn.execute(text("""
+            rows = conn.execute(
+                text("""
                 SELECT data_type FROM information_schema.columns
                 WHERE table_name = :t AND column_name = 'ledger_version'
-            """), {"t": table_name}).fetchall()
-            assert rows and rows[0][0] == "bigint", f"{table_name}.ledger_version not bigint"
+            """),
+                {"t": table_name},
+            ).fetchall()
+            assert rows and rows[0][0] == "bigint", (
+                f"{table_name}.ledger_version not bigint"
+            )

@@ -1,4 +1,5 @@
 """Domain repository functions (split from monolith)."""
+
 from __future__ import annotations
 
 # Standard/third-party imports used across repository domains.
@@ -38,17 +39,17 @@ from memoria.db.repository.fact_claims import (
 # runtime_state（角色状态）
 # =========================
 def get_runtime_state(
-    character_id: str, 
-    player_id: str, 
+    character_id: str,
+    player_id: str,
     card,
     query_context: str | None = None,
-    memory_created_after: str | None = None
+    memory_created_after: str | None = None,
 ) -> dict:
-     """
+    """
     获取角色运行时状态（好感度 / 信任 / 情绪）
 
     如果不存在 → 使用角色卡默认值初始化
-    
+
     Args:
         character_id: 角色 ID
         player_id: 玩家 ID
@@ -56,33 +57,37 @@ def get_runtime_state(
         query_context: 查询上下文（用于向量检索长期记忆）
         memory_created_after: 只加载该时间之后保存的长期记忆
     """
-     with db_session() as session:
-         row = session.execute(
-             text("""
+    with db_session() as session:
+        row = (
+            session.execute(
+                text("""
              SELECT affection_level, trust_level, current_mood
              FROM relationship_state
              WHERE character_id = :character_id AND player_id = :player_id
              """),
-             {"character_id": character_id, "player_id": player_id},
-         ).mappings().fetchone()
-         
-         if row:
-             state = {
-                 "affection_level": row["affection_level"],
-                 "trust_level": row["trust_level"],
-                 "current_mood": row["current_mood"],
-             }
-         else:
-             schema = getattr(card, "runtime_state_schema", None)
-             mood_schema = getattr(schema, "current_mood", None)
-             
-             state = {
-                 "affection_level": getattr(schema, "affection_level", 0),
-                 "trust_level": getattr(schema, "trust_level", 10),
-                 "current_mood": getattr(mood_schema, "default_mood", "neutral"),
-             }
-             
-             session.execute(
+                {"character_id": character_id, "player_id": player_id},
+            )
+            .mappings()
+            .fetchone()
+        )
+
+        if row:
+            state = {
+                "affection_level": row["affection_level"],
+                "trust_level": row["trust_level"],
+                "current_mood": row["current_mood"],
+            }
+        else:
+            schema = getattr(card, "runtime_state_schema", None)
+            mood_schema = getattr(schema, "current_mood", None)
+
+            state = {
+                "affection_level": getattr(schema, "affection_level", 0),
+                "trust_level": getattr(schema, "trust_level", 10),
+                "current_mood": getattr(mood_schema, "default_mood", "neutral"),
+            }
+
+            session.execute(
                 text("""
                 INSERT INTO relationship_state
                 (character_id, player_id, affection_level, trust_level, current_mood, updated_at)
@@ -98,48 +103,63 @@ def get_runtime_state(
                     "current_mood": state["current_mood"],
                     "updated_at": _now(),
                 },
-             )
-             row = session.execute(
-                 text("""
+            )
+            row = (
+                session.execute(
+                    text("""
                  SELECT affection_level, trust_level, current_mood
                  FROM relationship_state
                  WHERE character_id = :character_id AND player_id = :player_id
                  """),
-                 {"character_id": character_id, "player_id": player_id},
-             ).mappings().fetchone()
-             state = {
-                 "affection_level": row["affection_level"],
-                 "trust_level": row["trust_level"],
-                 "current_mood": row["current_mood"],
-             }
-             
-         # Task 5 完成迁移后，prompt 路径不得再读取 legacy 长期记忆。
-         if has_data_migration(LONG_TERM_FACT_BACKFILL_MIGRATION):
-             state["known_player_facts"] = []
-         else:
-             state["known_player_facts"] = get_long_term_facts(
-                 character_id,
-                 player_id,
-                 query_context=query_context,
-                 created_after=memory_created_after
-             )
-         unlock_rows = session.execute(
-             text("""
+                    {"character_id": character_id, "player_id": player_id},
+                )
+                .mappings()
+                .fetchone()
+            )
+            state = {
+                "affection_level": row["affection_level"],
+                "trust_level": row["trust_level"],
+                "current_mood": row["current_mood"],
+            }
+
+        # Task 5 完成迁移后，prompt 路径不得再读取 legacy 长期记忆。
+        if has_data_migration(LONG_TERM_FACT_BACKFILL_MIGRATION):
+            state["known_player_facts"] = []
+        else:
+            state["known_player_facts"] = get_long_term_facts(
+                character_id,
+                player_id,
+                query_context=query_context,
+                created_after=memory_created_after,
+            )
+        unlock_rows = (
+            session.execute(
+                text("""
              SELECT unlock_key FROM event_unlock
              WHERE player_id = :player_id AND character_id = :character_id
              ORDER BY unlocked_at ASC, unlock_key ASC
              """),
-             {"player_id": player_id, "character_id": character_id},
-         ).mappings().fetchall()
-         state["unlocked_content"] = [row["unlock_key"] for row in unlock_rows]
-         return state
-     
+                {"player_id": player_id, "character_id": character_id},
+            )
+            .mappings()
+            .fetchall()
+        )
+        state["unlocked_content"] = [row["unlock_key"] for row in unlock_rows]
+        return state
 
-def save_runtime_state(character_id: str, player_id: str, affection_level: float, trust_level: float, current_mood: str):
+
+def save_runtime_state(
+    character_id: str,
+    player_id: str,
+    affection_level: float,
+    trust_level: float,
+    current_mood: str,
+):
     """更新角色状态"""
     now = _now()
     with db_session() as session:
         from memoria.db.repository.events import _save_runtime_state_in_transaction
+
         _save_runtime_state_in_transaction(
             session,
             character_id=character_id,
@@ -149,28 +169,28 @@ def save_runtime_state(character_id: str, player_id: str, affection_level: float
             current_mood=current_mood,
             now=now,
         )
-        
+
 
 # =========================
 # long term memory
 # =========================
 def get_long_term_facts(
-    character_id: str, 
-    player_id: str, 
+    character_id: str,
+    player_id: str,
     limit: int = 20,
     query_context: str | None = None,
-    created_after: str | None = None
+    created_after: str | None = None,
 ) -> list[str]:
     """
     获取长期记忆
-    
+
     Args:
         character_id: 角色 ID
         player_id: 玩家 ID
         limit: 返回的最大记忆数量
         query_context: 查询上下文（用于向量检索），如果提供则使用语义检索
         created_after: 只返回该时间之后创建的记忆
-    
+
     Returns:
         list[str]: 记忆文本列表
     """
@@ -189,7 +209,7 @@ def get_long_term_fact_records(
     player_id: str,
     limit: int = 20,
     query_context: str | None = None,
-    created_after: str | None = None
+    created_after: str | None = None,
 ) -> list[dict]:
     """
     获取长期记忆记录，包含创建时间等元数据。
@@ -201,23 +221,28 @@ def get_long_term_fact_records(
     if query_context and not created_after:
         try:
             from memoria.core.vector_memory import get_vector_store
+
             vector_store = get_vector_store()
-            
+
             # 向量检索获取相关记忆
             with (
                 tracing.start_span("memory.vector_search", character_id=character_id),
                 performance.measure("memory.vector_search"),
             ):
-                    vector_results = vector_store.search_similar_memories(
-                        character_id=character_id,
-                        player_id=player_id,
-                        query_text=query_context,
-                        top_k=limit
-                    )
-            
+                vector_results = vector_store.search_similar_memories(
+                    character_id=character_id,
+                    player_id=player_id,
+                    query_text=query_context,
+                    top_k=limit,
+                )
+
             if vector_results:
                 logger.debug(f"向量检索返回 {len(vector_results)} 条记忆")
-                fact_ids = [r.get("fact_id") for r in vector_results if r.get("fact_id") is not None]
+                fact_ids = [
+                    r.get("fact_id")
+                    for r in vector_results
+                    if r.get("fact_id") is not None
+                ]
                 records_by_id = {}
                 if fact_ids:
                     placeholders = ",".join(
@@ -228,20 +253,24 @@ def get_long_term_fact_records(
                         for index, fact_id in enumerate(fact_ids)
                     }
                     with db_session() as session:
-                        rows = session.execute(
-                            text(f"""
+                        rows = (
+                            session.execute(
+                                text(f"""
                             SELECT id, fact_text, importance, created_at, last_referenced
                             FROM long_term_fact
                             WHERE id IN ({placeholders})
                               AND character_id = :character_id
                               AND player_id = :player_id
                             """),
-                            {
-                                **fact_params,
-                                "character_id": character_id,
-                                "player_id": player_id,
-                            },
-                        ).mappings().fetchall()
+                                {
+                                    **fact_params,
+                                    "character_id": character_id,
+                                    "player_id": player_id,
+                                },
+                            )
+                            .mappings()
+                            .fetchall()
+                        )
                     records_by_id = {row["id"]: dict(row) for row in rows}
 
                 records = []
@@ -252,20 +281,22 @@ def get_long_term_fact_records(
                         record["similarity"] = result.get("similarity")
                         records.append(record)
                     elif fact_id is None:
-                        records.append({
-                            "id": fact_id,
-                            "fact_text": result["fact_text"],
-                            "importance": result.get("importance", 0),
-                            "created_at": None,
-                            "last_referenced": None,
-                            "similarity": result.get("similarity"),
-                        })
+                        records.append(
+                            {
+                                "id": fact_id,
+                                "fact_text": result["fact_text"],
+                                "importance": result.get("importance", 0),
+                                "created_at": None,
+                                "last_referenced": None,
+                                "similarity": result.get("similarity"),
+                            }
+                        )
                     # fact_id 有值但租户复验未命中：属于其他租户或已删除，跳过
                 return records
-                
+
         except Exception as e:
             logger.warning(f"向量检索失败，回退到传统查询: {e}")
-    
+
     # 传统查询（按重要性和最近引用排序）
     where_clause = "character_id = :character_id AND player_id = :player_id"
     params = {
@@ -277,17 +308,21 @@ def get_long_term_fact_records(
         params["created_after"] = created_after
     params["limit"] = limit
     with db_session() as session:
-        rows = session.execute(
-            text(f"""
+        rows = (
+            session.execute(
+                text(f"""
             SELECT id, fact_text, importance, created_at, last_referenced
             FROM long_term_fact
             WHERE {where_clause}
             ORDER BY importance DESC, last_referenced DESC
             LIMIT :limit
             """),
-            params,
-        ).mappings().fetchall()
-        
+                params,
+            )
+            .mappings()
+            .fetchall()
+        )
+
     return [dict(r) for r in rows]
 
 
@@ -301,12 +336,14 @@ def _prompt_memory_claim_scopes(
         return scopes
 
     from memoria.db.repository.sessions_and_messages import get_session
+
     session = get_session(session_id)
     if not session or session.get("player_id") != player_id:
         return scopes
 
     if session.get("is_multi_character"):
         from memoria.db.repository.multi_session import get_group_thread_id
+
         group_thread_id = get_group_thread_id(session_id)
         if group_thread_id:
             scopes.append(("group_thread", group_thread_id))
@@ -325,9 +362,7 @@ def _fact_claim_visible_to_character(
     evidence = provenance.get("evidence") or []
     provenance_entries = [provenance]
     provenance_entries.extend(
-        item.get("details") or {}
-        for item in evidence
-        if isinstance(item, dict)
+        item.get("details") or {} for item in evidence if isinstance(item, dict)
     )
 
     has_restriction = False
@@ -400,9 +435,8 @@ def get_prompt_memory_fact_records(
         if not advanced:
             break
 
-    if (
-        len(records) < effective_limit
-        and not has_data_migration(LONG_TERM_FACT_BACKFILL_MIGRATION)
+    if len(records) < effective_limit and not has_data_migration(
+        LONG_TERM_FACT_BACKFILL_MIGRATION
     ):
         legacy_records = get_long_term_fact_records(
             character_id=character_id,
@@ -447,14 +481,11 @@ def normalize_long_term_fact_text(fact_text: str | None) -> str | None:
 
 
 def save_long_term_fact(
-    character_id: str,
-    player_id: str,
-    fact_text: str | None,
-    importance: int = 5
+    character_id: str, player_id: str, fact_text: str | None, importance: int = 5
 ) -> int | None:
     """
     保存长期记忆（同时保存到 SQLite 和向量数据库）
-    
+
     Returns:
         int | None: 新插入的 fact_id；空记忆不写入并返回 None
     """
@@ -467,10 +498,13 @@ def save_long_term_fact(
         _lock_sqlite_write(session)
         # 去重检查
         existing = _dedup_check(
-            session, "long_term_fact", "fact_text", fact_text,
+            session,
+            "long_term_fact",
+            "fact_text",
+            fact_text,
             "character_id = :character_id AND player_id = :player_id",
             {"character_id": character_id, "player_id": player_id},
-            threshold=0.75
+            threshold=0.75,
         )
         if existing:
             new_imp = max(existing.get("importance", 0), importance)
@@ -512,22 +546,23 @@ def save_long_term_fact(
             fact_id = cursor.mappings().fetchone()["id"]
         else:
             fact_id = cursor.lastrowid
-        
+
     # 同步到向量数据库
     try:
         from memoria.core.vector_memory import get_vector_store
+
         vector_store = get_vector_store()
         vector_store.add_memory(
             fact_id=fact_id,
             character_id=character_id,
             player_id=player_id,
             fact_text=fact_text,
-            importance=importance
+            importance=importance,
         )
         logger.debug(f"长期记忆已同步到向量数据库: fact_id={fact_id}")
     except Exception as e:
         logger.warning(f"向量数据库同步失败: {e}")
-        
+
     return fact_id
 
 
@@ -544,7 +579,7 @@ def save_long_term_fact_if_checkpoint(
     from memoria.db.repository.sessions_and_messages import (
         is_long_term_memory_checkpoint,
     )
+
     if not fact_text or not is_long_term_memory_checkpoint(session_id, interval_turns):
         return None
     return save_long_term_fact(character_id, player_id, fact_text, importance)
-        

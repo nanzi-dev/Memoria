@@ -106,9 +106,10 @@ def test_knowledge_crud_binding_validation_and_owner_isolation():
     knowledge_base = repository.create_knowledge_base(owner, "Lore", "World facts")
     knowledge_base_id = knowledge_base["knowledge_base_id"]
     assert repository.get_knowledge_base(other, knowledge_base_id) is None
-    assert repository.update_knowledge_base(
-        other, knowledge_base_id, name="stolen"
-    ) is None
+    assert (
+        repository.update_knowledge_base(other, knowledge_base_id, name="stolen")
+        is None
+    )
 
     bindings = repository.replace_knowledge_bindings(
         owner,
@@ -182,11 +183,14 @@ def test_authorized_chunks_follow_global_character_group_and_owner_visibility():
         char_base["knowledge_base_id"],
         group_base["knowledge_base_id"],
     }
-    assert repository.get_authorized_knowledge_base_ids(
-        other,
-        character_id=character_a,
-        group_thread_id=group_thread_id,
-    ) == []
+    assert (
+        repository.get_authorized_knowledge_base_ids(
+            other,
+            character_id=character_a,
+            group_thread_id=group_thread_id,
+        )
+        == []
+    )
 
     single_a = repository.get_authorized_knowledge_chunks(
         owner, chunk_ids, character_id=character_a
@@ -210,12 +214,15 @@ def test_authorized_chunks_follow_global_character_group_and_owner_visibility():
         "Character",
         "Group",
     }
-    assert repository.get_authorized_knowledge_chunks(
-        other,
-        chunk_ids,
-        character_id=character_a,
-        group_thread_id=group_thread_id,
-    ) == []
+    assert (
+        repository.get_authorized_knowledge_chunks(
+            other,
+            chunk_ids,
+            character_id=character_a,
+            group_thread_id=group_thread_id,
+        )
+        == []
+    )
 
     repository.update_knowledge_base(
         owner, global_base["knowledge_base_id"], is_enabled=False
@@ -243,11 +250,14 @@ def test_owned_chunks_allow_unbound_admin_preview_but_preserve_owner_checks():
     )
 
     assert [item["chunk_id"] for item in visible] == [chunk["chunk_id"]]
-    assert repository.get_owned_knowledge_chunks(
-        other,
-        [chunk["chunk_id"]],
-        knowledge_base_ids=[knowledge_base["knowledge_base_id"]],
-    ) == []
+    assert (
+        repository.get_owned_knowledge_chunks(
+            other,
+            [chunk["chunk_id"]],
+            knowledge_base_ids=[knowledge_base["knowledge_base_id"]],
+        )
+        == []
+    )
 
 
 def test_knowledge_sources_round_trip_in_single_and_group_history():
@@ -284,9 +294,7 @@ def test_knowledge_sources_round_trip_in_single_and_group_history():
         "Character",
         knowledge_sources=[source],
     )
-    history, _ = repository.get_multi_character_thread_history_paginated(
-        group_session
-    )
+    history, _ = repository.get_multi_character_thread_history_paginated(group_session)
     assert history[0]["knowledge_sources"] == [source]
 
 
@@ -299,7 +307,9 @@ def _simple_pdf(text: str) -> bytes:
             b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
             b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
         ),
-        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n"
+        b"<< /Length "
+        + str(len(stream)).encode()
+        + b" >>\nstream\n"
         + stream
         + b"\nendstream",
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
@@ -419,7 +429,7 @@ class _OffsetTokenizer:
         truncation=False,
     ):
         tokens = list(str(text))
-        return (["<s>", *tokens, "</s>"] if add_special_tokens else tokens)
+        return ["<s>", *tokens, "</s>"] if add_special_tokens else tokens
 
     def __call__(
         self,
@@ -439,8 +449,7 @@ class _OffsetTokenizer:
         }
         if return_offsets_mapping:
             result["offset_mapping"] = [
-                (index, index + 1)
-                for index in range(len(value))
+                (index, index + 1) for index in range(len(value))
             ]
         return result
 
@@ -481,9 +490,7 @@ UID: hidden
         for chunk in chunks
     )
     table_chunks = [
-        chunk
-        for chunk in chunks
-        if chunk["source_metadata"].get("kind") == "table"
+        chunk for chunk in chunks if chunk["source_metadata"].get("kind") == "table"
     ]
     assert table_chunks
     assert all("| 卦名 | 方位 |" in chunk["content"] for chunk in table_chunks)
@@ -524,8 +531,7 @@ answer = 42
     )
 
     by_kind = {
-        chunk["source_metadata"].get("kind"): chunk["content"]
-        for chunk in chunks
+        chunk["source_metadata"].get("kind"): chunk["content"] for chunk in chunks
     }
     assert by_kind["paragraph"] == "普通正文。"
     assert by_kind["quote"] == "> 引用事实。"
@@ -608,9 +614,7 @@ def test_knowledge_runtime_config_has_one_source_and_fits_embedding_limit():
     assert fields["knowledge_chunk_overlap_tokens"].default == 36
     assert fields["knowledge_chunk_max_tokens"].default == 240
 
-    compatibility_config = (root / "config/settings.yaml").read_text(
-        encoding="utf-8"
-    )
+    compatibility_config = (root / "config/settings.yaml").read_text(encoding="utf-8")
     assert "memoria.core.config.Configs" in compatibility_config
     assert "\nknowledge:" not in compatibility_config
 
@@ -620,9 +624,7 @@ def test_knowledge_runtime_config_has_one_source_and_fits_embedding_limit():
     assert "硬上限 240 token" in readme
 
     model_config_path = (
-        root
-        / fields["embedding_model"].default
-        / "sentence_bert_config.json"
+        root / fields["embedding_model"].default / "sentence_bert_config.json"
     )
     if model_config_path.exists():
         model_config = json.loads(model_config_path.read_text(encoding="utf-8"))
@@ -817,8 +819,7 @@ def test_list_incomplete_knowledge_documents_includes_queued_and_processing():
     repository.update_knowledge_document_status(owner, ready["document_id"], "ready")
 
     incomplete_ids = {
-        item["document_id"]
-        for item in repository.list_incomplete_knowledge_documents()
+        item["document_id"] for item in repository.list_incomplete_knowledge_documents()
     }
 
     assert queued["document_id"] in incomplete_ids
@@ -906,10 +907,7 @@ def test_indexing_cleans_vectors_when_document_is_deleted_during_upsert(tmp_path
 
 
 def test_knowledge_query_keeps_direct_question_free_from_history(monkeypatch):
-    history = [
-        {"role": "user", "content": f"message-{index}"}
-        for index in range(8)
-    ]
+    history = [{"role": "user", "content": f"message-{index}"} for index in range(8)]
     monkeypatch.setattr(configs, "knowledge_query_max_chars", 4000)
     query = knowledge_retriever.build_knowledge_query(
         "北区有轨电车几点开始运营？",
@@ -920,10 +918,7 @@ def test_knowledge_query_keeps_direct_question_free_from_history(monkeypatch):
 
 
 def test_knowledge_query_adds_two_messages_for_short_follow_up(monkeypatch):
-    history = [
-        {"role": "user", "content": f"message-{index}"}
-        for index in range(8)
-    ]
+    history = [{"role": "user", "content": f"message-{index}"} for index in range(8)]
     monkeypatch.setattr(configs, "knowledge_query_max_chars", 4000)
     query = knowledge_retriever.build_knowledge_query("那几点开始？", history)
 
@@ -1385,9 +1380,7 @@ def test_vector_cleanup_retry_and_reconciliation(monkeypatch):
             self.upserted.extend(chunks)
 
     store = FakeStore()
-    cleanup = knowledge_service.retry_knowledge_vector_cleanups(
-        vector_store=store
-    )
+    cleanup = knowledge_service.retry_knowledge_vector_cleanups(vector_store=store)
     assert cleanup == {"completed": 1, "failed": 0}
     assert store.deleted_documents == [("owner", "deleted-doc")]
 
@@ -1399,9 +1392,7 @@ def test_vector_cleanup_retry_and_reconciliation(monkeypatch):
             {"chunk_id": "missing", "content": "restore"},
         ],
     )
-    reconciled = knowledge_service.reconcile_knowledge_vectors(
-        vector_store=store
-    )
+    reconciled = knowledge_service.reconcile_knowledge_vectors(vector_store=store)
     assert reconciled["deleted_orphans"] == 1
     assert reconciled["restored_missing"] == 1
     assert store.deleted_chunks == ["orphan"]

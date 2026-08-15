@@ -81,10 +81,10 @@ class GroupTurnContext:
     authorized_knowledge_base_ids: dict[str, list[str]]
 
 
-
 # =========================
 # 工具函数
 # =========================
+
 
 def _history_after_cutoff(
     history: list[dict],
@@ -113,7 +113,6 @@ def _history_after_cutoff(
                 message.get("message_id"),
             )
     return filtered
-
 
 
 def _clip(value: float, lo: float, hi: float) -> float:
@@ -147,7 +146,9 @@ def _load_character_card(character_id: str, player_id: str, locale: Locale):
     try:
         return character_loader.load_character_card(character_id, player_id, locale)
     except TypeError as exc:
-        if "positional" not in str(exc) and "unexpected keyword argument" not in str(exc):
+        if "positional" not in str(exc) and "unexpected keyword argument" not in str(
+            exc
+        ):
             raise
         return character_loader.load_character_card(character_id, player_id)
 
@@ -175,11 +176,10 @@ def _build_multi_character_system_prompt(*, locale: Locale, **kwargs) -> str:
             return prompt_builder.build_multi_character_system_prompt(**legacy_kwargs)
 
 
-
-
 # =========================
 # 上下文构建 Mixin
 # =========================
+
 
 class MultiCharacterContextMixin:
     """Mixin：为 MultiCharacterOrchestrator 提供上下文加载与格式化能力。"""
@@ -217,14 +217,14 @@ class MultiCharacterContextMixin:
     def _load_all_relationships(self) -> dict:
         """
         加载所有参与角色之间的关系
-        
+
         Returns:
             dict: {f"{char_a}_{char_b}": relationship_dict}
         """
         relationships = {}
-        
+
         for i, char_a in enumerate(self.character_ids):
-            for char_b in self.character_ids[i+1:]:
+            for char_b in self.character_ids[i + 1 :]:
                 rel = self._get_character_relationship(char_a, char_b)
                 if rel:
                     relationships[f"{char_a}_{char_b}"] = rel
@@ -234,36 +234,39 @@ class MultiCharacterContextMixin:
             rel = self._get_character_relationship(player_node_id, character_id)
             if rel:
                 relationships[f"{player_node_id}_{character_id}"] = rel
-        
+
         return relationships
 
-
-    def _get_character_relationship(self, char_id_a: str, char_id_b: str) -> dict | None:
+    def _get_character_relationship(
+        self, char_id_a: str, char_id_b: str
+    ) -> dict | None:
         """
         获取两个角色之间的关系
-        
+
         Args:
             char_id_a: 角色 A ID
             char_id_b: 角色 B ID
-        
+
         Returns:
             dict: 关系信息，不存在则返回 None
         """
         try:
             # 尝试正向查询
-            rel = repository.get_character_relationship(self.player_id, char_id_a, char_id_b)
+            rel = repository.get_character_relationship(
+                self.player_id, char_id_a, char_id_b
+            )
             if rel:
                 return rel
-            
+
             # 尝试反向查询（关系是双向的）
-            rel = repository.get_character_relationship(self.player_id, char_id_b, char_id_a)
+            rel = repository.get_character_relationship(
+                self.player_id, char_id_b, char_id_a
+            )
             return rel
-        
+
         except Exception as e:
             logger.debug(f"查询角色关系失败: {e}")
             return None
-
-
 
     def _load_memory_context(
         self,
@@ -303,7 +306,8 @@ class MultiCharacterContextMixin:
                 other_character_ids=other_character_ids,
                 query_context=query_context,
                 character_relationships=character_relationships,
-                relationship_aliases=relationship_aliases or self._memory_aliases_for_characters(self.character_ids),
+                relationship_aliases=relationship_aliases
+                or self._memory_aliases_for_characters(self.character_ids),
                 world_now=world_now,
                 recall_key=recall_key,
                 player_memories_override=player_memories_override,
@@ -316,9 +320,7 @@ class MultiCharacterContextMixin:
 
         for memory in context.get("group_memories", [])[:5]:
             if self._text_conflicts_with_relationship_graph(
-                memory,
-                character_relationships,
-                character_id=character_id
+                memory, character_relationships, character_id=character_id
             ):
                 continue
             memory_lines.append(f"群体记忆：{memory}")
@@ -329,9 +331,7 @@ class MultiCharacterContextMixin:
             other_name = other_card.meta.display_name if other_card else other_id
             for memory in memories[:2]:
                 if self._text_conflicts_with_relationship_graph(
-                    memory,
-                    character_relationships,
-                    character_id=character_id
+                    memory, character_relationships, character_id=character_id
                 ):
                     continue
                 memory_lines.append(f"对{other_name}的印象：{memory}")
@@ -342,7 +342,6 @@ class MultiCharacterContextMixin:
                 cache[cache_key] = list(memory_lines)
         return memory_lines
 
-
     def _memory_aliases_for_characters(self, character_ids: list[str]) -> list[str]:
         """返回参与角色的 ID 和显示名，用于识别旧长期记忆中的关系事实。"""
         aliases = []
@@ -351,12 +350,13 @@ class MultiCharacterContextMixin:
             card = self.character_cards.get(character_id)
             if card:
                 meta = getattr(card, "meta", None)
-                aliases.extend([
-                    getattr(meta, "name", ""),
-                    getattr(meta, "display_name", ""),
-                ])
+                aliases.extend(
+                    [
+                        getattr(meta, "name", ""),
+                        getattr(meta, "display_name", ""),
+                    ]
+                )
         return aliases
-
 
     def _load_runtime_state_for_prompt(
         self,
@@ -384,7 +384,9 @@ class MultiCharacterContextMixin:
                 other_character_ids=other_character_ids,
                 relationship_history_cutoff=relationship_history_cutoff,
                 query_context=query_context,
-                relationship_aliases=self._memory_aliases_for_characters(self.character_ids),
+                relationship_aliases=self._memory_aliases_for_characters(
+                    self.character_ids
+                ),
                 world_now=world_now,
                 recall_key=recall_key,
             )
@@ -393,23 +395,22 @@ class MultiCharacterContextMixin:
             fact
             for fact in runtime_state["known_player_facts"]
             if not self._text_conflicts_with_relationship_graph(
-                fact,
-                character_relationships,
-                character_id=character_id
+                fact, character_relationships, character_id=character_id
             )
         ]
         return runtime_state
-
 
     def _aliases_for_character(self, character_id: str) -> list[str]:
         aliases = [character_id]
         card = self.character_cards.get(character_id)
         meta = getattr(card, "meta", None) if card else None
         if meta:
-            aliases.extend([
-                getattr(meta, "name", ""),
-                getattr(meta, "display_name", ""),
-            ])
+            aliases.extend(
+                [
+                    getattr(meta, "name", ""),
+                    getattr(meta, "display_name", ""),
+                ]
+            )
             aliases.extend(getattr(meta, "aliases", []) or [])
 
         clean_aliases = []
@@ -425,20 +426,21 @@ class MultiCharacterContextMixin:
             clean_aliases.append(alias)
         return clean_aliases
 
-
     def _aliases_for_pair(self, character_id_a: str, character_id_b: str) -> list[str]:
-        return self._aliases_for_character(character_id_a) + self._aliases_for_character(character_id_b)
-
+        return self._aliases_for_character(
+            character_id_a
+        ) + self._aliases_for_character(character_id_b)
 
     def _participant_pairs(self) -> list[tuple[str, str]]:
         pairs = []
         for idx, character_id_a in enumerate(self.character_ids):
-            for character_id_b in self.character_ids[idx + 1:]:
+            for character_id_b in self.character_ids[idx + 1 :]:
                 pairs.append((character_id_a, character_id_b))
         return pairs
 
-
-    def _history_candidate_relationship_pairs(self, msg: dict) -> tuple[list[tuple[str, str]], bool]:
+    def _history_candidate_relationship_pairs(
+        self, msg: dict
+    ) -> tuple[list[tuple[str, str]], bool]:
         text = str(msg.get("content") or "")
         speaker_id = msg.get("character_id")
         alias_matched_pairs = []
@@ -466,32 +468,30 @@ class MultiCharacterContextMixin:
 
         return [], False
 
-
-
     def _text_conflicts_with_relationship_graph(
         self,
         text: str,
         character_relationships: dict | None,
-        character_id: str | None = None
+        character_id: str | None = None,
     ) -> bool:
         if character_relationships is None:
             return False
         if not text:
             return False
 
-        pairs, has_alias_match = self._history_candidate_relationship_pairs({
-            "content": text,
-            "character_id": character_id,
-        })
+        pairs, has_alias_match = self._history_candidate_relationship_pairs(
+            {
+                "content": text,
+                "character_id": character_id,
+            }
+        )
         if not pairs:
             return False
 
         conflicts = []
         for character_id_a, character_id_b in pairs:
             relationship = relationship_context.relationship_between(
-                character_relationships,
-                character_id_a,
-                character_id_b
+                character_relationships, character_id_a, character_id_b
             )
             aliases = self._aliases_for_pair(character_id_a, character_id_b)
             conflicts.append(
@@ -506,44 +506,39 @@ class MultiCharacterContextMixin:
             return any(conflicts)
         return bool(conflicts) and all(conflicts)
 
-
     def _history_message_conflicts_with_relationship_graph(
-        self,
-        msg: dict,
-        character_relationships: dict | None
+        self, msg: dict, character_relationships: dict | None
     ) -> bool:
         if msg.get("role") != "assistant":
             return False
         return self._text_conflicts_with_relationship_graph(
             str(msg.get("content") or ""),
             character_relationships,
-            character_id=msg.get("character_id")
+            character_id=msg.get("character_id"),
         )
-
 
     def _format_history_for_llm(
         self,
         history: list[dict],
         current_character_id: str,
-        character_relationships: dict | None = None
+        character_relationships: dict | None = None,
     ) -> list[dict]:
         """
         将多角色历史转换为 LLM 格式
-        
+
         Args:
             history: 原始历史记录
             current_character_id: 当前发言角色 ID
             character_relationships: 当前关系图谱，用于丢弃与图谱冲突的关系历史
-        
+
         Returns:
             list[dict]: 格式化后的消息列表
         """
         messages = []
-        
+
         for msg in history:
             if self._history_message_conflicts_with_relationship_graph(
-                msg,
-                character_relationships
+                msg, character_relationships
             ):
                 logger.debug(
                     "跳过与当前关系图谱冲突的历史关系发言: session=%s, character=%s",
@@ -556,11 +551,9 @@ class MultiCharacterContextMixin:
             content = msg["content"]
             char_id = msg.get("character_id")
             char_name = msg.get("character_name")
-            
+
             if role == "user":
-                formatted_content = (
-                    f"玩家 {self.player_name} 说：{content}"
-                )
+                formatted_content = f"玩家 {self.player_name} 说：{content}"
                 messages.append({"role": "user", "content": formatted_content})
 
             elif role == "assistant":
@@ -568,14 +561,14 @@ class MultiCharacterContextMixin:
                 target = msg.get("reply_to_character_id") or "玩家/群体"
                 # 用自然语言叙述，避免机器元数据被 LLM 复述
                 if char_id == current_character_id:
-                    messages.append({
-                        "role": "assistant",
-                        "content": f"{source_name}（{char_id}）回应{target}，意图{msg.get('intent') or '回答'}，话题{msg.get('topic') or '延续当前'}：{content}",
-                    })
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": f"{source_name}（{char_id}）回应{target}，意图{msg.get('intent') or '回答'}，话题{msg.get('topic') or '延续当前'}：{content}",
+                        }
+                    )
                 else:
                     formatted_content = f"{source_name}（{char_id}）回应{target}，意图{msg.get('intent') or '回答'}，话题{msg.get('topic') or '延续当前'}：{content}"
                     messages.append({"role": "user", "content": formatted_content})
-        
-        return messages
-    
 
+        return messages

@@ -143,7 +143,9 @@ def _verify_password(password: str, stored_hash: str) -> bool:
 
 
 def _needs_password_rehash(stored_hash: str) -> bool:
-    return not stored_hash.startswith(f"{PASSWORD_HASH_ALGORITHM}${PASSWORD_HASH_ITERATIONS}$")
+    return not stored_hash.startswith(
+        f"{PASSWORD_HASH_ALGORITHM}${PASSWORD_HASH_ITERATIONS}$"
+    )
 
 
 def _burn_password_hash_time(password: str) -> None:
@@ -155,8 +157,10 @@ def _burn_password_hash_time(password: str) -> None:
         PASSWORD_HASH_ITERATIONS,
     )
 
+
 def _gen_token() -> str:
     return secrets.token_hex(32)
+
 
 def _gen_user_id() -> str:
     """生成 usr_<8字符> 格式的用户 ID"""
@@ -197,7 +201,9 @@ def _set_auth_cookie(
 
 
 def _store_auth_token(token: str, user_id: str) -> None:
-    expires_at = (datetime.now(timezone.utc) + timedelta(seconds=AUTH_COOKIE_MAX_AGE)).isoformat()
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(seconds=AUTH_COOKIE_MAX_AGE)
+    ).isoformat()
     repository.create_auth_token(token, user_id, expires_at)
 
 
@@ -217,19 +223,21 @@ def _validate_username(username: str) -> str:
     """校验用户名格式"""
     if not username or len(username) < 2 or len(username) > 20:
         raise HTTPException(400, "用户名长度需在 2-20 之间")
-    if not re.match(r'^[\w\u4e00-\u9fff-]+$', username):
+    if not re.match(r"^[\w\u4e00-\u9fff-]+$", username):
         raise HTTPException(400, "用户名只能包含字母、数字、中文、下划线和连字符")
     return username
+
 
 def _validate_password(password: str) -> str:
     """校验密码格式：至少 8 位，含字母和数字"""
     if not password or len(password) < 8:
         raise HTTPException(400, "密码长度不能少于 8 位")
-    if not re.search(r'[A-Za-z]', password):
+    if not re.search(r"[A-Za-z]", password):
         raise HTTPException(400, "密码必须包含至少一个字母")
-    if not re.search(r'\d', password):
+    if not re.search(r"\d", password):
         raise HTTPException(400, "密码必须包含至少一个数字")
     return password
+
 
 def _resize_image(data: bytes, max_dim: int = 512) -> bytes | None:
     """兼容旧调用：将图片压缩为 JPEG。"""
@@ -296,11 +304,15 @@ class RegisterRequest(BaseModel):
     username: str
     password: str
     gender: Literal["male", "female", "unknown"] = "unknown"
-    admin_bootstrap_token: str | None = Field(default=None, min_length=1, max_length=512)
+    admin_bootstrap_token: str | None = Field(
+        default=None, min_length=1, max_length=512
+    )
+
 
 class LoginRequest(BaseModel):
     username: str
     password: str
+
 
 class UpdateProfileRequest(BaseModel):
     username: str | None = None
@@ -310,6 +322,7 @@ class UpdateProfileRequest(BaseModel):
 class UpdateSpeechSettingsRequest(BaseModel):
     tts_auto_play: bool
     stt_auto_send: bool
+
 
 class SetAvatarUrlRequest(BaseModel):
     url: str = Field(..., max_length=2048)
@@ -393,6 +406,7 @@ class SetWorldClockRequest(ClockRevisionRequest):
 class AdvanceWorldClockRequest(ClockRevisionRequest):
     seconds: StrictInt = Field(gt=0, le=366 * 24 * 60 * 60)
 
+
 class UserResponse(BaseModel):
     user_id: str
     username: str
@@ -412,6 +426,7 @@ class UserResponse(BaseModel):
     stt_auto_send: bool = False
     role_summary: UserRoleSummary
 
+
 class EventInboxItem(BaseModel):
     id: int
     event_id: str | None = None
@@ -425,8 +440,10 @@ class EventInboxItem(BaseModel):
     created_at: str
     read_at: str | None = None
 
+
 class AuthResponse(BaseModel):
     user: UserResponse
+
 
 class OperationResponse(BaseModel):
     success: bool
@@ -434,9 +451,7 @@ class OperationResponse(BaseModel):
 
 
 def _build_user_response(user: dict) -> UserResponse:
-    clock = _build_world_clock_response(
-        world_clock.get_clock_snapshot(user["user_id"])
-    )
+    clock = _build_world_clock_response(world_clock.get_clock_snapshot(user["user_id"]))
     card = repository.get_user_character_card(user["user_id"])
     role_summary = UserRoleSummary(
         node_id=repository.player_node_id(user["user_id"]),
@@ -574,7 +589,9 @@ def login(
 
     _clear_login_failures(req.username, client_ip)
     if _needs_password_rehash(user["password_hash"]):
-        repository.update_user_password_hash(user["user_id"], _hash_password(req.password))
+        repository.update_user_password_hash(
+            user["user_id"], _hash_password(req.password)
+        )
 
     token = _gen_token()
     try:
@@ -690,7 +707,9 @@ def put_character_card(
             encoded = avatar_url.split(",", 1)[1] if "," in avatar_url else ""
             fields["avatar_url"] = avatar_data_url(base64.b64decode(encoded))
         except Exception as exc:
-            raise HTTPException(400, "角色头像无效，请通过头像上传或网络图片接口设置") from exc
+            raise HTTPException(
+                400, "角色头像无效，请通过头像上传或网络图片接口设置"
+            ) from exc
     card = repository.update_user_character_card(user_id, fields)
     if not card:
         raise HTTPException(404, "用户不存在")

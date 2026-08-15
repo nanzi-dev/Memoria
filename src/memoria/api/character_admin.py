@@ -48,14 +48,19 @@ def _require_character_data_within_limit(character_data: dict) -> None:
 # =========================
 class CharacterCardCreateRequest(BaseModel):
     """创建角色卡请求"""
+
     character_data: dict = Field(..., description="完整的角色卡 JSON 数据")
+
 
 class CharacterCardUpdateRequest(BaseModel):
     """更新角色卡请求"""
+
     character_data: dict = Field(..., description="完整的角色卡 JSON 数据")
+
 
 class CharacterCardListItem(BaseModel):
     """角色卡列表项"""
+
     character_id: str
     name: str | None = None
     display_name: str | None = None
@@ -66,8 +71,10 @@ class CharacterCardListItem(BaseModel):
     created_at: str | None = None
     updated_at: str | None = None
 
+
 class CharacterCardDetail(BaseModel):
     """角色卡详情"""
+
     character_id: str
     card_data: dict
     version: str | None = None
@@ -79,8 +86,10 @@ class CharacterCardDetail(BaseModel):
     created_at: str | None = None
     updated_at: str | None = None
 
+
 class ImportFromFileRequest(BaseModel):
     """从文件导入请求"""
+
     character_id: str = Field(
         ...,
         min_length=1,
@@ -89,8 +98,10 @@ class ImportFromFileRequest(BaseModel):
         description="要导入的角色 ID（对应文件名，仅允许字母/数字/下划线/连字符）",
     )
 
+
 class OperationResponse(BaseModel):
     """操作响应"""
+
     success: bool
     message: str
     character_id: str | None = None
@@ -106,12 +117,14 @@ def list_characters_admin(
 ):
     """
     获取所有角色卡列表（管理后台）
-    
+
     Args:
         only_active: 是否仅返回启用的角色卡
     """
     try:
-        cards = repository.list_character_cards_from_db(current_user_id, only_active=only_active)
+        cards = repository.list_character_cards_from_db(
+            current_user_id, only_active=only_active
+        )
         return [CharacterCardListItem(**card) for card in cards]
     except Exception:
         logger.exception("获取角色卡列表失败")
@@ -128,19 +141,23 @@ def get_character_detail(
 ):
     """
     获取指定角色卡的完整数据
-    
+
     Args:
         character_id: 角色 ID
     """
     try:
-        db_card = repository.get_character_card_from_db(current_user_id, character_id, include_inactive=True)
-        
+        db_card = repository.get_character_card_from_db(
+            current_user_id, character_id, include_inactive=True
+        )
+
         if not db_card:
-            raise HTTPException(status_code=404, detail=f"角色卡 '{character_id}' 不存在")
-        
+            raise HTTPException(
+                status_code=404, detail=f"角色卡 '{character_id}' 不存在"
+            )
+
         # 解析 JSON 数据
         card_data = json.loads(db_card["card_data"])
-        
+
         return CharacterCardDetail(
             character_id=db_card["character_id"],
             card_data=card_data,
@@ -151,9 +168,9 @@ def get_character_detail(
             is_active=db_card.get("is_active", 1),
             source=db_card.get("source", "db"),
             created_at=db_card.get("created_at"),
-            updated_at=db_card.get("updated_at")
+            updated_at=db_card.get("updated_at"),
         )
-    
+
     except HTTPException:
         raise
     except Exception:
@@ -172,7 +189,7 @@ def create_character(
 ):
     """
     创建新角色卡
-    
+
     Args:
         req: 包含完整角色卡数据的请求
     """
@@ -187,13 +204,15 @@ def create_character(
             )
 
         # 检查角色 ID 是否已存在
-        existing = repository.get_character_card_from_db(current_user_id, card.character_id)
+        existing = repository.get_character_card_from_db(
+            current_user_id, card.character_id
+        )
         if existing:
             raise HTTPException(
-                status_code=400, 
-                detail=f"角色卡 '{card.character_id}' 已存在，请使用更新接口"
+                status_code=400,
+                detail=f"角色卡 '{card.character_id}' 已存在，请使用更新接口",
             )
-        
+
         # 保存到数据库
         card_json = json.dumps(req.character_data, ensure_ascii=False, indent=2)
         # 先保存原始 URL，头像异步下载
@@ -205,7 +224,7 @@ def create_character(
             name=card.meta.name,
             display_name=card.meta.display_name,
             source="db",
-            avatar_url=card.avatar_url
+            avatar_url=card.avatar_url,
         )
         if not avatar_revision:
             raise HTTPException(status_code=500, detail="保存角色卡到数据库失败")
@@ -216,16 +235,16 @@ def create_character(
             card.avatar_url,
             avatar_revision,
         )
-        
+
         # 清除缓存
         character_loader.reload_character_card(card.character_id, current_user_id)
-        
+
         return OperationResponse(
             success=True,
             message=f"角色卡 '{card.character_id}' 创建成功",
-            character_id=card.character_id
+            character_id=card.character_id,
         )
-    
+
     except HTTPException:
         raise
     except ValidationError as e:
@@ -248,7 +267,7 @@ def update_character(
 ):
     """
     更新现有角色卡
-    
+
     Args:
         character_id: 角色 ID
         req: 包含完整角色卡数据的请求
@@ -262,22 +281,22 @@ def update_character(
                 status_code=400,
                 detail="角色 ID 不能使用 player: 前缀（该前缀保留给玩家节点）",
             )
-        
+
         # 检查角色 ID 是否匹配
         if card.character_id != character_id:
             raise HTTPException(
                 status_code=400,
-                detail=f"URL 中的角色 ID '{character_id}' 与数据中的 '{card.character_id}' 不匹配"
+                detail=f"URL 中的角色 ID '{character_id}' 与数据中的 '{card.character_id}' 不匹配",
             )
-        
+
         # 检查是否存在
         existing = repository.get_character_card_from_db(current_user_id, character_id)
         if not existing:
             raise HTTPException(
                 status_code=404,
-                detail=f"角色卡 '{character_id}' 不存在，请使用创建接口"
+                detail=f"角色卡 '{character_id}' 不存在，请使用创建接口",
             )
-        
+
         # 更新到数据库
         card_json = json.dumps(req.character_data, ensure_ascii=False, indent=2)
         # 先保存原始 URL，头像异步下载
@@ -289,7 +308,7 @@ def update_character(
             name=card.meta.name,
             display_name=card.meta.display_name,
             source=existing.get("source", "db"),
-            avatar_url=card.avatar_url
+            avatar_url=card.avatar_url,
         )
         if not avatar_revision:
             raise HTTPException(status_code=500, detail="更新角色卡到数据库失败")
@@ -300,16 +319,16 @@ def update_character(
             card.avatar_url,
             avatar_revision,
         )
-        
+
         # 清除缓存
         character_loader.reload_character_card(character_id, current_user_id)
-        
+
         return OperationResponse(
             success=True,
             message=f"角色卡 '{character_id}' 更新成功",
-            character_id=character_id
+            character_id=character_id,
         )
-    
+
     except HTTPException:
         raise
     except ValidationError as e:
@@ -330,37 +349,41 @@ def delete_character(
 ):
     """
     删除角色卡
-    
+
     Args:
         character_id: 角色 ID
         permanent: 是否永久删除（默认为软删除）
     """
     try:
         # 检查是否存在（包括已禁用的）
-        existing = repository.get_character_card_from_db(current_user_id, character_id, include_inactive=True)
+        existing = repository.get_character_card_from_db(
+            current_user_id, character_id, include_inactive=True
+        )
         if not existing:
-            raise HTTPException(status_code=404, detail=f"角色卡 '{character_id}' 不存在")
-        
+            raise HTTPException(
+                status_code=404, detail=f"角色卡 '{character_id}' 不存在"
+            )
+
         # 永久删除时由仓储层在同一事务中清理角色关系；软禁用保留关系。
         success = repository.delete_character_card_from_db(
             owner_user_id=current_user_id,
             character_id=character_id,
-            soft_delete=not permanent
+            soft_delete=not permanent,
         )
-        
+
         if not success:
             raise HTTPException(status_code=500, detail="删除角色卡失败")
-        
+
         # 清除缓存（不尝试重新加载）
         character_loader.load_character_card.cache_clear()
-        
+
         action = "永久删除" if permanent else "禁用"
         return OperationResponse(
             success=True,
             message=f"角色卡 '{character_id}' 已{action}",
-            character_id=character_id
+            character_id=character_id,
         )
-    
+
     except HTTPException:
         raise
     except Exception:
@@ -371,32 +394,34 @@ def delete_character(
 # =========================
 # 激活角色卡
 # =========================
-@router.post("/admin/characters/{character_id}/activate", response_model=OperationResponse)
+@router.post(
+    "/admin/characters/{character_id}/activate", response_model=OperationResponse
+)
 def activate_character(
     character_id: str,
     current_user_id: str = Depends(require_current_user_id),
 ):
     """
     激活已禁用的角色卡
-    
+
     Args:
         character_id: 角色 ID
     """
     try:
         success = repository.activate_character_card(current_user_id, character_id)
-        
+
         if not success:
             raise HTTPException(status_code=500, detail="激活角色卡失败")
-        
+
         # 清除缓存
         character_loader.reload_character_card(character_id, current_user_id)
-        
+
         return OperationResponse(
             success=True,
             message=f"角色卡 '{character_id}' 已激活",
-            character_id=character_id
+            character_id=character_id,
         )
-    
+
     except HTTPException:
         raise
     except Exception:
@@ -414,7 +439,7 @@ def import_character_from_file(
 ):
     """
     从 JSON 文件导入角色卡到数据库
-    
+
     Args:
         req: 包含角色 ID 的请求
     """
@@ -428,10 +453,9 @@ def import_character_from_file(
 
         if not file_path.exists():
             raise HTTPException(
-                status_code=404,
-                detail=f"角色卡文件 '{req.character_id}.json' 不存在"
+                status_code=404, detail=f"角色卡文件 '{req.character_id}.json' 不存在"
             )
-        
+
         # 读取并验证文件
         raw_text = file_path.read_text(encoding="utf-8")
         raw_data = character_loader.normalize_character_data(json.loads(raw_text))
@@ -453,7 +477,9 @@ def import_character_from_file(
             card.character_id,
             include_inactive=True,
         ):
-            raise HTTPException(status_code=409, detail=f"角色卡 '{card.character_id}' 已存在")
+            raise HTTPException(
+                status_code=409, detail=f"角色卡 '{card.character_id}' 已存在"
+            )
 
         # 保存到数据库；显式写入文件中的 avatar_url，防止覆盖已有头像。
         card_json = json.dumps(raw_data, ensure_ascii=False, indent=2)
@@ -467,19 +493,19 @@ def import_character_from_file(
             source="file",  # 标记为从文件导入
             avatar_url=card.avatar_url,
         )
-        
+
         if not success:
             raise HTTPException(status_code=500, detail="导入角色卡到数据库失败")
-        
+
         # 清除缓存
         character_loader.reload_character_card(card.character_id, current_user_id)
-        
+
         return OperationResponse(
             success=True,
             message=f"角色卡 '{card.character_id}' 从文件导入成功",
-            character_id=card.character_id
+            character_id=card.character_id,
         )
-    
+
     except HTTPException:
         raise
     except json.JSONDecodeError:
@@ -490,12 +516,14 @@ def import_character_from_file(
         logger.exception("导入角色卡失败: %s", req.character_id)
         raise HTTPException(status_code=400, detail="导入角色卡失败")
 
+
 # =========================
 # 头像管理
 # =========================
 MAX_AVATAR_UPLOAD_SIZE = 8 * 1024 * 1024  # 输入上限；较大图片再压缩到 2MB
 
 AVATAR_DOWNLOAD_TIMEOUT = 5  # seconds — shorter so saves don't stall
+
 
 def _download_avatar_sync(avatar_url: str) -> str | None:
     """尝试下载远程头像 URL 并返回 base64 data URL，失败返回 None"""
@@ -507,6 +535,7 @@ def _download_avatar_sync(avatar_url: str) -> str | None:
     except Exception as e:
         logger.warning(f"下载头像 URL 失败，保留原始 URL: {e}")
         return None
+
 
 def _download_and_store_avatar(
     owner_user_id: str,
@@ -545,9 +574,9 @@ def _schedule_avatar_download(
         )
 
 
-
 class AvatarUrlRequest(BaseModel):
     """通过 URL 设置头像"""
+
     url: str = Field(..., max_length=2048, description="头像图片的 URL 地址")
 
 
@@ -558,17 +587,21 @@ def get_character_avatar(
 ):
     """
     获取角色头像
-    
+
     Returns:
         dict: {"avatar_url": "..."} — base64 data URL 或网络 URL，无头像时 avatar_url 为 None
     """
     try:
-        db_card = repository.get_character_card_from_db(current_user_id, character_id, include_inactive=True)
+        db_card = repository.get_character_card_from_db(
+            current_user_id, character_id, include_inactive=True
+        )
         if not db_card:
-            raise HTTPException(status_code=404, detail=f"角色卡 '{character_id}' 不存在")
-        
+            raise HTTPException(
+                status_code=404, detail=f"角色卡 '{character_id}' 不存在"
+            )
+
         return {"character_id": character_id, "avatar_url": db_card.get("avatar_url")}
-    
+
     except HTTPException:
         raise
     except Exception:
@@ -576,7 +609,9 @@ def get_character_avatar(
         raise HTTPException(status_code=500, detail="获取头像失败")
 
 
-@router.post("/admin/characters/{character_id}/avatar/upload", response_model=OperationResponse)
+@router.post(
+    "/admin/characters/{character_id}/avatar/upload", response_model=OperationResponse
+)
 async def upload_character_avatar(
     character_id: str,
     file: UploadFile = File(...),  # noqa: B008
@@ -584,35 +619,39 @@ async def upload_character_avatar(
 ):
     """
     从本地文件上传头像（转换为 base64 data URL 存入数据库）
-    
+
     - 支持 PNG / JPEG / GIF / WebP
     - 最大 2MB
     """
     try:
         # 检查角色是否存在
-        db_card = repository.get_character_card_from_db(current_user_id, character_id, include_inactive=True)
+        db_card = repository.get_character_card_from_db(
+            current_user_id, character_id, include_inactive=True
+        )
         if not db_card:
-            raise HTTPException(status_code=404, detail=f"角色卡 '{character_id}' 不存在")
-        
+            raise HTTPException(
+                status_code=404, detail=f"角色卡 '{character_id}' 不存在"
+            )
+
         contents = await read_upload_limited(
             file,
             MAX_AVATAR_UPLOAD_SIZE,
             detail="头像文件超过 8 MB 上传限制",
         )
-        
+
         data_url = await run_in_threadpool(avatar_data_url, contents)
-        
+
         # 更新数据库
         repository.update_character_avatar(current_user_id, character_id, data_url)
-        
-        logger.info("头像已上传: character_id=%s, input_size=%s", character_id, len(contents))
-        
-        return OperationResponse(
-            success=True,
-            message="头像上传成功",
-            character_id=character_id
+
+        logger.info(
+            "头像已上传: character_id=%s, input_size=%s", character_id, len(contents)
         )
-    
+
+        return OperationResponse(
+            success=True, message="头像上传成功", character_id=character_id
+        )
+
     except HTTPException:
         raise
     except Exception:
@@ -620,7 +659,9 @@ async def upload_character_avatar(
         raise HTTPException(status_code=500, detail="头像上传失败")
 
 
-@router.post("/admin/characters/{character_id}/avatar/url", response_model=OperationResponse)
+@router.post(
+    "/admin/characters/{character_id}/avatar/url", response_model=OperationResponse
+)
 def set_character_avatar_url(
     character_id: str,
     req: AvatarUrlRequest,
@@ -630,31 +671,35 @@ def set_character_avatar_url(
     通过网络 URL 设置头像 — 服务端下载并转为 data URL 存储，避免前端 CORS 问题
     """
     try:
-        db_card = repository.get_character_card_from_db(current_user_id, character_id, include_inactive=True)
+        db_card = repository.get_character_card_from_db(
+            current_user_id, character_id, include_inactive=True
+        )
         if not db_card:
-            raise HTTPException(status_code=404, detail=f"角色卡 '{character_id}' 不存在")
-        
+            raise HTTPException(
+                status_code=404, detail=f"角色卡 '{character_id}' 不存在"
+            )
+
         url = req.url.strip()
         if not url:
             repository.update_character_avatar(current_user_id, character_id, None)
             return OperationResponse(
                 success=True, message="头像已清除", character_id=character_id
             )
-        
+
         image = download_remote_image(url, timeout=10)
         data_url = avatar_data_url(image.data)
-        
+
         repository.update_character_avatar(current_user_id, character_id, data_url)
         logger.info(
             "头像 URL 已下载并存储: character_id=%s, input_size=%s",
             character_id,
             len(image.data),
         )
-        
+
         return OperationResponse(
             success=True, message="头像已下载并存储", character_id=character_id
         )
-    
+
     except HTTPException:
         raise
     except Exception:

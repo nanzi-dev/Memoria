@@ -179,10 +179,9 @@ def test_event_effects_project_fact_and_story_atomically():
         "story.started.v1",
         "story.completed.v1",
     ]
-    assert {
-        event.correlation_id
-        for event in [*fact_events, *story_events]
-    } == {result.execution_id}
+    assert {event.correlation_id for event in [*fact_events, *story_events]} == {
+        result.execution_id
+    }
 
 
 def test_event_effect_commit_failure_rolls_back_all_projections(monkeypatch):
@@ -265,10 +264,13 @@ def test_event_effect_commit_failure_rolls_back_all_projections(monkeypatch):
     assert repository.list_fact_claims(user_id, "story", story_id) == []
     assert repository.get_story_state(user_id, story_id) is None
     assert repository.list_domain_events(user_id, "story", story_id) == []
-    assert repository.get_event_trigger_history(
-        event_id=event_id,
-        player_id=user_id,
-    ) == []
+    assert (
+        repository.get_event_trigger_history(
+            event_id=event_id,
+            player_id=user_id,
+        )
+        == []
+    )
 
 
 @pytest.mark.parametrize(
@@ -307,11 +309,14 @@ def test_story_progress_is_rejected_after_terminal_state(
 
     state = repository.get_story_state(test_user, story_id)
     assert state["status"] == terminal_status
-    assert repository.list_domain_events(
-        test_user,
-        "story",
-        story_id,
-    )[-1].event_type == terminal_event_type
+    assert (
+        repository.list_domain_events(
+            test_user,
+            "story",
+            story_id,
+        )[-1].event_type
+        == terminal_event_type
+    )
 
 
 @pytest.mark.asyncio
@@ -327,9 +332,7 @@ async def test_story_state_api_requires_auth_and_returns_not_found(monkeypatch):
         transport=httpx.ASGITransport(app=app),
         base_url="http://testserver",
     ) as client:
-        assert (
-            await client.get("/api/v1/stories/test-story/state")
-        ).status_code == 401
+        assert (await client.get("/api/v1/stories/test-story/state")).status_code == 401
         response = await client.get(
             "/api/v1/stories/test-story/state",
             headers=headers,

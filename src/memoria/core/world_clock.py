@@ -115,10 +115,16 @@ def format_elapsed(delta: timedelta | None, locale: str = "zh-CN") -> str:
         return "less than 1 minute" if english else "不到 1 分钟"
     minutes = seconds // 60
     if minutes < 60:
-        return f"{minutes} minute{'s' if minutes != 1 else ''}" if english else f"{minutes} 分钟"
+        return (
+            f"{minutes} minute{'s' if minutes != 1 else ''}"
+            if english
+            else f"{minutes} 分钟"
+        )
     hours = minutes // 60
     if hours < 24:
-        return f"{hours} hour{'s' if hours != 1 else ''}" if english else f"{hours} 小时"
+        return (
+            f"{hours} hour{'s' if hours != 1 else ''}" if english else f"{hours} 小时"
+        )
     days = hours // 24
     if days < 7:
         return f"{days} day{'s' if days != 1 else ''}" if english else f"{days} 天"
@@ -127,7 +133,11 @@ def format_elapsed(delta: timedelta | None, locale: str = "zh-CN") -> str:
         return f"{weeks} week{'s' if weeks != 1 else ''}" if english else f"{weeks} 周"
     months = days // 30
     if months < 12:
-        return f"{months} month{'s' if months != 1 else ''}" if english else f"{months} 个月"
+        return (
+            f"{months} month{'s' if months != 1 else ''}"
+            if english
+            else f"{months} 个月"
+        )
     years = days // 365
     return f"{years} year{'s' if years != 1 else ''}" if english else f"{years} 年"
 
@@ -208,7 +218,15 @@ class WorldClockSnapshot:
             elapsed = self.world_now - as_utc(last_interaction_world_at)
         local_now = self.local_now
         if locale.lower().startswith("zh"):
-            weekdays = ("星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日")
+            weekdays = (
+                "星期一",
+                "星期二",
+                "星期三",
+                "星期四",
+                "星期五",
+                "星期六",
+                "星期日",
+            )
         else:
             weekdays = (
                 "Monday",
@@ -293,7 +311,9 @@ def _apply_clock_change(
         if world_now is not None
         else current.world_now
     )
-    revision = current.clock_revision if expected_revision is None else expected_revision
+    revision = (
+        current.clock_revision if expected_revision is None else expected_revision
+    )
     timezone_changed = next_timezone != current.timezone
     moved_backward = next_world < current.world_now
 

@@ -1,4 +1,5 @@
 """Domain repository functions (split from monolith)."""
+
 from __future__ import annotations
 
 import json
@@ -12,6 +13,7 @@ from memoria.db.repository._common import _now, _row_to_dict, db_session
 
 logger = logging.getLogger(__name__)
 
+
 # =========================
 # 角色卡管理（CRUD）
 # =========================
@@ -23,11 +25,11 @@ def save_character_card_to_db(
     name: str | None = None,
     display_name: str | None = None,
     source: str = "db",
-    avatar_url: str | None = None
+    avatar_url: str | None = None,
 ) -> str | None:
     """
     保存或更新角色卡到数据库
-    
+
     Args:
         owner_user_id: 角色卡归属用户 ID
         character_id: 角色 ID
@@ -37,7 +39,7 @@ def save_character_card_to_db(
         display_name: 显示名称
         source: 来源标记（'db'=数据库创建, 'file'=从文件导入）
         avatar_url: 角色头像 data URL 或待异步抓取的网络 URL
-    
+
     Returns:
         str | None: 本次头像更新的 revision；保存失败时返回 None
     """
@@ -76,7 +78,9 @@ def save_character_card_to_db(
                     "source": source,
                 },
             )
-        logger.info(f"角色卡已保存到数据库: owner={owner_user_id}, character_id={character_id}")
+        logger.info(
+            f"角色卡已保存到数据库: owner={owner_user_id}, character_id={character_id}"
+        )
         return avatar_revision
     except Exception as e:
         logger.error(f"保存角色卡失败: {e}")
@@ -132,15 +136,17 @@ def patch_character_card_voice(
         return False
 
 
-def get_character_card_from_db(owner_user_id: str, character_id: str, include_inactive: bool = False) -> dict | None:
+def get_character_card_from_db(
+    owner_user_id: str, character_id: str, include_inactive: bool = False
+) -> dict | None:
     """
     从数据库获取角色卡
-    
+
     Args:
         owner_user_id: 角色卡归属用户 ID
         character_id: 角色 ID
         include_inactive: 是否包含已禁用的角色卡（默认 False）
-    
+
     Returns:
         dict: 角色卡数据，包含 card_data (JSON字符串) 等字段，不存在则返回 None
     """
@@ -171,7 +177,9 @@ def is_character_card_active(owner_user_id: str, character_id: str) -> bool:
     return bool(row)
 
 
-def update_character_avatar(owner_user_id: str, character_id: str, avatar_url: str | None) -> bool:
+def update_character_avatar(
+    owner_user_id: str, character_id: str, avatar_url: str | None
+) -> bool:
     """更新角色头像 URL"""
     try:
         with db_session() as session:
@@ -236,14 +244,16 @@ def update_character_avatar_if_current(
         return False
 
 
-def list_character_cards_from_db(owner_user_id: str, only_active: bool = True) -> list[dict]:
+def list_character_cards_from_db(
+    owner_user_id: str, only_active: bool = True
+) -> list[dict]:
     """
     列出所有角色卡（仅返回元信息，不包含完整 card_data）
-    
+
     Args:
         owner_user_id: 角色卡归属用户 ID
         only_active: 是否仅返回启用的角色卡
-    
+
     Returns:
         list[dict]: 角色卡元信息列表
     """
@@ -264,15 +274,17 @@ def list_character_cards_from_db(owner_user_id: str, only_active: bool = True) -
     return [dict(r) for r in rows]
 
 
-def delete_character_card_from_db(owner_user_id: str, character_id: str, soft_delete: bool = True) -> bool:
+def delete_character_card_from_db(
+    owner_user_id: str, character_id: str, soft_delete: bool = True
+) -> bool:
     """
     删除角色卡
-    
+
     Args:
         owner_user_id: 角色卡归属用户 ID
         character_id: 角色 ID
         soft_delete: 是否软删除（仅标记为不活跃）
-    
+
     Returns:
         bool: 是否删除成功
     """
@@ -481,18 +493,26 @@ def delete_character_card_from_db(owner_user_id: str, character_id: str, soft_de
                 )
 
                 # 6) 关系清理（保留 revision 记录以供“已删除关系”查询）。
-                rows = session.execute(
-                    text("""
+                rows = (
+                    session.execute(
+                        text("""
                         SELECT character_id_a, character_id_b
                         FROM character_relationship
                         WHERE owner_user_id = :owner
                           AND (character_id_a = :cid OR character_id_b = :cid)
                     """),
-                    {"owner": owner, "cid": cid},
-                ).mappings().all()
+                        {"owner": owner, "cid": cid},
+                    )
+                    .mappings()
+                    .all()
+                )
                 for row in rows:
                     # Inline _touch_character_relationship_revision logic
-                    ca, cb = (row["character_id_b"], row["character_id_a"]) if row["character_id_a"] > row["character_id_b"] else (row["character_id_a"], row["character_id_b"])
+                    ca, cb = (
+                        (row["character_id_b"], row["character_id_a"])
+                        if row["character_id_a"] > row["character_id_b"]
+                        else (row["character_id_a"], row["character_id_b"])
+                    )
                     session.execute(
                         text("""
                             INSERT INTO character_relationship_revision
@@ -514,10 +534,14 @@ def delete_character_card_from_db(owner_user_id: str, character_id: str, soft_de
 
                 # 7) 最后删除角色卡本体。
                 session.execute(
-                    text("DELETE FROM character_card WHERE owner_user_id = :owner AND character_id = :cid"),
+                    text(
+                        "DELETE FROM character_card WHERE owner_user_id = :owner AND character_id = :cid"
+                    ),
                     {"owner": owner, "cid": cid},
                 )
-        logger.info(f"角色卡已{'禁用' if soft_delete else '删除'}: owner={owner_user_id}, character_id={character_id}")
+        logger.info(
+            f"角色卡已{'禁用' if soft_delete else '删除'}: owner={owner_user_id}, character_id={character_id}"
+        )
         return True
     except Exception as e:
         logger.error(f"删除角色卡失败: {e}")
@@ -527,11 +551,11 @@ def delete_character_card_from_db(owner_user_id: str, character_id: str, soft_de
 def activate_character_card(owner_user_id: str, character_id: str) -> bool:
     """
     激活已禁用的角色卡
-    
+
     Args:
         owner_user_id: 角色卡归属用户 ID
         character_id: 角色 ID
-    
+
     Returns:
         bool: 是否激活成功
     """

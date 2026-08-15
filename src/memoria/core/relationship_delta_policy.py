@@ -145,13 +145,10 @@ def _fallback_delta(
         # 只有在同时出现明确负面词时才会走上面的强负面分支。
         return 0.0
 
-    positive_cues = (
-        _SHARED_POSITIVE_CUES
-        + (
-            _AFFINITY_POSITIVE_CUES
-            if relationship_kind == "affinity"
-            else _TRUST_POSITIVE_CUES
-        )
+    positive_cues = _SHARED_POSITIVE_CUES + (
+        _AFFINITY_POSITIVE_CUES
+        if relationship_kind == "affinity"
+        else _TRUST_POSITIVE_CUES
     )
     if _contains_any(combined, _STRONG_POSITIVE_CUES):
         return 2.0

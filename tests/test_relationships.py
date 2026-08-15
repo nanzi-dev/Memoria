@@ -28,11 +28,14 @@ def test_touch_character_relationship_revision_uses_named_params_in_transaction(
             updated_at="2026-01-01T00:00:00+00:00",
         )
 
-    assert repository.get_character_relationship_updated_at(
-        owner_user_id,
-        character_id_a,
-        character_id_b,
-    ) == "2026-01-01T00:00:00+00:00"
+    assert (
+        repository.get_character_relationship_updated_at(
+            owner_user_id,
+            character_id_a,
+            character_id_b,
+        )
+        == "2026-01-01T00:00:00+00:00"
+    )
 
     with repository.db_session() as conn:
         repository._touch_character_relationship_revision(
@@ -43,28 +46,47 @@ def test_touch_character_relationship_revision_uses_named_params_in_transaction(
             updated_at="2026-01-02T00:00:00+00:00",
         )
 
-    assert repository.get_character_relationship_updated_at(
-        owner_user_id,
-        character_id_a,
-        character_id_b,
-    ) == "2026-01-02T00:00:00+00:00"
+    assert (
+        repository.get_character_relationship_updated_at(
+            owner_user_id,
+            character_id_a,
+            character_id_b,
+        )
+        == "2026-01-02T00:00:00+00:00"
+    )
 
     with repository.db_session() as session:
-        rows = session.execute(
-            select(CharacterRelationshipRevision).where(
-                CharacterRelationshipRevision.owner_user_id == owner_user_id,
-                (
+        rows = (
+            session.execute(
+                select(CharacterRelationshipRevision).where(
+                    CharacterRelationshipRevision.owner_user_id == owner_user_id,
                     (
-                        (CharacterRelationshipRevision.character_id_a == character_id_a)
-                        & (CharacterRelationshipRevision.character_id_b == character_id_b)
-                    )
-                    | (
-                        (CharacterRelationshipRevision.character_id_a == character_id_b)
-                        & (CharacterRelationshipRevision.character_id_b == character_id_a)
-                    )
-                ),
+                        (
+                            (
+                                CharacterRelationshipRevision.character_id_a
+                                == character_id_a
+                            )
+                            & (
+                                CharacterRelationshipRevision.character_id_b
+                                == character_id_b
+                            )
+                        )
+                        | (
+                            (
+                                CharacterRelationshipRevision.character_id_a
+                                == character_id_b
+                            )
+                            & (
+                                CharacterRelationshipRevision.character_id_b
+                                == character_id_a
+                            )
+                        )
+                    ),
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     assert len(rows) == 1
     assert rows[0].updated_at == "2026-01-02T00:00:00+00:00"

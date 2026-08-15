@@ -81,7 +81,9 @@ def _load_character_card(character_id: str, player_id: str, locale: Locale):
     try:
         return character_loader.load_character_card(character_id, player_id, locale)
     except TypeError as exc:
-        if "positional" not in str(exc) and "unexpected keyword argument" not in str(exc):
+        if "positional" not in str(exc) and "unexpected keyword argument" not in str(
+            exc
+        ):
             raise
         return character_loader.load_character_card(character_id, player_id)
 

@@ -1,4 +1,5 @@
 """Domain repository functions (split from monolith)."""
+
 from __future__ import annotations
 
 # Standard/third-party imports used across repository domains.
@@ -95,14 +96,18 @@ def _get_domain_event_by_id_in_transaction(
     conn,
     event_id: str,
 ) -> StoredDomainEvent | None:
-    row = conn.execute(
-        text("""
+    row = (
+        conn.execute(
+            text("""
         SELECT *
         FROM domain_event
         WHERE event_id = :event_id
         """),
-        {"event_id": event_id},
-    ).mappings().fetchone()
+            {"event_id": event_id},
+        )
+        .mappings()
+        .fetchone()
+    )
     return _domain_event_from_row(row)
 
 
@@ -111,14 +116,18 @@ def _get_domain_event_in_transaction(
     event_id: str,
     owner_user_id: str,
 ) -> StoredDomainEvent | None:
-    row = conn.execute(
-        text("""
+    row = (
+        conn.execute(
+            text("""
         SELECT *
         FROM domain_event
         WHERE event_id = :event_id AND owner_user_id = :owner_user_id
         """),
-        {"event_id": event_id, "owner_user_id": owner_user_id},
-    ).mappings().fetchone()
+            {"event_id": event_id, "owner_user_id": owner_user_id},
+        )
+        .mappings()
+        .fetchone()
+    )
     return _domain_event_from_row(row)
 
 
@@ -143,10 +152,9 @@ def _validate_domain_event_retry(
         submitted_value = submitted[field_name]
         stored_value = stored[field_name]
         if field_name in {"payload", "metadata"}:
-            matches = (
-                _canonical_domain_event_json(submitted_value)
-                == _canonical_domain_event_json(stored_value)
-            )
+            matches = _canonical_domain_event_json(
+                submitted_value
+            ) == _canonical_domain_event_json(stored_value)
         else:
             matches = submitted_value == stored_value
         if not matches:
@@ -164,20 +172,24 @@ def _current_domain_event_version(
     conn,
     aggregate_key: tuple[str, str, str],
 ) -> int:
-    row = conn.execute(
-        text("""
+    row = (
+        conn.execute(
+            text("""
         SELECT COALESCE(MAX(aggregate_version), 0) AS aggregate_version
         FROM domain_event
         WHERE owner_user_id = :owner_user_id
           AND aggregate_type = :aggregate_type
           AND aggregate_id = :aggregate_id
         """),
-        {
-            "owner_user_id": aggregate_key[0],
-            "aggregate_type": aggregate_key[1],
-            "aggregate_id": aggregate_key[2],
-        },
-    ).mappings().fetchone()
+            {
+                "owner_user_id": aggregate_key[0],
+                "aggregate_type": aggregate_key[1],
+                "aggregate_id": aggregate_key[2],
+            },
+        )
+        .mappings()
+        .fetchone()
+    )
     return int(row["aggregate_version"] or 0)
 
 
@@ -207,9 +219,7 @@ def _append_domain_events_in_transaction(
             event.event_id,
         )
         if existing is not None:
-            stored_events.append(
-                _validate_domain_event_retry(event, existing)
-            )
+            stored_events.append(_validate_domain_event_retry(event, existing))
             continue
 
         aggregate_key = (
@@ -223,10 +233,7 @@ def _append_domain_events_in_transaction(
                 aggregate_key,
             )
             expected_version = expected_versions.get(aggregate_key)
-            if (
-                expected_version is not None
-                and current_version != expected_version
-            ):
+            if expected_version is not None and current_version != expected_version:
                 raise DomainEventConcurrencyError(
                     "domain event aggregate version conflict: "
                     f"expected {expected_version}, found {current_version}"
@@ -400,9 +407,7 @@ def append_domain_event(
         event.aggregate_id,
     )
     expected_versions = (
-        {aggregate_key: expected_version}
-        if expected_version is not None
-        else None
+        {aggregate_key: expected_version} if expected_version is not None else None
     )
     return append_domain_events(
         [event],
@@ -434,10 +439,7 @@ def list_domain_events(
     limit: int | None = None,
 ) -> list[StoredDomainEvent]:
     """按全局序列读取租户领域事件。"""
-    if limit is not None and (
-        isinstance(limit, bool)
-        or limit < 0
-    ):
+    if limit is not None and (isinstance(limit, bool) or limit < 0):
         raise ValueError("limit must be a non-negative integer")
 
     clauses = ["owner_user_id = :owner_user_id", "sequence > :after_sequence"]
@@ -462,4 +464,3 @@ def list_domain_events(
     with db_session() as session:
         rows = session.execute(text(sql), params).mappings().fetchall()
     return [_domain_event_from_row(row) for row in rows]
-

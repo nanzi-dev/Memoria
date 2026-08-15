@@ -8,7 +8,9 @@ from zoneinfo import ZoneInfo
 
 def _parse_number(value: str, field_name: str) -> int:
     if not value or not value.isdigit():
-        raise ValueError(f"cron {field_name} field contains an invalid value: {value!r}")
+        raise ValueError(
+            f"cron {field_name} field contains an invalid value: {value!r}"
+        )
     return int(value)
 
 

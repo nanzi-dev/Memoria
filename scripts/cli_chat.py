@@ -65,9 +65,7 @@ def _ensure_character_available(character_id: str, player_id: str) -> None:
         return
     path = character_loader.CHARACTERS_DIR / f"{character_id}.json"
     if not path.exists():
-        raise SystemExit(
-            f"角色卡 '{character_id}' 在数据库和文件系统中都不存在"
-        )
+        raise SystemExit(f"角色卡 '{character_id}' 在数据库和文件系统中都不存在")
     raw_data = character_loader.normalize_character_data(
         json.loads(path.read_text(encoding="utf-8"))
     )

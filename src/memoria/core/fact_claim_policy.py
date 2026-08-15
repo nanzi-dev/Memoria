@@ -4,13 +4,15 @@ import re
 import unicodedata
 from typing import Any
 
-CLAIM_SOURCE_KINDS = frozenset({
-    "player_message",
-    "knowledge_chunk",
-    "authored_event",
-    "model_inference",
-    "legacy",
-})
+CLAIM_SOURCE_KINDS = frozenset(
+    {
+        "player_message",
+        "knowledge_chunk",
+        "authored_event",
+        "model_inference",
+        "legacy",
+    }
+)
 ADMIN_VERIFICATION_SOURCE_KIND = "admin_verification"
 EVIDENCE_SOURCE_KINDS = CLAIM_SOURCE_KINDS | {
     ADMIN_VERIFICATION_SOURCE_KIND,
@@ -62,9 +64,7 @@ def normalize_fact_text(fact_text: str) -> str:
     stable_chars = []
     for char in normalized:
         category = unicodedata.category(char)
-        stable_chars.append(
-            char if category[0] in {"L", "M", "N"} else " "
-        )
+        stable_chars.append(char if category[0] in {"L", "M", "N"} else " ")
     return re.sub(r"\s+", " ", "".join(stable_chars)).strip()
 
 
@@ -117,8 +117,7 @@ def clean_source_ids(source_ids: list[str]) -> list[str]:
     if type(source_ids) is not list or not source_ids:
         raise ValueError("source_ids must be a non-empty list of strings")
     if any(
-        type(source_id) is not str or not source_id.strip()
-        for source_id in source_ids
+        type(source_id) is not str or not source_id.strip() for source_id in source_ids
     ):
         raise ValueError("source_ids must contain only non-empty strings")
     return sorted({source_id.strip() for source_id in source_ids})
@@ -150,27 +149,20 @@ def evaluate_verification(
 ) -> dict[str, Any]:
     if type(evidence) is not list:
         raise ValueError("fact claim evidence must be a list")
-    normalized_evidence = [
-        normalize_evidence_entry(item)
-        for item in evidence
-    ]
-    high_risk = any(
-        marker in normalized_fact_text
-        for marker in HIGH_RISK_MARKERS
-    )
+    normalized_evidence = [normalize_evidence_entry(item) for item in evidence]
+    high_risk = any(marker in normalized_fact_text for marker in HIGH_RISK_MARKERS)
     qualifying_source_ids = set()
     all_source_ids = set()
     for item in normalized_evidence:
         source_kind = item["source_kind"]
         source_ids = item["source_ids"]
         all_source_ids.update(source_ids)
-        qualifies = (
-            source_kind
-            in {"authored_event", ADMIN_VERIFICATION_SOURCE_KIND}
-            or (
-                source_kind in {"player_message", "knowledge_chunk"}
-                and item["direct_support"] is True
-            )
+        qualifies = source_kind in {
+            "authored_event",
+            ADMIN_VERIFICATION_SOURCE_KIND,
+        } or (
+            source_kind in {"player_message", "knowledge_chunk"}
+            and item["direct_support"] is True
         )
         if qualifies:
             qualifying_source_ids.update(source_ids)

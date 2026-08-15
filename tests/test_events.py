@@ -1,6 +1,7 @@
 """
 事件执行器与检测器深入测试
 """
+
 import json
 import sys
 import uuid
@@ -19,10 +20,19 @@ from unittest.mock import MagicMock, Mock
 class TestEventExecutorEffects:
     def _make_context(self, **kw):
         from memoria.core.event_schema import EventContext
-        d = {"character_id":"c","player_id":"p","session_id":"s",
-             "current_affinity":50,"current_trust":30,"current_mood":"happy",
-             "player_message":"","dialogue_count":1,"total_dialogue_count":10,
-             "session_duration_minutes":5}
+
+        d = {
+            "character_id": "c",
+            "player_id": "p",
+            "session_id": "s",
+            "current_affinity": 50,
+            "current_trust": 30,
+            "current_mood": "happy",
+            "player_message": "",
+            "dialogue_count": 1,
+            "total_dialogue_count": 10,
+            "session_duration_minutes": 5,
+        }
         d.update(kw)
         return EventContext(**d)
 
@@ -30,8 +40,15 @@ class TestEventExecutorEffects:
         from memoria.core.event_schema import (
             EventDefinition,
         )
-        return EventDefinition(event_id=eid,event_name="T",trigger_condition=tc,
-                               effects=effects,priority=1,is_active=True)
+
+        return EventDefinition(
+            event_id=eid,
+            event_name="T",
+            trigger_condition=tc,
+            effects=effects,
+            priority=1,
+            is_active=True,
+        )
 
     def test_execute_modify_state(self):
         from memoria.core.event_executor import get_event_executor
@@ -41,12 +58,15 @@ class TestEventExecutorEffects:
             TriggerCondition,
             TriggerType,
         )
+
         exe = get_event_executor()
-        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=0)
-        eff = EventEffect(effect_type=EffectType.MODIFY_STATE,
-                          state_changes={"affection_level":5,"trust_level":3})
+        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=0)
+        eff = EventEffect(
+            effect_type=EffectType.MODIFY_STATE,
+            state_changes={"affection_level": 5, "trust_level": 3},
+        )
         ctx = self._make_context()
-        result = exe.execute_event(self._make_event("e1",tc,[eff]),ctx)
+        result = exe.execute_event(self._make_event("e1", tc, [eff]), ctx)
         assert result.triggered
         assert any("modify_state" in e.lower() for e in result.effects_applied)
 
@@ -58,12 +78,14 @@ class TestEventExecutorEffects:
             TriggerCondition,
             TriggerType,
         )
+
         exe = get_event_executor()
-        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=0)
-        eff = EventEffect(effect_type=EffectType.NOTIFY_PLAYER,
-                          notification_message="测试通知")
+        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=0)
+        eff = EventEffect(
+            effect_type=EffectType.NOTIFY_PLAYER, notification_message="测试通知"
+        )
         ctx = self._make_context()
-        result = exe.execute_event(self._make_event("e2",tc,[eff]),ctx)
+        result = exe.execute_event(self._make_event("e2", tc, [eff]), ctx)
         assert result.notification == "测试通知"
 
     def test_execute_change_mood(self):
@@ -74,11 +96,12 @@ class TestEventExecutorEffects:
             TriggerCondition,
             TriggerType,
         )
+
         exe = get_event_executor()
-        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=0)
-        eff = EventEffect(effect_type=EffectType.CHANGE_MOOD,target_mood="sad")
+        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=0)
+        eff = EventEffect(effect_type=EffectType.CHANGE_MOOD, target_mood="sad")
         ctx = self._make_context()
-        result = exe.execute_event(self._make_event("e3",tc,[eff]),ctx)
+        result = exe.execute_event(self._make_event("e3", tc, [eff]), ctx)
         assert result.state_changes.get("current_mood") == "sad"
 
     def test_execute_trigger_dialogue(self):
@@ -89,12 +112,14 @@ class TestEventExecutorEffects:
             TriggerCondition,
             TriggerType,
         )
+
         exe = get_event_executor()
-        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=0)
-        eff = EventEffect(effect_type=EffectType.TRIGGER_DIALOGUE,
-                          dialogue_text="你好！")
+        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=0)
+        eff = EventEffect(
+            effect_type=EffectType.TRIGGER_DIALOGUE, dialogue_text="你好！"
+        )
         ctx = self._make_context()
-        result = exe.execute_event(self._make_event("e4",tc,[eff]),ctx)
+        result = exe.execute_event(self._make_event("e4", tc, [eff]), ctx)
         assert result.dialogue_override == "你好！"
 
     def test_execute_unlock_content(self):
@@ -105,13 +130,15 @@ class TestEventExecutorEffects:
             TriggerCondition,
             TriggerType,
         )
+
         exe = get_event_executor()
-        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=0)
-        eff = EventEffect(effect_type=EffectType.UNLOCK_CONTENT,
-                          unlock_keys=["quest_intro"])
+        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=0)
+        eff = EventEffect(
+            effect_type=EffectType.UNLOCK_CONTENT, unlock_keys=["quest_intro"]
+        )
         ctx = self._make_context()
-        result = exe.execute_event(self._make_event("e5",tc,[eff]),ctx)
-        assert "quest_intro" in result.state_changes.get("unlocked_content",[])
+        result = exe.execute_event(self._make_event("e5", tc, [eff]), ctx)
+        assert "quest_intro" in result.state_changes.get("unlocked_content", [])
 
     def test_execute_add_memory(self):
         from memoria.core.event_executor import get_event_executor
@@ -121,12 +148,16 @@ class TestEventExecutorEffects:
             TriggerCondition,
             TriggerType,
         )
+
         exe = get_event_executor()
-        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=0)
-        eff = EventEffect(effect_type=EffectType.ADD_MEMORY,
-                          memory_text="test_memory",memory_importance=8)
+        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=0)
+        eff = EventEffect(
+            effect_type=EffectType.ADD_MEMORY,
+            memory_text="test_memory",
+            memory_importance=8,
+        )
         ctx = self._make_context()
-        result = exe.execute_event(self._make_event("e6",tc,[eff]),ctx)
+        result = exe.execute_event(self._make_event("e6", tc, [eff]), ctx)
         assert any("add_memory" in e.lower() for e in result.effects_applied)
 
     def test_multiple_effects(self):
@@ -137,17 +168,21 @@ class TestEventExecutorEffects:
             TriggerCondition,
             TriggerType,
         )
+
         exe = get_event_executor()
-        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=0)
+        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=0)
         effects = [
-            EventEffect(effect_type=EffectType.MODIFY_STATE,
-                        state_changes={"affection_level":3}),
-            EventEffect(effect_type=EffectType.NOTIFY_PLAYER,
-                        notification_message="完成！"),
-            EventEffect(effect_type=EffectType.CHANGE_MOOD,target_mood="excited"),
+            EventEffect(
+                effect_type=EffectType.MODIFY_STATE,
+                state_changes={"affection_level": 3},
+            ),
+            EventEffect(
+                effect_type=EffectType.NOTIFY_PLAYER, notification_message="完成！"
+            ),
+            EventEffect(effect_type=EffectType.CHANGE_MOOD, target_mood="excited"),
         ]
         ctx = self._make_context()
-        result = exe.execute_event(self._make_event("e7",tc,effects),ctx)
+        result = exe.execute_event(self._make_event("e7", tc, effects), ctx)
         assert result.triggered
         assert len(result.effects_applied) == 3
         assert result.notification == "完成！"
@@ -160,14 +195,21 @@ class TestEventExecutorEffects:
             TriggerCondition,
             TriggerType,
         )
+
         get_event_executor()
-        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=0)
-        event = EventDefinition(event_id="inactive",event_name="T",
-                                trigger_condition=tc,effects=[],is_active=False)
+        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=0)
+        event = EventDefinition(
+            event_id="inactive",
+            event_name="T",
+            trigger_condition=tc,
+            effects=[],
+            is_active=False,
+        )
         ctx = self._make_context()
         from memoria.core.event_detector import EventDetector
+
         det = EventDetector()
-        triggered = det.check_events(ctx,[event])
+        triggered = det.check_events(ctx, [event])
         assert len(triggered) == 0
 
     def test_proactive_dialogue_rejects_foreign_group_before_orchestrator(
@@ -230,7 +272,9 @@ class TestEventExecutorEffects:
         monkeypatch.setattr(
             MultiCharacterOrchestrator,
             "__init__",
-            lambda *args, **kwargs: pytest.fail("invalid participant must not be loaded"),
+            lambda *args, **kwargs: pytest.fail(
+                "invalid participant must not be loaded"
+            ),
         )
 
         with pytest.raises(ValueError, match="不是目标群聊的活跃参与者"):
@@ -339,11 +383,13 @@ def test_event_commit_rejects_proactive_message_for_foreign_session():
         "duration_ms": 1,
         "context_snapshot": "{}",
         "effects_applied": "[]",
-        "proactive_messages": [{
-            "session_id": victim_session_id,
-            "content": "must not be inserted",
-            "character_id": character_id,
-        }],
+        "proactive_messages": [
+            {
+                "session_id": victim_session_id,
+                "content": "must not be inserted",
+                "character_id": character_id,
+            }
+        ],
     }
 
     with pytest.raises(RuntimeError, match="proactive dialogue target"):
@@ -371,17 +417,33 @@ class TestEventDetectorMore:
             TriggerCondition,
             TriggerType,
         )
+
         det = EventDetector()
-        tc = TriggerCondition(trigger_type=TriggerType.KEYWORD_MATCH,
-                              keywords=["HELLO"],match_mode="any")
-        event = EventDefinition(event_id="kw",event_name="T",
-                                trigger_condition=tc,effects=[],is_active=True)
+        tc = TriggerCondition(
+            trigger_type=TriggerType.KEYWORD_MATCH, keywords=["HELLO"], match_mode="any"
+        )
+        event = EventDefinition(
+            event_id="kw",
+            event_name="T",
+            trigger_condition=tc,
+            effects=[],
+            is_active=True,
+        )
         from memoria.core.event_schema import EventContext
-        ctx = EventContext(character_id="c",player_id="p",session_id="s",
-                           current_affinity=0,current_trust=0,current_mood="neutral",
-                           player_message="hello world",dialogue_count=1,
-                           total_dialogue_count=1,session_duration_minutes=1)
-        triggered = det.check_events(ctx,[event])
+
+        ctx = EventContext(
+            character_id="c",
+            player_id="p",
+            session_id="s",
+            current_affinity=0,
+            current_trust=0,
+            current_mood="neutral",
+            player_message="hello world",
+            dialogue_count=1,
+            total_dialogue_count=1,
+            session_duration_minutes=1,
+        )
+        triggered = det.check_events(ctx, [event])
         assert len(triggered) == 1
 
     def test_affinity_eq_comparison(self):
@@ -391,17 +453,33 @@ class TestEventDetectorMore:
             TriggerCondition,
             TriggerType,
         )
+
         det = EventDetector()
-        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,
-                              threshold=50,comparison="eq")
-        event = EventDefinition(event_id="eq",event_name="T",
-                                trigger_condition=tc,effects=[],is_active=True)
+        tc = TriggerCondition(
+            trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=50, comparison="eq"
+        )
+        event = EventDefinition(
+            event_id="eq",
+            event_name="T",
+            trigger_condition=tc,
+            effects=[],
+            is_active=True,
+        )
         from memoria.core.event_schema import EventContext
-        ctx = EventContext(character_id="c",player_id="p",session_id="s",
-                           current_affinity=50,current_trust=0,current_mood="neutral",
-                           player_message="",dialogue_count=1,total_dialogue_count=1,
-                           session_duration_minutes=1)
-        triggered = det.check_events(ctx,[event])
+
+        ctx = EventContext(
+            character_id="c",
+            player_id="p",
+            session_id="s",
+            current_affinity=50,
+            current_trust=0,
+            current_mood="neutral",
+            player_message="",
+            dialogue_count=1,
+            total_dialogue_count=1,
+            session_duration_minutes=1,
+        )
+        triggered = det.check_events(ctx, [event])
         assert len(triggered) == 1
 
     def test_gt_lt_comparisons(self):
@@ -412,17 +490,52 @@ class TestEventDetectorMore:
             TriggerCondition,
             TriggerType,
         )
+
         det = EventDetector()
-        ctx = EventContext(character_id="c",player_id="p",session_id="s",
-                           current_affinity=50,current_trust=0,current_mood="neutral",
-                           player_message="",dialogue_count=1,total_dialogue_count=1,
-                           session_duration_minutes=1)
-        tc_gt = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=40,comparison="gt")
-        triggered_gt = det.check_events(ctx,[EventDefinition(event_id="gt",event_name="T",trigger_condition=tc_gt,effects=[],is_active=True)])
-        assert len(triggered_gt)==1
-        tc_lt = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=60,comparison="lt")
-        triggered_lt = det.check_events(ctx,[EventDefinition(event_id="lt",event_name="T",trigger_condition=tc_lt,effects=[],is_active=True)])
-        assert len(triggered_lt)==1
+        ctx = EventContext(
+            character_id="c",
+            player_id="p",
+            session_id="s",
+            current_affinity=50,
+            current_trust=0,
+            current_mood="neutral",
+            player_message="",
+            dialogue_count=1,
+            total_dialogue_count=1,
+            session_duration_minutes=1,
+        )
+        tc_gt = TriggerCondition(
+            trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=40, comparison="gt"
+        )
+        triggered_gt = det.check_events(
+            ctx,
+            [
+                EventDefinition(
+                    event_id="gt",
+                    event_name="T",
+                    trigger_condition=tc_gt,
+                    effects=[],
+                    is_active=True,
+                )
+            ],
+        )
+        assert len(triggered_gt) == 1
+        tc_lt = TriggerCondition(
+            trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=60, comparison="lt"
+        )
+        triggered_lt = det.check_events(
+            ctx,
+            [
+                EventDefinition(
+                    event_id="lt",
+                    event_name="T",
+                    trigger_condition=tc_lt,
+                    effects=[],
+                    is_active=True,
+                )
+            ],
+        )
+        assert len(triggered_lt) == 1
 
     def test_time_based_zero_minutes_matches_zero_duration(self):
         from memoria.core.event_detector import EventDetector
@@ -546,6 +659,7 @@ class TestEventDetectorGroupAggregation:
 class TestEventDeepIntegration:
     def _context(self):
         from memoria.core.event_schema import EventContext
+
         return EventContext(
             character_id="chain_c",
             player_id="chain_p",
@@ -570,6 +684,7 @@ class TestEventDeepIntegration:
             TriggerCondition,
             TriggerType,
         )
+
         suffix = uuid.uuid4().hex[:8]
         first_id = f"chain_first_{suffix}"
         second_id = f"chain_second_{suffix}"
@@ -577,15 +692,26 @@ class TestEventDeepIntegration:
         first = EventDefinition(
             event_id=first_id,
             event_name="第一段",
-            trigger_condition=TriggerCondition(trigger_type=TriggerType.KEYWORD_MATCH, keywords=["线索"]),
-            effects=[EventEffect(effect_type=EffectType.TRIGGER_EVENT, next_event_id=second_id)],
+            trigger_condition=TriggerCondition(
+                trigger_type=TriggerType.KEYWORD_MATCH, keywords=["线索"]
+            ),
+            effects=[
+                EventEffect(
+                    effect_type=EffectType.TRIGGER_EVENT, next_event_id=second_id
+                )
+            ],
         )
         second = EventDefinition(
             event_id=second_id,
             event_name="第二段",
-            trigger_condition=TriggerCondition(trigger_type=TriggerType.KEYWORD_MATCH, keywords=["不会出现"]),
+            trigger_condition=TriggerCondition(
+                trigger_type=TriggerType.KEYWORD_MATCH, keywords=["不会出现"]
+            ),
             effects=[
-                EventEffect(effect_type=EffectType.NOTIFY_PLAYER, notification_message="链式事件完成"),
+                EventEffect(
+                    effect_type=EffectType.NOTIFY_PLAYER,
+                    notification_message="链式事件完成",
+                ),
                 EventEffect(
                     effect_type=EffectType.UPDATE_EVENT_PROGRESS,
                     progress=1,
@@ -594,10 +720,13 @@ class TestEventDeepIntegration:
             ],
         )
 
-        results = event_runtime.detect_and_execute_events(self._context(), [first, second])
+        results = event_runtime.detect_and_execute_events(
+            self._context(), [first, second]
+        )
         assert [r.event_id for r in results] == [first_id, second_id]
 
         from memoria.db import repository
+
         state = repository.get_event_context_state(second_id, "chain_c", "chain_p")
         assert state is not None
         assert state["status"] == "completed"
@@ -609,12 +738,29 @@ class TestEventDeepIntegration:
         effect = EventEffect(
             effect_type=EffectType.BRANCH_EVENT,
             branch_conditions=[
-                {"event_id": "low", "condition": {"trigger_type": "trust_threshold", "threshold": 10, "comparison": "lt"}},
-                {"event_id": "high", "condition": {"trigger_type": "trust_threshold", "threshold": 50, "comparison": "gte"}},
+                {
+                    "event_id": "low",
+                    "condition": {
+                        "trigger_type": "trust_threshold",
+                        "threshold": 10,
+                        "comparison": "lt",
+                    },
+                },
+                {
+                    "event_id": "high",
+                    "condition": {
+                        "trigger_type": "trust_threshold",
+                        "threshold": 50,
+                        "comparison": "gte",
+                    },
+                },
             ],
         )
         from memoria.core.event_schema import EventTriggerResult
-        result = EventTriggerResult(event_id="branch", event_name="分支", triggered=True)
+
+        result = EventTriggerResult(
+            event_id="branch", event_name="分支", triggered=True
+        )
         EventExecutor()._branch_next_event(effect, self._context(), result)
         assert result.chained_events == ["high"]
 
@@ -640,7 +786,9 @@ class TestEventDeepIntegration:
                 },
             ],
         )
-        result = EventTriggerResult(event_id="branch", event_name="分支", triggered=True)
+        result = EventTriggerResult(
+            event_id="branch", event_name="分支", triggered=True
+        )
 
         EventExecutor()._branch_next_event(effect, self._context(), result)
 
@@ -710,7 +858,9 @@ class TestEventDeepIntegration:
         assert repository.get_event_schedule(event_id, "c1", owner_a) is None
 
         assert repository.get_event_definition(owner_b, event_id) is not None
-        assert len(repository.get_event_trigger_history(event_id, player_id=owner_b)) == 1
+        assert (
+            len(repository.get_event_trigger_history(event_id, player_id=owner_b)) == 1
+        )
         assert repository.get_event_context_state(event_id, "c1", owner_b) is not None
         assert repository.get_event_schedule(event_id, "c1", owner_b) is not None
 
@@ -855,29 +1005,32 @@ class TestEventReliability:
             character_id=character_id,
             player_id=player_id,
         )
-        event = self._event(event_id, [
-            EventEffect(
-                effect_type=EffectType.MODIFY_STATE,
-                state_changes={"affection_level": 4},
-            ),
-            EventEffect(
-                effect_type=EffectType.ADD_MEMORY,
-                memory_text=f"唯一记忆 {suffix}",
-            ),
-            EventEffect(
-                effect_type=EffectType.UNLOCK_CONTENT,
-                unlock_keys=[f"unlock_{suffix}"],
-            ),
-            EventEffect(
-                effect_type=EffectType.NOTIFY_PLAYER,
-                notification_message=f"唯一通知 {suffix}",
-            ),
-            EventEffect(
-                effect_type=EffectType.UPDATE_EVENT_PROGRESS,
-                progress=0.5,
-                event_status="active",
-            ),
-        ])
+        event = self._event(
+            event_id,
+            [
+                EventEffect(
+                    effect_type=EffectType.MODIFY_STATE,
+                    state_changes={"affection_level": 4},
+                ),
+                EventEffect(
+                    effect_type=EffectType.ADD_MEMORY,
+                    memory_text=f"唯一记忆 {suffix}",
+                ),
+                EventEffect(
+                    effect_type=EffectType.UNLOCK_CONTENT,
+                    unlock_keys=[f"unlock_{suffix}"],
+                ),
+                EventEffect(
+                    effect_type=EffectType.NOTIFY_PLAYER,
+                    notification_message=f"唯一通知 {suffix}",
+                ),
+                EventEffect(
+                    effect_type=EffectType.UPDATE_EVENT_PROGRESS,
+                    progress=0.5,
+                    event_status="active",
+                ),
+            ],
+        )
         repository.save_event_definition(
             owner_user_id=player_id,
             event_id=event_id,
@@ -895,17 +1048,30 @@ class TestEventReliability:
         assert first[0].status == "succeeded"
         assert second[0].status == "skipped"
         assert second[0].deduplicated is True
-        assert repository.get_long_term_facts(character_id, player_id, 10).count(
-            f"唯一记忆 {suffix}"
-        ) == 1
+        assert (
+            repository.get_long_term_facts(character_id, player_id, 10).count(
+                f"唯一记忆 {suffix}"
+            )
+            == 1
+        )
         assert repository.list_event_unlocks(player_id, character_id) == [
             f"unlock_{suffix}"
         ]
         assert len(repository.list_player_event_inbox(player_id)) == 1
-        assert len(repository.get_event_trigger_history(event_id=event_id, player_id=player_id)) == 1
-        assert repository.get_event_context_state(event_id, character_id, player_id)[
-            "progress"
-        ] == 0.5
+        assert (
+            len(
+                repository.get_event_trigger_history(
+                    event_id=event_id, player_id=player_id
+                )
+            )
+            == 1
+        )
+        assert (
+            repository.get_event_context_state(event_id, character_id, player_id)[
+                "progress"
+            ]
+            == 0.5
+        )
         metrics = repository.get_event_execution_metrics(player_id, event_id)
         assert metrics["succeeded_count"] == 1
         assert metrics["deduplicated_count"] == 1
@@ -1082,9 +1248,7 @@ class TestEventReliability:
         repository.commit_event_execution_batch(
             player_id=player_id,
             execution_key=execution_key,
-            trigger_source=(
-                "multi_dialogue" if turn_kind == "multi" else "dialogue"
-            ),
+            trigger_source=("multi_dialogue" if turn_kind == "multi" else "dialogue"),
             results_data="[]",
             executions=[],
             dialogue_turn={
@@ -1220,23 +1384,28 @@ class TestEventReliability:
 
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = [
-                executor.submit(run, f"guard:{suffix}:{index}")
-                for index in range(2)
+                executor.submit(run, f"guard:{suffix}:{index}") for index in range(2)
             ]
             results = [future.result(timeout=10) for future in futures]
 
         assert sorted(result.status for result in results) == ["skipped", "succeeded"]
-        assert repository.get_long_term_facts(character_id, player_id, 10).count(
-            memory_text
-        ) == 1
+        assert (
+            repository.get_long_term_facts(character_id, player_id, 10).count(
+                memory_text
+            )
+            == 1
+        )
         assert repository.list_event_unlocks(player_id, character_id) == [unlock_key]
         assert len(repository.list_player_event_inbox(player_id)) == 1
-        assert len(
-            repository.get_event_trigger_history(
-                event_id=event_id,
-                player_id=player_id,
+        assert (
+            len(
+                repository.get_event_trigger_history(
+                    event_id=event_id,
+                    player_id=player_id,
+                )
             )
-        ) == 1
+            == 1
+        )
 
     def test_failed_effect_rolls_back_every_planned_side_effect(self):
         from memoria.core import event_runtime
@@ -1248,25 +1417,30 @@ class TestEventReliability:
         character_id = f"rollback_character_{suffix}"
         event_id = f"rollback_event_{suffix}"
         context = self._context(character_id=character_id, player_id=player_id)
-        event = self._event(event_id, [
-            EventEffect(
-                effect_type=EffectType.MODIFY_STATE,
-                state_changes={"affection_level": 5},
-            ),
-            EventEffect(
-                effect_type=EffectType.ADD_MEMORY,
-                memory_text=f"不应出现的记忆 {suffix}",
-            ),
-            EventEffect(
-                effect_type=EffectType.UNLOCK_CONTENT,
-                unlock_keys=[f"blocked_{suffix}"],
-            ),
-            EventEffect(
-                effect_type=EffectType.NOTIFY_PLAYER,
-                notification_message=f"不应出现的通知 {suffix}",
-            ),
-            EventEffect(effect_type=EffectType.GRANT_ITEM, item_id="missing-system"),
-        ])
+        event = self._event(
+            event_id,
+            [
+                EventEffect(
+                    effect_type=EffectType.MODIFY_STATE,
+                    state_changes={"affection_level": 5},
+                ),
+                EventEffect(
+                    effect_type=EffectType.ADD_MEMORY,
+                    memory_text=f"不应出现的记忆 {suffix}",
+                ),
+                EventEffect(
+                    effect_type=EffectType.UNLOCK_CONTENT,
+                    unlock_keys=[f"blocked_{suffix}"],
+                ),
+                EventEffect(
+                    effect_type=EffectType.NOTIFY_PLAYER,
+                    notification_message=f"不应出现的通知 {suffix}",
+                ),
+                EventEffect(
+                    effect_type=EffectType.GRANT_ITEM, item_id="missing-system"
+                ),
+            ],
+        )
         repository.save_runtime_state(character_id, player_id, 20, 30, "neutral")
         repository.save_event_definition(
             owner_user_id=player_id,
@@ -1287,22 +1461,34 @@ class TestEventReliability:
         assert repository.get_long_term_facts(character_id, player_id, 10) == []
         assert repository.list_event_unlocks(player_id, character_id) == []
         assert repository.list_player_event_inbox(player_id) == []
-        assert repository.get_event_trigger_history(event_id=event_id, player_id=player_id) == []
-        assert repository.get_event_context_state(event_id, character_id, player_id) is None
+        assert (
+            repository.get_event_trigger_history(event_id=event_id, player_id=player_id)
+            == []
+        )
+        assert (
+            repository.get_event_context_state(event_id, character_id, player_id)
+            is None
+        )
         runtime = repository.get_runtime_state(character_id, player_id, MagicMock())
         assert runtime["affection_level"] == 20
-        assert repository.get_event_definition(player_id, event_id)["trigger_count"] == 0
+        assert (
+            repository.get_event_definition(player_id, event_id)["trigger_count"] == 0
+        )
 
     def test_turn_limit_only_constrains_the_event_that_declares_it(self):
         from memoria.core.event_detector import EventDetector
 
         context = self._context()
         events = [
-            self._event(f"limit_{index}", [], priority=10 - index, max_triggers_per_turn=limit)
+            self._event(
+                f"limit_{index}", [], priority=10 - index, max_triggers_per_turn=limit
+            )
             for index, limit in enumerate([1, 20, 20])
         ]
         # limit_0 的上限只约束它自己，不应压制后续高配额事件
-        assert [event.event_id for event in EventDetector().check_events(context, events)] == [
+        assert [
+            event.event_id for event in EventDetector().check_events(context, events)
+        ] == [
             "limit_0",
             "limit_1",
             "limit_2",
@@ -1310,7 +1496,9 @@ class TestEventReliability:
 
         # 低配额事件排在后面时，会因本回合已触发数达到自身上限而被跳过
         events_low_priority_last = [
-            self._event(f"tail_{index}", [], priority=10 - index, max_triggers_per_turn=limit)
+            self._event(
+                f"tail_{index}", [], priority=10 - index, max_triggers_per_turn=limit
+            )
             for index, limit in enumerate([20, 20, 1])
         ]
         # 修复后语义：每个事件的 max_triggers_per_turn 只约束自身，
@@ -1328,13 +1516,15 @@ class TestEventReliability:
             TriggerType,
         )
 
-        context = self._context().model_copy(update={
-            "previous_affinity": 49,
-            "current_affinity": 51,
-            "affinity_delta": 2,
-            "event_history": [{"event_id": "prerequisite", "status": "succeeded"}],
-            "world_time": "2026-07-14T23:30:00+08:00",
-        })
+        context = self._context().model_copy(
+            update={
+                "previous_affinity": 49,
+                "current_affinity": 51,
+                "affinity_delta": 2,
+                "event_history": [{"event_id": "prerequisite", "status": "succeeded"}],
+                "world_time": "2026-07-14T23:30:00+08:00",
+            }
+        )
         conditions = [
             TriggerCondition(
                 trigger_type=TriggerType.AFFINITY_THRESHOLD,
@@ -1546,7 +1736,11 @@ class TestEventReliability:
             character_event.event_id,
             excluded_by_limit.event_id,
         ]
-        assert [result.character_id for result in results] == [character_a, character_b, character_a]
+        assert [result.character_id for result in results] == [
+            character_a,
+            character_b,
+            character_a,
+        ]
         for result in results:
             assert [item.message for item in result.notifications] == [
                 f"{result.event_id}-notice-a",
@@ -1556,14 +1750,22 @@ class TestEventReliability:
                 f"{result.event_id}-dialogue-a",
                 f"{result.event_id}-dialogue-b",
             ]
-        assert len(repository.get_event_trigger_history(
-            event_id=global_event.event_id,
-            player_id=player_id,
-        )) == 1
-        assert repository.get_event_execution_metrics(
-            player_id,
-            global_event.event_id,
-        )["succeeded_count"] == 1
+        assert (
+            len(
+                repository.get_event_trigger_history(
+                    event_id=global_event.event_id,
+                    player_id=player_id,
+                )
+            )
+            == 1
+        )
+        assert (
+            repository.get_event_execution_metrics(
+                player_id,
+                global_event.event_id,
+            )["succeeded_count"]
+            == 1
+        )
 
     def test_player_exclusive_group_rejects_second_event_across_turns(self):
         from memoria.core import event_runtime
@@ -1614,10 +1816,13 @@ class TestEventReliability:
 
         assert first_result.status == "succeeded"
         assert second_result.status == "skipped"
-        assert repository.get_event_exclusive_group_selection(
-            player_id,
-            "ending",
-        )["selected_event_id"] == first.event_id
+        assert (
+            repository.get_event_exclusive_group_selection(
+                player_id,
+                "ending",
+            )["selected_event_id"]
+            == first.event_id
+        )
 
     def test_selected_event_group_update_releases_old_group_selection(self):
         from memoria.core import event_runtime
@@ -1649,14 +1854,17 @@ class TestEventReliability:
             exclusive_group=old_group,
             exclusive_scope="player",
         )
-        assert event_runtime.detect_and_execute_events(
-            self._context(
-                execution_key=f"updated-group:{suffix}:selected",
-                character_id=character_id,
-                player_id=player_id,
-            ),
-            [selected_event],
-        )[0].status == "succeeded"
+        assert (
+            event_runtime.detect_and_execute_events(
+                self._context(
+                    execution_key=f"updated-group:{suffix}:selected",
+                    character_id=character_id,
+                    player_id=player_id,
+                ),
+                [selected_event],
+            )[0].status
+            == "succeeded"
+        )
 
         assert repository.save_event_definition(
             owner_user_id=player_id,
@@ -1677,10 +1885,13 @@ class TestEventReliability:
             exclusive_scope="player",
         )
 
-        assert repository.get_event_exclusive_group_selection(
-            player_id,
-            old_group,
-        ) is None
+        assert (
+            repository.get_event_exclusive_group_selection(
+                player_id,
+                old_group,
+            )
+            is None
+        )
         competing_result = event_runtime.detect_and_execute_events(
             self._context(
                 execution_key=f"updated-group:{suffix}:competing",
@@ -1690,10 +1901,13 @@ class TestEventReliability:
             [competing_event],
         )[0]
         assert competing_result.status == "skipped"
-        assert repository.get_event_exclusive_group_selection(
-            player_id,
-            new_group,
-        )["selected_event_id"] == selected_event.event_id
+        assert (
+            repository.get_event_exclusive_group_selection(
+                player_id,
+                new_group,
+            )["selected_event_id"]
+            == selected_event.event_id
+        )
 
     def test_selected_event_scope_update_to_turn_releases_player_selection(self):
         from memoria.core import event_runtime
@@ -1724,14 +1938,17 @@ class TestEventReliability:
             exclusive_group=exclusive_group,
             exclusive_scope="player",
         )
-        assert event_runtime.detect_and_execute_events(
-            self._context(
-                execution_key=f"updated-scope:{suffix}:selected",
-                character_id=character_id,
-                player_id=player_id,
-            ),
-            [selected_event],
-        )[0].status == "succeeded"
+        assert (
+            event_runtime.detect_and_execute_events(
+                self._context(
+                    execution_key=f"updated-scope:{suffix}:selected",
+                    character_id=character_id,
+                    player_id=player_id,
+                ),
+                [selected_event],
+            )[0].status
+            == "succeeded"
+        )
 
         assert repository.save_event_definition(
             owner_user_id=player_id,
@@ -1752,10 +1969,13 @@ class TestEventReliability:
             exclusive_scope="player",
         )
 
-        assert repository.get_event_exclusive_group_selection(
-            player_id,
-            exclusive_group,
-        ) is None
+        assert (
+            repository.get_event_exclusive_group_selection(
+                player_id,
+                exclusive_group,
+            )
+            is None
+        )
         competing_result = event_runtime.detect_and_execute_events(
             self._context(
                 execution_key=f"updated-scope:{suffix}:competing",
@@ -1765,10 +1985,13 @@ class TestEventReliability:
             [competing_event],
         )[0]
         assert competing_result.status == "succeeded"
-        assert repository.get_event_exclusive_group_selection(
-            player_id,
-            exclusive_group,
-        )["selected_event_id"] == competing_event.event_id
+        assert (
+            repository.get_event_exclusive_group_selection(
+                player_id,
+                exclusive_group,
+            )["selected_event_id"]
+            == competing_event.event_id
+        )
 
     @pytest.mark.parametrize(
         ("updated_group", "updated_scope"),
@@ -1839,10 +2062,13 @@ class TestEventReliability:
             executions=executions,
         )
 
-        assert repository.get_event_exclusive_group_selection(
-            player_id,
-            old_group,
-        ) is None
+        assert (
+            repository.get_event_exclusive_group_selection(
+                player_id,
+                old_group,
+            )
+            is None
+        )
 
     def test_turn_exclusive_group_allows_different_event_on_later_turn(self):
         from memoria.core import event_runtime
@@ -1883,10 +2109,13 @@ class TestEventReliability:
         ]
 
         assert [result.status for result in results] == ["succeeded", "succeeded"]
-        assert repository.get_event_exclusive_group_selection(
-            player_id,
-            "revelation",
-        ) is None
+        assert (
+            repository.get_event_exclusive_group_selection(
+                player_id,
+                "revelation",
+            )
+            is None
+        )
 
     def test_concurrent_player_exclusive_group_commits_only_one_event(
         self,
@@ -1950,13 +2179,18 @@ class TestEventReliability:
             "ending",
         )
         assert selected["selected_event_id"] in {event.event_id for event in events}
-        assert sum(
-            len(repository.get_event_trigger_history(
-                event_id=event.event_id,
-                player_id=player_id,
-            ))
-            for event in events
-        ) == 1
+        assert (
+            sum(
+                len(
+                    repository.get_event_trigger_history(
+                        event_id=event.event_id,
+                        player_id=player_id,
+                    )
+                )
+                for event in events
+            )
+            == 1
+        )
 
     @pytest.mark.parametrize("failure_point", ["context_state", "execution_record"])
     def test_planning_exception_releases_event_claims(

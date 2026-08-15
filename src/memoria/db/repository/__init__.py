@@ -8,6 +8,7 @@ existing bare-name calls continue to work at runtime.
 Monkeypatching ``repository.<symbol>`` also propagates into every domain
 submodule, matching monolith behavior where tests patch the package surface.
 """
+
 from __future__ import annotations
 
 import sys

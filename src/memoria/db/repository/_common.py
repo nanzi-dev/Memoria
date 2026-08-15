@@ -8,6 +8,7 @@
 - 文本去重引擎（``_normalize`` / ``_text_similarity`` / ``_dedup_check``）
 - 各类序列化 / 反序列化辅助函数
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -33,14 +34,17 @@ except ImportError:  # pragma: no cover
 # 延迟导入引擎（避免循环依赖）
 # ---------------------------------------------------------------------------
 
+
 def _get_engine():
     from memoria.db.engine import get_engine as _ge
+
     return _ge()
 
 
 # ===========================================================================
 # 异常 & 常量
 # ===========================================================================
+
 
 class AdminBootstrapUnavailable(RuntimeError):
     """管理员初始化名额已被占用。"""
@@ -58,6 +62,7 @@ def _auth_token_storage_key(token: str) -> str:
 # ===========================================================================
 # 时间 / 序列化工具
 # ===========================================================================
+
 
 def _now() -> str:
     """统一时间格式（UTC ISO8601）"""
@@ -109,6 +114,7 @@ def _decode_message_row(row) -> dict:
 # 数据库类型检测
 # ===========================================================================
 
+
 def _is_postgres_enabled() -> bool:
     database_url = (configs.database_url or "").strip().lower()
     return database_url.startswith(("postgresql://", "postgres://", "postgresql+"))
@@ -118,6 +124,7 @@ def _database_name() -> str:
     if not _is_postgres_enabled():
         return configs.database_path
     from urllib.parse import urlsplit
+
     parsed = urlsplit(configs.database_url)
     return f"{parsed.hostname or 'postgres'}{parsed.path or ''}"
 
@@ -126,11 +133,12 @@ def _database_name() -> str:
 # 文本去重引擎
 # ===========================================================================
 
+
 def _normalize(text: str) -> str:
     """归一化文本"""
     if not text:
         return ""
-    return re.sub(r'\s+', ' ', text.strip().lower())
+    return re.sub(r"\s+", " ", text.strip().lower())
 
 
 def _text_similarity(a: str, b: str) -> float:
@@ -165,10 +173,14 @@ def _dedup_check(conn, table, text_col, text, where_clause, params, threshold=0.
     norm = _normalize(text)
     if len(norm) < 2:
         return None
-    rows = conn.execute(
-        _text(f"SELECT *, {text_col} as _cmp FROM {table} WHERE {where_clause}"),
-        params,
-    ).mappings().fetchall()
+    rows = (
+        conn.execute(
+            _text(f"SELECT *, {text_col} as _cmp FROM {table} WHERE {where_clause}"),
+            params,
+        )
+        .mappings()
+        .fetchall()
+    )
     for row in rows:
         if _text_similarity(text, row["_cmp"]) >= threshold:
             return dict(row)
@@ -210,6 +222,7 @@ class _PgRawConn:
         # psycopg3 默认行工厂是 tuple_row；设为 dict_row 以支持 row["col"] 访问
         try:
             from psycopg.rows import dict_row
+
             self._dbapi.row_factory = dict_row
         except ImportError:  # pragma: no cover
             pass
@@ -255,7 +268,9 @@ def get_conn():
     engine = _get_engine()
     if engine.dialect.name == "sqlite":
         conn = sqlite3.connect(
-            configs.database_path, timeout=30, check_same_thread=False,
+            configs.database_path,
+            timeout=30,
+            check_same_thread=False,
         )
         conn.row_factory = sqlite3.Row
         if configs.database_path not in _wal_configured_paths:
@@ -288,9 +303,11 @@ def get_conn():
         finally:
             raw.close()
 
+
 # ===========================================================================
 # ORM 会话管理 — 新代码使用此接口
 # ===========================================================================
+
 
 def db_session():
     """
@@ -304,6 +321,7 @@ def db_session():
     自动处理 commit / rollback / close。
     """
     from memoria.db.engine import get_session as _gs
+
     return _gs()
 
 
@@ -311,9 +329,11 @@ def db_session():
 # 初始化
 # ===========================================================================
 
+
 def init_db():
     """初始化数据库结构（通过 SQLAlchemy ``create_all`` + 迁移钩子）。"""
     from memoria.db.engine import init_db as _idb
+
     _idb()
 
     from sqlalchemy import text as _text
@@ -323,48 +343,57 @@ def init_db():
     is_pg = engine.dialect.name == "postgresql"
     with engine.connect() as conn:
         if is_pg:
-            conn.execute(_text(
-                "ALTER TABLE session ADD COLUMN IF NOT EXISTS story_id TEXT"
-            ))
-            conn.execute(_text(
-                "ALTER TABLE event_definition ADD COLUMN IF NOT EXISTS story_id TEXT"
-            ))
-            conn.execute(_text(
-                "ALTER TABLE event_definition ADD COLUMN IF NOT EXISTS exclusive_scope TEXT NOT NULL DEFAULT 'turn'"
-            ))
-            conn.execute(_text(
-                "ALTER TABLE character_card ADD COLUMN IF NOT EXISTS avatar_revision TEXT"
-            ))
+            conn.execute(
+                _text("ALTER TABLE session ADD COLUMN IF NOT EXISTS story_id TEXT")
+            )
+            conn.execute(
+                _text(
+                    "ALTER TABLE event_definition ADD COLUMN IF NOT EXISTS story_id TEXT"
+                )
+            )
+            conn.execute(
+                _text(
+                    "ALTER TABLE event_definition ADD COLUMN IF NOT EXISTS exclusive_scope TEXT NOT NULL DEFAULT 'turn'"
+                )
+            )
+            conn.execute(
+                _text(
+                    "ALTER TABLE character_card ADD COLUMN IF NOT EXISTS avatar_revision TEXT"
+                )
+            )
         else:
             session_columns = {
-                row[1] for row in conn.execute(
-                    _text("PRAGMA table_info(session)")
-                ).fetchall()
+                row[1]
+                for row in conn.execute(_text("PRAGMA table_info(session)")).fetchall()
             }
             if "story_id" not in session_columns:
                 conn.execute(_text("ALTER TABLE session ADD COLUMN story_id TEXT"))
             event_columns = {
-                row[1] for row in conn.execute(
+                row[1]
+                for row in conn.execute(
                     _text("PRAGMA table_info(event_definition)")
                 ).fetchall()
             }
             if "story_id" not in event_columns:
-                conn.execute(_text(
-                    "ALTER TABLE event_definition ADD COLUMN story_id TEXT"
-                ))
+                conn.execute(
+                    _text("ALTER TABLE event_definition ADD COLUMN story_id TEXT")
+                )
             if "exclusive_scope" not in event_columns:
-                conn.execute(_text(
-                    "ALTER TABLE event_definition ADD COLUMN exclusive_scope TEXT NOT NULL DEFAULT 'turn'"
-                ))
+                conn.execute(
+                    _text(
+                        "ALTER TABLE event_definition ADD COLUMN exclusive_scope TEXT NOT NULL DEFAULT 'turn'"
+                    )
+                )
             character_columns = {
-                row[1] for row in conn.execute(
+                row[1]
+                for row in conn.execute(
                     _text("PRAGMA table_info(character_card)")
                 ).fetchall()
             }
             if "avatar_revision" not in character_columns:
-                conn.execute(_text(
-                    "ALTER TABLE character_card ADD COLUMN avatar_revision TEXT"
-                ))
+                conn.execute(
+                    _text("ALTER TABLE character_card ADD COLUMN avatar_revision TEXT")
+                )
         conn.commit()
 
     # ── 去重索引 ──
@@ -373,21 +402,25 @@ def init_db():
     # 异常时记录而非静默吞掉。
     with engine.connect() as conn:
         try:
-            conn.execute(_text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_summary_unique "
-                "ON session_summary(session_id, character_id, player_id)"
-            ))
+            conn.execute(
+                _text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_summary_unique "
+                    "ON session_summary(session_id, character_id, player_id)"
+                )
+            )
         except Exception:
             logger.warning(
                 "创建唯一索引 idx_summary_unique 失败，跳过（旧库可能存在重复行）",
                 exc_info=True,
             )
         try:
-            conn.execute(_text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_group_unread "
-                "ON player_event_inbox(player_id, group_thread_id) "
-                "WHERE event_type = 'group_message' AND read_at IS NULL"
-            ))
+            conn.execute(
+                _text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_group_unread "
+                    "ON player_event_inbox(player_id, group_thread_id) "
+                    "WHERE event_type = 'group_message' AND read_at IS NULL"
+                )
+            )
         except Exception:
             logger.warning(
                 "创建部分唯一索引 idx_inbox_group_unread 失败，跳过",
@@ -399,6 +432,7 @@ def init_db():
 # ===========================================================================
 # 向后兼容辅助（已迁移到 SQLAlchemy 的模块不再需要）
 # ===========================================================================
+
 
 def _append_postgres_clause(sql: str, clause: str) -> str:
     """在 SQL 语句末尾追加子句（如 ``FOR UPDATE SKIP LOCKED``）。"""
@@ -454,6 +488,7 @@ def _prepare_postgres_sql(sql: str) -> str:
 # ===========================================================================
 # 过渡辅助：从 SQLAlchemy 会话获取原始 DBAPI 连接
 # ===========================================================================
+
 
 @contextmanager
 def get_raw_conn():

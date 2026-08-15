@@ -15,32 +15,200 @@ logger = logging.getLogger(__name__)
 _RECENT_MESSAGE_WINDOW = 12
 _EXPERTISE_DOMAINS = (
     (
-        ("医生", "医师", "护士", "治疗师", "药师", "医疗", "急救", "doctor", "medic", "nurse", "healer"),
-        ("急救", "受伤", "伤口", "包扎", "治疗", "诊断", "中毒", "药物", "生病", "medical", "injury", "wound", "heal"),
+        (
+            "医生",
+            "医师",
+            "护士",
+            "治疗师",
+            "药师",
+            "医疗",
+            "急救",
+            "doctor",
+            "medic",
+            "nurse",
+            "healer",
+        ),
+        (
+            "急救",
+            "受伤",
+            "伤口",
+            "包扎",
+            "治疗",
+            "诊断",
+            "中毒",
+            "药物",
+            "生病",
+            "medical",
+            "injury",
+            "wound",
+            "heal",
+        ),
     ),
     (
-        ("侦探", "调查员", "警察", "记者", "情报", "侦查", "detective", "investigator", "police", "journalist"),
-        ("调查", "线索", "证据", "推理", "嫌疑", "真相", "追踪", "案发", "investigate", "clue", "evidence", "suspect"),
+        (
+            "侦探",
+            "调查员",
+            "警察",
+            "记者",
+            "情报",
+            "侦查",
+            "detective",
+            "investigator",
+            "police",
+            "journalist",
+        ),
+        (
+            "调查",
+            "线索",
+            "证据",
+            "推理",
+            "嫌疑",
+            "真相",
+            "追踪",
+            "案发",
+            "investigate",
+            "clue",
+            "evidence",
+            "suspect",
+        ),
     ),
     (
-        ("工程师", "机械师", "程序员", "科学家", "技术员", "engineer", "mechanic", "programmer", "scientist"),
-        ("机械", "机器", "设备", "修理", "故障", "代码", "系统", "技术", "engine", "machine", "repair", "code", "system"),
+        (
+            "工程师",
+            "机械师",
+            "程序员",
+            "科学家",
+            "技术员",
+            "engineer",
+            "mechanic",
+            "programmer",
+            "scientist",
+        ),
+        (
+            "机械",
+            "机器",
+            "设备",
+            "修理",
+            "故障",
+            "代码",
+            "系统",
+            "技术",
+            "engine",
+            "machine",
+            "repair",
+            "code",
+            "system",
+        ),
     ),
     (
-        ("战士", "士兵", "骑士", "护卫", "军人", "保镖", "warrior", "soldier", "knight", "guard"),
-        ("战斗", "敌人", "攻击", "防守", "武器", "护送", "危险", "作战", "fight", "enemy", "attack", "defend", "weapon"),
+        (
+            "战士",
+            "士兵",
+            "骑士",
+            "护卫",
+            "军人",
+            "保镖",
+            "warrior",
+            "soldier",
+            "knight",
+            "guard",
+        ),
+        (
+            "战斗",
+            "敌人",
+            "攻击",
+            "防守",
+            "武器",
+            "护送",
+            "危险",
+            "作战",
+            "fight",
+            "enemy",
+            "attack",
+            "defend",
+            "weapon",
+        ),
     ),
     (
-        ("法师", "巫师", "术士", "魔法师", "牧师", "wizard", "mage", "sorcerer", "priest"),
-        ("魔法", "法术", "咒语", "诅咒", "灵异", "仪式", "神术", "magic", "spell", "curse", "ritual"),
+        (
+            "法师",
+            "巫师",
+            "术士",
+            "魔法师",
+            "牧师",
+            "wizard",
+            "mage",
+            "sorcerer",
+            "priest",
+        ),
+        (
+            "魔法",
+            "法术",
+            "咒语",
+            "诅咒",
+            "灵异",
+            "仪式",
+            "神术",
+            "magic",
+            "spell",
+            "curse",
+            "ritual",
+        ),
     ),
     (
-        ("向导", "导航员", "船长", "猎人", "斥候", "guide", "navigator", "captain", "hunter", "scout"),
-        ("路线", "地图", "方向", "带路", "追踪", "野外", "航行", "迷路", "route", "map", "navigate", "track"),
+        (
+            "向导",
+            "导航员",
+            "船长",
+            "猎人",
+            "斥候",
+            "guide",
+            "navigator",
+            "captain",
+            "hunter",
+            "scout",
+        ),
+        (
+            "路线",
+            "地图",
+            "方向",
+            "带路",
+            "追踪",
+            "野外",
+            "航行",
+            "迷路",
+            "route",
+            "map",
+            "navigate",
+            "track",
+        ),
     ),
     (
-        ("外交官", "律师", "商人", "谈判专家", "贵族", "diplomat", "lawyer", "merchant", "negotiator"),
-        ("谈判", "交易", "价格", "法律", "协议", "交涉", "合同", "外交", "negotiate", "trade", "law", "contract"),
+        (
+            "外交官",
+            "律师",
+            "商人",
+            "谈判专家",
+            "贵族",
+            "diplomat",
+            "lawyer",
+            "merchant",
+            "negotiator",
+        ),
+        (
+            "谈判",
+            "交易",
+            "价格",
+            "法律",
+            "协议",
+            "交涉",
+            "合同",
+            "外交",
+            "negotiate",
+            "trade",
+            "law",
+            "contract",
+        ),
     ),
 )
 
@@ -53,11 +221,15 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _relationship_between(character_relationships: dict, char_a: str, char_b: str) -> dict | None:
+def _relationship_between(
+    character_relationships: dict, char_a: str, char_b: str
+) -> dict | None:
     """按双向关系查找角色关系。"""
     rel_key = f"{char_a}_{char_b}"
     rel_key_rev = f"{char_b}_{char_a}"
-    return character_relationships.get(rel_key) or character_relationships.get(rel_key_rev)
+    return character_relationships.get(rel_key) or character_relationships.get(
+        rel_key_rev
+    )
 
 
 def _relationship_turn_score(relationship: dict | None) -> float:
@@ -80,21 +252,55 @@ def _relationship_turn_score(relationship: dict | None) -> float:
         score = 4.0 + magnitude * 8.0
 
     rel_text = " ".join(
-        str(relationship.get(key) or "")
-        for key in ("relationship_type", "description")
+        str(relationship.get(key) or "") for key in ("relationship_type", "description")
     ).lower()
 
     close_cues = (
-        "friend", "family", "lover", "love", "ally", "partner", "companion",
-        "朋友", "好友", "挚友", "家人", "亲人", "恋", "爱", "伴侣", "同伴", "盟友",
+        "friend",
+        "family",
+        "lover",
+        "love",
+        "ally",
+        "partner",
+        "companion",
+        "朋友",
+        "好友",
+        "挚友",
+        "家人",
+        "亲人",
+        "恋",
+        "爱",
+        "伴侣",
+        "同伴",
+        "盟友",
     )
     conflict_cues = (
-        "enemy", "rival", "opponent", "competitor", "hostile",
-        "敌", "仇", "宿敌", "对手", "竞争", "冲突", "死敌",
+        "enemy",
+        "rival",
+        "opponent",
+        "competitor",
+        "hostile",
+        "敌",
+        "仇",
+        "宿敌",
+        "对手",
+        "竞争",
+        "冲突",
+        "死敌",
     )
     guidance_cues = (
-        "mentor", "teacher", "student", "master", "apprentice",
-        "导师", "老师", "师父", "师徒", "学生", "弟子", "同门",
+        "mentor",
+        "teacher",
+        "student",
+        "master",
+        "apprentice",
+        "导师",
+        "老师",
+        "师父",
+        "师徒",
+        "学生",
+        "弟子",
+        "同门",
     )
 
     if any(cue in rel_text for cue in close_cues):
@@ -163,18 +369,13 @@ def _character_topic_text(card: Any) -> tuple[str, str]:
 
 def _topic_units(text: str) -> set[str]:
     normalized = str(text or "").lower()
-    units = {
-        word
-        for word in re.findall(r"[a-z0-9]+", normalized)
-        if len(word) >= 3
-    }
+    units = {word for word in re.findall(r"[a-z0-9]+", normalized) if len(word) >= 3}
     for sequence in re.findall(r"[\u4e00-\u9fff]+", normalized):
         if 2 <= len(sequence) <= 8:
             units.add(sequence)
         if len(sequence) >= 2:
             units.update(
-                sequence[index:index + 2]
-                for index in range(len(sequence) - 1)
+                sequence[index : index + 2] for index in range(len(sequence) - 1)
             )
     return units
 
@@ -189,9 +390,8 @@ def _topic_relevance_score(player_message: str, card: Any) -> float:
     score = min(24.0, len(overlap) * 4.0)
 
     for role_cues, topic_cues in _EXPERTISE_DOMAINS:
-        if (
-            any(cue in role_text for cue in role_cues)
-            and any(cue in message for cue in topic_cues)
+        if any(cue in role_text for cue in role_cues) and any(
+            cue in message for cue in topic_cues
         ):
             score += 30.0
             break
@@ -229,24 +429,22 @@ def _recent_message_counts(history: list[dict]) -> dict[str, int]:
 # 发言策略基类
 # =========================
 
+
 class SpeakingStrategy(ABC):
     """发言策略抽象基类"""
-    
+
     @abstractmethod
     def select_speaker(
-        self,
-        participants: list[dict],
-        character_cards: dict,
-        context: dict
+        self, participants: list[dict], character_cards: dict, context: dict
     ) -> str:
         """
         选择下一个发言者
-        
+
         Args:
             participants: 参与者列表
             character_cards: 角色卡字典 {character_id: card}
             context: 上下文信息（包含player_message、history等）
-        
+
         Returns:
             str: 选中的角色 ID
         """
@@ -256,41 +454,39 @@ class SpeakingStrategy(ABC):
 # 智能选择策略
 # =========================
 
+
 class SmartSelectionStrategy(SpeakingStrategy):
     """
     智能选择策略：综合考虑多种因素
-    
+
     评分因素：
     1. 关键词匹配（被提及）
     2. 角色关系（与最近发言者的关系）
     3. 发言频率配置
     4. 发言均衡性（避免某角色过度发言）
     5. 情绪和状态匹配
-    
+
     适用场景：
     - 追求最自然的对话流
     - 复杂的多角色互动
     """
-    
+
     def __init__(self, balance_factor: float = 1.0):
         """
         初始化智能策略
-        
+
         Args:
             balance_factor: 均衡因子（0-2），越高越倾向于让发言少的角色说话
         """
         self.balance_factor = balance_factor
-    
+
     def select_speaker(
-        self,
-        participants: list[dict],
-        character_cards: dict,
-        context: dict
+        self, participants: list[dict], character_cards: dict, context: dict
     ) -> str:
         """智能选择发言者"""
         if not participants:
             raise ValueError("没有可用的参与者")
-        
+
         player_message = context.get("player_message", "")
         last_speaker_id = context.get("last_speaker_id")
         character_relationships = context.get("character_relationships", {})
@@ -301,20 +497,22 @@ class SmartSelectionStrategy(SpeakingStrategy):
             for participant in participants
         ]
         max_lifetime_count = max(lifetime_counts, default=0)
-        
+
         candidates = []
-        
+
         for p in participants:
             char_id = p["character_id"]
             card = character_cards.get(char_id)
-            
+
             if not card:
                 continue
-            
+
             score = 0.0
-            
+
             # 1. 关键词匹配（玩家提到角色）
-            if player_message and any(n in player_message for n in _names_for_card(card)):
+            if player_message and any(
+                n in player_message for n in _names_for_card(card)
+            ):
                 score += 50.0
                 logger.debug(f"[智能策略] {char_id} 被提及，+50")
 
@@ -326,51 +524,62 @@ class SmartSelectionStrategy(SpeakingStrategy):
                     char_id,
                     relevance_score,
                 )
-            
+
             # 2. 角色关系（与最后发言者的关系）
             if last_speaker_id and last_speaker_id != char_id:
-                relationship = _relationship_between(character_relationships, last_speaker_id, char_id)
+                relationship = _relationship_between(
+                    character_relationships, last_speaker_id, char_id
+                )
                 relation_score = _relationship_turn_score(relationship) * 0.45
                 if relation_score:
                     score += relation_score
-                    logger.debug(f"[智能策略] {char_id} 与 {last_speaker_id} 关系接话权重，+{relation_score:.1f}")
-            
+                    logger.debug(
+                        f"[智能策略] {char_id} 与 {last_speaker_id} 关系接话权重，+{relation_score:.1f}"
+                    )
+
             # 3. 前文提及：其他角色刚刚点名时更容易接话
             previous_responses = context.get("previous_responses") or []
             if previous_responses:
-                recent_text = "\n".join(str(r.get("dialogue", "")) for r in previous_responses[-2:])
+                recent_text = "\n".join(
+                    str(r.get("dialogue", "")) for r in previous_responses[-2:]
+                )
                 if recent_text and any(n in recent_text for n in _names_for_card(card)):
                     score += 28.0
                     logger.debug(f"[智能策略] {char_id} 被上一轮角色提及，+28")
                 for response in previous_responses[-2:]:
                     prev_id = response.get("character_id")
                     if prev_id and prev_id != char_id:
-                        relation_score = _relationship_turn_score(
-                            _relationship_between(character_relationships, prev_id, char_id)
-                        ) * 0.20
+                        relation_score = (
+                            _relationship_turn_score(
+                                _relationship_between(
+                                    character_relationships, prev_id, char_id
+                                )
+                            )
+                            * 0.20
+                        )
                         if relation_score:
                             score += relation_score
-                            logger.debug(f"[智能策略] {char_id} 与前序发言者 {prev_id} 关系延续，+{relation_score:.1f}")
-            
+                            logger.debug(
+                                f"[智能策略] {char_id} 与前序发言者 {prev_id} 关系延续，+{relation_score:.1f}"
+                            )
+
             # 4. 发言频率配置
             frequency = p.get("speak_frequency", 1.0)
             score += frequency * 15.0
-            logger.debug(f"[智能策略] {char_id} 频率权重 {frequency}，+{frequency * 15.0:.1f}")
-            
+            logger.debug(
+                f"[智能策略] {char_id} 频率权重 {frequency}，+{frequency * 15.0:.1f}"
+            )
+
             # 5. 最近窗口与全会话的相对均衡，累计超过 10 条后仍然有效
             recent_count = recent_counts.get(char_id, 0)
             recent_balance = min(
                 14.0,
-                max(0, max_recent_count - recent_count)
-                * 4.0
-                * self.balance_factor,
+                max(0, max_recent_count - recent_count) * 4.0 * self.balance_factor,
             )
             message_count = max(0, int(_safe_float(p.get("message_count", 0))))
             lifetime_balance = min(
                 6.0,
-                max(0, max_lifetime_count - message_count)
-                * 0.75
-                * self.balance_factor,
+                max(0, max_lifetime_count - message_count) * 0.75 * self.balance_factor,
             )
             balance_score = recent_balance + lifetime_balance
             score += balance_score
@@ -381,26 +590,26 @@ class SmartSelectionStrategy(SpeakingStrategy):
                 message_count,
                 balance_score,
             )
-            
+
             # 6. 避免连续发言
             if char_id == last_speaker_id:
                 score -= 30.0
                 logger.debug(f"[智能策略] {char_id} 刚发言过，-30")
-            
+
             # 7. 小幅可复现扰动，避免同分时永久偏向参与者顺序
             jitter = _stable_jitter(context, char_id)
             score += jitter
-            
+
             candidates.append((char_id, score))
             logger.debug(f"[智能策略] {char_id} 总分: {score:.2f}")
-        
+
         if not candidates:
             return participants[0]["character_id"]
-        
+
         # 选择得分最高的
         candidates.sort(key=lambda x: x[1], reverse=True)
         selected = candidates[0][0]
-        
+
         logger.info(f"[智能策略] 选中 {selected}，得分 {candidates[0][1]:.2f}")
         return selected
 
@@ -409,56 +618,60 @@ class SmartSelectionStrategy(SpeakingStrategy):
 # 混合策略
 # =========================
 
+
 class HybridStrategy(SpeakingStrategy):
     """
     混合策略：结合多种策略的优点
-    
+
     流程：
     1. 先检查触发条件（强制优先级）
     2. 如果有强提及（关键词），直接选择
     3. 否则使用智能选择
-    
+
     这是推荐的默认策略
     """
-    
+
     def __init__(self, balance_factor: float = 1.0):
         self.keyword_triggers = {}
         self.smart_strategy = SmartSelectionStrategy(balance_factor)
-    
+
     def add_keyword_trigger(self, keyword: str, character_id: str):
         """添加关键词触发"""
         self.keyword_triggers[keyword] = character_id
-    
+
     def select_speaker(
-        self,
-        participants: list[dict],
-        character_cards: dict,
-        context: dict
+        self, participants: list[dict], character_cards: dict, context: dict
     ) -> str:
         """混合策略选择"""
         if not participants:
             raise ValueError("没有可用的参与者")
-        
+
         player_message = context.get("player_message", "")
-        
+
         # 1. 检查强关键词触发
         for keyword, char_id in self.keyword_triggers.items():
-            if keyword in player_message and any(p["character_id"] == char_id for p in participants):
+            if keyword in player_message and any(
+                p["character_id"] == char_id for p in participants
+            ):
                 logger.info(f"[混合策略] 关键词触发 {char_id}")
                 return char_id
-        
+
         # 2. 检查角色名被提及（强匹配）
         for p in participants:
             char_id = p["character_id"]
             card = character_cards.get(char_id)
             if not card:
                 continue
-            
+
             # 完整名字匹配
-            if player_message and any(name in player_message for name in _names_for_card(card)):
+            if player_message and any(
+                name in player_message for name in _names_for_card(card)
+            ):
                 logger.info(f"[混合策略] 强提及触发 {char_id}")
                 return char_id
-        
+
         # 3. 使用智能策略
         logger.debug("[混合策略] 使用智能选择")
-        return self.smart_strategy.select_speaker(participants, character_cards, context)
+        return self.smart_strategy.select_speaker(
+            participants, character_cards, context
+        )

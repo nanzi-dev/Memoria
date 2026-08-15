@@ -37,19 +37,23 @@ def _get_memory_curve_state_in_transaction(
     memory_type: str,
     memory_id: str,
 ) -> dict | None:
-    row = conn.execute(
-        text("""
+    row = (
+        conn.execute(
+            text("""
         SELECT * FROM memory_curve_state
         WHERE owner_user_id = :owner_user_id AND character_id = :character_id
           AND memory_type = :memory_type AND memory_id = :memory_id
         """),
-        {
-            "owner_user_id": owner_user_id,
-            "character_id": character_id,
-            "memory_type": memory_type,
-            "memory_id": memory_id,
-        },
-    ).mappings().fetchone()
+            {
+                "owner_user_id": owner_user_id,
+                "character_id": character_id,
+                "memory_type": memory_type,
+                "memory_id": memory_id,
+            },
+        )
+        .mappings()
+        .fetchone()
+    )
     return dict(row) if row else None
 
 
@@ -64,9 +68,7 @@ def _initialize_memory_curve_state_in_transaction(
     source_kind: str,
     importance: float,
 ) -> bool:
-    key = _memory_curve_key(
-        owner_user_id, character_id, memory_type, memory_id
-    )
+    key = _memory_curve_key(owner_user_id, character_id, memory_type, memory_id)
     now = _now()
     cursor = conn.execute(
         text("""
@@ -87,9 +89,7 @@ def _initialize_memory_curve_state_in_transaction(
             "character_id": key[1],
             "memory_type": key[2],
             "memory_id": key[3],
-            "stability_days": curve.initial_stability_days(
-                importance, source_kind
-            ),
+            "stability_days": curve.initial_stability_days(importance, source_kind),
             "world_watermark": curve.as_utc(world_occurred_at).isoformat(),
             "source_kind": source_kind,
             "importance": curve.normalized_importance(importance),
@@ -133,9 +133,7 @@ def get_memory_curve_state(
     memory_type: str,
     memory_id: str,
 ) -> dict | None:
-    key = _memory_curve_key(
-        owner_user_id, character_id, memory_type, memory_id
-    )
+    key = _memory_curve_key(owner_user_id, character_id, memory_type, memory_id)
     with db_session() as session:
         return _get_memory_curve_state_in_transaction(session, *key)
 
@@ -186,9 +184,7 @@ def advance_or_initialize_memory_curve_state(
     source_kind: str,
     importance: float,
 ) -> dict:
-    key = _memory_curve_key(
-        owner_user_id, character_id, memory_type, memory_id
-    )
+    key = _memory_curve_key(owner_user_id, character_id, memory_type, memory_id)
     with db_session() as session:
         _lock_sqlite_write(session)
         _initialize_memory_curve_state_in_transaction(
@@ -218,9 +214,7 @@ def advance_or_initialize_memory_curve_state(
                 },
             ).fetchone()
         state = _get_memory_curve_state_in_transaction(session, *key)
-        return _advance_memory_curve_state_in_transaction(
-            session, state, world_now
-        )
+        return _advance_memory_curve_state_in_transaction(session, state, world_now)
 
 
 def record_memory_curve_evidence(
@@ -235,9 +229,7 @@ def record_memory_curve_evidence(
     importance: float,
 ) -> dict:
     """Initialize on first formation; idempotently reinforce later evidence."""
-    key = _memory_curve_key(
-        owner_user_id, character_id, memory_type, memory_id
-    )
+    key = _memory_curve_key(owner_user_id, character_id, memory_type, memory_id)
     evidence_id = str(evidence_id or "").strip()
     if not evidence_id:
         raise ValueError("evidence_id must not be blank")
@@ -285,9 +277,7 @@ def record_memory_curve_evidence(
                 "memory_type": key[2],
                 "memory_id": key[3],
                 "evidence_id": evidence_id,
-                "world_occurred_at": curve.as_utc(
-                    world_occurred_at
-                ).isoformat(),
+                "world_occurred_at": curve.as_utc(world_occurred_at).isoformat(),
                 "created_at": _now(),
             },
         )
@@ -299,9 +289,7 @@ def record_memory_curve_evidence(
             session, state, world_occurred_at
         )
         current = curve.state_retention(state, world_occurred_at)
-        strength, stability = curve.reinforce(
-            current, state["stability_days"]
-        )
+        strength, stability = curve.reinforce(current, state["stability_days"])
         session.execute(
             text("""
             UPDATE memory_curve_state
@@ -348,12 +336,17 @@ def list_memory_curve_states(
         where += " AND memory_type = :memory_type"
         params["memory_type"] = memory_type
     with db_session() as session:
-        rows = session.execute(
-            text(f"SELECT * FROM memory_curve_state WHERE {where} "
-            "ORDER BY memory_type, memory_id",
-            ),
-            params,
-        ).mappings().fetchall()
+        rows = (
+            session.execute(
+                text(
+                    f"SELECT * FROM memory_curve_state WHERE {where} "
+                    "ORDER BY memory_type, memory_id",
+                ),
+                params,
+            )
+            .mappings()
+            .fetchall()
+        )
     return [dict(row) for row in rows]
 
 
@@ -369,20 +362,24 @@ def list_memory_curve_states_for_memory(
     if not owner_user_id or not memory_type or not memory_id:
         raise ValueError("memory curve lookup fields must not be blank")
     with db_session() as session:
-        rows = session.execute(
-            text("""
+        rows = (
+            session.execute(
+                text("""
             SELECT * FROM memory_curve_state
             WHERE owner_user_id = :owner_user_id
               AND memory_type = :memory_type
               AND memory_id = :memory_id
             ORDER BY character_id
             """),
-            {
-                "owner_user_id": owner_user_id,
-                "memory_type": memory_type,
-                "memory_id": memory_id,
-            },
-        ).mappings().fetchall()
+                {
+                    "owner_user_id": owner_user_id,
+                    "memory_type": memory_type,
+                    "memory_id": memory_id,
+                },
+            )
+            .mappings()
+            .fetchall()
+        )
     return [dict(row) for row in rows]
 
 
@@ -463,8 +460,7 @@ def cleanup_forgotten_memory_curve_states(
         return 0
 
     cutoff_iso = (
-        datetime.now(timezone.utc)
-        - timedelta(days=forgotten_threshold_days)
+        datetime.now(timezone.utc) - timedelta(days=forgotten_threshold_days)
     ).isoformat()
 
     with db_session() as session:
@@ -475,10 +471,14 @@ def cleanup_forgotten_memory_curve_states(
             where += " AND owner_user_id = :owner_user_id"
             params["owner_user_id"] = owner_user_id
 
-        rows = session.execute(
-            text(f"SELECT * FROM memory_curve_state WHERE {where}"),
-            params,
-        ).mappings().fetchall()
+        rows = (
+            session.execute(
+                text(f"SELECT * FROM memory_curve_state WHERE {where}"),
+                params,
+            )
+            .mappings()
+            .fetchall()
+        )
 
         to_delete = []
         for row in rows:
@@ -491,12 +491,14 @@ def cleanup_forgotten_memory_curve_states(
             ).isoformat()
             r = curve.state_retention(state, approx_now_iso)
             if r < clarity_fragment_threshold:
-                to_delete.append((
-                    state["owner_user_id"],
-                    state["character_id"],
-                    state["memory_type"],
-                    state["memory_id"],
-                ))
+                to_delete.append(
+                    (
+                        state["owner_user_id"],
+                        state["character_id"],
+                        state["memory_type"],
+                        state["memory_id"],
+                    )
+                )
 
         deleted = 0
         for key in to_delete:

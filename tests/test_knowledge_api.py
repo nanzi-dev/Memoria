@@ -49,9 +49,7 @@ def test_knowledge_routes_require_authentication():
     assert exc_info.value.status_code == 401
 
 
-def test_knowledge_base_crud_bindings_and_owner_isolation(
-    knowledge_owner, monkeypatch
-):
+def test_knowledge_base_crud_bindings_and_owner_isolation(knowledge_owner, monkeypatch):
     owner_user_id = knowledge_owner
     vector_store = _FakeVectorStore()
     monkeypatch.setattr(
@@ -59,17 +57,13 @@ def test_knowledge_base_crud_bindings_and_owner_isolation(
     )
 
     created = knowledge_api.create_knowledge_base(
-        knowledge_api.KnowledgeBaseCreate(
-            name="城市设定", description="街区与组织"
-        ),
+        knowledge_api.KnowledgeBaseCreate(name="城市设定", description="街区与组织"),
         current_user_id=owner_user_id,
     )
     knowledge_base_id = created["knowledge_base_id"]
 
     listing = knowledge_api.list_knowledge_bases(current_user_id=owner_user_id)
-    assert [item["knowledge_base_id"] for item in listing] == [
-        knowledge_base_id
-    ]
+    assert [item["knowledge_base_id"] for item in listing] == [knowledge_base_id]
 
     updated = knowledge_api.update_knowledge_base(
         knowledge_base_id,
@@ -252,9 +246,10 @@ def test_delete_document_vector_failure_stays_queued_until_retry(
     )
 
     assert response.success
-    assert repository.get_knowledge_document(
-        owner_user_id, document["document_id"]
-    ) is None
+    assert (
+        repository.get_knowledge_document(owner_user_id, document["document_id"])
+        is None
+    )
     pending = repository.list_knowledge_vector_cleanups()
     assert len(pending) == 1
     assert pending[0]["scope_type"] == "document"
@@ -267,9 +262,7 @@ def test_delete_document_vector_failure_stays_queued_until_retry(
         vector_store=working_store
     )
     assert result == {"completed": 1, "failed": 0}
-    assert working_store.deleted_documents == [
-        (owner_user_id, document["document_id"])
-    ]
+    assert working_store.deleted_documents == [(owner_user_id, document["document_id"])]
     assert repository.list_knowledge_vector_cleanups() == []
 
 
@@ -309,9 +302,9 @@ def test_preview_forwards_authenticated_context_and_returns_sources(
     knowledge_owner, monkeypatch
 ):
     owner_user_id = knowledge_owner
-    knowledge_base_id = repository.create_knowledge_base(
-        owner_user_id, "World"
-    )["knowledge_base_id"]
+    knowledge_base_id = repository.create_knowledge_base(owner_user_id, "World")[
+        "knowledge_base_id"
+    ]
     calls = []
     source = {
         "knowledge_base_id": knowledge_base_id,

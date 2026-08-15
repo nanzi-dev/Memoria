@@ -160,9 +160,7 @@ def build_event_context(
         )
     if trust_delta is None:
         trust_delta = (
-            current_trust - previous_trust
-            if previous_trust is not None
-            else 0.0
+            current_trust - previous_trust if previous_trust is not None else 0.0
         )
 
     if "event_history" not in cache:
@@ -438,9 +436,7 @@ def _plan_event_roots(
                     exclusive_group=event.exclusive_group,
                     claim_token=exclusive_group_claim_token,
                     claimed_at=claimed_at.isoformat(),
-                    claim_expires_at=(
-                        claimed_at + timedelta(minutes=5)
-                    ).isoformat(),
+                    claim_expires_at=(claimed_at + timedelta(minutes=5)).isoformat(),
                 )
             except Exception:
                 if claim_token:
@@ -533,9 +529,7 @@ def _plan_event_roots(
             execution = {
                 "player_id": event_context.player_id,
                 "exclusive_group": (
-                    event.exclusive_group
-                    if exclusive_group_claim_token
-                    else None
+                    event.exclusive_group if exclusive_group_claim_token else None
                 ),
                 "exclusive_group_claim_token": exclusive_group_claim_token,
                 **executor.build_execution_record(
@@ -654,19 +648,14 @@ def _runtime_states_after_contexts(
     states: list[dict[str, Any]] = []
     insert_only_ids = insert_only_unchanged_character_ids or set()
     apply_to_current_ids = apply_state_changes_to_current_character_ids or set()
-    latest_contexts = {
-        context.character_id: context
-        for context in contexts
-    }
+    latest_contexts = {context.character_id: context for context in contexts}
     ordered_character_ids = list(
         dict.fromkeys(context.character_id for context in contexts)
     )
     for character_id in ordered_character_ids:
         context = latest_contexts[character_id]
         character_results = [
-            result
-            for result in results
-            if result.character_id == character_id
+            result for result in results if result.character_id == character_id
         ]
         state_changes = _runtime_state_changes_after_results(character_results)
         if state_changes and character_id in apply_to_current_ids:
@@ -719,9 +708,7 @@ def _commit_planned_batch(
             ensure_ascii=False,
         )
         dialogue_turn = (
-            dialogue_turn_factory(results)
-            if dialogue_turn_factory
-            else None
+            dialogue_turn_factory(results) if dialogue_turn_factory else None
         )
         effective_runtime_states = (
             dialogue_turn.get("runtime_states")
@@ -776,7 +763,9 @@ def execute_event_with_chain(
     if definitions_by_id is None:
         definitions_by_id = {
             definition.event_id: definition
-            for definition in load_event_definitions(context.player_id, context.character_id)
+            for definition in load_event_definitions(
+                context.player_id, context.character_id
+            )
         }
     definitions_by_id[event.event_id] = event
     execution_key = context.execution_key or (
@@ -831,7 +820,9 @@ def detect_and_execute_events(
             dialogue_turn_factory=dialogue_turn_factory,
         )
 
-    definitions = event_definitions or load_event_definitions(context.player_id, context.character_id, only_active=True)
+    definitions = event_definitions or load_event_definitions(
+        context.player_id, context.character_id, only_active=True
+    )
     detector = get_event_detector()
     triggered_events = detector.check_events(context, definitions)
     definitions_by_id = {event.event_id: event for event in definitions}
@@ -903,7 +894,9 @@ def detect_and_execute_event_contexts(
             normalized_contexts[0],
             restored,
             [],
-            runtime_states=_runtime_states_after_contexts(normalized_contexts, restored),
+            runtime_states=_runtime_states_after_contexts(
+                normalized_contexts, restored
+            ),
             dialogue_turn_factory=dialogue_turn_factory,
         )
 
@@ -946,9 +939,7 @@ def detect_and_execute_event_contexts(
         if per_event_count.get(event.event_id, 0) >= event_limit:
             continue
         roots.append((event, context))
-        per_event_count[event.event_id] = (
-            per_event_count.get(event.event_id, 0) + 1
-        )
+        per_event_count[event.event_id] = per_event_count.get(event.event_id, 0) + 1
         if event.exclusive_group:
             exclusive_groups.add(event.exclusive_group)
         if event.stop_processing:
@@ -1001,19 +992,23 @@ def apply_event_results_to_dialogue_state(
     dialogue_overrides: list[str] = []
     notifications: list[str] = []
     for event_result in results:
-        triggered_info.append({
-            "event_id": event_result.event_id,
-            "event_name": event_result.event_name,
-            "character_id": event_result.character_id,
-            "execution_id": event_result.execution_id,
-            "status": event_result.status,
-            "effects": event_result.effects_applied,
-            "effect_details": [effect.model_dump(mode="json") for effect in event_result.effects],
-            "chained_events": event_result.chained_events,
-            "proactive_dialogues": event_result.proactive_dialogues,
-            "error": event_result.error,
-            "deduplicated": event_result.deduplicated,
-        })
+        triggered_info.append(
+            {
+                "event_id": event_result.event_id,
+                "event_name": event_result.event_name,
+                "character_id": event_result.character_id,
+                "execution_id": event_result.execution_id,
+                "status": event_result.status,
+                "effects": event_result.effects_applied,
+                "effect_details": [
+                    effect.model_dump(mode="json") for effect in event_result.effects
+                ],
+                "chained_events": event_result.chained_events,
+                "proactive_dialogues": event_result.proactive_dialogues,
+                "error": event_result.error,
+                "deduplicated": event_result.deduplicated,
+            }
+        )
         if event_result.status != "succeeded":
             continue
         state_changes = event_result.state_changes or {}
@@ -1025,11 +1020,13 @@ def apply_event_results_to_dialogue_state(
             mood = state_changes["current_mood"]
         dialogue_overrides.extend(
             event_result.dialogue_overrides
-            or ([event_result.dialogue_override] if event_result.dialogue_override else [])
+            or (
+                [event_result.dialogue_override]
+                if event_result.dialogue_override
+                else []
+            )
         )
-        notifications.extend(
-            item.message for item in event_result.notifications
-        )
+        notifications.extend(item.message for item in event_result.notifications)
         if event_result.notification and event_result.notification not in notifications:
             notifications.append(event_result.notification)
 
@@ -1144,14 +1141,14 @@ def _load_scheduled_event_context(
                 extra={"event_id": event.event_id, "player_id": player_id},
             )
 
-    persisted_session_id = (
-        (stored_context or {}).get("last_session_id")
-        or context_data.get("session_id")
+    persisted_session_id = (stored_context or {}).get(
+        "last_session_id"
+    ) or context_data.get("session_id")
+    session = (
+        repository.get_session(persisted_session_id) if persisted_session_id else None
     )
-    session = repository.get_session(persisted_session_id) if persisted_session_id else None
     if session and (
-        session.get("player_id") != player_id
-        or session.get("status") == "ended"
+        session.get("player_id") != player_id or session.get("status") == "ended"
     ):
         session = None
     if not session:
@@ -1159,11 +1156,13 @@ def _load_scheduled_event_context(
 
     session_id = session["session_id"] if session else f"schedule:{event.event_id}"
     event_data = dict(context_data.get("event_data") or {})
-    event_data.update({
-        "triggered_by": "schedule",
-        "scheduled_for": schedule_state["next_run_at"],
-        "world_now": world_now.isoformat(),
-    })
+    event_data.update(
+        {
+            "triggered_by": "schedule",
+            "scheduled_for": schedule_state["next_run_at"],
+            "world_now": world_now.isoformat(),
+        }
+    )
     return build_event_context(
         character_id=character_id,
         player_id=player_id,
@@ -1367,18 +1366,20 @@ def run_due_time_events(
                             for item in matching.proactive_dialogues
                             if item.get("dialogue") or item.get("content")
                         )
-                        execution["inbox_items"].append({
-                            "title": matching.event_name,
-                            "content": "\n".join(dict.fromkeys(content_parts))
-                            or f"{matching.event_name} 已触发。",
-                            "session_id": (
-                                None
-                                if context.session_id.startswith("schedule:")
-                                else context.session_id
-                            ),
-                            "payload": matching.model_dump_json(),
-                            "world_created_at": scheduled_for.isoformat(),
-                        })
+                        execution["inbox_items"].append(
+                            {
+                                "title": matching.event_name,
+                                "content": "\n".join(dict.fromkeys(content_parts))
+                                or f"{matching.event_name} 已触发。",
+                                "session_id": (
+                                    None
+                                    if context.session_id.startswith("schedule:")
+                                    else context.session_id
+                                ),
+                                "payload": matching.model_dump_json(),
+                                "world_created_at": scheduled_for.isoformat(),
+                            }
+                        )
                 runtime_state = _runtime_state_after_results_with_claim_cleanup(
                     context,
                     event_results,
@@ -1479,10 +1480,19 @@ DEFAULT_EVENT_TEMPLATES = [
         "template_name": "好感度里程碑",
         "category": "relationship",
         "description": "当玩家与 NPC 的好感度达到指定阈值时通知玩家并记录记忆。",
-        "trigger_condition": TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=50),
+        "trigger_condition": TriggerCondition(
+            trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=50
+        ),
         "effects": [
-            EventEffect(effect_type=EffectType.NOTIFY_PLAYER, notification_message="关系出现了新的变化。"),
-            EventEffect(effect_type=EffectType.ADD_MEMORY, memory_text="玩家与我的关系进入了新的阶段。", memory_importance=7),
+            EventEffect(
+                effect_type=EffectType.NOTIFY_PLAYER,
+                notification_message="关系出现了新的变化。",
+            ),
+            EventEffect(
+                effect_type=EffectType.ADD_MEMORY,
+                memory_text="玩家与我的关系进入了新的阶段。",
+                memory_importance=7,
+            ),
         ],
         "metadata": {"threshold_editable": True},
     },
@@ -1491,10 +1501,17 @@ DEFAULT_EVENT_TEMPLATES = [
         "template_name": "信任度里程碑",
         "category": "relationship",
         "description": "当信任度达到阈值后解锁更深入的话题。",
-        "trigger_condition": TriggerCondition(trigger_type=TriggerType.TRUST_THRESHOLD, threshold=60),
+        "trigger_condition": TriggerCondition(
+            trigger_type=TriggerType.TRUST_THRESHOLD, threshold=60
+        ),
         "effects": [
-            EventEffect(effect_type=EffectType.UNLOCK_CONTENT, unlock_keys=["deep_trust_topic"]),
-            EventEffect(effect_type=EffectType.NOTIFY_PLAYER, notification_message="新的信任话题已解锁。"),
+            EventEffect(
+                effect_type=EffectType.UNLOCK_CONTENT, unlock_keys=["deep_trust_topic"]
+            ),
+            EventEffect(
+                effect_type=EffectType.NOTIFY_PLAYER,
+                notification_message="新的信任话题已解锁。",
+            ),
         ],
         "metadata": {"threshold_editable": True},
     },
@@ -1503,9 +1520,14 @@ DEFAULT_EVENT_TEMPLATES = [
         "template_name": "关键剧情节点",
         "category": "story",
         "description": "玩家提到关键字时推进剧情，并可通过 next_event_id 接续事件链。",
-        "trigger_condition": TriggerCondition(trigger_type=TriggerType.KEYWORD_MATCH, keywords=["线索"], match_mode="any"),
+        "trigger_condition": TriggerCondition(
+            trigger_type=TriggerType.KEYWORD_MATCH, keywords=["线索"], match_mode="any"
+        ),
         "effects": [
-            EventEffect(effect_type=EffectType.TRIGGER_DIALOGUE, dialogue_text="这件事不能再拖了，我们得继续查下去。"),
+            EventEffect(
+                effect_type=EffectType.TRIGGER_DIALOGUE,
+                dialogue_text="这件事不能再拖了，我们得继续查下去。",
+            ),
         ],
         "metadata": {"keywords_editable": True},
     },
@@ -1522,7 +1544,9 @@ def ensure_default_event_templates() -> int:
             category=template["category"],
             description=template["description"],
             trigger_config=template["trigger_condition"].model_dump_json(),
-            effects_config=json.dumps([e.model_dump() for e in template["effects"]], ensure_ascii=False),
+            effects_config=json.dumps(
+                [e.model_dump() for e in template["effects"]], ensure_ascii=False
+            ),
             metadata=json.dumps(template["metadata"], ensure_ascii=False),
         )
         if ok:

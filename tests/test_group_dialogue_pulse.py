@@ -77,9 +77,7 @@ def _apply_event_turn(
         player_text,
         responses,
         clock_snapshot=SimpleNamespace(
-            world_now=SimpleNamespace(
-                isoformat=lambda: "2026-07-16T12:00:00+08:00"
-            )
+            world_now=SimpleNamespace(isoformat=lambda: "2026-07-16T12:00:00+08:00")
         ),
         request_id=request_id,
         lease_owner=claim["lease_owner"],
@@ -130,9 +128,11 @@ def test_zero_speaker_turn_still_triggers_player_event_and_commits_message(
     )
 
     assert [result.event_id for result in results] == [event_id]
-    history = multi_character_orchestrator.repository.get_multi_character_thread_history(
-        orchestrator.session_id,
-        limit_messages=10,
+    history = (
+        multi_character_orchestrator.repository.get_multi_character_thread_history(
+            orchestrator.session_id,
+            limit_messages=10,
+        )
     )
     assert [(message["role"], message["content"]) for message in history] == [
         ("user", "这轮保持安静")
@@ -353,10 +353,13 @@ def test_npc_keyword_event_does_not_use_another_characters_response(monkeypatch)
     )
 
     assert results == []
-    assert multi_character_orchestrator.repository.get_event_trigger_history(
-        event_id=event_id,
-        player_id=orchestrator.player_id,
-    ) == []
+    assert (
+        multi_character_orchestrator.repository.get_event_trigger_history(
+            event_id=event_id,
+            player_id=orchestrator.player_id,
+        )
+        == []
+    )
 
 
 def test_repeated_speaker_event_checks_each_response_in_order(monkeypatch):
@@ -470,8 +473,7 @@ def test_repeated_speaker_event_effects_apply_only_to_matching_response(
     assert responses[0]["current_trust"] == 23
     assert responses[0]["event_notification"] == "首轮暗号已确认。"
     assert [
-        execution["event_id"]
-        for execution in responses[0]["event_executions"]
+        execution["event_id"] for execution in responses[0]["event_executions"]
     ] == [event_id]
     assert responses[2]["dialogue"] == "那就按计划行动。"
     assert responses[2]["current_trust"] == 20
@@ -572,8 +574,8 @@ def test_group_event_replay_factory_receives_original_presentation_results():
         captured["event_executions"] = [
             result.model_dump(mode="json") for result in results
         ]
-        captured["event_notifications"] = (
-            event_runtime.collect_event_notifications(results)
+        captured["event_notifications"] = event_runtime.collect_event_notifications(
+            results
         )
         return {}
 
@@ -590,9 +592,9 @@ def test_group_event_replay_factory_receives_original_presentation_results():
     assert captured["event_executions"][0]["execution_id"] == first[0].execution_id
     assert captured["event_executions"][0]["response_index"] == 2
     assert captured["event_executions"][0]["status"] == "succeeded"
-    assert [
-        item["message"] for item in captured["event_notifications"]
-    ] == [notification]
+    assert [item["message"] for item in captured["event_notifications"]] == [
+        notification
+    ]
     assert replay[0].status == "skipped"
     assert replay[0].deduplicated is True
 
@@ -695,51 +697,55 @@ def test_pulse_redecides_after_each_message_and_can_reply_to_npc(monkeypatch):
     from memoria.core import multi_character_orchestrator
 
     orchestrator = _orchestrator()
-    histories = iter([
-        [{"message_id": 1, "role": "user", "content": "怎么行动？"}],
+    histories = iter(
         [
-            {"message_id": 1, "role": "user", "content": "怎么行动？"},
-            {
-                "message_id": 2,
-                "role": "assistant",
-                "content": "先侦查。",
-                "character_id": "c1",
-                "character_name": "甲",
-            },
-        ],
+            [{"message_id": 1, "role": "user", "content": "怎么行动？"}],
+            [
+                {"message_id": 1, "role": "user", "content": "怎么行动？"},
+                {
+                    "message_id": 2,
+                    "role": "assistant",
+                    "content": "先侦查。",
+                    "character_id": "c1",
+                    "character_name": "甲",
+                },
+            ],
+            [
+                {"message_id": 1, "role": "user", "content": "怎么行动？"},
+                {
+                    "message_id": 2,
+                    "role": "assistant",
+                    "content": "先侦查。",
+                    "character_id": "c1",
+                    "character_name": "甲",
+                },
+                {
+                    "message_id": 3,
+                    "role": "assistant",
+                    "content": "我补充路线。",
+                    "character_id": "c2",
+                    "character_name": "乙",
+                },
+            ],
+        ]
+    )
+    decisions = iter(
         [
-            {"message_id": 1, "role": "user", "content": "怎么行动？"},
-            {
-                "message_id": 2,
-                "role": "assistant",
-                "content": "先侦查。",
-                "character_id": "c1",
-                "character_name": "甲",
-            },
-            {
-                "message_id": 3,
-                "role": "assistant",
-                "content": "我补充路线。",
-                "character_id": "c2",
-                "character_name": "乙",
-            },
-        ],
-    ])
-    decisions = iter([
-        _decision(speaker_id="c1", reply_to_message_id=1),
-        _decision(
-            speaker_id="c2",
-            reply_to_message_id=2,
-            reply_to_character_id="c1",
-            intent="agree",
-        ),
-        _decision(
-            speaker_id="c1",
-            reply_to_message_id=3,
-            reply_to_character_id="c2",
-            intent="challenge",
-        ),
-    ])
+            _decision(speaker_id="c1", reply_to_message_id=1),
+            _decision(
+                speaker_id="c2",
+                reply_to_message_id=2,
+                reply_to_character_id="c1",
+                intent="agree",
+            ),
+            _decision(
+                speaker_id="c1",
+                reply_to_message_id=3,
+                reply_to_character_id="c2",
+                intent="challenge",
+            ),
+        ]
+    )
     generated = []
 
     monkeypatch.setattr(
@@ -764,11 +770,13 @@ def test_pulse_redecides_after_each_message_and_can_reply_to_npc(monkeypatch):
     )
 
     def generate(character_id, player_message, **kwargs):
-        generated.append({
-            "character_id": character_id,
-            "target": kwargs["target_message"]["message_id"],
-            "trigger_source": kwargs["trigger_source"],
-        })
+        generated.append(
+            {
+                "character_id": character_id,
+                "target": kwargs["target_message"]["message_id"],
+                "trigger_source": kwargs["trigger_source"],
+            }
+        )
         return {
             "message_id": len(generated) + 1,
             "character_id": character_id,
@@ -783,7 +791,9 @@ def test_pulse_redecides_after_each_message_and_can_reply_to_npc(monkeypatch):
         trigger_text="怎么行动？",
         trigger_message_id=1,
         max_messages=5,
-        clock_snapshot=SimpleNamespace(world_now=SimpleNamespace(isoformat=lambda: "now")),
+        clock_snapshot=SimpleNamespace(
+            world_now=SimpleNamespace(isoformat=lambda: "now")
+        ),
     )
 
     assert [response["character_id"] for response in responses] == ["c1", "c2", "c1"]
@@ -861,9 +871,7 @@ def test_pulse_persists_each_reply_once_for_next_decision(monkeypatch):
         max_messages=3,
         persist_state=False,
         clock_snapshot=SimpleNamespace(
-            world_now=SimpleNamespace(
-                isoformat=lambda: "2026-01-01T08:00:00+00:00"
-            )
+            world_now=SimpleNamespace(isoformat=lambda: "2026-01-01T08:00:00+00:00")
         ),
     )
 
@@ -929,7 +937,9 @@ def test_unpersisted_pulse_uses_staged_messages_for_next_decision(monkeypatch):
         max_messages=3,
         persist_state=False,
         persist_messages=False,
-        clock_snapshot=SimpleNamespace(world_now=SimpleNamespace(isoformat=lambda: "now")),
+        clock_snapshot=SimpleNamespace(
+            world_now=SimpleNamespace(isoformat=lambda: "now")
+        ),
     )
 
     assert [response["message_id"] for response in responses] == [-1, -2]
@@ -967,9 +977,7 @@ def test_pulse_stops_on_wait_or_wait_for_player(
     monkeypatch.setattr(
         multi_character_orchestrator.repository,
         "get_multi_character_thread_history",
-        lambda *args, **kwargs: [
-            {"message_id": 1, "role": "user", "content": "继续"}
-        ],
+        lambda *args, **kwargs: [{"message_id": 1, "role": "user", "content": "继续"}],
     )
     monkeypatch.setattr(
         multi_character_orchestrator.repository,
@@ -989,12 +997,15 @@ def test_pulse_stops_on_wait_or_wait_for_player(
     monkeypatch.setattr(
         orchestrator,
         "_generate_character_response",
-        lambda *args, **kwargs: generated.append(True) or {
-            "message_id": 2,
-            "character_id": "c1",
-            "character_name": "甲",
-            "dialogue": "等你回应。",
-        },
+        lambda *args, **kwargs: (
+            generated.append(True)
+            or {
+                "message_id": 2,
+                "character_id": "c1",
+                "character_name": "甲",
+                "dialogue": "等你回应。",
+            }
+        ),
     )
 
     responses = orchestrator.run_dialogue_pulse(
@@ -1002,7 +1013,9 @@ def test_pulse_stops_on_wait_or_wait_for_player(
         trigger_text="继续",
         trigger_message_id=1,
         max_messages=3,
-        clock_snapshot=SimpleNamespace(world_now=SimpleNamespace(isoformat=lambda: "now")),
+        clock_snapshot=SimpleNamespace(
+            world_now=SimpleNamespace(isoformat=lambda: "now")
+        ),
     )
 
     assert len(responses) == expected_count
@@ -1014,16 +1027,16 @@ def test_pulse_suppresses_repeated_generated_dialogue(monkeypatch):
     from memoria.core import multi_character_orchestrator
 
     orchestrator = _orchestrator()
-    decisions = iter([
-        _decision(speaker_id="c1", reply_to_message_id=1),
-        _decision(speaker_id="c1", reply_to_message_id=1),
-    ])
+    decisions = iter(
+        [
+            _decision(speaker_id="c1", reply_to_message_id=1),
+            _decision(speaker_id="c1", reply_to_message_id=1),
+        ]
+    )
     monkeypatch.setattr(
         multi_character_orchestrator.repository,
         "get_multi_character_thread_history",
-        lambda *args, **kwargs: [
-            {"message_id": 1, "role": "user", "content": "继续"}
-        ],
+        lambda *args, **kwargs: [{"message_id": 1, "role": "user", "content": "继续"}],
     )
     monkeypatch.setattr(
         orchestrator,
@@ -1047,7 +1060,9 @@ def test_pulse_suppresses_repeated_generated_dialogue(monkeypatch):
         max_messages=2,
         persist_state=False,
         persist_messages=False,
-        clock_snapshot=SimpleNamespace(world_now=SimpleNamespace(isoformat=lambda: "now")),
+        clock_snapshot=SimpleNamespace(
+            world_now=SimpleNamespace(isoformat=lambda: "now")
+        ),
     )
 
     assert [response["dialogue"] for response in responses] == ["我们先去北门侦查。"]
@@ -1093,7 +1108,9 @@ def test_pulse_suppresses_duplicate_from_recent_history(monkeypatch):
         max_messages=1,
         persist_state=False,
         persist_messages=False,
-        clock_snapshot=SimpleNamespace(world_now=SimpleNamespace(isoformat=lambda: "now")),
+        clock_snapshot=SimpleNamespace(
+            world_now=SimpleNamespace(isoformat=lambda: "now")
+        ),
     )
 
     assert responses == []
@@ -1144,9 +1161,10 @@ def test_player_pulse_avoids_decision_model_and_rotates_speakers(monkeypatch):
     )
 
     assert [response["character_id"] for response in responses] == ["c1", "c2"]
-    assert performance.snapshot()["counters"][
-        "llm.calls_avoided.group_dialogue_decision"
-    ] == 2
+    assert (
+        performance.snapshot()["counters"]["llm.calls_avoided.group_dialogue_decision"]
+        == 2
+    )
     assert orchestrator.last_pulse_state["waiting_for_player"] is True
 
 
@@ -1256,11 +1274,14 @@ def test_dialogue_pulse_memory_secret_is_not_broadcast(monkeypatch):
     monkeypatch.setattr(
         memory_extractor,
         "record_generated_memory_claim",
-        lambda **kwargs: claims.append(kwargs) or {
-            **kwargs,
-            "status": "candidate",
-            "source_kind": "model_inference",
-        },
+        lambda **kwargs: (
+            claims.append(kwargs)
+            or {
+                **kwargs,
+                "status": "candidate",
+                "source_kind": "model_inference",
+            }
+        ),
         raising=False,
     )
     monkeypatch.setattr(
@@ -1291,21 +1312,23 @@ def test_dialogue_pulse_memory_secret_is_not_broadcast(monkeypatch):
     assert group_memories == []
     assert shared_memories == []
     assert [claim["fact_text"] for claim in claims] == [
-        "玩家来自北境", "众人决定夜间出发", "甲持有密钥"
+        "玩家来自北境",
+        "众人决定夜间出发",
+        "甲持有密钥",
     ]
     assert all(claim["owner_user_id"] == "player-1" for claim in claims)
     assert all(claim["scope_type"] == "group_thread" for claim in claims)
     assert all(claim["scope_id"] == "thread-1" for claim in claims)
     assert all(claim["source_ids"][0] == "session:session-1" for claim in claims)
     assert len({claim["evidence_id"] for claim in claims}) == 1
-    assert all(
-        claim["source_ids"][1] == claim["evidence_id"] for claim in claims
-    )
+    assert all(claim["source_ids"][1] == claim["evidence_id"] for claim in claims)
     assert claims[0]["witness_character_ids"] == ["c1", "c2", "c3"]
     assert claims[1]["witness_character_ids"] == ["c1", "c2", "c3"]
     assert claims[2]["witness_character_ids"] == ["c1", "c2"]
     assert all(claim["world_occurred_at"] for claim in claims)
     assert claims[2]["provenance"]["allowed_character_ids"] == ["c1", "c2"]
+
+
 def test_dialogue_pulse_does_not_duplicate_character_impression_writes(monkeypatch):
     from memoria.core import multi_character_memory
     from memoria.db import repository
@@ -1336,9 +1359,12 @@ def test_dialogue_pulse_does_not_duplicate_character_impression_writes(monkeypat
     )
 
     assert set(extracted) == {"player_facts", "shared_facts", "secret_facts"}
-    assert repository.get_shared_memories(
-        player_id,
-        "c1",
-        "c2",
-        limit=5,
-    ) == []
+    assert (
+        repository.get_shared_memories(
+            player_id,
+            "c1",
+            "c2",
+            limit=5,
+        )
+        == []
+    )

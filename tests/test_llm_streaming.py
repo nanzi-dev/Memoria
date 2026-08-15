@@ -172,7 +172,7 @@ def test_call_role_turn_prefers_parsed_json_when_plain_stream_has_explanation(
         on_dialogue_delta=deltas.append,
     )
 
-    assert "".join(deltas) == "好的：{\"dialogue\":\"你好\",\"action\":\"idle\"}]"
+    assert "".join(deltas) == '好的：{"dialogue":"你好","action":"idle"}]'
     assert result["dialogue"] == "你好"
     assert result["action"] == "idle"
 
@@ -222,9 +222,7 @@ def test_call_role_turn_replaces_unpaired_surrogates_before_streaming(monkeypatc
 
     assert "".join(deltas) == "安全前缀\ufffd后缀"
     assert result["dialogue"] == "安全前缀\ufffd后缀"
-    assert _encode_sse("dialogue_delta", {"delta": result["dialogue"]}).encode(
-        "utf-8"
-    )
+    assert _encode_sse("dialogue_delta", {"delta": result["dialogue"]}).encode("utf-8")
 
 
 def test_call_role_turn_streams_structured_json_and_returns_final_object(monkeypatch):
@@ -298,9 +296,7 @@ def test_call_role_turn_records_repair_and_response_format_fallback(monkeypatch)
                 )
             return iter([_stream_chunk("not json")])
 
-    fake_client = SimpleNamespace(
-        chat=SimpleNamespace(completions=FakeCompletions())
-    )
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
     monkeypatch.setattr(llm_client, "BadRequestError", UnsupportedResponseFormat)
     monkeypatch.setattr(llm_client, "_get_client", lambda: fake_client)
     llm_client._response_format_unsupported.clear()
@@ -355,10 +351,7 @@ def test_call_light_task_uses_task_budget_and_records_usage(monkeypatch):
     assert metrics["counters"]["llm.calls.light"] == 1
     assert metrics["counters"]["llm.calls.task.test_summary"] == 1
     assert metrics["observations"]["llm.tokens.prompt_tokens"]["max"] == 12
-    assert (
-        metrics["observations"]["llm.tokens.test_summary.total_tokens"]["max"]
-        == 19
-    )
+    assert metrics["observations"]["llm.tokens.test_summary.total_tokens"]["max"] == 19
 
 
 def test_call_light_task_defaults_to_two_attempts(monkeypatch):
@@ -371,7 +364,9 @@ def test_call_light_task_defaults_to_two_attempts(monkeypatch):
         return func(**kwargs)
 
     calls = []
-    monkeypatch.setattr(llm_client, "_get_light_client", lambda: _non_stream_client("ok", calls))
+    monkeypatch.setattr(
+        llm_client, "_get_light_client", lambda: _non_stream_client("ok", calls)
+    )
     monkeypatch.setattr(llm_client, "_retry_call", fake_retry_call)
 
     assert llm_client.call_light_task("task") == "ok"
@@ -396,9 +391,7 @@ def test_call_role_turn_does_not_restart_after_stream_has_emitted(monkeypatch):
             calls.append(kwargs)
             return FailingStream()
 
-    fake_client = SimpleNamespace(
-        chat=SimpleNamespace(completions=FakeCompletions())
-    )
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
     monkeypatch.setattr(llm_client, "BadRequestError", StreamBadRequest)
     monkeypatch.setattr(llm_client, "_get_client", lambda: fake_client)
     deltas = []
@@ -518,7 +511,9 @@ def test_get_light_client_uses_light_timeout(monkeypatch):
         )
         return object()
 
-    monkeypatch.setattr(llm_client.configs, "llm_light_base_url", "https://light.test/v1")
+    monkeypatch.setattr(
+        llm_client.configs, "llm_light_base_url", "https://light.test/v1"
+    )
     monkeypatch.setattr(llm_client.configs, "llm_light_api_key", SecretStr("light-key"))
     monkeypatch.setattr(llm_client.configs, "llm_light_timeout_seconds", 9.5)
     monkeypatch.setattr(llm_client, "_create_openai_client", fake_create)
@@ -551,9 +546,7 @@ def test_call_light_task_uses_configured_output_limit(monkeypatch):
                 ]
             )
 
-    fake_client = SimpleNamespace(
-        chat=SimpleNamespace(completions=FakeCompletions())
-    )
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
     monkeypatch.setattr(llm_client, "_get_light_client", lambda: fake_client)
     monkeypatch.setattr(
         llm_client,
@@ -577,9 +570,7 @@ def test_call_light_task_passes_max_attempts_to_retry_layer(monkeypatch):
                 choices=[SimpleNamespace(message=SimpleNamespace(content="summary"))]
             )
 
-    fake_client = SimpleNamespace(
-        chat=SimpleNamespace(completions=FakeCompletions())
-    )
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
 
     def fake_retry(fn, *args, **kwargs):
         retry_options["max_attempts"] = kwargs.pop("max_attempts")

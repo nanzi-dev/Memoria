@@ -189,7 +189,11 @@ class SpeechService:
         except SpeechProviderError as exc:
             raise self._provider_error(exc) from exc
         if not text:
-            raise SpeechServiceError(502, "Speech provider returned an empty transcription", "provider_failure")
+            raise SpeechServiceError(
+                502,
+                "Speech provider returned an empty transcription",
+                "provider_failure",
+            )
         return {"text": text, "locale": locale}
 
     def validate_stt_upload(self, audio: bytes, filename: str, mime_type: str) -> None:
@@ -218,7 +222,9 @@ class SpeechService:
             raise SpeechServiceError(400, "Only assistant messages can be synthesized")
 
         character_id = (
-            message.get("character_id") if mode == "group" else session.get("character_id")
+            message.get("character_id")
+            if mode == "group"
+            else session.get("character_id")
         )
         if not character_id:
             raise SpeechServiceError(400, "Assistant message has no speaking character")
@@ -238,10 +244,14 @@ class SpeechService:
             voice=voice,
             instructions=card.voice.tts_instructions,
         )
-        cache_path = self._cache_dir() / f"{cache_key}.{self.settings.speech_output_format}"
+        cache_path = (
+            self._cache_dir() / f"{cache_key}.{self.settings.speech_output_format}"
+        )
         if cache_path.is_file() and cache_path.stat().st_size > 0:
             os.utime(cache_path, None)
-            self._log_audio_request(cache_hit=True, cache_key=cache_key, started_at=None)
+            self._log_audio_request(
+                cache_hit=True, cache_key=cache_key, started_at=None
+            )
             return SpeechAudio(cache_path, cache_key, True)
         return SpeechSynthesisRequest(
             cache_path=cache_path,
@@ -408,7 +418,9 @@ class SpeechService:
         if not db_card:
             raise SpeechServiceError(404, "Speaking character not found")
         try:
-            raw = character_loader.normalize_character_data(json.loads(db_card["card_data"]))
+            raw = character_loader.normalize_character_data(
+                json.loads(db_card["card_data"])
+            )
             return CharacterCard.model_validate(raw)
         except (KeyError, TypeError, ValueError) as exc:
             raise SpeechServiceError(500, "Speaking character card is invalid") from exc
@@ -436,7 +448,9 @@ class SpeechService:
             "instructions": instructions,
             "format": self.settings.speech_output_format,
         }
-        encoded = json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        encoded = json.dumps(
+            payload, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+        )
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
     def cleanup_cache(self) -> None:
@@ -444,7 +458,11 @@ class SpeechService:
         if not cache_dir.exists():
             return
         now = datetime.now(timezone.utc).timestamp()
-        files = [path for path in cache_dir.iterdir() if path.is_file() and not path.name.endswith(".tmp")]
+        files = [
+            path
+            for path in cache_dir.iterdir()
+            if path.is_file() and not path.name.endswith(".tmp")
+        ]
         max_age = self.settings.speech_cache_max_age_seconds
         if max_age > 0:
             for path in files:
@@ -483,7 +501,9 @@ class SpeechService:
             except (wave.Error, EOFError):
                 raise SpeechServiceError(400, "Invalid WAV recording")
             if duration > 30.0:
-                raise SpeechServiceError(400, "Voice recordings must be 30 seconds or less")
+                raise SpeechServiceError(
+                    400, "Voice recordings must be 30 seconds or less"
+                )
 
     async def upload_voice_consent(
         self,
@@ -509,9 +529,8 @@ class SpeechService:
             filename,
             audio,
         )
-        preserve_ready_voice = (
-            card.voice.custom_voice_status == "ready"
-            and bool(card.voice.custom_voice_id)
+        preserve_ready_voice = card.voice.custom_voice_status == "ready" and bool(
+            card.voice.custom_voice_id
         )
         if not preserve_ready_voice:
             self._patch_character_voice(
@@ -548,8 +567,14 @@ class SpeechService:
         del reference_transcript
         workflow = self._read_workflow(owner_user_id, character_id)
         consent_filename = str(workflow.get("consent_filename") or "")
-        consent_path = self._workflow_dir(owner_user_id, character_id) / consent_filename
-        if not workflow.get("consent_id") or not consent_filename or not consent_path.is_file():
+        consent_path = (
+            self._workflow_dir(owner_user_id, character_id) / consent_filename
+        )
+        if (
+            not workflow.get("consent_id")
+            or not consent_filename
+            or not consent_path.is_file()
+        ):
             raise SpeechServiceError(400, "Upload a valid consent recording first")
         sample_path = self._save_workflow_audio(
             owner_user_id,
@@ -558,9 +583,8 @@ class SpeechService:
             filename,
             audio,
         )
-        preserve_ready_voice = (
-            card.voice.custom_voice_status == "ready"
-            and bool(card.voice.custom_voice_id)
+        preserve_ready_voice = card.voice.custom_voice_status == "ready" and bool(
+            card.voice.custom_voice_id
         )
         if not preserve_ready_voice:
             self._patch_character_voice(
@@ -586,7 +610,11 @@ class SpeechService:
                 locale=str(workflow.get("consent_locale") or "zh-CN"),
             )
         except SpeechProviderError as exc:
-            status = "unavailable" if exc.category in {"not_configured", "unavailable"} else "failed"
+            status = (
+                "unavailable"
+                if exc.category in {"not_configured", "unavailable"}
+                else "failed"
+            )
             if not preserve_ready_voice:
                 self._patch_character_voice(
                     owner_user_id,
@@ -594,7 +622,9 @@ class SpeechService:
                     customVoiceStatus=status,
                     customVoiceId=None,
                 )
-            workflow.update(status=status, error_category=exc.category, error=exc.message)
+            workflow.update(
+                status=status, error_category=exc.category, error=exc.message
+            )
             self._write_workflow(owner_user_id, character_id, workflow)
             raise self._provider_error(exc) from exc
 
@@ -608,7 +638,9 @@ class SpeechService:
                     customVoiceStatus="failed",
                     customVoiceId=None,
                 )
-            workflow.update(status="failed", error_category="provider_failure", error=error)
+            workflow.update(
+                status="failed", error_category="provider_failure", error=error
+            )
             self._write_workflow(owner_user_id, character_id, workflow)
             raise SpeechServiceError(502, error, "provider_failure")
         self._patch_character_voice(
@@ -665,7 +697,9 @@ class SpeechService:
         self._write_workflow(owner_user_id, character_id, workflow)
         return self.voice_status(owner_user_id, character_id)
 
-    def _owned_character(self, owner_user_id: str, character_id: str) -> tuple[CharacterCard, dict]:
+    def _owned_character(
+        self, owner_user_id: str, character_id: str
+    ) -> tuple[CharacterCard, dict]:
         db_card = repository.get_character_card_from_db(
             owner_user_id,
             character_id,
@@ -704,11 +738,16 @@ class SpeechService:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (FileNotFoundError, OSError, ValueError):
             return {"owner_user_id": owner_user_id, "character_id": character_id}
-        if payload.get("owner_user_id") != owner_user_id or payload.get("character_id") != character_id:
+        if (
+            payload.get("owner_user_id") != owner_user_id
+            or payload.get("character_id") != character_id
+        ):
             return {"owner_user_id": owner_user_id, "character_id": character_id}
         return payload
 
-    def _write_workflow(self, owner_user_id: str, character_id: str, payload: dict) -> None:
+    def _write_workflow(
+        self, owner_user_id: str, character_id: str, payload: dict
+    ) -> None:
         directory = self._workflow_dir(owner_user_id, character_id)
         directory.mkdir(parents=True, exist_ok=True)
         payload.update(
@@ -718,7 +757,9 @@ class SpeechService:
         )
         path = directory / "metadata.json"
         temp_path = directory / "metadata.json.tmp"
-        temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         temp_path.replace(path)
 
     def _save_workflow_audio(

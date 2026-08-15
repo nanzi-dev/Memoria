@@ -135,9 +135,9 @@ def test_echo_archive_static_content_contract():
         if "@player" in pair:
             player_edges.append(pair)
     assert len(player_edges) == 22
-    assert {next(node for node in pair if node != "@player") for pair in player_edges} == (
-        character_ids
-    )
+    assert {
+        next(node for node in pair if node != "@player") for pair in player_edges
+    } == (character_ids)
 
     knowledge_bases = manifest["knowledge_bases"]
     assert len(knowledge_bases) == 13
@@ -157,9 +157,7 @@ def test_echo_archive_static_content_contract():
             if binding["target_type"] == "character":
                 assert binding["target_id"] in character_ids
             if binding["target_type"] == "group_thread":
-                assert binding["target_id"] in {
-                    group["thread_id"] for group in groups
-                }
+                assert binding["target_id"] in {group["thread_id"] for group in groups}
         for relative_path in knowledge_base["documents"]:
             path = MODULE_ROOT / relative_path
             assert path.is_file()
@@ -277,9 +275,7 @@ def test_echo_archive_choice_and_outcome_graph_is_complete():
     main_exclusive_groups = {
         events[event_id].exclusive_group for event_id in MAIN_ENDINGS
     }
-    ji_exclusive_groups = {
-        events[event_id].exclusive_group for event_id in JI_OUTCOMES
-    }
+    ji_exclusive_groups = {events[event_id].exclusive_group for event_id in JI_OUTCOMES}
     assert main_exclusive_groups == {"echo_main_ending"}
     assert ji_exclusive_groups == {"echo_ji_outcome"}
 
@@ -287,11 +283,7 @@ def test_echo_archive_choice_and_outcome_graph_is_complete():
 def test_echo_archive_choice_and_ending_groups_are_player_scoped():
     events = _read_json("events.json")
     grouped_events = {
-        group: [
-            event
-            for event in events
-            if event.get("exclusive_group") == group
-        ]
+        group: [event for event in events if event.get("exclusive_group") == group]
         for group in PLAYER_EXCLUSIVE_GROUPS
     }
 
@@ -310,20 +302,13 @@ def test_echo_archive_revelations_remain_distinct_turn_scoped_events():
 
     for volume in range(1, 7):
         group = f"echo_v{volume}_revelation"
-        members = [
-            event
-            for event in events
-            if event.get("exclusive_group") == group
-        ]
+        members = [event for event in events if event.get("exclusive_group") == group]
 
         assert {event["event_id"] for event in members} == {
             f"echo_v{volume}_turning_point",
             f"echo_v{volume}_contradiction",
         }
-        assert all(
-            event.get("exclusive_scope", "turn") == "turn"
-            for event in members
-        )
+        assert all(event.get("exclusive_scope", "turn") == "turn" for event in members)
 
 
 def test_echo_archive_v1_to_v6_resolutions_require_both_revelations():
@@ -358,9 +343,7 @@ def test_echo_archive_readme_reports_the_complete_module_inventory():
         line for line in readme.splitlines() if line.startswith("- 27 个 JSON 文件")
     )
     markdown_line = next(
-        line
-        for line in readme.splitlines()
-        if line.startswith("- 29 个 Markdown 文件")
+        line for line in readme.splitlines() if line.startswith("- 29 个 Markdown 文件")
     )
 
     assert len(module_files) == 56
@@ -374,9 +357,9 @@ def test_echo_archive_readme_reports_the_complete_module_inventory():
 
 
 def test_echo_archive_disclosure_costs_match_the_ending_graph():
-    disclosure_costs = (
-        MODULE_ROOT / "knowledge" / "v7_disclosure_costs.md"
-    ).read_text(encoding="utf-8")
+    disclosure_costs = (MODULE_ROOT / "knowledge" / "v7_disclosure_costs.md").read_text(
+        encoding="utf-8"
+    )
 
     assert "“沉默证词”通常来自保全证人" in disclosure_costs
     assert "“失效档案”通常来自封存主档" in disclosure_costs
@@ -452,12 +435,8 @@ def test_echo_archive_walkthrough_documents_actual_event_timing():
         "第1至第6卷的 `echo_vN_resolution` 同时要求 "
         "`echo_vN_turning_point` 和 `echo_vN_contradiction`"
     ) in walkthrough
-    assert (
-        "`match_mode: all` 要求两个关键词出现在同一条玩家消息中"
-    ) in walkthrough
-    assert (
-        "`EVENT_HISTORY` 只读取检测前已经提交的历史批次"
-    ) in walkthrough
+    assert ("`match_mode: all` 要求两个关键词出现在同一条玩家消息中") in walkthrough
+    assert ("`EVENT_HISTORY` 只读取检测前已经提交的历史批次") in walkthrough
     assert "普通依赖不会在同一批次级联" in walkthrough
     assert "除非使用显式 `TRIGGER_EVENT` 链接" in walkthrough
     assert "两个前置事件都已提交后，至少再推进一轮" in walkthrough
@@ -483,8 +462,7 @@ def test_echo_archive_walkthrough_documents_actual_event_timing():
     assert "案件结论同时要求转折事件和矛盾核验已提交" in guide
     assert "普通 `EVENT_HISTORY` 依赖不会在同一批次级联" in guide
     assert (
-        "季衡选择需等待 `echo_v7_transition` 和 "
-        "`echo_meta_decision_window` 均已提交"
+        "季衡选择需等待 `echo_v7_transition` 和 `echo_meta_decision_window` 均已提交"
     ) in guide
 
 
@@ -537,9 +515,7 @@ def test_echo_archive_seeds_all_runtime_assets_idempotently(
         group["thread_id"] for group in manifest_groups
     ]
     for group in manifest_groups:
-        session = repository.get_latest_group_thread_session(
-            group["thread_id"]
-        )
+        session = repository.get_latest_group_thread_session(group["thread_id"])
         assert session["session_id"] == group["session_id"]
         assert session["player_id"] == owner_user_id
         assert [
@@ -555,9 +531,7 @@ def test_echo_archive_seeds_all_runtime_assets_idempotently(
     }
     knowledge_bases = repository.list_knowledge_bases(owner_user_id)
     assert len(knowledge_bases) == 13
-    assert {base["name"] for base in knowledge_bases} == set(
-        definitions_by_name
-    )
+    assert {base["name"] for base in knowledge_bases} == set(definitions_by_name)
     document_count = 0
     for knowledge_base in knowledge_bases:
         documents = repository.list_knowledge_documents(
@@ -566,15 +540,13 @@ def test_echo_archive_seeds_all_runtime_assets_idempotently(
         )
         document_count += len(documents)
         assert len(documents) == 2
-        assert {
-            document["source_type"] for document in documents
-        } == {"echo_archive-demo"}
+        assert {document["source_type"] for document in documents} == {
+            "echo_archive-demo"
+        }
 
         expected_bindings = {
             (binding["target_type"], binding.get("target_id") or "")
-            for binding in definitions_by_name[
-                knowledge_base["name"]
-            ]["bindings"]
+            for binding in definitions_by_name[knowledge_base["name"]]["bindings"]
         }
         actual_bindings = {
             (binding["target_type"], binding.get("target_id") or "")

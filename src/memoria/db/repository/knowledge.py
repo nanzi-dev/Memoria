@@ -1,4 +1,5 @@
 """Domain repository functions (split from monolith)."""
+
 from __future__ import annotations
 
 # Standard/third-party imports used across repository domains.
@@ -61,8 +62,9 @@ def create_knowledge_base(
 
 def get_knowledge_base(owner_user_id: str, knowledge_base_id: str) -> dict | None:
     with db_session() as conn:
-        row = conn.execute(
-            text("""
+        row = (
+            conn.execute(
+                text("""
             SELECT kb.*,
                    (SELECT COUNT(*) FROM knowledge_document d
                     WHERE d.owner_user_id = kb.owner_user_id
@@ -78,18 +80,22 @@ def get_knowledge_base(owner_user_id: str, knowledge_base_id: str) -> dict | Non
             WHERE kb.owner_user_id = :owner_user_id
               AND kb.knowledge_base_id = :knowledge_base_id
             """),
-            {
-                "owner_user_id": owner_user_id,
-                "knowledge_base_id": knowledge_base_id,
-            },
-        ).mappings().fetchone()
+                {
+                    "owner_user_id": owner_user_id,
+                    "knowledge_base_id": knowledge_base_id,
+                },
+            )
+            .mappings()
+            .fetchone()
+        )
     return _row_to_dict(row)
 
 
 def list_knowledge_bases(owner_user_id: str) -> list[dict]:
     with db_session() as conn:
-        rows = conn.execute(
-            text("""
+        rows = (
+            conn.execute(
+                text("""
             SELECT kb.*,
                    (SELECT COUNT(*) FROM knowledge_document d
                     WHERE d.owner_user_id = kb.owner_user_id
@@ -105,8 +111,11 @@ def list_knowledge_bases(owner_user_id: str) -> list[dict]:
             WHERE kb.owner_user_id = :owner_user_id
             ORDER BY kb.updated_at DESC, kb.name ASC
             """),
-            {"owner_user_id": owner_user_id},
-        ).mappings().fetchall()
+                {"owner_user_id": owner_user_id},
+            )
+            .mappings()
+            .fetchall()
+        )
     return [dict(row) for row in rows]
 
 
@@ -178,18 +187,22 @@ def delete_knowledge_base(
                 "updated_at": now,
             },
         )
-        documents = conn.execute(
-            text("""
+        documents = (
+            conn.execute(
+                text("""
             SELECT document_id, storage_path
             FROM knowledge_document
             WHERE owner_user_id = :owner_user_id
               AND knowledge_base_id = :knowledge_base_id
             """),
-            {
-                "owner_user_id": owner_user_id,
-                "knowledge_base_id": knowledge_base_id,
-            },
-        ).mappings().fetchall()
+                {
+                    "owner_user_id": owner_user_id,
+                    "knowledge_base_id": knowledge_base_id,
+                },
+            )
+            .mappings()
+            .fetchall()
+        )
         conn.execute(
             text(
                 "DELETE FROM knowledge_chunk WHERE owner_user_id = :owner_user_id "
@@ -262,24 +275,32 @@ def _validate_knowledge_binding_target(
     if target_type == "global":
         return
     if target_type == "character":
-        row = conn.execute(
-            text("""
+        row = (
+            conn.execute(
+                text("""
             SELECT 1 FROM character_card
             WHERE owner_user_id = :owner_user_id AND character_id = :target_id
             """),
-            {"owner_user_id": owner_user_id, "target_id": target_id},
-        ).mappings().fetchone()
+                {"owner_user_id": owner_user_id, "target_id": target_id},
+            )
+            .mappings()
+            .fetchone()
+        )
     else:
-        row = conn.execute(
-            text("""
+        row = (
+            conn.execute(
+                text("""
             SELECT 1 FROM session
             WHERE player_id = :owner_user_id
               AND COALESCE(is_multi_character, 0) = 1
               AND COALESCE(group_thread_id, session_id) = :target_id
             LIMIT 1
             """),
-            {"owner_user_id": owner_user_id, "target_id": target_id},
-        ).mappings().fetchone()
+                {"owner_user_id": owner_user_id, "target_id": target_id},
+            )
+            .mappings()
+            .fetchone()
+        )
     if not row:
         raise ValueError(f"绑定目标不存在或不属于当前用户: {target_type}/{target_id}")
 
@@ -289,16 +310,25 @@ def replace_knowledge_bindings(
     knowledge_base_id: str,
     bindings: list[dict],
 ) -> list[dict]:
-    normalized = list(dict.fromkeys(_normalize_knowledge_binding(item) for item in bindings))
+    normalized = list(
+        dict.fromkeys(_normalize_knowledge_binding(item) for item in bindings)
+    )
     with db_session() as conn:
-        base = conn.execute(
-            text("""
+        base = (
+            conn.execute(
+                text("""
             SELECT 1 FROM knowledge_base
             WHERE owner_user_id = :owner_user_id
               AND knowledge_base_id = :knowledge_base_id
             """),
-            {"owner_user_id": owner_user_id, "knowledge_base_id": knowledge_base_id},
-        ).mappings().fetchone()
+                {
+                    "owner_user_id": owner_user_id,
+                    "knowledge_base_id": knowledge_base_id,
+                },
+            )
+            .mappings()
+            .fetchone()
+        )
         if not base:
             raise ValueError("知识库不存在")
 
@@ -354,32 +384,44 @@ def list_knowledge_bindings(
     knowledge_base_id: str,
 ) -> list[dict]:
     with db_session() as conn:
-        rows = conn.execute(
-            text("""
+        rows = (
+            conn.execute(
+                text("""
             SELECT target_type, target_id, created_at
             FROM knowledge_binding
             WHERE owner_user_id = :owner_user_id
               AND knowledge_base_id = :knowledge_base_id
             ORDER BY target_type ASC, target_id ASC
             """),
-            {"owner_user_id": owner_user_id, "knowledge_base_id": knowledge_base_id},
-        ).mappings().fetchall()
+                {
+                    "owner_user_id": owner_user_id,
+                    "knowledge_base_id": knowledge_base_id,
+                },
+            )
+            .mappings()
+            .fetchall()
+        )
     return [dict(row) for row in rows]
 
 
 def list_knowledge_binding_targets(owner_user_id: str) -> dict:
     with db_session() as conn:
-        characters = conn.execute(
-            text("""
+        characters = (
+            conn.execute(
+                text("""
             SELECT character_id, COALESCE(display_name, name, character_id) AS name
             FROM character_card
             WHERE owner_user_id = :owner_user_id AND is_active = 1
             ORDER BY name ASC
             """),
-            {"owner_user_id": owner_user_id},
-        ).mappings().fetchall()
-        groups = conn.execute(
-            text("""
+                {"owner_user_id": owner_user_id},
+            )
+            .mappings()
+            .fetchall()
+        )
+        groups = (
+            conn.execute(
+                text("""
             SELECT COALESCE(group_thread_id, session_id) AS group_thread_id,
                    MAX(COALESCE(group_name, '未命名群聊')) AS name,
                    MAX(created_at) AS last_active_at
@@ -388,8 +430,11 @@ def list_knowledge_binding_targets(owner_user_id: str) -> dict:
             GROUP BY COALESCE(group_thread_id, session_id)
             ORDER BY last_active_at DESC
             """),
-            {"owner_user_id": owner_user_id},
-        ).mappings().fetchall()
+                {"owner_user_id": owner_user_id},
+            )
+            .mappings()
+            .fetchall()
+        )
     return {
         "characters": [dict(row) for row in characters],
         "group_threads": [dict(row) for row in groups],
@@ -441,8 +486,9 @@ def create_knowledge_document(
 
 def get_knowledge_document(owner_user_id: str, document_id: str) -> dict | None:
     with db_session() as conn:
-        row = conn.execute(
-            text("""
+        row = (
+            conn.execute(
+                text("""
             SELECT d.*,
                    (SELECT COUNT(*) FROM knowledge_chunk c
                     WHERE c.owner_user_id = d.owner_user_id
@@ -450,8 +496,11 @@ def get_knowledge_document(owner_user_id: str, document_id: str) -> dict | None:
             FROM knowledge_document d
             WHERE d.owner_user_id = :owner_user_id AND d.document_id = :document_id
             """),
-            {"owner_user_id": owner_user_id, "document_id": document_id},
-        ).mappings().fetchone()
+                {"owner_user_id": owner_user_id, "document_id": document_id},
+            )
+            .mappings()
+            .fetchone()
+        )
     return _row_to_dict(row)
 
 
@@ -460,8 +509,9 @@ def list_knowledge_documents(
     knowledge_base_id: str,
 ) -> list[dict]:
     with db_session() as conn:
-        rows = conn.execute(
-            text("""
+        rows = (
+            conn.execute(
+                text("""
             SELECT d.*,
                    (SELECT COUNT(*) FROM knowledge_chunk c
                     WHERE c.owner_user_id = d.owner_user_id
@@ -471,19 +521,23 @@ def list_knowledge_documents(
               AND d.knowledge_base_id = :knowledge_base_id
             ORDER BY d.created_at DESC
             """),
-            {
-                "owner_user_id": owner_user_id,
-                "knowledge_base_id": knowledge_base_id,
-            },
-        ).mappings().fetchall()
+                {
+                    "owner_user_id": owner_user_id,
+                    "knowledge_base_id": knowledge_base_id,
+                },
+            )
+            .mappings()
+            .fetchall()
+        )
     return [dict(row) for row in rows]
 
 
 def list_incomplete_knowledge_documents() -> list[dict]:
     """Return queued or interrupted documents so startup can resume indexing."""
     with db_session() as conn:
-        rows = conn.execute(
-            text("""
+        rows = (
+            conn.execute(
+                text("""
             SELECT d.*,
                    (SELECT COUNT(*) FROM knowledge_chunk c
                     WHERE c.owner_user_id = d.owner_user_id
@@ -492,7 +546,10 @@ def list_incomplete_knowledge_documents() -> list[dict]:
             WHERE d.status IN ('queued', 'processing')
             ORDER BY d.created_at ASC
             """)
-        ).mappings().fetchall()
+            )
+            .mappings()
+            .fetchall()
+        )
     return [dict(row) for row in rows]
 
 
@@ -623,14 +680,18 @@ def replace_knowledge_chunks(
 
 def list_knowledge_chunks(owner_user_id: str, document_id: str) -> list[dict]:
     with db_session() as conn:
-        rows = conn.execute(
-            text("""
+        rows = (
+            conn.execute(
+                text("""
             SELECT * FROM knowledge_chunk
             WHERE owner_user_id = :owner_user_id AND document_id = :document_id
             ORDER BY chunk_index ASC
             """),
-            {"owner_user_id": owner_user_id, "document_id": document_id},
-        ).mappings().fetchall()
+                {"owner_user_id": owner_user_id, "document_id": document_id},
+            )
+            .mappings()
+            .fetchall()
+        )
     return [_decode_knowledge_chunk_row(row) for row in rows]
 
 
@@ -713,19 +774,23 @@ def get_knowledge_vector_cleanup_id(
     scope_id: str,
 ) -> str | None:
     with db_session() as conn:
-        row = conn.execute(
-            text("""
+        row = (
+            conn.execute(
+                text("""
             SELECT cleanup_id
             FROM knowledge_vector_cleanup
             WHERE owner_user_id = :owner_user_id AND scope_type = :scope_type
               AND scope_id = :scope_id
             """),
-            {
-                "owner_user_id": owner_user_id,
-                "scope_type": scope_type,
-                "scope_id": scope_id,
-            },
-        ).mappings().fetchone()
+                {
+                    "owner_user_id": owner_user_id,
+                    "scope_type": scope_type,
+                    "scope_id": scope_id,
+                },
+            )
+            .mappings()
+            .fetchone()
+        )
     return row["cleanup_id"] if row else None
 
 
@@ -770,15 +835,19 @@ def enqueue_knowledge_vector_cleanup(
 
 def list_knowledge_vector_cleanups(limit: int = 100) -> list[dict]:
     with db_session() as conn:
-        rows = conn.execute(
-            text("""
+        rows = (
+            conn.execute(
+                text("""
             SELECT *
             FROM knowledge_vector_cleanup
             ORDER BY updated_at ASC
             LIMIT :limit
             """),
-            {"limit": max(1, limit)},
-        ).mappings().fetchall()
+                {"limit": max(1, limit)},
+            )
+            .mappings()
+            .fetchall()
+        )
     return [dict(row) for row in rows]
 
 
@@ -801,14 +870,19 @@ def fail_knowledge_vector_cleanup(cleanup_id: str, error: str) -> None:
                 updated_at = :updated_at
             WHERE cleanup_id = :cleanup_id
             """),
-            {"last_error": str(error)[:2000], "updated_at": _now(), "cleanup_id": cleanup_id},
+            {
+                "last_error": str(error)[:2000],
+                "updated_at": _now(),
+                "cleanup_id": cleanup_id,
+            },
         )
 
 
 def list_all_knowledge_chunks_for_indexing() -> list[dict]:
     with db_session() as conn:
-        rows = conn.execute(
-            text("""
+        rows = (
+            conn.execute(
+                text("""
             SELECT c.*, d.original_name AS document_name
             FROM knowledge_chunk c
             INNER JOIN knowledge_document d
@@ -817,7 +891,10 @@ def list_all_knowledge_chunks_for_indexing() -> list[dict]:
             WHERE d.status = 'ready'
             ORDER BY c.document_id, c.chunk_index
             """)
-        ).mappings().fetchall()
+            )
+            .mappings()
+            .fetchall()
+        )
     return [_decode_knowledge_chunk_row(row) for row in rows]
 
 
@@ -834,7 +911,9 @@ def get_authorized_knowledge_chunks(
     visibility = ["b.target_type = 'global'"]
     visibility_params: dict = {}
     if character_id:
-        visibility.append("(b.target_type = 'character' AND b.target_id = :character_id)")
+        visibility.append(
+            "(b.target_type = 'character' AND b.target_id = :character_id)"
+        )
         visibility_params["character_id"] = character_id
     if group_thread_id:
         visibility.append(
@@ -847,8 +926,9 @@ def get_authorized_knowledge_chunks(
         f"chunk_id_{idx}": chunk_id for idx, chunk_id in enumerate(chunk_ids)
     }
     with db_session() as conn:
-        rows = conn.execute(
-            text(f"""
+        rows = (
+            conn.execute(
+                text(f"""
             SELECT c.*, d.original_name AS document_name,
                    kb.name AS knowledge_base_name
             FROM knowledge_chunk c
@@ -869,16 +949,16 @@ def get_authorized_knowledge_chunks(
                     AND ({" OR ".join(visibility)})
               )
             """),
-            {
-                "owner_user_id": owner_user_id,
-                **chunk_params,
-                **visibility_params,
-            },
-        ).mappings().fetchall()
-    by_id = {
-        row["chunk_id"]: _decode_knowledge_chunk_row(row)
-        for row in rows
-    }
+                {
+                    "owner_user_id": owner_user_id,
+                    **chunk_params,
+                    **visibility_params,
+                },
+            )
+            .mappings()
+            .fetchall()
+        )
+    by_id = {row["chunk_id"]: _decode_knowledge_chunk_row(row) for row in rows}
     return [by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_id]
 
 
@@ -903,8 +983,9 @@ def get_owned_knowledge_chunks(
         for idx, knowledge_base_id in enumerate(knowledge_base_ids)
     }
     with db_session() as conn:
-        rows = conn.execute(
-            text(f"""
+        rows = (
+            conn.execute(
+                text(f"""
             SELECT c.*, d.original_name AS document_name,
                    kb.name AS knowledge_base_name
             FROM knowledge_chunk c
@@ -920,12 +1001,12 @@ def get_owned_knowledge_chunks(
               AND d.status = 'ready'
               AND kb.is_enabled = 1
             """),
-            {"owner_user_id": owner_user_id, **chunk_params, **base_params},
-        ).mappings().fetchall()
-    by_id = {
-        row["chunk_id"]: _decode_knowledge_chunk_row(row)
-        for row in rows
-    }
+                {"owner_user_id": owner_user_id, **chunk_params, **base_params},
+            )
+            .mappings()
+            .fetchall()
+        )
+    by_id = {row["chunk_id"]: _decode_knowledge_chunk_row(row) for row in rows}
     return [by_id[chunk_id] for chunk_id in chunk_ids if chunk_id in by_id]
 
 
@@ -942,7 +1023,9 @@ def list_authorized_knowledge_chunks(
     visibility = ["b.target_type = 'global'"]
     visibility_params: dict = {}
     if character_id:
-        visibility.append("(b.target_type = 'character' AND b.target_id = :character_id)")
+        visibility.append(
+            "(b.target_type = 'character' AND b.target_id = :character_id)"
+        )
         visibility_params["character_id"] = character_id
     if group_thread_id:
         visibility.append(
@@ -957,8 +1040,9 @@ def list_authorized_knowledge_chunks(
         for idx, knowledge_base_id in enumerate(knowledge_base_ids)
     }
     with db_session() as conn:
-        rows = conn.execute(
-            text(f"""
+        rows = (
+            conn.execute(
+                text(f"""
             SELECT c.*, d.original_name AS document_name,
                    kb.name AS knowledge_base_name
             FROM knowledge_chunk c
@@ -980,8 +1064,11 @@ def list_authorized_knowledge_chunks(
               )
             ORDER BY c.document_id, c.chunk_index
             """),
-            {"owner_user_id": owner_user_id, **base_params, **visibility_params},
-        ).mappings().fetchall()
+                {"owner_user_id": owner_user_id, **base_params, **visibility_params},
+            )
+            .mappings()
+            .fetchall()
+        )
     return [_decode_knowledge_chunk_row(row) for row in rows]
 
 
@@ -1001,8 +1088,9 @@ def list_owned_knowledge_chunks_for_bases(
         for idx, knowledge_base_id in enumerate(knowledge_base_ids)
     }
     with db_session() as conn:
-        rows = conn.execute(
-            text(f"""
+        rows = (
+            conn.execute(
+                text(f"""
             SELECT c.*, d.original_name AS document_name,
                    kb.name AS knowledge_base_name
             FROM knowledge_chunk c
@@ -1018,8 +1106,11 @@ def list_owned_knowledge_chunks_for_bases(
               AND kb.is_enabled = 1
             ORDER BY c.document_id, c.chunk_index
             """),
-            {"owner_user_id": owner_user_id, **base_params},
-        ).mappings().fetchall()
+                {"owner_user_id": owner_user_id, **base_params},
+            )
+            .mappings()
+            .fetchall()
+        )
     return [_decode_knowledge_chunk_row(row) for row in rows]
 
 
@@ -1032,7 +1123,9 @@ def get_authorized_knowledge_base_ids(
     visibility = ["b.target_type = 'global'"]
     params: dict = {"owner_user_id": owner_user_id}
     if character_id:
-        visibility.append("(b.target_type = 'character' AND b.target_id = :character_id)")
+        visibility.append(
+            "(b.target_type = 'character' AND b.target_id = :character_id)"
+        )
         params["character_id"] = character_id
     if group_thread_id:
         visibility.append(
@@ -1040,8 +1133,9 @@ def get_authorized_knowledge_base_ids(
         )
         params["group_thread_id"] = group_thread_id
     with db_session() as conn:
-        rows = conn.execute(
-            text(f"""
+        rows = (
+            conn.execute(
+                text(f"""
             SELECT DISTINCT kb.knowledge_base_id
             FROM knowledge_base kb
             INNER JOIN knowledge_binding b
@@ -1056,8 +1150,11 @@ def get_authorized_knowledge_base_ids(
               AND ({" OR ".join(visibility)})
             ORDER BY kb.knowledge_base_id
             """),
-            params,
-        ).mappings().fetchall()
+                params,
+            )
+            .mappings()
+            .fetchall()
+        )
     return [row["knowledge_base_id"] for row in rows]
 
 

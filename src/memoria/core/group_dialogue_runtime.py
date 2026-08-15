@@ -54,7 +54,11 @@ def _story_motivation(
     hooks = state.get("unresolved_hooks") or []
     if hooks:
         topic = next(
-            (str(hook.get("topic") or "").strip() for hook in hooks if isinstance(hook, dict)),
+            (
+                str(hook.get("topic") or "").strip()
+                for hook in hooks
+                if isinstance(hook, dict)
+            ),
             "",
         )
         return "npc_follow_up", topic or "延续尚未解决的角色提问或剧情钩子"
@@ -64,7 +68,9 @@ def _story_motivation(
         try:
             card = character_loader.load_character_card(character_id, player_id)
         except Exception as exc:
-            logger.warning("自主群聊加载角色卡失败: character=%s error=%s", character_id, exc)
+            logger.warning(
+                "自主群聊加载角色卡失败: character=%s error=%s", character_id, exc
+            )
             continue
         goals = getattr(card, "goals_and_motivations", None)
         current_goals = list(getattr(goals, "current_goals", []) or [])
@@ -97,7 +103,10 @@ def _ordinary_pulse_due(
         return False
     today = snapshot.real_now.date().isoformat()
     count = int(state.get("daily_message_count") or 0)
-    return state.get("daily_message_date") != today or count < DAILY_AUTONOMOUS_MESSAGE_LIMIT
+    return (
+        state.get("daily_message_date") != today
+        or count < DAILY_AUTONOMOUS_MESSAGE_LIMIT
+    )
 
 
 def _ensure_carrier_session(
@@ -220,7 +229,8 @@ def run_group_dialogue_pulse(
             world_now_iso=snapshot.world_now.isoformat(),
             autonomous_message_count=0 if explicit_event else len(responses),
             daily_message_date=real_now.date().isoformat(),
-            current_topic=pulse_state.get("current_topic") or state.get("current_topic"),
+            current_topic=pulse_state.get("current_topic")
+            or state.get("current_topic"),
             topic_source=pulse_state.get("topic_source") or trigger_source,
             last_reply_to_message_id=pulse_state.get("last_reply_to_message_id"),
             last_reply_to_character_id=pulse_state.get("last_reply_to_character_id"),

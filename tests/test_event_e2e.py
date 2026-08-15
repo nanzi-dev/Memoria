@@ -167,7 +167,9 @@ async def test_single_dialogue_http_event_execution_persists_to_database(monkeyp
 
     app = _app(event_admin_api.router, dialogue_api.router)
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
         created = await client.post(
             "/api/v1/admin/events",
             headers=headers,
@@ -216,10 +218,15 @@ async def test_single_dialogue_http_event_execution_persists_to_database(monkeyp
         character_loader.load_character_card(character_id, player_id),
     )
     assert runtime["affection_level"] == 4
-    assert len(repository.get_event_trigger_history(event_id=event_id, player_id=player_id)) == 1
-    assert [item["content"] for item in repository.list_player_event_inbox(player_id)] == [
-        notification
-    ]
+    assert (
+        len(
+            repository.get_event_trigger_history(event_id=event_id, player_id=player_id)
+        )
+        == 1
+    )
+    assert [
+        item["content"] for item in repository.list_player_event_inbox(player_id)
+    ] == [notification]
     assert [
         message["role"]
         for message in repository.get_short_term_history(session_id, limit_turns=2)
@@ -274,7 +281,9 @@ async def test_group_dialogue_http_event_execution_persists_to_database(monkeypa
 
     app = _app(event_admin_api.router, multi_dialogue_api.router)
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
         created = await client.post(
             "/api/v1/admin/events",
             headers=headers,
@@ -313,10 +322,15 @@ async def test_group_dialogue_http_event_execution_persists_to_database(monkeypa
         character_loader.load_character_card(speaker_id, player_id),
     )
     assert runtime["trust_level"] == 14
-    assert len(repository.get_event_trigger_history(event_id=event_id, player_id=player_id)) == 1
-    assert [item["content"] for item in repository.list_player_event_inbox(player_id)] == [
-        notification
-    ]
+    assert (
+        len(
+            repository.get_event_trigger_history(event_id=event_id, player_id=player_id)
+        )
+        == 1
+    )
+    assert [
+        item["content"] for item in repository.list_player_event_inbox(player_id)
+    ] == [notification]
     history = repository.get_multi_character_history(session_id, limit_messages=10)
     assert [message["role"] for message in history] == ["user", "assistant"]
 
@@ -352,7 +366,9 @@ async def test_group_dialogue_zero_speaker_surfaces_committed_event_metadata(
 
     app = _app(event_admin_api.router, multi_dialogue_api.router)
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
         created = await client.post(
             "/api/v1/admin/events",
             headers=headers,
@@ -384,18 +400,23 @@ async def test_group_dialogue_zero_speaker_surfaces_committed_event_metadata(
     assert body["event_executions"][0]["event_id"] == event_id
     assert body["event_executions"][0]["status"] == "succeeded"
     assert [item["message"] for item in body["event_notifications"]] == [notification]
-    assert len(
-        repository.get_event_trigger_history(
-            event_id=event_id,
-            player_id=player_id,
+    assert (
+        len(
+            repository.get_event_trigger_history(
+                event_id=event_id,
+                player_id=player_id,
+            )
         )
-    ) == 1
+        == 1
+    )
     history = repository.get_multi_character_history(session_id, limit_messages=10)
     assert [message["role"] for message in history] == ["user"]
 
 
 @pytest.mark.asyncio
-async def test_scheduled_event_http_execution_persists_and_advances_schedule(monkeypatch):
+async def test_scheduled_event_http_execution_persists_and_advances_schedule(
+    monkeypatch,
+):
     _install_inline_fastapi(monkeypatch)
     # run-due 现在要求管理员权限（防止普通用户刷 LLM 预算）
     player_id, headers = _create_identity("schedule_e2e", admin=True)
@@ -407,7 +428,9 @@ async def test_scheduled_event_http_execution_persists_and_advances_schedule(mon
 
     app = _app(event_admin_api.router)
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
         created = await client.post(
             "/api/v1/admin/events",
             headers=headers,
@@ -456,10 +479,15 @@ async def test_scheduled_event_http_execution_persists_and_advances_schedule(mon
         character_loader.load_character_card(character_id, player_id),
     )
     assert runtime["affection_level"] == 7
-    assert len(repository.get_event_trigger_history(event_id=event_id, player_id=player_id)) == 1
-    assert [item["content"] for item in repository.list_player_event_inbox(player_id)] == [
-        notification
-    ]
+    assert (
+        len(
+            repository.get_event_trigger_history(event_id=event_id, player_id=player_id)
+        )
+        == 1
+    )
+    assert [
+        item["content"] for item in repository.list_player_event_inbox(player_id)
+    ] == [notification]
     schedule = repository.get_event_schedule(event_id, character_id, player_id)
     assert schedule["last_run_at"] is not None
     assert datetime.fromisoformat(schedule["next_run_at"]) > due_at

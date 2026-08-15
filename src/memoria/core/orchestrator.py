@@ -49,6 +49,7 @@ EventSink = Callable[[str, dict], None]
 def _clip(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
 
+
 def _safe_float(value, default: float = 0.0) -> float:
     """安全 float 转换（防 None / 字符串异常）"""
     try:
@@ -148,7 +149,9 @@ def _load_character_card(character_id: str, player_id: str, locale: Locale):
     try:
         return character_loader.load_character_card(character_id, player_id, locale)
     except TypeError as exc:
-        if "positional" not in str(exc) and "unexpected keyword argument" not in str(exc):
+        if "positional" not in str(exc) and "unexpected keyword argument" not in str(
+            exc
+        ):
             raise
         return character_loader.load_character_card(character_id, player_id)
 
@@ -182,7 +185,9 @@ def _build_opening_line_prompt(
         except TypeError as legacy_exc:
             if "unexpected keyword argument" not in str(legacy_exc):
                 raise
-            return prompt_builder.build_opening_line_prompt(card, runtime_state, player_name)
+            return prompt_builder.build_opening_line_prompt(
+                card, runtime_state, player_name
+            )
 
 
 def _load_player_character(player_id: str, fallback_name: str) -> dict:
@@ -196,29 +201,35 @@ def _load_player_character(player_id: str, fallback_name: str) -> dict:
     player_character.setdefault("display_name", fallback_name or "玩家")
     player_character.setdefault("node_id", repository.player_node_id(player_id))
     return player_character
-    
+
 
 def _aliases_for_card(character_id: str, card) -> list[str]:
     aliases = [character_id]
     meta = getattr(card, "meta", None)
     if meta:
-        aliases.extend([
-            getattr(meta, "name", ""),
-            getattr(meta, "display_name", ""),
-        ])
+        aliases.extend(
+            [
+                getattr(meta, "name", ""),
+                getattr(meta, "display_name", ""),
+            ]
+        )
         aliases.extend(getattr(meta, "aliases", []) or [])
     return relationship_context.normalize_aliases(aliases)
 
 
-def _character_name_and_aliases(player_id: str, character_id: str) -> tuple[str, list[str]]:
+def _character_name_and_aliases(
+    player_id: str, character_id: str
+) -> tuple[str, list[str]]:
     if repository.is_player_node_id(character_id):
         player_character = _load_player_character(player_id, "玩家")
         name = player_character.get("display_name") or "玩家"
-        return name, relationship_context.normalize_aliases([
-            character_id,
-            name,
-            "玩家",
-        ])
+        return name, relationship_context.normalize_aliases(
+            [
+                character_id,
+                name,
+                "玩家",
+            ]
+        )
 
     aliases = [character_id]
     name = character_id
@@ -238,15 +249,17 @@ def _character_name_and_aliases(player_id: str, character_id: str) -> tuple[str,
         try:
             card_data = json.loads(row.get("card_data") or "{}")
             meta = card_data.get("meta") or {}
-            aliases.extend([
-                alias
-                for alias in (
-                    meta.get("name"),
-                    meta.get("display_name"),
-                    *(meta.get("aliases") or []),
-                )
-                if alias
-            ])
+            aliases.extend(
+                [
+                    alias
+                    for alias in (
+                        meta.get("name"),
+                        meta.get("display_name"),
+                        *(meta.get("aliases") or []),
+                    )
+                    if alias
+                ]
+            )
         except (TypeError, ValueError):
             pass
 
@@ -293,9 +306,8 @@ def _relationship_updated_at_for_pair(
         character_id_a,
         character_id_b,
     )
-    if (
-        repository.is_player_node_id(character_id_a)
-        or repository.is_player_node_id(character_id_b)
+    if repository.is_player_node_id(character_id_a) or repository.is_player_node_id(
+        character_id_b
     ):
         return revision_updated_at
     updated_at = relationship.get("updated_at") if relationship else None
@@ -448,11 +460,9 @@ def _build_single_character_memory_query_context(
     if query_context:
         parts.append(str(query_context).strip())
 
-    names = relationship_context.normalize_aliases([
-        name
-        for name in character_names.values()
-        if name
-    ])
+    names = relationship_context.normalize_aliases(
+        [name for name in character_names.values() if name]
+    )
     if names:
         parts.append("相关角色：" + "、".join(names))
 
@@ -473,15 +483,15 @@ def _load_single_character_prompt_context(
     world_now: str | None = None,
     recall_key: str | None = None,
 ) -> dict:
-    relationship_records = repository.list_character_relationships(player_id, character_id)
+    relationship_records = repository.list_character_relationships(
+        player_id, character_id
+    )
     character_relationships = relationship_context.relationship_map_from_records(
         relationship_records
     )
 
     curve_candidate_limit = (
-        memory_curve.candidate_limit(20)
-        if configs.memory_curve_enabled
-        else 20
+        memory_curve.candidate_limit(20) if configs.memory_curve_enabled else 20
     )
     shared_records = repository.get_character_shared_memories(
         owner_user_id=player_id,
@@ -512,37 +522,43 @@ def _load_single_character_prompt_context(
         add_related(_other_character_id(character_id, memory))
 
     for memory in group_records:
-        for participant_id in _parse_group_memory_participants(memory.get("participants")):
+        for participant_id in _parse_group_memory_participants(
+            memory.get("participants")
+        ):
             add_related(participant_id)
 
     player_node_id = repository.player_node_id(player_id)
     add_related(player_node_id)
 
     current_name = getattr(getattr(card, "meta", None), "display_name", None)
-    current_name = current_name or getattr(getattr(card, "meta", None), "name", None) or character_id
+    current_name = (
+        current_name
+        or getattr(getattr(card, "meta", None), "name", None)
+        or character_id
+    )
     character_names = {character_id: current_name}
     aliases_by_character = {character_id: _aliases_for_card(character_id, card)}
 
     for other_id in related_character_ids:
         if other_id == player_node_id:
-            current_player = player_character or _load_player_character(player_id, "玩家")
+            current_player = player_character or _load_player_character(
+                player_id, "玩家"
+            )
             name = current_player.get("display_name") or "玩家"
-            aliases = relationship_context.normalize_aliases([
-                player_node_id,
-                name,
-                "玩家",
-            ])
+            aliases = relationship_context.normalize_aliases(
+                [
+                    player_node_id,
+                    name,
+                    "玩家",
+                ]
+            )
         else:
             name, aliases = _character_name_and_aliases(player_id, other_id)
         character_names[other_id] = name
         aliases_by_character[other_id] = aliases
 
     relationship_aliases = relationship_context.normalize_aliases(
-        [
-            alias
-            for aliases in aliases_by_character.values()
-            for alias in aliases
-        ]
+        [alias for aliases in aliases_by_character.values() for alias in aliases]
     )
     relationship_cutoff = None
     if related_character_ids:
@@ -552,10 +568,12 @@ def _load_single_character_prompt_context(
             character_relationships,
         )
 
-    relationship_graph_lines = relationship_context.build_relationship_graph_lines_for_pairs(
-        [(character_id, other_id) for other_id in related_character_ids],
-        character_names,
-        character_relationships,
+    relationship_graph_lines = (
+        relationship_context.build_relationship_graph_lines_for_pairs(
+            [(character_id, other_id) for other_id in related_character_ids],
+            character_names,
+            character_relationships,
+        )
     )
     memory_query_context = _build_single_character_memory_query_context(
         query_context,
@@ -602,9 +620,9 @@ def _load_single_character_prompt_context(
         relationship_context=False,
     )
     if configs.memory_curve_enabled:
-        effective_world_now = world_now or world_clock.get_clock_snapshot(
-            player_id
-        ).world_now.isoformat()
+        effective_world_now = (
+            world_now or world_clock.get_clock_snapshot(player_id).world_now.isoformat()
+        )
         effective_recall_key = recall_key or session_id or effective_world_now
         with memory_curve.curve_eval_context(fact_records, 20) as fb_fact:
             fb_fact[:] = memory_curve.evaluate_records(
@@ -685,7 +703,7 @@ def start_session(
     locale: Locale = DEFAULT_LOCALE,
 ) -> dict:
     """对应 /dialogue/session/start"""
-    
+
     player_character = _load_player_character(player_id, player_name)
     player_name = player_character["display_name"]
     card = _load_character_card(character_id, player_id, locale)
@@ -695,7 +713,7 @@ def start_session(
         repository.get_last_character_interaction_world_at(player_id, character_id),
         locale=getattr(getattr(card, "speech_style", None), "language", "zh-CN"),
     )
-    
+
     candidate_session_id = str(uuid.uuid4())
     session = repository.create_session(
         candidate_session_id,
@@ -716,10 +734,14 @@ def start_session(
             "assistant_message_id": None,
             "locale": session.get("locale") or locale,
         }
-    
+
     # 获取历史会话摘要（最近3次）
-    past_summaries_raw = repository.get_recent_summaries(character_id, player_id, limit=3)
-    past_summaries = [s["summary_text"] for s in past_summaries_raw] if past_summaries_raw else []
+    past_summaries_raw = repository.get_recent_summaries(
+        character_id, player_id, limit=3
+    )
+    past_summaries = (
+        [s["summary_text"] for s in past_summaries_raw] if past_summaries_raw else []
+    )
     prompt_context = _load_single_character_prompt_context(
         character_id,
         player_id,
@@ -732,7 +754,7 @@ def start_session(
     )
     runtime_state["known_player_facts"] = prompt_context["known_player_facts"]
     past_summaries.extend(prompt_context["cross_mode_memories"])
-    
+
     system_prompt = _build_system_prompt(
         card,
         runtime_state,
@@ -746,16 +768,16 @@ def start_session(
     opening_instruction = _build_opening_line_prompt(
         card, runtime_state, player_name, locale, player_character
     )
-    
+
     result = llm_client.call_role_turn(
-        system_prompt = system_prompt + opening_instruction,
-        history =  [],
-        debug = debug,
-        debug_sink = debug_sink,
+        system_prompt=system_prompt + opening_instruction,
+        history=[],
+        debug=debug,
+        debug_sink=debug_sink,
     )
-    
+
     dialogue = _safety_check(result.get("dialogue", ""))
-    
+
     assistant_msg_id = _append_short_term_message(
         session_id,
         "assistant",
@@ -768,8 +790,8 @@ def start_session(
         current_mood=runtime_state.get("current_mood", "neutral"),
         world_created_at=clock_snapshot.world_now.isoformat(),
     )
-    
-    return{
+
+    return {
         "session_id": session_id,
         "opening_line": dialogue,
         "action": result.get("action", card.action_vocabulary.default_action),
@@ -779,7 +801,7 @@ def start_session(
         "assistant_message_id": assistant_msg_id,
         "locale": locale,
     }
-    
+
 
 # =========================
 # 主对话流程
@@ -839,9 +861,7 @@ def _run_dialogue_turn(
                 card,
                 query_context=player_message,
             )
-            previous_affinity = _safe_float(
-                runtime_state.get("affection_level", 0)
-            )
+            previous_affinity = _safe_float(runtime_state.get("affection_level", 0))
             previous_trust = _safe_float(runtime_state.get("trust_level", 0))
             history = repository.get_short_term_history(
                 session_id,
@@ -870,16 +890,12 @@ def _run_dialogue_turn(
                 card,
                 session_id=session_id,
                 query_context=player_message,
-                fallback_known_player_facts=runtime_state.get(
-                    "known_player_facts"
-                ),
+                fallback_known_player_facts=runtime_state.get("known_player_facts"),
                 player_character=player_character,
                 world_now=world_created_at,
                 recall_key=request_id,
             )
-            runtime_state["known_player_facts"] = (
-                prompt_context["known_player_facts"]
-            )
+            runtime_state["known_player_facts"] = prompt_context["known_player_facts"]
             past_summaries = [
                 summary["summary_text"] for summary in past_summaries_raw or []
             ]
@@ -890,9 +906,7 @@ def _run_dialogue_turn(
                 player_name,
                 player_character=player_character,
                 past_summaries=past_summaries,
-                relationship_graph_lines=(
-                    prompt_context["relationship_graph_lines"]
-                ),
+                relationship_graph_lines=(prompt_context["relationship_graph_lines"]),
                 time_context=time_context,
                 knowledge_context=knowledge.prompt_section,
                 locale=locale,
@@ -1036,39 +1050,41 @@ def _run_dialogue_turn(
             }
             background_jobs = []
             checkpoint_interval = configs.long_term_memory_interval_turns
-            checkpoint_turn = (
-                repository.get_session_user_turn_count(session_id) + 1
-            )
+            checkpoint_turn = repository.get_session_user_turn_count(session_id) + 1
             if checkpoint_turn % checkpoint_interval == 0:
                 checkpoint_history = repository.get_short_term_history(
                     session_id,
                     limit_turns=checkpoint_interval,
                 )
-                checkpoint_history.extend([
-                    {"role": "user", "content": player_message},
-                    {"role": "assistant", "content": dialogue},
-                ])
-                checkpoint_history = checkpoint_history[-checkpoint_interval * 2:]
+                checkpoint_history.extend(
+                    [
+                        {"role": "user", "content": player_message},
+                        {"role": "assistant", "content": dialogue},
+                    ]
+                )
+                checkpoint_history = checkpoint_history[-checkpoint_interval * 2 :]
                 if is_memory_worthy_candidate(
                     checkpoint_history,
                     max_messages=checkpoint_interval,
                 ):
-                    background_jobs.append({
-                        "job_type": "single_checkpoint_memory",
-                        "dedupe_key": (
-                            f"single_checkpoint_memory:{session_id}:{checkpoint_turn}"
-                        ),
-                        "payload": {
-                            "owner_user_id": player_id,
-                            "scope_type": "character",
-                            "scope_id": character_id,
-                            "session_id": session_id,
-                            "history": checkpoint_history,
-                            "witness_character_ids": [character_id],
-                            "evidence_id": f"message:{request_id}",
-                            "world_occurred_at": world_created_at,
-                        },
-                    })
+                    background_jobs.append(
+                        {
+                            "job_type": "single_checkpoint_memory",
+                            "dedupe_key": (
+                                f"single_checkpoint_memory:{session_id}:{checkpoint_turn}"
+                            ),
+                            "payload": {
+                                "owner_user_id": player_id,
+                                "scope_type": "character",
+                                "scope_id": character_id,
+                                "session_id": session_id,
+                                "history": checkpoint_history,
+                                "witness_character_ids": [character_id],
+                                "evidence_id": f"message:{request_id}",
+                                "world_occurred_at": world_created_at,
+                            },
+                        }
+                    )
                 else:
                     performance.increment("llm.calls_avoided.memory_gate")
             turn = {
@@ -1077,12 +1093,14 @@ def _run_dialogue_turn(
                 "player_id": player_id,
                 "lease_owner": lease_owner,
                 "response": response,
-                "runtime_states": [{
-                    "character_id": character_id,
-                    "affection_level": new_affinity,
-                    "trust_level": new_trust,
-                    "current_mood": mood_after,
-                }],
+                "runtime_states": [
+                    {
+                        "character_id": character_id,
+                        "affection_level": new_affinity,
+                        "trust_level": new_trust,
+                        "current_mood": mood_after,
+                    }
+                ],
                 "messages": [
                     {
                         "role": "user",

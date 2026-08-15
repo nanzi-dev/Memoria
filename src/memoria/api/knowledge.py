@@ -214,9 +214,7 @@ def delete_knowledge_base(
 ):
     _require_base(current_user_id, knowledge_base_id)
     try:
-        deleted = repository.delete_knowledge_base(
-            current_user_id, knowledge_base_id
-        )
+        deleted = repository.delete_knowledge_base(current_user_id, knowledge_base_id)
     except Exception as exc:
         logger.exception("删除知识库失败: %s", knowledge_base_id)
         raise HTTPException(status_code=500, detail="删除知识库失败") from exc

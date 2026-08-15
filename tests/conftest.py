@@ -10,6 +10,7 @@ before invoking pytest — the suite will drop/recreate tables on that server
 and run against it (exercising the real named-bind SQL, ON CONFLICT, FOR
 UPDATE, partial indexes and BigInteger columns).
 """
+
 import os
 import sys
 import tempfile
@@ -35,17 +36,54 @@ def _precreate_shared_test_users() -> None:
     from memoria.db.repository import _common
 
     hardcoded = {
-        "admin", "another-user", "cfP", "chain_p", "curve-fallback-owner",
-        "deduplicated-worker", "english-player", "esP", "group-player", "lsP",
-        "noone", "opening-owner", "opening-player", "other", "other-player",
-        "other-user", "owner", "owner-1", "owner-a", "p", "p1", "player",
-        "player_001", "player-1", "prompt-player", "scheduled_player",
-        "stale-worker", "test-user", "too-early", "u_pg_affinity", "user-1",
-        "user_auto_shared", "user_shared_auto", "user_shared_d",
-        "user_shared_invalid", "user_shared_pulse", "usr_1", "usr_a",
-        "usr_knowledge_owner", "usr_story_other", "usr_story_session_competitor",
-        "usr_test", "worker-1", "worker-2", "worker-a", "worker-b",
-        "worker-dedup", "worker-rollback",
+        "admin",
+        "another-user",
+        "cfP",
+        "chain_p",
+        "curve-fallback-owner",
+        "deduplicated-worker",
+        "english-player",
+        "esP",
+        "group-player",
+        "lsP",
+        "noone",
+        "opening-owner",
+        "opening-player",
+        "other",
+        "other-player",
+        "other-user",
+        "owner",
+        "owner-1",
+        "owner-a",
+        "p",
+        "p1",
+        "player",
+        "player_001",
+        "player-1",
+        "prompt-player",
+        "scheduled_player",
+        "stale-worker",
+        "test-user",
+        "too-early",
+        "u_pg_affinity",
+        "user-1",
+        "user_auto_shared",
+        "user_shared_auto",
+        "user_shared_d",
+        "user_shared_invalid",
+        "user_shared_pulse",
+        "usr_1",
+        "usr_a",
+        "usr_knowledge_owner",
+        "usr_story_other",
+        "usr_story_session_competitor",
+        "usr_test",
+        "worker-1",
+        "worker-2",
+        "worker-a",
+        "worker-b",
+        "worker-dedup",
+        "worker-rollback",
     }
     for i, uid in enumerate(sorted(hardcoded)):
         if repository.get_user_by_id(uid):
@@ -74,6 +112,7 @@ def pytest_sessionstart(session):
             # SQLite 默认不强制外键；PG 强制会大面积误报）。唯一约束与 NOT NULL 仍生效。
             # 仅对 PostgreSQL 连接生效（SQLite 连接不执行）。
             import sqlite3
+
             if isinstance(dbapi_conn, sqlite3.Connection):
                 return  # SQLite 连接不执行
             try:

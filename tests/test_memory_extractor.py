@@ -1,6 +1,7 @@
 """
 记忆萃取与提示构建测试
 """
+
 import sys
 from pathlib import Path
 
@@ -8,11 +9,22 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+
 class TestPromptBuilder:
     def test_build_system_prompt_structure(self):
         from memoria.core import character_loader, prompt_builder
+
         card = character_loader.load_character_card("npc_luo_xiaohei")
-        prompt = prompt_builder.build_system_prompt(card, {"affection_level":30,"trust_level":50,"current_mood":"开心","known_player_facts":["玩家喜欢猫"]},"测试者")
+        prompt = prompt_builder.build_system_prompt(
+            card,
+            {
+                "affection_level": 30,
+                "trust_level": 50,
+                "current_mood": "开心",
+                "known_player_facts": ["玩家喜欢猫"],
+            },
+            "测试者",
+        )
         assert "罗小黑" in prompt or "小黑" in prompt
         assert "好感度" in prompt
         assert "信任度" in prompt
@@ -57,13 +69,27 @@ class TestPromptBuilder:
 
     def test_build_multi_character_prompt(self):
         from memoria.core import character_loader, prompt_builder
+
         c1 = character_loader.load_character_card("npc_luo_xiaohei")
         character_loader.load_character_card("npc_wuxian")
         prompt = prompt_builder.build_multi_character_system_prompt(
-            c1, {"affection_level":30,"trust_level":50,"current_mood":"开心","known_player_facts":[]},
+            c1,
+            {
+                "affection_level": 30,
+                "trust_level": 50,
+                "current_mood": "开心",
+                "known_player_facts": [],
+            },
             "测试者",
-            other_characters=[{"character_id":"npc_wuxian","name":"巫仙","display_name":"无限","occupation":"修行者"}],
-            is_opening=True
+            other_characters=[
+                {
+                    "character_id": "npc_wuxian",
+                    "name": "巫仙",
+                    "display_name": "无限",
+                    "occupation": "修行者",
+                }
+            ],
+            is_opening=True,
         )
         assert "小黑" in prompt or "罗小黑" in prompt
         assert "无限" in prompt or "巫仙" in prompt
@@ -107,12 +133,25 @@ class TestPromptBuilder:
 
     def test_multi_character_prompt_marks_relationship_graph_authoritative(self):
         from memoria.core import character_loader, prompt_builder
+
         c1 = character_loader.load_character_card("npc_luo_xiaohei")
         prompt = prompt_builder.build_multi_character_system_prompt(
             c1,
-            {"affection_level":30,"trust_level":50,"current_mood":"开心","known_player_facts":["旧记忆说他们只是师徒"]},
+            {
+                "affection_level": 30,
+                "trust_level": 50,
+                "current_mood": "开心",
+                "known_player_facts": ["旧记忆说他们只是师徒"],
+            },
             "测试者",
-            other_characters=[{"character_id":"npc_wuxian","name":"巫仙","display_name":"无限","occupation":"修行者"}],
+            other_characters=[
+                {
+                    "character_id": "npc_wuxian",
+                    "name": "巫仙",
+                    "display_name": "无限",
+                    "occupation": "修行者",
+                }
+            ],
             character_relationships={
                 "npc_luo_xiaohei_npc_wuxian": {
                     "relationship_type": "情侣",
@@ -121,7 +160,7 @@ class TestPromptBuilder:
                     "updated_at": "2026-07-12T03:09:58+00:00",
                 }
             },
-            past_summaries=["旧历史记录说他们是师徒"]
+            past_summaries=["旧历史记录说他们是师徒"],
         )
         assert "当前关系图谱（最高优先级，覆盖角色卡背景）" in prompt
         assert "唯一权威事实" in prompt
@@ -133,14 +172,27 @@ class TestPromptBuilder:
 
     def test_multi_character_prompt_treats_missing_graph_edge_as_authoritative(self):
         from memoria.core import character_loader, prompt_builder
+
         c1 = character_loader.load_character_card("npc_luo_xiaohei")
         prompt = prompt_builder.build_multi_character_system_prompt(
             c1,
-            {"affection_level":30,"trust_level":50,"current_mood":"开心","known_player_facts":["旧记忆说他们是师徒"]},
+            {
+                "affection_level": 30,
+                "trust_level": 50,
+                "current_mood": "开心",
+                "known_player_facts": ["旧记忆说他们是师徒"],
+            },
             "测试者",
-            other_characters=[{"character_id":"npc_wuxian","name":"巫仙","display_name":"无限","occupation":"修行者"}],
+            other_characters=[
+                {
+                    "character_id": "npc_wuxian",
+                    "name": "巫仙",
+                    "display_name": "无限",
+                    "occupation": "修行者",
+                }
+            ],
             character_relationships={},
-            past_summaries=["旧历史记录说他们是师徒"]
+            past_summaries=["旧历史记录说他们是师徒"],
         )
         assert "当前关系图谱（最高优先级，覆盖角色卡背景）" in prompt
         assert "当前关系 = 未定义" in prompt
@@ -148,6 +200,7 @@ class TestPromptBuilder:
 
     def test_multi_character_prompt_preserves_custom_relationship_type(self):
         from memoria.core import character_loader, prompt_builder
+
         c1 = character_loader.load_character_card("npc_wuxian")
         prompt = prompt_builder.build_multi_character_system_prompt(
             c1,
@@ -252,10 +305,30 @@ class TestPromptBuilder:
 
     def test_build_system_prompt_affinity_indicator(self):
         from memoria.core import character_loader, prompt_builder
+
         card = character_loader.load_character_card("npc_luo_xiaohei")
-        p_low = prompt_builder.build_system_prompt(card, {"affection_level":-50,"trust_level":10,"current_mood":"neutral","known_player_facts":[]},"T")
-        p_high = prompt_builder.build_system_prompt(card, {"affection_level":80,"trust_level":90,"current_mood":"开心","known_player_facts":[]},"T")
+        p_low = prompt_builder.build_system_prompt(
+            card,
+            {
+                "affection_level": -50,
+                "trust_level": 10,
+                "current_mood": "neutral",
+                "known_player_facts": [],
+            },
+            "T",
+        )
+        p_high = prompt_builder.build_system_prompt(
+            card,
+            {
+                "affection_level": 80,
+                "trust_level": 90,
+                "current_mood": "开心",
+                "known_player_facts": [],
+            },
+            "T",
+        )
         assert p_low != p_high
+
 
 class TestMemoryExtractor:
     def test_clean_summary_text_rejects_prompt_and_analysis(self):
@@ -289,10 +362,12 @@ class TestMemoryExtractor:
 
         monkeypatch.setattr(memory_extractor, "call_light_task", fake_call_light_task)
 
-        result = memory_extractor.summarize_session([
-            {"role": "user", "content": "没有啊"},
-            {"role": "assistant", "content": "嗯。那你该去忙了。"},
-        ])
+        result = memory_extractor.summarize_session(
+            [
+                {"role": "user", "content": "没有啊"},
+                {"role": "assistant", "content": "嗯。那你该去忙了。"},
+            ]
+        )
 
         assert called["allow_reasoning_fallback"] is False
         assert called["task_name"] == "session_summary"
@@ -315,10 +390,7 @@ class TestMemoryExtractor:
         history = [
             {"role": "system", "content": "SYSTEM SECRET"},
             {"role": "assistant", "content": "【外部世界知识】RAG SECRET"},
-            *[
-                {"role": "user", "content": f"玩家消息 {index}"}
-                for index in range(8)
-            ],
+            *[{"role": "user", "content": f"玩家消息 {index}"} for index in range(8)],
         ]
 
         result = memory_extractor.extract_player_memory(history)
@@ -341,15 +413,17 @@ class TestMemoryExtractor:
         from memoria.core.multi_character_memory import (
             _format_messages_for_extraction as _format_messages,
         )
+
         assert _format_messages([]) == ""
 
     def test_format_messages_basic(self):
         from memoria.core.multi_character_memory import (
             _format_messages_for_extraction as _format_messages,
         )
+
         msgs = [
-            {"role":"user","content":"你好"},
-            {"role":"assistant","content":"你好！","character_name":"小黑"},
+            {"role": "user", "content": "你好"},
+            {"role": "assistant", "content": "你好！", "character_name": "小黑"},
         ]
         result = _format_messages(msgs)
         assert "你好" in result
@@ -358,39 +432,49 @@ class TestMemoryExtractor:
         from memoria.core.multi_character_memory import (
             extract_multi_character_memories as extract_memories,
         )
+
         result = extract_memories("sess", [], [])
         assert result == {}
+
 
 class TestLLMClient:
     def test_extract_json_valid(self):
         from memoria.core.llm_client import _extract_json
+
         r = _extract_json('{"dialogue":"你好","action":"greet","affinity_delta":2}')
         assert r is not None
         assert r["dialogue"] == "你好"
 
     def test_extract_json_invalid(self):
         from memoria.core.llm_client import _extract_json
+
         r = _extract_json("not json at all")
         assert r is None
 
     def test_extract_json_with_markdown(self):
         from memoria.core.llm_client import _extract_json
-        r = _extract_json('```json\n{"dialogue":"test","action":"a","affinity_delta":0}\n```')
+
+        r = _extract_json(
+            '```json\n{"dialogue":"test","action":"a","affinity_delta":0}\n```'
+        )
         assert r is not None
 
     def test_extract_json_from_text_surrounding_json(self):
         from memoria.core.llm_client import _extract_json
+
         r = _extract_json('好的：{"dialogue":"你好","action":"idle"} 结束')
         assert r == {"dialogue": "你好", "action": "idle"}
 
     def test_plain_text_fallback(self):
         from memoria.core.llm_client import _plain_text_fallback
+
         r = _plain_text_fallback("你好，我是小黑")
         assert r["dialogue"] == "你好，我是小黑"
         assert r["_fallback_mode"] is True
 
     def test_plain_text_fallback_keeps_stage_direction(self):
         from memoria.core.llm_client import _plain_text_fallback
+
         raw = "[开心地点头] 那我也来帮你！我最喜欢学新东西了！[眼睛亮晶晶地]"
         r = _plain_text_fallback(raw)
         assert r["dialogue"] == raw
@@ -398,14 +482,15 @@ class TestLLMClient:
 
     def test_plain_text_fallback_extracts_jsonish_role_fields(self):
         from memoria.core.llm_client import _plain_text_fallback
-        raw = '''{
+
+        raw = """{
           "dialogue": "别慌。她现在的状态，更像是某种信号接收器。",
           "action": "观察",
           "affinity_delta": 0,
           "trust_delta": -1,
           "mood_after": "平静",
           "memory_worth_keeping": "南子出现类似附身的机械性社交反应。",
-        }'''
+        }"""
         r = _plain_text_fallback(raw)
         assert r["dialogue"] == "别慌。她现在的状态，更像是某种信号接收器。"
         assert r["action"] == "观察"
@@ -415,14 +500,15 @@ class TestLLMClient:
 
     def test_plain_text_fallback_extracts_fields_from_broken_json(self):
         from memoria.core.llm_client import _plain_text_fallback
-        raw = '''{
+
+        raw = """{
           "dialogue": "按住腰间的武器柄，冷静地打量南子。",
           "action": "观察",
           "affinity_delta": 1,
           "trust_delta": 2,
           "mood_after": "警觉",
           "memory_worth_keeping": "南子的状态需要持续观察。"
-        '''
+        """
         r = _plain_text_fallback(raw)
         assert r["dialogue"] == "按住腰间的武器柄，冷静地打量南子。"
         assert r["action"] == "观察"
@@ -433,7 +519,10 @@ class TestLLMClient:
 
     def test_plain_text_fallback_hides_provider_rejection(self):
         from memoria.core.llm_client import _plain_text_fallback
-        r = _plain_text_fallback("The request was rejected because it was considered high risk")
+
+        r = _plain_text_fallback(
+            "The request was rejected because it was considered high risk"
+        )
         assert r["dialogue"] == "……"
         assert r["trust_delta"] == 0
 
@@ -454,10 +543,12 @@ class TestLLMClient:
     def test_memory_gate_rejects_low_value_messages(self, message):
         from memoria.core.memory_extractor import is_memory_worthy_candidate
 
-        assert not is_memory_worthy_candidate([
-            {"role": "user", "content": message},
-            {"role": "assistant", "content": "回应"},
-        ])
+        assert not is_memory_worthy_candidate(
+            [
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": "回应"},
+            ]
+        )
 
     @pytest.mark.parametrize(
         "message",
@@ -473,12 +564,15 @@ class TestLLMClient:
     def test_memory_gate_accepts_facts_preferences_and_commitments(self, message):
         from memoria.core.memory_extractor import is_memory_worthy_candidate
 
-        assert is_memory_worthy_candidate([
-            {"role": "user", "content": message},
-        ])
+        assert is_memory_worthy_candidate(
+            [
+                {"role": "user", "content": message},
+            ]
+        )
 
     def test_lazy_init(self):
         from memoria.core.llm_client import _MAX_RETRIES, _get_client
+
         assert _MAX_RETRIES == 3
         assert callable(_get_client)
 
@@ -508,7 +602,9 @@ class TestLLMClient:
         debug_lines = []
 
         monkeypatch.setattr(llm_client, "_get_client", lambda: fake_client)
-        monkeypatch.setattr(llm_client, "_retry_call", lambda fn, *args, **kwargs: fn(*args, **kwargs))
+        monkeypatch.setattr(
+            llm_client, "_retry_call", lambda fn, *args, **kwargs: fn(*args, **kwargs)
+        )
 
         result = llm_client.call_role_turn(
             "system prompt",
@@ -526,9 +622,11 @@ class TestLLMClient:
         assert "dialogue" in debug_text
         assert "你好" in debug_text
 
+
 class TestConfig:
     def test_defaults(self):
         from memoria.core.config import configs
+
         assert configs.short_term_memory_turns >= 1
         assert configs.long_term_memory_interval_turns >= 1
         assert configs.max_output_tokens > 0
@@ -536,6 +634,7 @@ class TestConfig:
 
     def test_light_model_fallback(self):
         from memoria.core.config import configs
+
         assert configs.light_model is not None
 
     def test_latency_sensitive_defaults_are_bounded(self):
@@ -548,41 +647,51 @@ class TestConfig:
         assert fields["knowledge_retrieval_top_k"].default == 4
         assert fields["knowledge_injection_max_chars"].default == 4000
 
+
 class TestCharacterLoader:
     def test_reload_clears_cache(self):
         from memoria.core import character_loader
+
         character_loader.load_character_card("npc_luo_xiaohei")
         card2 = character_loader.reload_character_card("npc_luo_xiaohei")
         assert card2.character_id == "npc_luo_xiaohei"
 
     def test_nonexistent_character(self):
         from memoria.core import character_loader
+
         with pytest.raises((FileNotFoundError, RuntimeError, Exception)):
             character_loader.load_character_card("nonexistent_character_xyz")
+
 
 class TestDedupHelpers:
     def test_normalize_whitespace(self):
         from memoria.db.repository import _normalize
+
         assert _normalize("  玩家  喜欢  猫  ") == "玩家 喜欢 猫"
 
     def test_normalize_case(self):
         from memoria.db.repository import _normalize
+
         assert _normalize("Hello World") == "hello world"
 
     def test_normalize_empty(self):
         from memoria.db.repository import _normalize
+
         assert _normalize("") == ""
         assert _normalize(None) == ""
 
     def test_similarity_identical(self):
         from memoria.db.repository import _text_similarity
+
         assert _text_similarity("玩家喜欢吃火锅", "玩家喜欢吃火锅") == 1.0
 
     def test_similarity_different(self):
         from memoria.db.repository import _text_similarity
+
         assert _text_similarity("火锅", "游泳") < 0.5
 
     def test_similarity_partial(self):
         from memoria.db.repository import _text_similarity
+
         sim = _text_similarity("玩家喜欢吃火锅", "玩家喜欢吃麻辣火锅")
         assert sim > 0.6

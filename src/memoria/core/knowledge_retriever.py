@@ -76,10 +76,7 @@ def _lexical_tokens(text: str) -> set[str]:
     tokens = set(_WORD_RE.findall(normalized))
     for sequence in _CJK_SEQUENCE_RE.findall(normalized):
         tokens.update(sequence)
-        tokens.update(
-            sequence[index : index + 2]
-            for index in range(len(sequence) - 1)
-        )
+        tokens.update(sequence[index : index + 2] for index in range(len(sequence) - 1))
     return tokens
 
 
@@ -89,9 +86,7 @@ def _normalize_query_terms(text: str) -> str:
 
 def _query_focus_terms(normalized_query: str) -> str:
     parts = [
-        part.strip()
-        for part in _QUERY_FOCUS_RE.split(normalized_query)
-        if part.strip()
+        part.strip() for part in _QUERY_FOCUS_RE.split(normalized_query) if part.strip()
     ]
     if len(parts) < 2:
         return normalized_query
@@ -252,9 +247,7 @@ def retrieve_knowledge(
 
     try:
         if preauthorized_knowledge_base_ids is not None:
-            authorized_base_ids = list(
-                dict.fromkeys(preauthorized_knowledge_base_ids)
-            )
+            authorized_base_ids = list(dict.fromkeys(preauthorized_knowledge_base_ids))
         else:
             authorized_base_ids = repository.get_authorized_knowledge_base_ids(
                 owner_user_id,
@@ -286,12 +279,10 @@ def retrieve_knowledge(
             >= max(0.0, configs.knowledge_similarity_threshold - 0.25)
         ]
         similarities = {
-            hit["chunk_id"]: float(hit.get("similarity", 0))
-            for hit in candidate_hits
+            hit["chunk_id"]: float(hit.get("similarity", 0)) for hit in candidate_hits
         }
         vector_ranks = {
-            hit["chunk_id"]: rank
-            for rank, hit in enumerate(candidate_hits)
+            hit["chunk_id"]: rank for rank, hit in enumerate(candidate_hits)
         }
         if preauthorized_knowledge_base_ids is not None:
             vector_chunks = repository.get_owned_knowledge_chunks(
@@ -322,23 +313,15 @@ def retrieve_knowledge(
             )
 
         all_chunks = {
-            chunk["chunk_id"]: chunk
-            for chunk in [*lexical_corpus, *vector_chunks]
+            chunk["chunk_id"]: chunk for chunk in [*lexical_corpus, *vector_chunks]
         }
         keyword_scores = _keyword_scores(query_text, list(all_chunks.values()))
         keyword_order = sorted(
-            (
-                chunk_id
-                for chunk_id, score in keyword_scores.items()
-                if score > 0
-            ),
+            (chunk_id for chunk_id, score in keyword_scores.items() if score > 0),
             key=keyword_scores.get,
             reverse=True,
         )
-        keyword_ranks = {
-            chunk_id: rank
-            for rank, chunk_id in enumerate(keyword_order)
-        }
+        keyword_ranks = {chunk_id: rank for rank, chunk_id in enumerate(keyword_order)}
         ranking_scores = {}
         qualified = []
         for chunk in all_chunks.values():

@@ -1,6 +1,7 @@
 """
 开发者体验功能测试：回放、性能指标、质量评分。
 """
+
 import sys
 from pathlib import Path
 
@@ -102,10 +103,12 @@ def test_replay_builds_step_and_state_timeline():
 def test_quality_score_heuristic_returns_scores():
     from memoria.core import quality_scorer
 
-    result = quality_scorer.score_dialogue([
-        {"role": "user", "content": "你在做什么？"},
-        {"role": "assistant", "content": "[抬头]我在看风。你也听见了吗？"},
-    ])
+    result = quality_scorer.score_dialogue(
+        [
+            {"role": "user", "content": "你在做什么？"},
+            {"role": "assistant", "content": "[抬头]我在看风。你也听见了吗？"},
+        ]
+    )
 
     assert result["method"] == "heuristic"
     assert 0 <= result["character_consistency"] <= 100
@@ -207,7 +210,6 @@ def test_developer_quality_score_use_llm_enforces_input_budget(monkeypatch):
         )
 
     assert exc.value.status_code == 400
-
 
 
 def test_request_body_size_limit_rejects_oversized_content_length():

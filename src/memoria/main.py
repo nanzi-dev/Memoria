@@ -70,6 +70,7 @@ try:
 except PackageNotFoundError:  # 源码直跑且未安装包时回退
     APP_VERSION = "1.0.0"
 
+
 # =========================
 # 配置校验
 # =========================
@@ -96,6 +97,7 @@ _request_counts_lock = threading.Lock()
 _last_rate_limit_cleanup = 0.0
 # 进程内限流：多 worker/多实例各自独立；生产建议在网关层叠加分布式限流。
 
+
 def _check_rate_limit(player_id: str) -> bool:
     """检查指定限流 key 是否允许请求。"""
     global _last_rate_limit_cleanup
@@ -107,7 +109,9 @@ def _check_rate_limit(player_id: str) -> bool:
     with _request_counts_lock:
         if now - _last_rate_limit_cleanup >= window:
             for key, timestamps in list(_request_counts.items()):
-                timestamps[:] = [timestamp for timestamp in timestamps if timestamp > cutoff]
+                timestamps[:] = [
+                    timestamp for timestamp in timestamps if timestamp > cutoff
+                ]
                 if not timestamps:
                     del _request_counts[key]
             _last_rate_limit_cleanup = now
@@ -184,7 +188,7 @@ async def lifespan(app: FastAPI):
     if config_errors:
         for err in config_errors:
             logger.warning("配置警告: %s", err)
-    
+
     try:
         repository.init_db()
         ensure_default_event_templates()
@@ -194,6 +198,7 @@ async def lifespan(app: FastAPI):
         # 自动清理过期的遗忘记忆曲线状态
         try:
             from memoria.core.memory_curve import cleanup_forgotten_states
+
             cleaned = cleanup_forgotten_states()
             if cleaned:
                 logger.info("已清理 %d 条过期遗忘记忆曲线状态", cleaned)
@@ -218,9 +223,7 @@ async def lifespan(app: FastAPI):
     knowledge_recovery_thread.start()
     memory_job_stop = threading.Event()
     memory_job_worker = BackgroundJobWorker(
-        lease_seconds=checkpoint_memory_lease_seconds(
-            configs.llm_timeout_seconds
-        )
+        lease_seconds=checkpoint_memory_lease_seconds(configs.llm_timeout_seconds)
     )
     register_checkpoint_memory_handlers(memory_job_worker)
     memory_job_thread = threading.Thread(
@@ -289,8 +292,7 @@ async def ready():
     except Exception:
         logger.exception("数据库就绪检查失败")
         return JSONResponse(
-            status_code=503,
-            content={"status": "not_ready", "database": "unavailable"}
+            status_code=503, content={"status": "not_ready", "database": "unavailable"}
         )
 
 
@@ -298,14 +300,15 @@ async def ready():
 # 日志级别动态调整
 # =========================
 @app.post("/admin/log-level", tags=["system"])
-async def set_log_level(level: str = "INFO", _current_user_id: str = Depends(require_admin_user_id)):
+async def set_log_level(
+    level: str = "INFO", _current_user_id: str = Depends(require_admin_user_id)
+):
     """动态调整日志级别（DEBUG/INFO/WARNING/ERROR）"""
     level = level.upper()
     if level not in ("DEBUG", "INFO", "WARNING", "ERROR"):
         return JSONResponse(status_code=400, content={"error": f"无效级别: {level}"})
     logging.getLogger("memoria").setLevel(getattr(logging, level))
     return {"log_level": level}
-
 
 
 # =========================
@@ -327,12 +330,19 @@ async def csrf_middleware(request: Request, call_next):
 async def rate_limit_middleware(request: Request, call_next):
     """写操作速率限制中间件。"""
     # 仅对写操作应用限流；列表、详情、历史等读请求不消耗窗口。
-    if is_protected_path(request.url.path) and request.method not in {"GET", "HEAD", "OPTIONS"}:
+    if is_protected_path(request.url.path) and request.method not in {
+        "GET",
+        "HEAD",
+        "OPTIONS",
+    }:
         rate_limit_key = _get_rate_limit_key(request)
         if not _check_rate_limit(rate_limit_key):
             return JSONResponse(
                 status_code=429,
-                content={"error": "请求过于频繁，请稍后再试", "retry_after": float(configs.rate_limit_window_seconds)}
+                content={
+                    "error": "请求过于频繁，请稍后再试",
+                    "retry_after": float(configs.rate_limit_window_seconds),
+                },
             )
     return await call_next(request)
 

@@ -36,9 +36,7 @@ class ExtractedDocument:
 _ALLOWED_SUFFIXES = {".txt", ".md", ".pdf", ".docx"}
 _UNSUPPORTED_SUFFIXES = {".doc", ".xlsx", ".xls", ".pptx", ".ppt"}
 _MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
-_MARKDOWN_IMAGE_RE = re.compile(
-    r"^\s*(?:!\[\[[^\]]+\]\]|!\[[^\]]*\]\([^)]+\))\s*$"
-)
+_MARKDOWN_IMAGE_RE = re.compile(r"^\s*(?:!\[\[[^\]]+\]\]|!\[[^\]]*\]\([^)]+\))\s*$")
 _MARKDOWN_TABLE_SEPARATOR_RE = re.compile(
     r"^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)+\|?\s*$"
 )
@@ -220,8 +218,7 @@ def _clean_markdown_inline(text: str) -> str:
 
 def _normalize_markdown_table_line(line: str) -> str:
     cells = [
-        _clean_markdown_inline(cell)
-        for cell in line.strip().strip("|").split("|")
+        _clean_markdown_inline(cell) for cell in line.strip().strip("|").split("|")
     ]
     return "| " + " | ".join(cells) + " |"
 
@@ -291,7 +288,10 @@ def _extract_docx(data: bytes) -> ExtractedDocument:
                 if entry.file_size:
                     if entry.compress_size == 0:
                         raise KnowledgeDocumentError("DOCX ZIP 压缩比异常")
-                    if entry.file_size / entry.compress_size > _DOCX_MAX_COMPRESSION_RATIO:
+                    if (
+                        entry.file_size / entry.compress_size
+                        > _DOCX_MAX_COMPRESSION_RATIO
+                    ):
                         raise KnowledgeDocumentError("DOCX ZIP 压缩比异常")
                 names.add(name)
             if "word/document.xml" not in names:
@@ -386,9 +386,7 @@ def chunk_document(
         metadata = _merge_metadata([item[1] for item in items])
         index_text = build_chunk_index_text(document_title, metadata, content)
         if codec.count(index_text, special_tokens=True) > hard_limit:
-            raise KnowledgeDocumentError(
-                f"分块超过嵌入模型 {hard_limit} token 上限"
-            )
+            raise KnowledgeDocumentError(f"分块超过嵌入模型 {hard_limit} token 上限")
         chunks.append(
             {
                 "chunk_index": len(chunks),
@@ -431,14 +429,10 @@ def chunk_document(
         )
         for part in _split_text_unit(text, unit_limit, codec):
             candidate = [*buffer, (part, metadata)]
-            if buffer and _indexed_count(
-                candidate, document_title, codec
-            ) > target:
+            if buffer and _indexed_count(candidate, document_title, codec) > target:
                 flush(keep_overlap=True)
                 candidate = [*buffer, (part, metadata)]
-            if buffer and _indexed_count(
-                candidate, document_title, codec
-            ) > hard_limit:
+            if buffer and _indexed_count(candidate, document_title, codec) > hard_limit:
                 buffer = []
                 new_unit_count = 0
                 candidate = [(part, metadata)]
@@ -769,15 +763,9 @@ def _merge_metadata(items: list[dict]) -> dict:
         result["table"] = tables[0]
     rows = [item["row"] for item in items if item.get("row") is not None]
     row_starts = [
-        item["row_start"]
-        for item in items
-        if item.get("row_start") is not None
+        item["row_start"] for item in items if item.get("row_start") is not None
     ]
-    row_ends = [
-        item["row_end"]
-        for item in items
-        if item.get("row_end") is not None
-    ]
+    row_ends = [item["row_end"] for item in items if item.get("row_end") is not None]
     if rows:
         row_starts.extend(rows)
         row_ends.extend(rows)
@@ -788,9 +776,7 @@ def _merge_metadata(items: list[dict]) -> dict:
     if row_starts and row_ends and min(row_starts) == max(row_ends):
         result["row"] = min(row_starts)
     row_fragments = [
-        item["row_fragment"]
-        for item in items
-        if item.get("row_fragment") is not None
+        item["row_fragment"] for item in items if item.get("row_fragment") is not None
     ]
     if len(row_fragments) == 1:
         result["row_fragment"] = row_fragments[0]

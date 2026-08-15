@@ -1,4 +1,5 @@
 """Lightweight extraction for isolated player memory and session summaries."""
+
 import logging
 import re
 from typing import Any
@@ -11,20 +12,88 @@ from memoria.db import repository
 logger = logging.getLogger(__name__)
 
 MEMORY_FIRST_PERSON_MARKERS = (
-    "我", "我们", "俺", "本人",
-    " i ", "i'm", "i am", "i've", "my ", "we ", "we're",
+    "我",
+    "我们",
+    "俺",
+    "本人",
+    " i ",
+    "i'm",
+    "i am",
+    "i've",
+    "my ",
+    "we ",
+    "we're",
 )
 MEMORY_FACT_MARKERS = (
-    "喜欢", "讨厌", "偏好", "爱", "不喜欢", "名字", "叫", "来自", "住在",
-    "工作", "职业", "生日", "家人", "朋友", "有一个", "没有", "曾经",
-    "会", "请", "准备", "计划", "打算", "决定", "答应", "承诺", "邀请",
-    "希望", "想要", "担心", "害怕", "开心", "难过", "感觉",
-    "like", "love", "prefer", "hate", "live", "work", "plan", "decide",
-    "promise", "will ", "going to", "afraid", "worried", "feel",
+    "喜欢",
+    "讨厌",
+    "偏好",
+    "爱",
+    "不喜欢",
+    "名字",
+    "叫",
+    "来自",
+    "住在",
+    "工作",
+    "职业",
+    "生日",
+    "家人",
+    "朋友",
+    "有一个",
+    "没有",
+    "曾经",
+    "会",
+    "请",
+    "准备",
+    "计划",
+    "打算",
+    "决定",
+    "答应",
+    "承诺",
+    "邀请",
+    "希望",
+    "想要",
+    "担心",
+    "害怕",
+    "开心",
+    "难过",
+    "感觉",
+    "like",
+    "love",
+    "prefer",
+    "hate",
+    "live",
+    "work",
+    "plan",
+    "decide",
+    "promise",
+    "will ",
+    "going to",
+    "afraid",
+    "worried",
+    "feel",
 )
 TRIVIAL_MEMORY_MESSAGES = {
-    "好", "好的", "行", "可以", "嗯", "恩", "哦", "噢", "知道了", "明白了",
-    "谢谢", "感谢", "你好", "嗨", "再见", "拜拜", "ok", "okay", "yes", "no",
+    "好",
+    "好的",
+    "行",
+    "可以",
+    "嗯",
+    "恩",
+    "哦",
+    "噢",
+    "知道了",
+    "明白了",
+    "谢谢",
+    "感谢",
+    "你好",
+    "嗨",
+    "再见",
+    "拜拜",
+    "ok",
+    "okay",
+    "yes",
+    "no",
 }
 
 SUMMARY_PROMPT_TEMPLATE = """请阅读以下这段游戏NPC与玩家的对话，用1-3句话概括这次对话中发生的关键事情（比如玩家做了什么承诺、送了什么礼物、透露了什么个人信息、关系发生了什么变化等）。
@@ -40,7 +109,16 @@ SUMMARY_PROMPT_TEMPLATE = """请阅读以下这段游戏NPC与玩家的对话，
 摘要："""
 
 
-EMPTY_SUMMARY_VALUES = {"无", "无。", "none", "none.", "null", "null.", "没有", "没有。"}
+EMPTY_SUMMARY_VALUES = {
+    "无",
+    "无。",
+    "none",
+    "none.",
+    "null",
+    "null.",
+    "没有",
+    "没有。",
+}
 SUMMARY_META_MARKERS = (
     "对话内容：",
     "重要提示",
@@ -90,7 +168,9 @@ def is_memory_worthy_candidate(
         if not stripped or stripped in TRIVIAL_MEMORY_MESSAGES:
             continue
         padded = f" {normalized} "
-        has_first_person = any(marker in padded for marker in MEMORY_FIRST_PERSON_MARKERS)
+        has_first_person = any(
+            marker in padded for marker in MEMORY_FIRST_PERSON_MARKERS
+        )
         has_fact = any(marker in normalized for marker in MEMORY_FACT_MARKERS)
         if has_first_person and has_fact:
             return True
@@ -103,7 +183,9 @@ def clean_summary_text(raw_text: str | None) -> str | None:
     if not text:
         return None
 
-    text = re.sub(r"^```(?:text|markdown)?\s*|\s*```$", "", text, flags=re.IGNORECASE).strip()
+    text = re.sub(
+        r"^```(?:text|markdown)?\s*|\s*```$", "", text, flags=re.IGNORECASE
+    ).strip()
     text = re.sub(r"^(?:摘要|最终摘要|最终答案|答案|总结)\s*[:：]\s*", "", text).strip()
     text = text.strip(" \t\r\n\"'")
 
@@ -112,11 +194,7 @@ def clean_summary_text(raw_text: str | None) -> str | None:
 
     # 提示词复读通常把元标记散布在前几行；只检查开头块，
     # 避免误伤正文里包含这些词的有效摘要。
-    first_lines = [
-        line.strip()
-        for line in text.splitlines()
-        if line.strip()
-    ][:3]
+    first_lines = [line.strip() for line in text.splitlines() if line.strip()][:3]
     opening = "\n".join(first_lines)
     if any(marker in opening for marker in SUMMARY_META_MARKERS):
         return None
@@ -166,9 +244,7 @@ def extract_player_memory(
         logger.warning("玩家长期记忆提取失败: %s", exc)
         return None
     if not result or not str(result).strip():
-        logger.warning(
-            "玩家长期记忆提取返回空结果（light_task 失败或空输出）"
-        )
+        logger.warning("玩家长期记忆提取返回空结果（light_task 失败或空输出）")
         return None
     return clean_summary_text(result)
 
@@ -226,13 +302,13 @@ def summarize_session(history: list[dict]) -> str | None:
     """对一段对话历史做摘要萃取，用于会话结束时写入 session_summary 表。"""
     if not history:
         return None
-    
+
     transcript = "\n".join(
         f"{'玩家' if m['role'] == 'user' else 'NPC'}：{m['content']}"
         for m in history
         if m.get("role") in {"user", "assistant"}
     )
-    
+
     prompt = SUMMARY_PROMPT_TEMPLATE.format(transcript=transcript)
     result = call_light_task(
         prompt,

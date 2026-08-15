@@ -44,7 +44,14 @@ def _heuristic_score(
             "reasons": ["没有可评分的 assistant 消息"],
         }
 
-    risk_markers = ("我是AI", "我是 AI", "语言模型", "系统提示词", "无法扮演", "作为一个AI")
+    risk_markers = (
+        "我是AI",
+        "我是 AI",
+        "语言模型",
+        "系统提示词",
+        "无法扮演",
+        "作为一个AI",
+    )
     risk_hits = sum(1 for marker in risk_markers if marker in all_text)
     consistency = 85 - risk_hits * 25
     if risk_hits:
@@ -62,10 +69,12 @@ def _heuristic_score(
     lengths = [len(text) for text in assistant_texts]
     avg_len = mean(lengths)
     varied_length = len(set(lengths)) > 1
-    action_markers = all((
-        "[" in all_text or "【" in all_text,
-        "]" in all_text or "】" in all_text,
-    ))
+    action_markers = all(
+        (
+            "[" in all_text or "【" in all_text,
+            "]" in all_text or "】" in all_text,
+        )
+    )
     question_count = all_text.count("?") + all_text.count("？")
 
     interestingness = 55
@@ -96,14 +105,10 @@ def _heuristic_score(
 
 def _llm_score(messages: list[dict], character_id: str | None, fallback: dict) -> dict:
     user_messages = [
-        str(m.get("content", ""))
-        for m in messages
-        if m.get("role") == "user"
+        str(m.get("content", "")) for m in messages if m.get("role") == "user"
     ]
     assistant_messages = [
-        str(m.get("content", ""))
-        for m in messages
-        if m.get("role") == "assistant"
+        str(m.get("content", "")) for m in messages if m.get("role") == "assistant"
     ]
 
     data_lines: list[str] = []
@@ -144,8 +149,12 @@ character_id: {character_id or "unknown"}
         reasons = fallback["reasons"]
 
     return {
-        "character_consistency": _clamp_score(parsed.get("character_consistency", fallback["character_consistency"])),
-        "interestingness": _clamp_score(parsed.get("interestingness", fallback["interestingness"])),
+        "character_consistency": _clamp_score(
+            parsed.get("character_consistency", fallback["character_consistency"])
+        ),
+        "interestingness": _clamp_score(
+            parsed.get("interestingness", fallback["interestingness"])
+        ),
         "overall": _clamp_score(parsed.get("overall", fallback["overall"])),
         "method": "llm",
         "reasons": reasons,

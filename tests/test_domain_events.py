@@ -12,6 +12,7 @@ from memoria.db import repository
 
 def _pg_enabled() -> bool:
     from memoria.core.config import configs
+
     return bool((configs.database_url or "").strip())
 
 
@@ -136,7 +137,6 @@ def test_new_domain_event_normalizes_identity_and_defaults_event_id():
 
 def test_domain_event_models_are_frozen():
     from pydantic import ValidationError
-
 
     new_event = _event()
     stored_event = _stored_event()
@@ -305,15 +305,21 @@ def test_append_domain_event_does_not_return_another_tenants_event(test_user):
             _story_event(other_user, "started", event_id=event_id),
         )
 
-    assert repository.get_domain_event(
-        stored.event_id,
-        owner_user_id=other_user,
-    ) is None
-    assert repository.list_domain_events(
-        other_user,
-        "story",
-        "test-story",
-    ) == []
+    assert (
+        repository.get_domain_event(
+            stored.event_id,
+            owner_user_id=other_user,
+        )
+        is None
+    )
+    assert (
+        repository.list_domain_events(
+            other_user,
+            "story",
+            "test-story",
+        )
+        == []
+    )
 
 
 def test_append_domain_event_rejects_stale_expected_version(test_user):
@@ -359,11 +365,14 @@ def test_append_domain_events_is_atomic_across_aggregates(test_user):
             },
         )
 
-    assert repository.list_domain_events(
-        test_user,
-        "story",
-        "other-story",
-    ) == []
+    assert (
+        repository.list_domain_events(
+            test_user,
+            "story",
+            "other-story",
+        )
+        == []
+    )
 
 
 def test_append_domain_events_is_atomic_when_external_transaction_catches_conflict(
@@ -403,16 +412,24 @@ def test_append_domain_events_is_atomic_when_external_transaction_catches_confli
             conn=session,
         )
 
-    assert repository.list_domain_events(
-        test_user,
-        "story",
-        "external-other-story",
-    ) == []
-    assert len(repository.list_domain_events(
-        test_user,
-        "story",
-        "external-recovery-story",
-    )) == 1
+    assert (
+        repository.list_domain_events(
+            test_user,
+            "story",
+            "external-other-story",
+        )
+        == []
+    )
+    assert (
+        len(
+            repository.list_domain_events(
+                test_user,
+                "story",
+                "external-recovery-story",
+            )
+        )
+        == 1
+    )
 
 
 def _run_sqlite_domain_event_race(
@@ -482,26 +499,24 @@ def test_sqlite_concurrent_expected_version_writers_are_serialized(
 ):
     aggregate_id = f"sqlite-race-{uuid4().hex}"
 
-    second_read_while_first_held, results, errors = (
-        _run_sqlite_domain_event_race(
-            monkeypatch,
-            lambda: repository.append_domain_event(
-                _event(
-                    owner_user_id=test_user,
-                    aggregate_id=aggregate_id,
-                    event_type="story.started.v1",
-                ),
-                expected_version=0,
+    second_read_while_first_held, results, errors = _run_sqlite_domain_event_race(
+        monkeypatch,
+        lambda: repository.append_domain_event(
+            _event(
+                owner_user_id=test_user,
+                aggregate_id=aggregate_id,
+                event_type="story.started.v1",
             ),
-            lambda: repository.append_domain_event(
-                _event(
-                    owner_user_id=test_user,
-                    aggregate_id=aggregate_id,
-                    event_type="story.progressed.v1",
-                ),
-                expected_version=0,
+            expected_version=0,
+        ),
+        lambda: repository.append_domain_event(
+            _event(
+                owner_user_id=test_user,
+                aggregate_id=aggregate_id,
+                event_type="story.progressed.v1",
             ),
-        )
+            expected_version=0,
+        ),
     )
 
     assert second_read_while_first_held is False
@@ -526,12 +541,10 @@ def test_sqlite_concurrent_duplicate_event_id_returns_existing(
         event_id=f"concurrent-{uuid4().hex}",
     )
 
-    second_read_while_first_held, results, errors = (
-        _run_sqlite_domain_event_race(
-            monkeypatch,
-            lambda: repository.append_domain_event(event),
-            lambda: repository.append_domain_event(event),
-        )
+    second_read_while_first_held, results, errors = _run_sqlite_domain_event_race(
+        monkeypatch,
+        lambda: repository.append_domain_event(event),
+        lambda: repository.append_domain_event(event),
     )
 
     assert second_read_while_first_held is False
@@ -551,14 +564,20 @@ def test_get_domain_event_round_trips_and_enforces_owner_boundary(test_user):
 
     with pytest.raises(TypeError):
         repository.get_domain_event(stored.event_id)
-    assert repository.get_domain_event(
-        stored.event_id,
-        owner_user_id=test_user,
-    ) == stored
-    assert repository.get_domain_event(
-        stored.event_id,
-        owner_user_id="other-user",
-    ) is None
+    assert (
+        repository.get_domain_event(
+            stored.event_id,
+            owner_user_id=test_user,
+        )
+        == stored
+    )
+    assert (
+        repository.get_domain_event(
+            stored.event_id,
+            owner_user_id="other-user",
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize("invalid_limit", [-1, True])
@@ -660,14 +679,10 @@ def test_replay_rebuilds_fact_and_story_projections(test_user):
     events = repository.list_domain_events(test_user)
     expected_sequences = {
         repository.FACT_CLAIM_PROJECTOR: max(
-            event.sequence
-            for event in events
-            if event.aggregate_type == "fact_claim"
+            event.sequence for event in events if event.aggregate_type == "fact_claim"
         ),
         repository.STORY_STATE_PROJECTOR: max(
-            event.sequence
-            for event in events
-            if event.aggregate_type == "story"
+            event.sequence for event in events if event.aggregate_type == "story"
         ),
     }
 
@@ -687,11 +702,14 @@ def test_replay_rebuilds_fact_and_story_projections(test_user):
 
     repository.rebuild_domain_projections(test_user)
 
-    assert repository.list_fact_claims(
-        test_user,
-        "story",
-        story_id,
-    ) == original_claims
+    assert (
+        repository.list_fact_claims(
+            test_user,
+            "story",
+            story_id,
+        )
+        == original_claims
+    )
     assert repository.get_story_state(test_user, story_id) == original_story
     assert {
         projector_name: repository.get_projection_checkpoint(
@@ -794,8 +812,7 @@ def test_legacy_fact_backfill_is_idempotent_and_non_destructive(test_user):
         ]
 
         assert [event.event_id for event in first_events] == [
-            f"legacy-long-term-fact-{fact_id}"
-            for fact_id in legacy_fact_ids
+            f"legacy-long-term-fact-{fact_id}" for fact_id in legacy_fact_ids
         ]
         assert second_events == first_events
         assert all(
@@ -806,7 +823,8 @@ def test_legacy_fact_backfill_is_idempotent_and_non_destructive(test_user):
             repository.get_fact_claim(
                 test_user,
                 event.payload["claim_id"],
-            )["status"] == "candidate"
+            )["status"]
+            == "candidate"
             for event in first_events
         )
         with repository.get_conn() as conn:
@@ -870,9 +888,7 @@ class _AbortingPostgresConnection:
             "SELECT * FROM domain_event WHERE event_id = :event_id"
         ):
             row = (
-                self.existing_after_rollback
-                if self.rolled_back_to_savepoint
-                else None
+                self.existing_after_rollback if self.rolled_back_to_savepoint else None
             )
             return _FakeCursor(row)
         if "SELECT COALESCE(MAX(aggregate_version), 0)" in normalized:
@@ -932,13 +948,15 @@ class _MixedRecoveryPostgresConnection:
 
 def _stored_database_row(event, *, sequence=7, aggregate_version=1):
     values = event.model_dump()
-    values.update({
-        "sequence": sequence,
-        "aggregate_version": aggregate_version,
-        "recorded_at": "2026-07-15T00:00:00+00:00",
-        "payload": json.dumps(values["payload"]),
-        "metadata": json.dumps(values["metadata"]),
-    })
+    values.update(
+        {
+            "sequence": sequence,
+            "aggregate_version": aggregate_version,
+            "recorded_at": "2026-07-15T00:00:00+00:00",
+            "payload": json.dumps(values["payload"]),
+            "metadata": json.dumps(values["metadata"]),
+        }
+    )
     return values
 
 

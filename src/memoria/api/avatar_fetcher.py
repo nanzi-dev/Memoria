@@ -101,7 +101,9 @@ def _parse_url(url: str) -> tuple[SplitResult, str, int]:
 def _canonical_hostname(hostname: str) -> tuple[str, str | None]:
     candidate = hostname.rstrip(".")
     try:
-        return str(ipaddress.ip_address(candidate)), str(ipaddress.ip_address(candidate))
+        return str(ipaddress.ip_address(candidate)), str(
+            ipaddress.ip_address(candidate)
+        )
     except ValueError:
         pass
 
@@ -178,12 +180,19 @@ def _query_doh(hostname: str, record_type: str, deadline: float) -> list[str]:
                 if address.version == (4 if record_type == "A" else 6):
                     addresses.append(str(address))
             return addresses
-        except (requests.RequestException, ValueError, TypeError, AttributeError) as exc:
+        except (
+            requests.RequestException,
+            ValueError,
+            TypeError,
+            AttributeError,
+        ) as exc:
             last_error = exc
         finally:
             session.close()
 
-    raise HTTPException(status_code=400, detail="无法安全解析图片 URL 主机") from last_error
+    raise HTTPException(
+        status_code=400, detail="无法安全解析图片 URL 主机"
+    ) from last_error
 
 
 def _resolve_public_dns(hostname: str, deadline: float) -> list[str]:
@@ -236,20 +245,24 @@ def _validate_url(
     peer_ip = addresses[0]
     pinned_host = _host_with_optional_port(peer_ip, port, parsed.scheme)
     host_header = _host_with_optional_port(hostname, port, parsed.scheme)
-    request_url = urlunsplit((
-        parsed.scheme,
-        pinned_host,
-        parsed.path or "/",
-        parsed.query,
-        "",
-    ))
-    canonical_url = urlunsplit((
-        parsed.scheme,
-        host_header,
-        parsed.path or "/",
-        parsed.query,
-        "",
-    ))
+    request_url = urlunsplit(
+        (
+            parsed.scheme,
+            pinned_host,
+            parsed.path or "/",
+            parsed.query,
+            "",
+        )
+    )
+    canonical_url = urlunsplit(
+        (
+            parsed.scheme,
+            host_header,
+            parsed.path or "/",
+            parsed.query,
+            "",
+        )
+    )
     return _ValidatedTarget(
         url=canonical_url,
         request_url=request_url,
@@ -350,7 +363,9 @@ def _download_remote_image(url: str, timeout: float) -> DownloadedImage:
                 if response.is_redirect:
                     location = response.headers.get("Location")
                     if not location:
-                        raise HTTPException(status_code=400, detail="图片 URL 重定向缺少 Location")
+                        raise HTTPException(
+                            status_code=400, detail="图片 URL 重定向缺少 Location"
+                        )
                     target = _validate_url(urljoin(target.url, location), deadline)
                     continue
 
@@ -359,9 +374,17 @@ def _download_remote_image(url: str, timeout: float) -> DownloadedImage:
                 except requests.RequestException as exc:
                     raise HTTPException(status_code=400, detail=f"无法获取图片: {exc}")
 
-                content_type = (response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+                content_type = (
+                    (response.headers.get("Content-Type") or "")
+                    .split(";")[0]
+                    .strip()
+                    .lower()
+                )
                 if content_type not in ALLOWED_IMAGE_MIME_TYPES:
-                    raise HTTPException(status_code=400, detail=f"URL 返回的不是支持的图片: {content_type or 'unknown'}")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"URL 返回的不是支持的图片: {content_type or 'unknown'}",
+                    )
 
                 content_length = response.headers.get("Content-Length")
                 if content_length:

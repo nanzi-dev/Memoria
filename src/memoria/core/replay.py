@@ -23,17 +23,19 @@ def build_replay(session: dict, messages: list[dict], step: int | None = None) -
             "mood": message.get("current_mood"),
         }
         if any(value is not None for value in state.values()):
-            state_timeline.append({
-                "step": index,
-                "message_id": message.get("message_id"),
-                "state": state,
-                "delta": {
-                    "affinity": message.get("affinity_delta"),
-                    "trust": message.get("trust_delta"),
-                },
-                "action": message.get("action"),
-                "event_notification": message.get("event_notification"),
-            })
+            state_timeline.append(
+                {
+                    "step": index,
+                    "message_id": message.get("message_id"),
+                    "state": state,
+                    "delta": {
+                        "affinity": message.get("affinity_delta"),
+                        "trust": message.get("trust_delta"),
+                    },
+                    "action": message.get("action"),
+                    "event_notification": message.get("event_notification"),
+                }
+            )
             last_state = state
 
     return {

@@ -79,9 +79,9 @@ def create_sse_response(
             return
 
         loop = asyncio.get_running_loop()
-        event_queue: queue.Queue[
-            tuple[str, dict[str, Any]] | None
-        ] = queue.Queue(maxsize=STREAM_EVENT_QUEUE_SIZE)
+        event_queue: queue.Queue[tuple[str, dict[str, Any]] | None] = queue.Queue(
+            maxsize=STREAM_EVENT_QUEUE_SIZE
+        )
         disconnected = threading.Event()
         read_fd, write_fd = os.pipe()
         os.set_blocking(read_fd, False)
@@ -101,8 +101,7 @@ def create_sse_response(
                         >= STREAM_BACKPRESSURE_TIMEOUT_SECONDS
                     ):
                         logger.warning(
-                            "流式响应消费过慢，终止 worker 并释放槽位 "
-                            "(timeout=%.1fs)",
+                            "流式响应消费过慢，终止 worker 并释放槽位 (timeout=%.1fs)",
                             STREAM_BACKPRESSURE_TIMEOUT_SECONDS,
                         )
                         raise StreamDisconnected()

@@ -48,17 +48,27 @@ def test_world_time_formula_pause_resume_scale_and_sync():
     assert initial.world_now == start
     assert initial.time_scale == 1
 
-    doubled = world_clock.update_clock(player_id, time_scale=2, real_now=start + timedelta(hours=1))
+    doubled = world_clock.update_clock(
+        player_id, time_scale=2, real_now=start + timedelta(hours=1)
+    )
     assert doubled.world_now == start + timedelta(hours=1)
-    later = world_clock.get_clock_snapshot(player_id, real_now=start + timedelta(hours=3))
+    later = world_clock.get_clock_snapshot(
+        player_id, real_now=start + timedelta(hours=3)
+    )
     assert later.world_now == start + timedelta(hours=5)
 
-    paused = world_clock.update_clock(player_id, time_scale=0, real_now=start + timedelta(hours=3))
-    frozen = world_clock.get_clock_snapshot(player_id, real_now=start + timedelta(days=2))
+    paused = world_clock.update_clock(
+        player_id, time_scale=0, real_now=start + timedelta(hours=3)
+    )
+    frozen = world_clock.get_clock_snapshot(
+        player_id, real_now=start + timedelta(days=2)
+    )
     assert paused.world_now == frozen.world_now
     assert frozen.paused
 
-    resumed = world_clock.update_clock(player_id, time_scale=5, real_now=start + timedelta(days=2))
+    resumed = world_clock.update_clock(
+        player_id, time_scale=5, real_now=start + timedelta(days=2)
+    )
     assert resumed.world_now == frozen.world_now
     synced = world_clock.sync_clock(player_id, real_now=start + timedelta(days=3))
     assert synced.world_now == start + timedelta(days=3)
@@ -165,7 +175,10 @@ def test_scale_pause_resume_and_timezone_changes_reproject_schedule():
     )
     schedule = repository.list_event_schedules_for_player(player_id)[0]
     assert schedule["next_run_at"] == next_run_at
-    assert schedule["next_due_real_at"] == (start + timedelta(hours=4, minutes=30)).isoformat()
+    assert (
+        schedule["next_due_real_at"]
+        == (start + timedelta(hours=4, minutes=30)).isoformat()
+    )
 
     paused = world_clock.update_clock(
         player_id,
@@ -173,7 +186,10 @@ def test_scale_pause_resume_and_timezone_changes_reproject_schedule():
         expected_revision=doubled.clock_revision,
         real_now=start,
     )
-    assert repository.list_event_schedules_for_player(player_id)[0]["next_due_real_at"] is None
+    assert (
+        repository.list_event_schedules_for_player(player_id)[0]["next_due_real_at"]
+        is None
+    )
 
     resumed = world_clock.update_clock(
         player_id,
@@ -181,7 +197,10 @@ def test_scale_pause_resume_and_timezone_changes_reproject_schedule():
         expected_revision=paused.clock_revision,
         real_now=start,
     )
-    assert repository.list_event_schedules_for_player(player_id)[0]["next_due_real_at"] == next_run_at
+    assert (
+        repository.list_event_schedules_for_player(player_id)[0]["next_due_real_at"]
+        == next_run_at
+    )
 
     changed_timezone = world_clock.update_clock(
         player_id,
@@ -375,9 +394,10 @@ def test_paused_player_schedule_does_not_trigger(monkeypatch):
         "claim_event_schedule",
         lambda *args, **kwargs: pytest.fail("paused schedule must not be claimed"),
     )
-    assert event_runtime.run_due_time_events(
-        now=datetime(2026, 7, 12, 12, 0, tzinfo=UTC)
-    ) == []
+    assert (
+        event_runtime.run_due_time_events(now=datetime(2026, 7, 12, 12, 0, tzinfo=UTC))
+        == []
+    )
 
 
 def test_catch_up_runs_once_and_advances_beyond_world_now(monkeypatch):
@@ -407,10 +427,22 @@ def test_catch_up_runs_once_and_advances_beyond_world_now(monkeypatch):
             world_now=world_now,
         ),
     )
-    monkeypatch.setattr(event_runtime.repository, "claim_event_schedule", lambda *args, **kwargs: True)
-    monkeypatch.setattr(event_runtime.repository, "get_event_definition", lambda *args: {"event_id": "scheduled_event"})
-    monkeypatch.setattr(event_runtime, "_event_definition_from_row", lambda row: _scheduled_event())
-    monkeypatch.setattr(event_runtime, "_load_scheduled_event_context", lambda *args: _scheduled_context())
+    monkeypatch.setattr(
+        event_runtime.repository, "claim_event_schedule", lambda *args, **kwargs: True
+    )
+    monkeypatch.setattr(
+        event_runtime.repository,
+        "get_event_definition",
+        lambda *args: {"event_id": "scheduled_event"},
+    )
+    monkeypatch.setattr(
+        event_runtime, "_event_definition_from_row", lambda row: _scheduled_event()
+    )
+    monkeypatch.setattr(
+        event_runtime,
+        "_load_scheduled_event_context",
+        lambda *args: _scheduled_context(),
+    )
     result = EventTriggerResult(
         execution_id="scheduled-execution",
         event_id="scheduled_event",
@@ -418,23 +450,33 @@ def test_catch_up_runs_once_and_advances_beyond_world_now(monkeypatch):
         character_id=row["character_id"],
         triggered=True,
     )
-    monkeypatch.setattr(event_runtime.repository, "get_event_execution_batch", lambda *args: None)
+    monkeypatch.setattr(
+        event_runtime.repository, "get_event_execution_batch", lambda *args: None
+    )
     monkeypatch.setattr(
         event_runtime,
         "_plan_event_chain",
-        lambda *args, **kwargs: ([result], [{
-            "execution_id": result.execution_id,
-            "status": "succeeded",
-            "inbox_items": [],
-        }]),
+        lambda *args, **kwargs: (
+            [result],
+            [
+                {
+                    "execution_id": result.execution_id,
+                    "status": "succeeded",
+                    "inbox_items": [],
+                }
+            ],
+        ),
     )
     monkeypatch.setattr(
         event_runtime.repository,
         "commit_event_execution_batch",
-        lambda **kwargs: commits.append(kwargs) or {
-            "deduplicated": False,
-            "inserted_memories": [],
-        },
+        lambda **kwargs: (
+            commits.append(kwargs)
+            or {
+                "deduplicated": False,
+                "inserted_memories": [],
+            }
+        ),
     )
 
     results = event_runtime.run_due_time_events(
@@ -479,8 +521,14 @@ def test_catch_up_replay_limit_executes_bounded_runs_and_counts_misses(monkeypat
             world_now=real_now,
         ),
     )
-    monkeypatch.setattr(event_runtime.repository, "claim_event_schedule", lambda *args, **kwargs: True)
-    monkeypatch.setattr(event_runtime.repository, "get_event_definition", lambda *args: {"event_id": row["event_id"]})
+    monkeypatch.setattr(
+        event_runtime.repository, "claim_event_schedule", lambda *args, **kwargs: True
+    )
+    monkeypatch.setattr(
+        event_runtime.repository,
+        "get_event_definition",
+        lambda *args: {"event_id": row["event_id"]},
+    )
     monkeypatch.setattr(
         event_runtime,
         "_event_definition_from_row",
@@ -516,19 +564,27 @@ def test_catch_up_replay_limit_executes_bounded_runs_and_counts_misses(monkeypat
     monkeypatch.setattr(
         event_runtime,
         "_plan_event_chain",
-        lambda *args, **kwargs: ([result], [{
-            "execution_id": result.execution_id,
-            "status": "succeeded",
-            "inbox_items": [],
-        }]),
+        lambda *args, **kwargs: (
+            [result],
+            [
+                {
+                    "execution_id": result.execution_id,
+                    "status": "succeeded",
+                    "inbox_items": [],
+                }
+            ],
+        ),
     )
     monkeypatch.setattr(
         event_runtime.repository,
         "commit_event_execution_batch",
-        lambda **kwargs: commits.append(kwargs) or {
-            "deduplicated": False,
-            "inserted_memories": [],
-        },
+        lambda **kwargs: (
+            commits.append(kwargs)
+            or {
+                "deduplicated": False,
+                "inserted_memories": [],
+            }
+        ),
     )
 
     results = event_runtime.run_due_time_events(now=real_now)
@@ -755,9 +811,7 @@ def test_concurrent_schedulers_execute_due_event_once(monkeypatch):
     monkeypatch.setattr(
         event_runtime,
         "_load_scheduled_event_context",
-        lambda *args: _scheduled_context().model_copy(
-            update={"player_id": player_id}
-        ),
+        lambda *args: _scheduled_context().model_copy(update={"player_id": player_id}),
     )
     monkeypatch.setattr(event_runtime, "_plan_event_chain", execute_once)
 
@@ -811,12 +865,14 @@ def test_atomic_schedule_completion_rolls_back_when_lease_is_lost():
             "status": "active",
             "progress": 0.25,
         },
-        "memories": [{
-            "character_id": character_id,
-            "player_id": player_id,
-            "fact_text": "租约丢失时不能落库",
-            "importance": 5,
-        }],
+        "memories": [
+            {
+                "character_id": character_id,
+                "player_id": player_id,
+                "fact_text": "租约丢失时不能落库",
+                "importance": 5,
+            }
+        ],
         "unlock_keys": ["lease_unlock"],
         "inbox_items": [{"content": "租约通知"}],
         "proactive_messages": [],
@@ -829,12 +885,14 @@ def test_atomic_schedule_completion_rolls_back_when_lease_is_lost():
             trigger_source="schedule",
             results_data="[]",
             executions=[execution],
-            runtime_states=[{
-                "character_id": character_id,
-                "affection_level": 15,
-                "trust_level": 20,
-                "current_mood": "happy",
-            }],
+            runtime_states=[
+                {
+                    "character_id": character_id,
+                    "affection_level": 15,
+                    "trust_level": 20,
+                    "current_mood": "happy",
+                }
+            ],
             schedule_completion={
                 "event_id": event_id,
                 "character_id": character_id,
@@ -847,7 +905,10 @@ def test_atomic_schedule_completion_rolls_back_when_lease_is_lost():
 
     assert repository.get_event_execution_batch(player_id, execution_key) is None
     assert repository.list_event_execution_history(player_id, event_id=event_id) == []
-    assert repository.get_event_trigger_history(event_id=event_id, player_id=player_id) == []
+    assert (
+        repository.get_event_trigger_history(event_id=event_id, player_id=player_id)
+        == []
+    )
     assert repository.get_long_term_facts(character_id, player_id, 10) == []
     assert repository.list_event_unlocks(player_id, character_id) == []
     assert repository.list_player_event_inbox(player_id) == []
@@ -1004,10 +1065,13 @@ def test_unimplemented_scheduled_effect_rolls_back_all_side_effects():
     assert relationship["affinity"] == 10
     inbox = repository.list_player_event_inbox(player_id)
     assert inbox == []
-    assert repository.get_event_trigger_history(
-        event_id=event.event_id,
-        player_id=player_id,
-    ) == []
+    assert (
+        repository.get_event_trigger_history(
+            event_id=event.event_id,
+            player_id=player_id,
+        )
+        == []
+    )
 
 
 def test_scheduled_planning_failure_keeps_cron_due_for_retry(monkeypatch):
@@ -1081,9 +1145,7 @@ def test_scheduled_planning_failure_keeps_cron_due_for_retry(monkeypatch):
 
     assert event_runtime.run_due_time_events(now=real_now, player_id=player_id) == []
 
-    execution_key = (
-        f"schedule:{event_id}:{character_id}:{player_id}:{scheduled_for}"
-    )
+    execution_key = f"schedule:{event_id}:{character_id}:{player_id}:{scheduled_for}"
     failed_schedule = repository.get_event_schedule(
         event_id,
         character_id,
@@ -1095,10 +1157,13 @@ def test_scheduled_planning_failure_keeps_cron_due_for_retry(monkeypatch):
     assert "grant_item" in failed_schedule["last_error"]
     assert failed_schedule["last_failed_at"] == scheduled_for
     assert repository.get_event_execution_batch(player_id, execution_key) is None
-    assert repository.list_event_execution_history(
-        player_id,
-        event_id=event_id,
-    ) == []
+    assert (
+        repository.list_event_execution_history(
+            player_id,
+            event_id=event_id,
+        )
+        == []
+    )
     assert repository.list_player_event_inbox(player_id) == []
 
     repaired_effect = EventEffect(
@@ -1123,9 +1188,9 @@ def test_scheduled_planning_failure_keeps_cron_due_for_retry(monkeypatch):
         character_id,
         player_id,
     )
-    assert completed_schedule["next_run_at"] == (
-        real_now + timedelta(hours=1)
-    ).isoformat()
+    assert (
+        completed_schedule["next_run_at"] == (real_now + timedelta(hours=1)).isoformat()
+    )
     assert completed_schedule["last_error"] is None
     assert completed_schedule["last_failed_at"] is None
     assert repository.get_event_execution_batch(player_id, execution_key) is not None
@@ -1149,7 +1214,9 @@ def test_single_and_group_prompts_share_world_context():
         "current_mood": "neutral",
         "known_player_facts": [],
     }
-    single = prompt_builder.build_system_prompt(card, state, "玩家", time_context=context)
+    single = prompt_builder.build_system_prompt(
+        card, state, "玩家", time_context=context
+    )
     group = prompt_builder.build_multi_character_system_prompt(
         card,
         state,
@@ -1181,7 +1248,9 @@ def test_english_time_context_and_negative_elapsed_are_explicit():
     )
 
 
-def test_group_orchestrator_paths_share_clock_snapshot_with_prompt_and_messages(monkeypatch):
+def test_group_orchestrator_paths_share_clock_snapshot_with_prompt_and_messages(
+    monkeypatch,
+):
     from memoria.core import multi_character_orchestrator
 
     character_id = "npc_luo_xiaohei"
@@ -1246,7 +1315,9 @@ def test_group_orchestrator_paths_share_clock_snapshot_with_prompt_and_messages(
     monkeypatch.setattr(
         multi_character_orchestrator.repository,
         "append_multi_character_message",
-        lambda *args, **kwargs: saved_messages.append((args, kwargs)) or len(saved_messages),
+        lambda *args, **kwargs: (
+            saved_messages.append((args, kwargs)) or len(saved_messages)
+        ),
     )
     monkeypatch.setattr(
         multi_character_orchestrator.prompt_builder,
@@ -1267,7 +1338,9 @@ def test_group_orchestrator_paths_share_clock_snapshot_with_prompt_and_messages(
 
     def fake_retrieve_knowledge(**kwargs):
         knowledge_queries.append(kwargs)
-        return SimpleNamespace(prompt_section="相关知识", sources=[{"document_id": "doc-1"}])
+        return SimpleNamespace(
+            prompt_section="相关知识", sources=[{"document_id": "doc-1"}]
+        )
 
     monkeypatch.setattr(
         multi_character_orchestrator,
@@ -1390,10 +1463,9 @@ def test_single_dialogue_uses_elapsed_world_time_and_shared_message_timestamp(
     monkeypatch.setattr(
         orchestrator,
         "_build_system_prompt",
-        lambda *args, **kwargs: captured_time_context.append(
-            kwargs["time_context"]
-        )
-        or "single prompt",
+        lambda *args, **kwargs: (
+            captured_time_context.append(kwargs["time_context"]) or "single prompt"
+        ),
     )
     monkeypatch.setattr(
         orchestrator.llm_client,
@@ -1456,7 +1528,9 @@ def test_single_session_opening_returns_saved_world_timestamp(monkeypatch):
     )
     saved_messages = []
 
-    monkeypatch.setattr(orchestrator.character_loader, "load_character_card", lambda *args: card)
+    monkeypatch.setattr(
+        orchestrator.character_loader, "load_character_card", lambda *args: card
+    )
     monkeypatch.setattr(
         orchestrator.repository,
         "get_runtime_state",
@@ -1467,7 +1541,9 @@ def test_single_session_opening_returns_saved_world_timestamp(monkeypatch):
             "known_player_facts": [],
         },
     )
-    monkeypatch.setattr(orchestrator.world_clock, "get_clock_snapshot", lambda player_id: snapshot)
+    monkeypatch.setattr(
+        orchestrator.world_clock, "get_clock_snapshot", lambda player_id: snapshot
+    )
     monkeypatch.setattr(
         orchestrator.repository,
         "get_last_character_interaction_world_at",
@@ -1481,7 +1557,9 @@ def test_single_session_opening_returns_saved_world_timestamp(monkeypatch):
             "locale": "zh-CN",
         },
     )
-    monkeypatch.setattr(orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: []
+    )
     monkeypatch.setattr(
         orchestrator,
         "_load_single_character_prompt_context",
@@ -1491,7 +1569,9 @@ def test_single_session_opening_returns_saved_world_timestamp(monkeypatch):
             "cross_mode_memories": [],
         },
     )
-    monkeypatch.setattr(orchestrator, "_build_system_prompt", lambda *args, **kwargs: "system")
+    monkeypatch.setattr(
+        orchestrator, "_build_system_prompt", lambda *args, **kwargs: "system"
+    )
     monkeypatch.setattr(
         orchestrator.prompt_builder,
         "build_opening_line_prompt",
@@ -1584,14 +1664,20 @@ def test_world_clock_api_auth_isolation_and_inbox_ownership():
             cookie_token=None,
         )
     assert unauthorized.value.status_code == 401
-    assert user_api.require_current_user_id(
-        authorization=f"Bearer {token_a}",
-        cookie_token=None,
-    ) == player_a
-    assert user_api.require_current_user_id(
-        authorization=f"Bearer {token_b}",
-        cookie_token=None,
-    ) == player_b
+    assert (
+        user_api.require_current_user_id(
+            authorization=f"Bearer {token_a}",
+            cookie_token=None,
+        )
+        == player_a
+    )
+    assert (
+        user_api.require_current_user_id(
+            authorization=f"Bearer {token_b}",
+            cookie_token=None,
+        )
+        == player_b
+    )
 
     updated = user_api.put_world_clock(
         user_api.UpdateWorldClockRequest(
@@ -1618,7 +1704,10 @@ def test_world_clock_api_auth_isolation_and_inbox_ownership():
         user_id=player_a,
     )
     assert any(item["id"] == inbox_id for item in listed)
-    assert user_api.read_event_inbox_item(
-        inbox_id,
-        user_id=player_a,
-    ).success is True
+    assert (
+        user_api.read_event_inbox_item(
+            inbox_id,
+            user_id=player_a,
+        ).success
+        is True
+    )

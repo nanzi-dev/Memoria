@@ -20,8 +20,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 def _route_dependencies(router, path: str, method: str) -> list[str]:
     for route in router.routes:
         if route.path == path and method in route.methods:
-            explicit = [getattr(dep.dependency, "__name__", "") for dep in route.dependencies]
-            parameter = [getattr(dep.call, "__name__", "") for dep in route.dependant.dependencies]
+            explicit = [
+                getattr(dep.dependency, "__name__", "") for dep in route.dependencies
+            ]
+            parameter = [
+                getattr(dep.call, "__name__", "")
+                for dep in route.dependant.dependencies
+            ]
             return explicit + parameter
     raise AssertionError(f"route not found: {method} {path}")
 
@@ -33,16 +38,26 @@ def test_admin_and_relationship_write_routes_require_expected_auth_dependency():
     from memoria.api.relationship import router as relationship_router
     from memoria.main import app
 
-    assert "require_current_user_id" in _route_dependencies(character_router, "/admin/characters", "POST")
-    assert "require_current_user_id" in _route_dependencies(event_router, "/admin/events", "POST")
-    assert "require_current_user_id" in _route_dependencies(event_router, "/admin/event-templates", "GET")
-    assert "require_admin_user_id" in _route_dependencies(event_router, "/admin/event-templates", "POST")
+    assert "require_current_user_id" in _route_dependencies(
+        character_router, "/admin/characters", "POST"
+    )
+    assert "require_current_user_id" in _route_dependencies(
+        event_router, "/admin/events", "POST"
+    )
+    assert "require_current_user_id" in _route_dependencies(
+        event_router, "/admin/event-templates", "GET"
+    )
+    assert "require_admin_user_id" in _route_dependencies(
+        event_router, "/admin/event-templates", "POST"
+    )
     assert "require_admin_user_id" in _route_dependencies(
         event_router,
         "/admin/event-templates/{template_id}",
         "DELETE",
     )
-    assert "require_current_user_id" in _route_dependencies(relationship_router, "/relationships", "POST")
+    assert "require_current_user_id" in _route_dependencies(
+        relationship_router, "/relationships", "POST"
+    )
     assert "require_current_user_id" in _route_dependencies(
         relationship_router,
         "/relationships/pair/{character_id_a}/{character_id_b}",
@@ -72,7 +87,8 @@ def test_admin_and_relationship_write_routes_require_expected_auth_dependency():
     for route in app.routes:
         if getattr(route, "path", None) == "/admin/log-level":
             assert "require_admin_user_id" in [
-                getattr(dep.call, "__name__", "") for dep in route.dependant.dependencies
+                getattr(dep.call, "__name__", "")
+                for dep in route.dependant.dependencies
             ]
             break
     else:
@@ -151,9 +167,7 @@ def test_avatar_downloader_resolves_and_pins_proxy_fake_ip_domain(monkeypatch):
     assert image.data == b"jpg"
     assert image.content_type == "image/jpeg"
     assert response.closed is True
-    assert requests_seen[0][0] == (
-        "https://140.150.22.50/m12/28/c7/01dd9a4bf126.jpg"
-    )
+    assert requests_seen[0][0] == ("https://140.150.22.50/m12/28/c7/01dd9a4bf126.jpg")
     assert requests_seen[0][1]["headers"]["Host"] == "img.itouxiang.com"
     assert mounts[0][0] == "https://140.150.22.50/"
     assert mounts[0][1]._hostname == "img.itouxiang.com"
@@ -342,7 +356,13 @@ def test_avatar_downloader_rejects_private_connected_peer(monkeypatch):
         avatar_fetcher.socket,
         "getaddrinfo",
         lambda *args, **kwargs: [
-            (avatar_fetcher.socket.AF_INET, avatar_fetcher.socket.SOCK_STREAM, 0, "", ("93.184.216.34", 443))
+            (
+                avatar_fetcher.socket.AF_INET,
+                avatar_fetcher.socket.SOCK_STREAM,
+                0,
+                "",
+                ("93.184.216.34", 443),
+            )
         ],
     )
     monkeypatch.setattr(avatar_fetcher.requests, "Session", FakeSession)
@@ -387,7 +407,13 @@ def test_avatar_downloader_enforces_total_download_deadline(monkeypatch):
         avatar_fetcher.socket,
         "getaddrinfo",
         lambda *args, **kwargs: [
-            (avatar_fetcher.socket.AF_INET, avatar_fetcher.socket.SOCK_STREAM, 0, "", ("93.184.216.34", 443))
+            (
+                avatar_fetcher.socket.AF_INET,
+                avatar_fetcher.socket.SOCK_STREAM,
+                0,
+                "",
+                ("93.184.216.34", 443),
+            )
         ],
     )
     monkeypatch.setattr(avatar_fetcher.requests, "Session", FakeSession)
@@ -603,7 +629,9 @@ async def test_user_avatar_upload_normalization_runs_in_threadpool(monkeypatch):
     assert saved["avatar_url"].startswith("data:image/png;base64,")
 
 
-def test_character_avatar_download_is_scheduled_and_only_replaces_source_url(monkeypatch):
+def test_character_avatar_download_is_scheduled_and_only_replaces_source_url(
+    monkeypatch,
+):
     from memoria.api import character_admin
 
     writes = []
@@ -615,13 +643,15 @@ def test_character_avatar_download_is_scheduled_and_only_replaces_source_url(mon
     monkeypatch.setattr(
         character_admin.repository,
         "update_character_avatar_if_current",
-        lambda owner_user_id, character_id, expected_avatar_url, expected_revision, avatar_url: writes.append(
-            (
-                owner_user_id,
-                character_id,
-                expected_avatar_url,
-                expected_revision,
-                avatar_url,
+        lambda owner_user_id, character_id, expected_avatar_url, expected_revision, avatar_url: (
+            writes.append(
+                (
+                    owner_user_id,
+                    character_id,
+                    expected_avatar_url,
+                    expected_revision,
+                    avatar_url,
+                )
             )
         ),
     )
@@ -660,22 +690,34 @@ def test_legacy_password_login_upgrades_hash_and_persists_token(monkeypatch):
     updates = {}
     tokens = {}
 
-    monkeypatch.setattr(user.repository, "get_user_by_username", lambda username: {
-        "user_id": "usr_test",
-        "username": username,
-        "gender": "unknown",
-        "password_hash": legacy_hash,
-        "avatar_url": None,
-    })
-    monkeypatch.setattr(user.repository, "update_user_password_hash", lambda uid, hash_value: updates.update(
-        user_id=uid,
-        password_hash=hash_value,
-    ))
-    monkeypatch.setattr(user.repository, "create_auth_token", lambda token, uid, expires_at: tokens.update(
-        token=token,
-        user_id=uid,
-        expires_at=expires_at,
-    ))
+    monkeypatch.setattr(
+        user.repository,
+        "get_user_by_username",
+        lambda username: {
+            "user_id": "usr_test",
+            "username": username,
+            "gender": "unknown",
+            "password_hash": legacy_hash,
+            "avatar_url": None,
+        },
+    )
+    monkeypatch.setattr(
+        user.repository,
+        "update_user_password_hash",
+        lambda uid, hash_value: updates.update(
+            user_id=uid,
+            password_hash=hash_value,
+        ),
+    )
+    monkeypatch.setattr(
+        user.repository,
+        "create_auth_token",
+        lambda token, uid, expires_at: tokens.update(
+            token=token,
+            user_id=uid,
+            expires_at=expires_at,
+        ),
+    )
 
     response = Response()
     res = user.login(user.LoginRequest(username="alice", password=password), response)
@@ -692,7 +734,9 @@ def test_get_current_user_id_reads_persistent_token_before_memory(monkeypatch):
     from memoria.api import user
 
     user._tokens.clear()
-    monkeypatch.setattr(user.repository, "get_user_id_for_auth_token", lambda token: "usr_db")
+    monkeypatch.setattr(
+        user.repository, "get_user_id_for_auth_token", lambda token: "usr_db"
+    )
 
     assert user.get_current_user_id("token") == "usr_db"
 
@@ -701,22 +745,30 @@ def test_admin_bootstrap_is_explicit_and_single_use(monkeypatch, tmp_path):
     from memoria.db import repository
 
     monkeypatch.setattr(repository.configs, "database_url", "")
-    monkeypatch.setattr(repository.configs, "database_path", str(tmp_path / "bootstrap.db"))
+    monkeypatch.setattr(
+        repository.configs, "database_path", str(tmp_path / "bootstrap.db")
+    )
     repository.init_db()
 
-    assert repository.create_user(
-        "usr_regular",
-        "regular",
-        "hash",
-    ) is False
+    assert (
+        repository.create_user(
+            "usr_regular",
+            "regular",
+            "hash",
+        )
+        is False
+    )
     assert repository.get_user_by_id("usr_regular")["is_admin"] == 0
 
-    assert repository.create_user(
-        "usr_admin",
-        "admin",
-        "hash",
-        bootstrap_admin=True,
-    ) is True
+    assert (
+        repository.create_user(
+            "usr_admin",
+            "admin",
+            "hash",
+            bootstrap_admin=True,
+        )
+        is True
+    )
     assert repository.get_user_by_id("usr_admin")["is_admin"] == 1
 
     with pytest.raises(repository.AdminBootstrapUnavailable):
@@ -736,7 +788,9 @@ def test_register_rejects_invalid_admin_bootstrap_token(monkeypatch):
     monkeypatch.setattr(
         user.repository,
         "get_user_by_username",
-        lambda username: pytest.fail("invalid bootstrap must be rejected before database access"),
+        lambda username: pytest.fail(
+            "invalid bootstrap must be rejected before database access"
+        ),
     )
 
     with pytest.raises(HTTPException) as exc_info:
@@ -755,7 +809,9 @@ def test_register_rejects_invalid_admin_bootstrap_token(monkeypatch):
 def test_register_reports_consumed_admin_bootstrap(monkeypatch):
     from memoria.api import user
 
-    monkeypatch.setattr(user.configs, "admin_bootstrap_token", SecretStr("correct-token"))
+    monkeypatch.setattr(
+        user.configs, "admin_bootstrap_token", SecretStr("correct-token")
+    )
     monkeypatch.setattr(user.repository, "get_user_by_username", lambda username: None)
     monkeypatch.setattr(user.repository, "get_user_by_id", lambda user_id: None)
     monkeypatch.setattr(user, "_gen_user_id", lambda: "usr_admin")
@@ -785,7 +841,9 @@ def test_auth_tokens_are_stored_as_digests(monkeypatch, tmp_path):
     from memoria.db import repository
 
     monkeypatch.setattr(repository.configs, "database_url", "")
-    monkeypatch.setattr(repository.configs, "database_path", str(tmp_path / "tokens.db"))
+    monkeypatch.setattr(
+        repository.configs, "database_path", str(tmp_path / "tokens.db")
+    )
     repository.init_db()
     repository.create_user("usr_token", "token_user", "hash")
 
@@ -805,7 +863,9 @@ def test_legacy_plaintext_auth_token_is_migrated_on_read(monkeypatch, tmp_path):
     from memoria.db import repository
 
     monkeypatch.setattr(repository.configs, "database_url", "")
-    monkeypatch.setattr(repository.configs, "database_path", str(tmp_path / "legacy_token.db"))
+    monkeypatch.setattr(
+        repository.configs, "database_path", str(tmp_path / "legacy_token.db")
+    )
     repository.init_db()
     repository.create_user("usr_legacy", "legacy_user", "hash")
 
@@ -837,7 +897,9 @@ def test_delete_auth_token_removes_digest_and_legacy_keys(monkeypatch, tmp_path)
     from memoria.db import repository
 
     monkeypatch.setattr(repository.configs, "database_url", "")
-    monkeypatch.setattr(repository.configs, "database_path", str(tmp_path / "delete_token.db"))
+    monkeypatch.setattr(
+        repository.configs, "database_path", str(tmp_path / "delete_token.db")
+    )
     repository.init_db()
     repository.create_user("usr_logout", "logout_user", "hash")
 
@@ -860,7 +922,9 @@ def test_delete_auth_token_removes_digest_and_legacy_keys(monkeypatch, tmp_path)
     repository.delete_auth_token(raw_token)
 
     with repository.get_conn() as conn:
-        count = conn.execute("SELECT COUNT(*) AS count FROM auth_token").fetchone()["count"]
+        count = conn.execute("SELECT COUNT(*) AS count FROM auth_token").fetchone()[
+            "count"
+        ]
     assert count == 0
 
 
@@ -873,13 +937,19 @@ def test_call_light_task_uses_light_client(monkeypatch):
         def create(self, **kwargs):
             called.update(kwargs)
             return SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(content="light result"))]
+                choices=[
+                    SimpleNamespace(message=SimpleNamespace(content="light result"))
+                ]
             )
 
     fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
     monkeypatch.setattr(llm_client, "_get_light_client", lambda: fake_client)
-    monkeypatch.setattr(llm_client, "_get_client", lambda: pytest.fail("main client should not be used"))
-    monkeypatch.setattr(llm_client, "_retry_call", lambda fn, *args, **kwargs: fn(*args, **kwargs))
+    monkeypatch.setattr(
+        llm_client, "_get_client", lambda: pytest.fail("main client should not be used")
+    )
+    monkeypatch.setattr(
+        llm_client, "_retry_call", lambda fn, *args, **kwargs: fn(*args, **kwargs)
+    )
 
     assert llm_client.call_light_task("summarize") == "light result"
     assert called["messages"] == [{"role": "user", "content": "summarize"}]
@@ -899,7 +969,9 @@ def test_get_light_client_uses_light_base_url(monkeypatch):
 
     monkeypatch.setattr(llm_client.configs, "llm_base_url", "https://main.test/v1")
     monkeypatch.setattr(llm_client.configs, "llm_api_key", SecretStr("main-key"))
-    monkeypatch.setattr(llm_client.configs, "llm_light_base_url", "https://light.test/v1")
+    monkeypatch.setattr(
+        llm_client.configs, "llm_light_base_url", "https://light.test/v1"
+    )
     monkeypatch.setattr(llm_client.configs, "llm_light_api_key", SecretStr("light-key"))
     monkeypatch.setattr(llm_client, "OpenAI", FakeOpenAI)
     monkeypatch.setattr(llm_client, "_build_http_client", lambda base_url: http_client)
@@ -1000,7 +1072,9 @@ def test_call_light_task_can_ignore_reasoning_content(monkeypatch):
 
     fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
     monkeypatch.setattr(llm_client, "_get_light_client", lambda: fake_client)
-    monkeypatch.setattr(llm_client, "_retry_call", lambda fn, *args, **kwargs: fn(*args, **kwargs))
+    monkeypatch.setattr(
+        llm_client, "_retry_call", lambda fn, *args, **kwargs: fn(*args, **kwargs)
+    )
 
     assert llm_client.call_light_task("summarize", allow_reasoning_fallback=False) == ""
 
@@ -1091,7 +1165,9 @@ def test_production_disables_in_memory_token_fallback(monkeypatch):
 
     user._tokens.clear()
     user._tokens["legacy-token"] = "usr_mem"
-    monkeypatch.setattr(user.repository, "get_user_id_for_auth_token", lambda token: None)
+    monkeypatch.setattr(
+        user.repository, "get_user_id_for_auth_token", lambda token: None
+    )
     monkeypatch.setattr(configs, "memoria_env", "production")
 
     assert user.get_current_user_id("legacy-token") is None
@@ -1172,7 +1248,9 @@ def test_import_character_rejects_path_traversal_ids(character_id):
 def test_import_character_accepts_plain_id():
     from memoria.api.character_admin import ImportFromFileRequest
 
-    assert ImportFromFileRequest(character_id="lin_yuan-01").character_id == "lin_yuan-01"
+    assert (
+        ImportFromFileRequest(character_id="lin_yuan-01").character_id == "lin_yuan-01"
+    )
 
 
 def test_import_character_error_does_not_echo_file_contents(monkeypatch, tmp_path):
@@ -1180,7 +1258,9 @@ def test_import_character_error_does_not_echo_file_contents(monkeypatch, tmp_pat
     from memoria.api import character_admin
 
     secret = tmp_path / "leaky.json"
-    secret.write_text('{"aws_secret_access_key": "TOTALLY_SECRET_VALUE"}', encoding="utf-8")
+    secret.write_text(
+        '{"aws_secret_access_key": "TOTALLY_SECRET_VALUE"}', encoding="utf-8"
+    )
 
     monkeypatch.setattr(
         character_admin.Path,
@@ -1189,7 +1269,9 @@ def test_import_character_error_does_not_echo_file_contents(monkeypatch, tmp_pat
     )
     monkeypatch.setattr(character_admin.Path, "exists", lambda self: True)
     monkeypatch.setattr(character_admin.Path, "resolve", lambda self: self)
-    monkeypatch.setattr(character_admin.Path, "is_relative_to", lambda self, other: True)
+    monkeypatch.setattr(
+        character_admin.Path, "is_relative_to", lambda self, other: True
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         character_admin.import_character_from_file(
@@ -1213,7 +1295,9 @@ def test_login_rejects_unknown_user_without_timing_shortcut(monkeypatch):
 
     user._login_failures.clear()
     burned = []
-    monkeypatch.setattr(user, "_burn_password_hash_time", lambda password: burned.append(password))
+    monkeypatch.setattr(
+        user, "_burn_password_hash_time", lambda password: burned.append(password)
+    )
     monkeypatch.setattr(user.repository, "get_user_by_username", lambda username: None)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -1233,16 +1317,22 @@ def test_login_throttles_repeated_failures(monkeypatch):
 
     for _ in range(user.LOGIN_FAILURE_MAX_ATTEMPTS):
         with pytest.raises(HTTPException) as exc_info:
-            user.login(user.LoginRequest(username="victim", password="wrong-pass1"), Response())
+            user.login(
+                user.LoginRequest(username="victim", password="wrong-pass1"), Response()
+            )
         assert exc_info.value.status_code == 401
 
     with pytest.raises(HTTPException) as exc_info:
-        user.login(user.LoginRequest(username="victim", password="wrong-pass1"), Response())
+        user.login(
+            user.LoginRequest(username="victim", password="wrong-pass1"), Response()
+        )
     assert exc_info.value.status_code == 429
 
     # 节流按用户名隔离，不应影响其它账号。
     with pytest.raises(HTTPException) as exc_info:
-        user.login(user.LoginRequest(username="bystander", password="wrong-pass1"), Response())
+        user.login(
+            user.LoginRequest(username="bystander", password="wrong-pass1"), Response()
+        )
     assert exc_info.value.status_code == 401
     user._login_failures.clear()
 
@@ -1263,13 +1353,17 @@ def test_successful_login_clears_failure_counter(monkeypatch):
         },
     )
     monkeypatch.setattr(user.repository, "create_auth_token", lambda *a, **k: None)
-    monkeypatch.setattr(user, "_build_user_response", lambda u: SimpleNamespace(user_id=u["user_id"]))
+    monkeypatch.setattr(
+        user, "_build_user_response", lambda u: SimpleNamespace(user_id=u["user_id"])
+    )
     monkeypatch.setattr(user, "AuthResponse", lambda user: SimpleNamespace(user=user))
 
     user._record_login_failure("recover_me")
     assert user._login_failures.get("recover_me")
 
-    user.login(user.LoginRequest(username="recover_me", password="correct-pass1"), Response())
+    user.login(
+        user.LoginRequest(username="recover_me", password="correct-pass1"), Response()
+    )
     assert "recover_me" not in user._login_failures
     user._login_failures.clear()
 
@@ -1373,9 +1467,7 @@ def test_pagination_limits_are_bounded(route_path, param, bound):
 
     for route in router.routes:
         if route.path == route_path:
-            field = next(
-                p for p in route.dependant.query_params if p.name == param
-            )
+            field = next(p for p in route.dependant.query_params if p.name == param)
             metadata = field.field_info.metadata
             assert any(getattr(m, "le", None) == bound for m in metadata), metadata
             assert any(getattr(m, "ge", None) == 1 for m in metadata), metadata

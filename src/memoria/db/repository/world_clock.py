@@ -1,4 +1,5 @@
 """Domain repository functions (split from monolith)."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -93,14 +94,18 @@ def update_player_world_clock_and_schedules(
         if result.rowcount != 1:
             raise ClockRevisionConflictError("world clock revision is stale")
 
-        schedules = session.execute(
-            text("""
+        schedules = (
+            session.execute(
+                text("""
                 SELECT * FROM event_schedule_state
                 WHERE player_id = :pid AND status = 'active'
                   AND next_run_at IS NOT NULL
             """),
-            {"pid": player_id},
-        ).mappings().all()
+                {"pid": player_id},
+            )
+            .mappings()
+            .all()
+        )
         for schedule in schedules:
             schedule = dict(schedule)
             lease_expires_at = schedule.get("lease_expires_at")

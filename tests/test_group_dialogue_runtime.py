@@ -29,25 +29,40 @@ def test_ordinary_pulse_due_enforces_pause_cooldowns_and_daily_budget():
     }
 
     assert group_dialogue_runtime._ordinary_pulse_due(state, _snapshot(now)) is True
-    assert group_dialogue_runtime._ordinary_pulse_due(
-        state,
-        _snapshot(now, paused=True),
-    ) is False
-    assert group_dialogue_runtime._ordinary_pulse_due(
-        {**state, "last_autonomous_pulse_at": (now - timedelta(seconds=30)).isoformat()},
-        _snapshot(now),
-    ) is False
-    assert group_dialogue_runtime._ordinary_pulse_due(
-        {
-            **state,
-            "last_autonomous_world_at": (now - timedelta(minutes=5)).isoformat(),
-        },
-        _snapshot(now),
-    ) is False
-    assert group_dialogue_runtime._ordinary_pulse_due(
-        {**state, "daily_message_count": 12},
-        _snapshot(now),
-    ) is False
+    assert (
+        group_dialogue_runtime._ordinary_pulse_due(
+            state,
+            _snapshot(now, paused=True),
+        )
+        is False
+    )
+    assert (
+        group_dialogue_runtime._ordinary_pulse_due(
+            {
+                **state,
+                "last_autonomous_pulse_at": (now - timedelta(seconds=30)).isoformat(),
+            },
+            _snapshot(now),
+        )
+        is False
+    )
+    assert (
+        group_dialogue_runtime._ordinary_pulse_due(
+            {
+                **state,
+                "last_autonomous_world_at": (now - timedelta(minutes=5)).isoformat(),
+            },
+            _snapshot(now),
+        )
+        is False
+    )
+    assert (
+        group_dialogue_runtime._ordinary_pulse_due(
+            {**state, "daily_message_count": 12},
+            _snapshot(now),
+        )
+        is False
+    )
 
 
 def test_pulse_does_not_run_when_lease_claim_fails(monkeypatch):
@@ -64,7 +79,9 @@ def test_pulse_does_not_run_when_lease_claim_fails(monkeypatch):
         "get_latest_group_thread_session",
         lambda thread_id: {"session_id": "session-1", "status": "active"},
     )
-    monkeypatch.setattr(group_dialogue_runtime, "_active_character_ids", lambda session: ["c1", "c2"])
+    monkeypatch.setattr(
+        group_dialogue_runtime, "_active_character_ids", lambda session: ["c1", "c2"]
+    )
     monkeypatch.setattr(
         group_dialogue_runtime.world_clock,
         "get_clock_snapshot",
@@ -108,15 +125,29 @@ def test_ended_thread_creates_carrier_session_and_persists_notification(monkeypa
     committed = {}
     memories = {}
 
-    monkeypatch.setattr(group_dialogue_runtime.repository, "get_group_dialogue_state", lambda thread_id: state)
-    monkeypatch.setattr(group_dialogue_runtime.repository, "get_latest_group_thread_session", lambda thread_id: latest_session)
-    monkeypatch.setattr(group_dialogue_runtime, "_active_character_ids", lambda session: ["c1", "c2"])
+    monkeypatch.setattr(
+        group_dialogue_runtime.repository,
+        "get_group_dialogue_state",
+        lambda thread_id: state,
+    )
+    monkeypatch.setattr(
+        group_dialogue_runtime.repository,
+        "get_latest_group_thread_session",
+        lambda thread_id: latest_session,
+    )
+    monkeypatch.setattr(
+        group_dialogue_runtime, "_active_character_ids", lambda session: ["c1", "c2"]
+    )
     monkeypatch.setattr(
         group_dialogue_runtime.world_clock,
         "get_clock_snapshot",
         lambda player_id, real_now: _snapshot(now),
     )
-    monkeypatch.setattr(group_dialogue_runtime.repository, "claim_group_dialogue_state", lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        group_dialogue_runtime.repository,
+        "claim_group_dialogue_state",
+        lambda *args, **kwargs: True,
+    )
 
     def create_session(**kwargs):
         created.update(kwargs)
@@ -138,16 +169,19 @@ def test_ended_thread_creates_carrier_session_and_persists_notification(monkeypa
     monkeypatch.setattr(
         group_dialogue_runtime.repository,
         "commit_group_dialogue_pulse",
-        lambda group_thread_id, session_id, player_id, responses, **kwargs: committed.update(
-            group_thread_id=group_thread_id,
-            session_id=session_id,
-            player_id=player_id,
-            responses=responses,
-            **kwargs,
-        ) or [
-            {**response, "message_id": index + 10}
-            for index, response in enumerate(responses)
-        ],
+        lambda group_thread_id, session_id, player_id, responses, **kwargs: (
+            committed.update(
+                group_thread_id=group_thread_id,
+                session_id=session_id,
+                player_id=player_id,
+                responses=responses,
+                **kwargs,
+            )
+            or [
+                {**response, "message_id": index + 10}
+                for index, response in enumerate(responses)
+            ]
+        ),
     )
     monkeypatch.setattr(
         group_dialogue_runtime.multi_character_memory,
@@ -175,7 +209,9 @@ def test_ended_thread_creates_carrier_session_and_persists_notification(monkeypa
                 {"message_id": -2, "character_id": "c2", "dialogue": "我守后方。"},
             ]
 
-    monkeypatch.setattr(group_dialogue_runtime, "MultiCharacterOrchestrator", FakeOrchestrator)
+    monkeypatch.setattr(
+        group_dialogue_runtime, "MultiCharacterOrchestrator", FakeOrchestrator
+    )
 
     responses = group_dialogue_runtime.run_group_dialogue_pulse(
         "thread-1",

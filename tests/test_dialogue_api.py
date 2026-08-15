@@ -1,6 +1,7 @@
 """
 Dialogue API behavior tests.
 """
+
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,11 +18,29 @@ def test_session_start_creates_session_without_llm_opening(monkeypatch):
 
     created = {}
 
-    monkeypatch.setattr(dialogue.repository, "get_all_player_sessions", lambda player_id: [])
-    monkeypatch.setattr(dialogue.repository, "get_latest_active_session", lambda player_id, character_id=None: None)
-    monkeypatch.setattr(dialogue.repository, "is_character_card_active", lambda owner_user_id, character_id: True)
-    monkeypatch.setattr(dialogue.character_loader, "load_character_card", lambda character_id, owner_user_id=None: SimpleNamespace())
-    monkeypatch.setattr(dialogue.repository, "get_runtime_state", lambda *args, **kwargs: {"affection_level": 12})
+    monkeypatch.setattr(
+        dialogue.repository, "get_all_player_sessions", lambda player_id: []
+    )
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_latest_active_session",
+        lambda player_id, character_id=None: None,
+    )
+    monkeypatch.setattr(
+        dialogue.repository,
+        "is_character_card_active",
+        lambda owner_user_id, character_id: True,
+    )
+    monkeypatch.setattr(
+        dialogue.character_loader,
+        "load_character_card",
+        lambda character_id, owner_user_id=None: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_runtime_state",
+        lambda *args, **kwargs: {"affection_level": 12},
+    )
     world_now = datetime(2026, 7, 14, 8, 30, tzinfo=timezone.utc)
     monkeypatch.setattr(
         dialogue.world_clock,
@@ -46,11 +65,15 @@ def test_session_start_creates_session_without_llm_opening(monkeypatch):
     monkeypatch.setattr(
         dialogue.orchestrator,
         "start_session",
-        lambda *args, **kwargs: pytest.fail("session_start should not block on LLM opening generation"),
+        lambda *args, **kwargs: pytest.fail(
+            "session_start should not block on LLM opening generation"
+        ),
     )
 
     res = dialogue.session_start(
-        dialogue.SessionStartRequest(character_id="char-1", player_id="player-1", player_name="Tester"),
+        dialogue.SessionStartRequest(
+            character_id="char-1", player_id="player-1", player_name="Tester"
+        ),
         BackgroundTasks(),
         current_user_id="player-1",
     )
@@ -74,13 +97,17 @@ def test_session_start_recovers_session_created_after_initial_lookup(monkeypatch
         "status": "active",
         "locale": "en-US",
     }
-    monkeypatch.setattr(dialogue.repository, "get_all_player_sessions", lambda player_id: [])
+    monkeypatch.setattr(
+        dialogue.repository, "get_all_player_sessions", lambda player_id: []
+    )
     monkeypatch.setattr(
         dialogue.repository,
         "get_latest_active_session",
         lambda player_id, character_id=None: None,
     )
-    monkeypatch.setattr(dialogue.repository, "is_character_card_active", lambda *args: True)
+    monkeypatch.setattr(
+        dialogue.repository, "is_character_card_active", lambda *args: True
+    )
     monkeypatch.setattr(
         dialogue.character_loader,
         "load_character_card",
@@ -135,13 +162,17 @@ def test_session_start_recovery_keeps_persisted_locale(monkeypatch):
         "status": "active",
         "locale": "en-US",
     }
-    monkeypatch.setattr(dialogue.repository, "get_all_player_sessions", lambda player_id: [])
+    monkeypatch.setattr(
+        dialogue.repository, "get_all_player_sessions", lambda player_id: []
+    )
     monkeypatch.setattr(
         dialogue.repository,
         "get_latest_active_session",
         lambda player_id, character_id=None: active,
     )
-    monkeypatch.setattr(dialogue, "_current_character_state", lambda *args: (0, 0, "neutral"))
+    monkeypatch.setattr(
+        dialogue, "_current_character_state", lambda *args: (0, 0, "neutral")
+    )
     monkeypatch.setattr(dialogue, "_messages_for_session", lambda session_id: [])
 
     response = dialogue.session_start(
@@ -162,13 +193,25 @@ def test_session_start_recovery_keeps_persisted_locale(monkeypatch):
 def test_session_start_rejects_disabled_character_without_existing_session(monkeypatch):
     from memoria.api import dialogue
 
-    monkeypatch.setattr(dialogue.repository, "get_all_player_sessions", lambda player_id: [])
-    monkeypatch.setattr(dialogue.repository, "get_latest_active_session", lambda player_id, character_id=None: None)
-    monkeypatch.setattr(dialogue.repository, "is_character_card_active", lambda owner_user_id, character_id: False)
+    monkeypatch.setattr(
+        dialogue.repository, "get_all_player_sessions", lambda player_id: []
+    )
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_latest_active_session",
+        lambda player_id, character_id=None: None,
+    )
+    monkeypatch.setattr(
+        dialogue.repository,
+        "is_character_card_active",
+        lambda owner_user_id, character_id: False,
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         dialogue.session_start(
-            dialogue.SessionStartRequest(character_id="char-1", player_id="player-1", player_name="Tester"),
+            dialogue.SessionStartRequest(
+                character_id="char-1", player_id="player-1", player_name="Tester"
+            ),
             BackgroundTasks(),
             current_user_id="player-1",
         )
@@ -181,7 +224,9 @@ def test_session_start_recovers_latest_message_world_timestamp(monkeypatch):
     from memoria.api import dialogue
 
     world_created_at = "2026-07-13T21:15:00+00:00"
-    monkeypatch.setattr(dialogue.repository, "get_all_player_sessions", lambda player_id: [])
+    monkeypatch.setattr(
+        dialogue.repository, "get_all_player_sessions", lambda player_id: []
+    )
     monkeypatch.setattr(
         dialogue.repository,
         "get_latest_active_session",
@@ -206,7 +251,9 @@ def test_session_start_recovers_latest_message_world_timestamp(monkeypatch):
     monkeypatch.setattr(
         dialogue.world_clock,
         "get_clock_snapshot",
-        lambda player_id: pytest.fail("stored message timestamp should avoid a clock fallback"),
+        lambda player_id: pytest.fail(
+            "stored message timestamp should avoid a clock fallback"
+        ),
     )
 
     res = dialogue.session_start(
@@ -237,7 +284,11 @@ def test_dialogue_turn_rejects_disabled_character(monkeypatch):
             "status": "active",
         },
     )
-    monkeypatch.setattr(dialogue.repository, "is_character_card_active", lambda owner_user_id, character_id: False)
+    monkeypatch.setattr(
+        dialogue.repository,
+        "is_character_card_active",
+        lambda owner_user_id, character_id: False,
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         dialogue.dialogue_turn(
@@ -252,11 +303,15 @@ def test_dialogue_turn_rejects_disabled_character(monkeypatch):
 def test_session_start_rejects_other_player(monkeypatch):
     from memoria.api import dialogue
 
-    monkeypatch.setattr(dialogue.repository, "get_all_player_sessions", lambda player_id: [])
+    monkeypatch.setattr(
+        dialogue.repository, "get_all_player_sessions", lambda player_id: []
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         dialogue.session_start(
-            dialogue.SessionStartRequest(character_id="char-1", player_id="player-1", player_name="Tester"),
+            dialogue.SessionStartRequest(
+                character_id="char-1", player_id="player-1", player_name="Tester"
+            ),
             BackgroundTasks(),
             current_user_id="other-player",
         )
@@ -279,11 +334,23 @@ def test_generate_session_summary_skips_when_message_count_not_enough(monkeypatc
     monkeypatch.setattr(
         dialogue.repository,
         "get_session",
-        lambda session_id: {"session_id": session_id, "character_id": "char-1", "player_id": "player-1"},
+        lambda session_id: {
+            "session_id": session_id,
+            "character_id": "char-1",
+            "player_id": "player-1",
+        },
     )
-    monkeypatch.setattr(dialogue.repository, "get_short_term_history", lambda session_id, limit_turns=1000: history)
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_short_term_history",
+        lambda session_id, limit_turns=1000: history,
+    )
     monkeypatch.setattr(dialogue, "summarize_session", fake_summarize_session)
-    monkeypatch.setattr(dialogue.repository, "save_session_summary", lambda **kwargs: saved.append(kwargs))
+    monkeypatch.setattr(
+        dialogue.repository,
+        "save_session_summary",
+        lambda **kwargs: saved.append(kwargs),
+    )
 
     dialogue._generate_session_summary("session-1")
 
@@ -300,11 +367,23 @@ def test_generate_session_summary_skips_empty_llm_summary(monkeypatch):
     monkeypatch.setattr(
         dialogue.repository,
         "get_session",
-        lambda session_id: {"session_id": session_id, "character_id": "char-1", "player_id": "player-1"},
+        lambda session_id: {
+            "session_id": session_id,
+            "character_id": "char-1",
+            "player_id": "player-1",
+        },
     )
-    monkeypatch.setattr(dialogue.repository, "get_short_term_history", lambda session_id, limit_turns=1000: history)
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_short_term_history",
+        lambda session_id, limit_turns=1000: history,
+    )
     monkeypatch.setattr(dialogue, "summarize_session", lambda messages: "  ")
-    monkeypatch.setattr(dialogue.repository, "save_session_summary", lambda **kwargs: saved.append(kwargs))
+    monkeypatch.setattr(
+        dialogue.repository,
+        "save_session_summary",
+        lambda **kwargs: saved.append(kwargs),
+    )
 
     dialogue._generate_session_summary("session-1")
 
@@ -320,11 +399,23 @@ def test_generate_session_summary_saves_completed_non_empty_summary(monkeypatch)
     monkeypatch.setattr(
         dialogue.repository,
         "get_session",
-        lambda session_id: {"session_id": session_id, "character_id": "char-1", "player_id": "player-1"},
+        lambda session_id: {
+            "session_id": session_id,
+            "character_id": "char-1",
+            "player_id": "player-1",
+        },
     )
-    monkeypatch.setattr(dialogue.repository, "get_short_term_history", lambda session_id, limit_turns=1000: history)
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_short_term_history",
+        lambda session_id, limit_turns=1000: history,
+    )
     monkeypatch.setattr(dialogue, "summarize_session", lambda messages: "  有效摘要  ")
-    monkeypatch.setattr(dialogue.repository, "save_session_summary", lambda **kwargs: saved.update(kwargs))
+    monkeypatch.setattr(
+        dialogue.repository,
+        "save_session_summary",
+        lambda **kwargs: saved.update(kwargs),
+    )
 
     dialogue._generate_session_summary("session-1")
 
@@ -374,9 +465,10 @@ def test_generate_session_summary_reuses_exact_completed_summary(monkeypatch):
 
     dialogue._generate_session_summary("session-1")
 
-    assert dialogue.performance.snapshot()["counters"][
-        "llm.calls_avoided.summary_reuse"
-    ] == 1
+    assert (
+        dialogue.performance.snapshot()["counters"]["llm.calls_avoided.summary_reuse"]
+        == 1
+    )
 
 
 def test_generate_session_summary_regenerates_stale_summary(monkeypatch):

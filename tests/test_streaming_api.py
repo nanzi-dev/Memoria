@@ -288,8 +288,7 @@ async def test_sse_bridge_uses_a_bounded_event_queue(monkeypatch):
 
     response = streaming.create_sse_response(
         lambda event_sink: (
-            event_sink("dialogue_delta", {"delta": "ok"})
-            or {"dialogue": "ok"}
+            event_sink("dialogue_delta", {"delta": "ok"}) or {"dialogue": "ok"}
         ),
         started_data={"request_id": "req-bounded-queue"},
     )
@@ -297,7 +296,6 @@ async def test_sse_bridge_uses_a_bounded_event_queue(monkeypatch):
 
     assert queue_sizes == [streaming.STREAM_EVENT_QUEUE_SIZE]
     assert queue_sizes[0] > 0
-
 
 
 @pytest.mark.asyncio
@@ -494,7 +492,6 @@ async def test_dialogue_stream_maps_conflict_to_409_error_event(monkeypatch):
     assert error["error_type"] == "DialogueTurnConflictError"
     assert error["status_code"] == 409
     assert error["detail"] == "该会话已有消息正在处理中"
-
 
 
 @pytest.mark.asyncio

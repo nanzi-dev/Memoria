@@ -135,9 +135,9 @@ def test_checkpoint_memory_provider_failure_retries_job(monkeypatch):
     monkeypatch.setattr(
         background_jobs.repository,
         "record_background_job_failure",
-        lambda job_id, **kwargs: failures.append((job_id, kwargs)) or {
-            "status": "pending"
-        },
+        lambda job_id, **kwargs: (
+            failures.append((job_id, kwargs)) or {"status": "pending"}
+        ),
     )
     monkeypatch.setattr(
         background_jobs.repository,
@@ -279,19 +279,23 @@ def test_checkpoint_memory_handler_extracts_snapshot_and_records_claim(
     assert worker.run_once()
 
     assert extracted == [history]
-    assert extraction_options == [{
-        "raise_on_error": True,
-        "max_attempts": 1,
-    }]
-    assert claims == [{
-        "owner_user_id": "player-1",
-        "scope_type": scope_type,
-        "scope_id": scope_id,
-        "fact_text": "玩家会带茉莉花茶",
-        "source_ids": ["session:session-1"],
-        "provenance": {
-            "memory_kind": "player_fact",
-            "session_id": "session-1",
-        },
-    }]
+    assert extraction_options == [
+        {
+            "raise_on_error": True,
+            "max_attempts": 1,
+        }
+    ]
+    assert claims == [
+        {
+            "owner_user_id": "player-1",
+            "scope_type": scope_type,
+            "scope_id": scope_id,
+            "fact_text": "玩家会带茉莉花茶",
+            "source_ids": ["session:session-1"],
+            "provenance": {
+                "memory_kind": "player_fact",
+                "session_id": "session-1",
+            },
+        }
+    ]
     assert repository.get_background_job(queued["job_id"])["status"] == "completed"

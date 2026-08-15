@@ -10,24 +10,83 @@ from __future__ import annotations
 import re
 
 RELATIONSHIP_CONTEXT_MARKERS = (
-    "关系", "之间", "互相", "彼此", "对方", "你们", "他们", "她们",
-    "二人", "两人", "称呼", "叫", "承诺", "身份", "定位", "已经是",
-    "不再是", "只是", "算是", "成为", "变成",
+    "关系",
+    "之间",
+    "互相",
+    "彼此",
+    "对方",
+    "你们",
+    "他们",
+    "她们",
+    "二人",
+    "两人",
+    "称呼",
+    "叫",
+    "承诺",
+    "身份",
+    "定位",
+    "已经是",
+    "不再是",
+    "只是",
+    "算是",
+    "成为",
+    "变成",
 )
 
 # 这些是“关系事实”常见自然语言词，不是系统支持的关系类型清单。
 RELATIONSHIP_CLAIM_TERMS = (
-    "师徒", "师父", "师傅", "徒弟", "导师", "老师", "学生", "师生",
-    "情侣", "恋人", "爱人", "夫妻", "伴侣", "朋友", "好友", "挚友",
-    "敌人", "仇人", "死敌", "宿敌", "对手", "家人", "亲人", "父子",
-    "父女", "母子", "母女", "兄弟", "姐妹", "兄妹", "姐弟", "队友",
-    "伙伴", "同伴", "盟友", "同事", "陌生人", "陌生", "中立",
-    "暧昧", "亲密", "疏远", "背叛", "守护者", "契约", "搭档",
+    "师徒",
+    "师父",
+    "师傅",
+    "徒弟",
+    "导师",
+    "老师",
+    "学生",
+    "师生",
+    "情侣",
+    "恋人",
+    "爱人",
+    "夫妻",
+    "伴侣",
+    "朋友",
+    "好友",
+    "挚友",
+    "敌人",
+    "仇人",
+    "死敌",
+    "宿敌",
+    "对手",
+    "家人",
+    "亲人",
+    "父子",
+    "父女",
+    "母子",
+    "母女",
+    "兄弟",
+    "姐妹",
+    "兄妹",
+    "姐弟",
+    "队友",
+    "伙伴",
+    "同伴",
+    "盟友",
+    "同事",
+    "陌生人",
+    "陌生",
+    "中立",
+    "暧昧",
+    "亲密",
+    "疏远",
+    "背叛",
+    "守护者",
+    "契约",
+    "搭档",
 )
 
 # “喜欢/讨厌”也可能描述普通爱好，例如“喜欢猫”，不能单独判定为角色关系事实。
 WEAK_RELATIONSHIP_CLAIM_TERMS = (
-    "喜欢", "讨厌",
+    "喜欢",
+    "讨厌",
 )
 
 # 兼容旧数据里常见的英文 canonical 类型。它只用于判定“当前图谱关系”
@@ -36,7 +95,18 @@ LEGACY_RELATIONSHIP_TYPE_SYNONYMS = {
     "friend": ("朋友", "好友", "挚友", "友人"),
     "enemy": ("敌人", "仇人", "死敌", "敌对", "敌手"),
     "rival": ("宿敌", "对手", "竞争者"),
-    "family": ("家人", "亲人", "父子", "父女", "母子", "母女", "兄弟", "姐妹", "兄妹", "姐弟"),
+    "family": (
+        "家人",
+        "亲人",
+        "父子",
+        "父女",
+        "母子",
+        "母女",
+        "兄弟",
+        "姐妹",
+        "兄妹",
+        "姐弟",
+    ),
     "mentor": ("师徒", "师父", "师傅", "徒弟", "导师", "老师", "学生", "师生"),
     "teacher": ("老师", "学生", "师生"),
     "student": ("学生", "老师", "师生"),
@@ -61,11 +131,27 @@ _GENERIC_RELATIONSHIP_CLAIM_PATTERN = re.compile(
     r"([。！？!?；;\n]|$)"
 )
 PAIR_REFERENCE_MARKERS = (
-    "我", "我们", "咱们", "你", "你们", "他", "她", "他们", "她们",
-    "二人", "两人", "彼此", "互相", "对方",
+    "我",
+    "我们",
+    "咱们",
+    "你",
+    "你们",
+    "他",
+    "她",
+    "他们",
+    "她们",
+    "二人",
+    "两人",
+    "彼此",
+    "互相",
+    "对方",
 )
 EXPLICIT_RELATIONSHIP_MARKERS = (
-    "关系", "身份", "定位", "称呼", "承诺",
+    "关系",
+    "身份",
+    "定位",
+    "称呼",
+    "承诺",
 )
 
 
@@ -105,8 +191,7 @@ def text_mentions_alias(text: str, aliases: list[str] | None) -> bool:
 
 def _alias_mentions(text: str, aliases: list[str] | None) -> list[str]:
     return [
-        alias for alias in normalize_aliases(aliases)
-        if text_contains_term(text, alias)
+        alias for alias in normalize_aliases(aliases) if text_contains_term(text, alias)
     ]
 
 
@@ -148,16 +233,13 @@ def relationship_map_from_records(records: list[dict] | None) -> dict[str, dict]
 
 
 def relationship_between(
-    character_relationships: dict | None,
-    character_id_a: str,
-    character_id_b: str
+    character_relationships: dict | None, character_id_a: str, character_id_b: str
 ) -> dict | None:
     if not character_relationships:
         return None
-    return (
-        character_relationships.get(relationship_key(character_id_a, character_id_b))
-        or character_relationships.get(relationship_key(character_id_b, character_id_a))
-    )
+    return character_relationships.get(
+        relationship_key(character_id_a, character_id_b)
+    ) or character_relationships.get(relationship_key(character_id_b, character_id_a))
 
 
 def relationship_summary_for_prompt(relationship: dict) -> str:
@@ -185,25 +267,27 @@ def undefined_relationship_summary() -> str:
 def build_relationship_graph_lines(
     participants: list[tuple[str, str]],
     character_relationships: dict | None,
-    include_missing: bool = True
+    include_missing: bool = True,
 ) -> list[str]:
     lines = []
     for idx, (char_a, name_a) in enumerate(participants):
-        for char_b, name_b in participants[idx + 1:]:
+        for char_b, name_b in participants[idx + 1 :]:
             relationship = relationship_between(character_relationships, char_a, char_b)
             if relationship:
                 lines.append(
                     f"- {name_a} 与 {name_b}：{relationship_summary_for_prompt(relationship)}"
                 )
             elif include_missing:
-                lines.append(f"- {name_a} 与 {name_b}：{undefined_relationship_summary()}")
+                lines.append(
+                    f"- {name_a} 与 {name_b}：{undefined_relationship_summary()}"
+                )
     return lines
 
 
 def build_relationship_graph_lines_for_pairs(
     pairs: list[tuple[str, str]],
     character_names: dict[str, str],
-    character_relationships: dict | None
+    character_relationships: dict | None,
 ) -> list[str]:
     lines = []
     seen = set()
@@ -230,16 +314,18 @@ def build_relationship_graph_lines_for_pairs(
 def format_relationship_graph_context(lines: list[str] | None) -> str:
     if not lines:
         return ""
-    return "\n".join([
-        "【当前关系图谱（最高优先级，覆盖角色卡背景）】",
-        "下面是当前角色关系的唯一权威事实。",
-        "如果角色卡简介、角色卡人物关系、长期记忆、共享记忆、群体记忆或历史发言与本节冲突，必须以本节为准。",
-        "关系类型是用户可自定义文本，不要把它改写成系统预设枚举。",
-        "关系强度是图谱数值，不固定等同于亲密、敌意或好感；具体含义以关系类型和说明为准。",
-        "回答“你们是什么关系”“你和某某是什么关系”这类问题时，只能按本节关系作答。",
-        *lines,
-        "",
-    ])
+    return "\n".join(
+        [
+            "【当前关系图谱（最高优先级，覆盖角色卡背景）】",
+            "下面是当前角色关系的唯一权威事实。",
+            "如果角色卡简介、角色卡人物关系、长期记忆、共享记忆、群体记忆或历史发言与本节冲突，必须以本节为准。",
+            "关系类型是用户可自定义文本，不要把它改写成系统预设枚举。",
+            "关系强度是图谱数值，不固定等同于亲密、敌意或好感；具体含义以关系类型和说明为准。",
+            "回答“你们是什么关系”“你和某某是什么关系”这类问题时，只能按本节关系作答。",
+            *lines,
+            "",
+        ]
+    )
 
 
 def _relationship_terms_for_record(relationship: dict | None) -> set[str]:
@@ -261,15 +347,14 @@ def _relationship_terms_for_record(relationship: dict | None) -> set[str]:
 
 
 def _contains_current_relationship_term(text: str, relationship: dict | None) -> bool:
-    return any(text_contains_term(text, term) for term in _relationship_terms_for_record(relationship))
+    return any(
+        text_contains_term(text, term)
+        for term in _relationship_terms_for_record(relationship)
+    )
 
 
 def _relationship_claim_terms_in_text(text: str) -> set[str]:
-    return {
-        term
-        for term in RELATIONSHIP_CLAIM_TERMS
-        if text_contains_term(text, term)
-    }
+    return {term for term in RELATIONSHIP_CLAIM_TERMS if text_contains_term(text, term)}
 
 
 def _relationship_allows_term(relationship: dict | None, term: str) -> bool:
@@ -290,7 +375,7 @@ def is_relationship_memory_text(
     text: str,
     participant_aliases: list[str] | None = None,
     relationship_context: bool = False,
-    relationship: dict | None = None
+    relationship: dict | None = None,
 ) -> bool:
     if not text:
         return False
@@ -299,7 +384,9 @@ def is_relationship_memory_text(
     has_claim_term = any(term in text for term in RELATIONSHIP_CLAIM_TERMS)
     has_weak_claim_term = any(term in text for term in WEAK_RELATIONSHIP_CLAIM_TERMS)
     has_current_term = _contains_current_relationship_term(text, relationship)
-    has_explicit_marker = any(marker in text for marker in EXPLICIT_RELATIONSHIP_MARKERS)
+    has_explicit_marker = any(
+        marker in text for marker in EXPLICIT_RELATIONSHIP_MARKERS
+    )
     has_pair_marker = any(marker in text for marker in PAIR_REFERENCE_MARKERS)
     has_alias = text_mentions_alias(text, aliases)
     has_multiple_aliases = len(_alias_mentions(text, aliases)) >= 2
@@ -334,7 +421,9 @@ def is_relationship_memory_text(
     return bool(has_generic_alias_claim)
 
 
-def memory_created_before_or_unknown(created_at: str | None, cutoff: str | None) -> bool:
+def memory_created_before_or_unknown(
+    created_at: str | None, cutoff: str | None
+) -> bool:
     if not cutoff:
         return False
     if not created_at:
@@ -348,7 +437,7 @@ def filter_stale_relationship_memory_records(
     participant_aliases: list[str] | None = None,
     text_key: str = "memory_text",
     relationship_context: bool = False,
-    relationship: dict | None = None
+    relationship: dict | None = None,
 ) -> list[dict]:
     if not relationship_updated_at:
         return records
@@ -356,14 +445,13 @@ def filter_stale_relationship_memory_records(
     filtered = []
     for record in records:
         text = str(record.get(text_key) or "")
-        if (
-            memory_created_before_or_unknown(record.get("created_at"), relationship_updated_at)
-            and is_relationship_memory_text(
-                text,
-                participant_aliases,
-                relationship_context=relationship_context,
-                relationship=relationship,
-            )
+        if memory_created_before_or_unknown(
+            record.get("created_at"), relationship_updated_at
+        ) and is_relationship_memory_text(
+            text,
+            participant_aliases,
+            relationship_context=relationship_context,
+            relationship=relationship,
         ):
             continue
         filtered.append(record)
@@ -371,17 +459,18 @@ def filter_stale_relationship_memory_records(
 
 
 def relationship_text_conflicts_with_graph(
-    text: str,
-    relationship: dict | None,
-    aliases: list[str] | None = None
+    text: str, relationship: dict | None, aliases: list[str] | None = None
 ) -> bool:
     if not text:
         return False
 
-    if (
-        _contains_current_relationship_term(text, relationship)
-        and not _has_disallowed_relationship_term(text, relationship)
-    ):
+    if _contains_current_relationship_term(
+        text, relationship
+    ) and not _has_disallowed_relationship_term(text, relationship):
         return False
 
-    return bool(is_relationship_memory_text(text, aliases, relationship_context=False, relationship=relationship))
+    return bool(
+        is_relationship_memory_text(
+            text, aliases, relationship_context=False, relationship=relationship
+        )
+    )

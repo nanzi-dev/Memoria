@@ -36,8 +36,10 @@ MAX_GROUP_CHARACTERS = 8
 # 请求/响应模型
 # =========================
 
+
 class StartMultiSessionRequest(BaseModel):
     """开始多角色会话请求"""
+
     player_id: str = Field(..., max_length=64, description="玩家ID")
     player_name: str = Field(..., max_length=50, description="玩家名称")
     group_name: str | None = Field(None, max_length=80, description="群聊名称")
@@ -52,32 +54,33 @@ class StartMultiSessionRequest(BaseModel):
 
 class StartMultiSessionResponse(BaseModel):
     """开始多角色会话响应"""
+
     session_id: str
     group_name: str | None = None
     group_thread_id: str | None = None
-    opening: dict | None = Field(default=None, description="开场白信息（已停用，恒为 None）")
+    opening: dict | None = Field(
+        default=None, description="开场白信息（已停用，恒为 None）"
+    )
     locale: Locale = DEFAULT_LOCALE
 
 
 class MultiDialogueTurnRequest(BaseModel):
     """多角色对话轮次请求"""
+
     session_id: str = Field(..., description="会话ID")
     player_message: str = Field(..., description="玩家消息", max_length=8000)
     discussion_mode: bool = Field(
-        True,
-        description="是否启用群聊接话，普通群聊默认启用"
+        True, description="是否启用群聊接话，普通群聊默认启用"
     )
     max_responses: int | None = Field(
-        None,
-        ge=1,
-        le=5,
-        description="群聊接话人数上限；不传时按语境动态决定"
+        None, ge=1, le=5, description="群聊接话人数上限；不传时按语境动态决定"
     )
     request_id: str | None = Field(None, description="客户端生成的事件执行幂等 ID")
 
 
 class MultiDialogueTurnResponse(BaseModel):
     """多角色对话轮次响应"""
+
     message_id: int | None = None
     stream_id: str | None = None
     character_id: str
@@ -104,7 +107,10 @@ class MultiDialogueTurnResponse(BaseModel):
 
 class MultiDialogueGroupResponse(BaseModel):
     """多角色群体讨论响应（讨论模式）"""
-    responses: list[MultiDialogueTurnResponse] = Field(..., description="所有角色的回应列表")
+
+    responses: list[MultiDialogueTurnResponse] = Field(
+        ..., description="所有角色的回应列表"
+    )
     total_speakers: int = Field(..., description="发言角色数量")
     discussion_mode: bool = Field(True, description="群聊接话标识")
     event_executions: list[dict] = Field(default_factory=list)
@@ -113,11 +119,10 @@ class MultiDialogueGroupResponse(BaseModel):
 
 class TriggerInteractionRequest(BaseModel):
     """触发角色互动请求"""
+
     session_id: str
     trigger_character_id: str | None = Field(
-        None,
-        max_length=64,
-        description="触发角色ID，留空则自动选择"
+        None, max_length=64, description="触发角色ID，留空则自动选择"
     )
     # 该字段原样进入 LLM prompt，必须与 player_message 一样有长度上限。
     prompt: str | None = Field(None, max_length=2000, description="主动发言提示")
@@ -125,11 +130,13 @@ class TriggerInteractionRequest(BaseModel):
 
 class EndMultiSessionRequest(BaseModel):
     """结束多角色会话请求"""
+
     session_id: str
 
 
 class SessionParticipant(BaseModel):
     """会话参与者信息"""
+
     character_id: str
     name: str
     display_name: str | None = None
@@ -143,6 +150,7 @@ class SessionParticipant(BaseModel):
 
 class MultiSessionInfo(BaseModel):
     """多角色会话信息"""
+
     session_id: str
     player_id: str
     player_name: str
@@ -156,6 +164,7 @@ class MultiSessionInfo(BaseModel):
 
 class ContinueMultiSessionResponse(BaseModel):
     """继续群聊会话响应"""
+
     session_id: str
     group_name: str | None = None
     group_thread_id: str
@@ -166,6 +175,7 @@ class ContinueMultiSessionResponse(BaseModel):
 
 class MultiDialogueHistory(BaseModel):
     """多角色对话历史"""
+
     messages: list[dict]
     has_more: bool
     latest_message_id: int = 0
@@ -177,11 +187,13 @@ class MarkGroupThreadReadResponse(BaseModel):
     marked_read: int
 
 
-def _chunk_messages(messages: list[dict], chunk_size: int = SUMMARY_CHUNK_MESSAGE_LIMIT) -> list[list[dict]]:
+def _chunk_messages(
+    messages: list[dict], chunk_size: int = SUMMARY_CHUNK_MESSAGE_LIMIT
+) -> list[list[dict]]:
     """按消息数切分长会话，避免一次摘要超过模型上下文。"""
     if chunk_size <= 0:
         return [messages]
-    return [messages[i:i + chunk_size] for i in range(0, len(messages), chunk_size)]
+    return [messages[i : i + chunk_size] for i in range(0, len(messages), chunk_size)]
 
 
 def _normalized_group_name(group_name: str | None) -> str:
@@ -303,18 +315,19 @@ def _save_session_summary_on_end(session_id: str, session: dict) -> None:
         logger.info(f"多角色会话无参与角色，跳过摘要保存: session={session_id}")
         return
 
-    relationship_history_cutoff = multi_character_memory.get_relationship_history_cutoff(
-        session["player_id"],
-        character_ids
+    relationship_history_cutoff = (
+        multi_character_memory.get_relationship_history_cutoff(
+            session["player_id"], character_ids
+        )
     )
     messages = repository.get_multi_character_history(
-        session_id,
-        limit_messages=None,
-        created_after=relationship_history_cutoff
+        session_id, limit_messages=None, created_after=relationship_history_cutoff
     )
     meaningful_messages = [m for m in messages if str(m.get("content") or "").strip()]
     if len(meaningful_messages) <= SUMMARY_MIN_MESSAGE_COUNT:
-        logger.info(f"多角色会话有效消息不超过 {SUMMARY_MIN_MESSAGE_COUNT} 条，跳过摘要保存: session={session_id}")
+        logger.info(
+            f"多角色会话有效消息不超过 {SUMMARY_MIN_MESSAGE_COUNT} 条，跳过摘要保存: session={session_id}"
+        )
         return
 
     existing_summary = repository.get_session_summary(session_id)
@@ -370,7 +383,9 @@ def _generate_multi_session_summary_task(session_id: str, session: dict) -> None
     try:
         _save_session_summary_on_end(session_id, session)
     except Exception as e:
-        logger.error(f"后台生成多角色摘要失败: session={session_id}, error={e}", exc_info=True)
+        logger.error(
+            f"后台生成多角色摘要失败: session={session_id}, error={e}", exc_info=True
+        )
 
 
 def finish_multi_character_session(
@@ -389,20 +404,26 @@ def finish_multi_character_session(
     try:
         message_count = _count_meaningful_multi_messages(session_id)
     except Exception as e:
-        logger.error(f"统计多角色摘要消息失败: session={session_id}, error={e}", exc_info=True)
+        logger.error(
+            f"统计多角色摘要消息失败: session={session_id}, error={e}", exc_info=True
+        )
 
     if session.get("status") != "ended":
         repository.end_session(session_id)
 
     if message_count > SUMMARY_MIN_MESSAGE_COUNT:
         if background_tasks is not None:
-            background_tasks.add_task(_generate_multi_session_summary_task, session_id, session)
+            background_tasks.add_task(
+                _generate_multi_session_summary_task, session_id, session
+            )
         else:
             _generate_multi_session_summary_task(session_id, session)
 
     return {
         "success": True,
-        "message": "多角色会话已结束" if session.get("status") != "ended" else "会话已经是结束状态",
+        "message": "多角色会话已结束"
+        if session.get("status") != "ended"
+        else "会话已经是结束状态",
         "session_id": session_id,
     }
 
@@ -411,6 +432,7 @@ def finish_multi_character_session(
 # API 端点
 # =========================
 
+
 @router.post("/session/start", response_model=StartMultiSessionResponse)
 def start_multi_session(
     request: StartMultiSessionRequest,
@@ -418,9 +440,9 @@ def start_multi_session(
 ):
     """
     开始多角色群聊会话
-    
+
     创建一个新的多角色对话会话，支持2个或更多NPC同时参与。
-    
+
     - **player_id**: 玩家唯一标识
     - **player_name**: 玩家显示名称
     - **character_ids**: 参与的角色ID列表（至少2个）
@@ -428,14 +450,13 @@ def start_multi_session(
     """
     try:
         _require_player_access(request.player_id, current_user_id)
-        logger.info(f"开始多角色会话: player={request.player_id}, characters={request.character_ids}")
-        
+        logger.info(
+            f"开始多角色会话: player={request.player_id}, characters={request.character_ids}"
+        )
+
         # 验证角色ID
         if len(request.character_ids) < 2:
-            raise HTTPException(
-                status_code=400,
-                detail="多角色会话至少需要2个角色"
-            )
+            raise HTTPException(status_code=400, detail="多角色会话至少需要2个角色")
         if len(set(request.character_ids)) != len(request.character_ids):
             raise HTTPException(status_code=400, detail="群聊角色不能重复")
 
@@ -453,17 +474,16 @@ def start_multi_session(
             request.player_id, clean_group_name.casefold()
         ):
             raise HTTPException(status_code=400, detail="群聊名称已存在，请换一个名称")
-        
+
         try:
             player_character = repository.get_or_create_user_character_card(
                 request.player_id
             )
         except Exception:
             player_character = None
-        player_name = (
-            (player_character or {}).get("display_name")
-            or request.player_name
-        )
+        player_name = (player_character or {}).get(
+            "display_name"
+        ) or request.player_name
 
         # 创建会话
         result = start_multi_character_session(
@@ -476,9 +496,10 @@ def start_multi_session(
 
         # 并发唯一性兜底：前序检查通过后仍可能被其他请求插入同名群聊，
         # 插入后再数一次逻辑群聊线程；若出现重复则返回 400。
-        if clean_group_name and _count_player_groups_with_name(
-            request.player_id, clean_group_name
-        ) > 1:
+        if (
+            clean_group_name
+            and _count_player_groups_with_name(request.player_id, clean_group_name) > 1
+        ):
             raise HTTPException(status_code=400, detail="群聊名称已存在，请换一个名称")
 
         return StartMultiSessionResponse(
@@ -488,7 +509,7 @@ def start_multi_session(
             opening=result["opening"],
             locale=result.get("locale") or request.locale,
         )
-    
+
     except HTTPException:
         raise
 
@@ -496,7 +517,7 @@ def start_multi_session(
         logger.error(f"创建多角色会话失败: {e}")
         # 异常消息可能包含会话 ID 等内部信息，不直接回传。
         raise HTTPException(status_code=400, detail="创建多角色会话失败") from e
-    
+
     except Exception as e:
         logger.error(f"创建多角色会话异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="服务器内部错误")
@@ -509,26 +530,28 @@ def multi_dialogue_turn(
 ):
     """
     处理多角色对话轮次
-    
+
     玩家发送消息后，系统会模拟普通群聊，选择少量角色接话。
-    
+
     - **session_id**: 会话ID
     - **player_message**: 玩家消息内容
     - **discussion_mode**: 是否启用群聊接话，默认启用
     - **max_responses**: 可选的人数上限；不传时按语境动态决定
-    
+
     返回选中角色的回应（单个或多个）。
     """
     try:
-        logger.info(f"处理多角色对话: session={request.session_id}, discussion={request.discussion_mode}")
-        
+        logger.info(
+            f"处理多角色对话: session={request.session_id}, discussion={request.discussion_mode}"
+        )
+
         # 验证会话
         session = _get_owned_multi_session(request.session_id, current_user_id)
-        
+
         if session.get("status") != "active":
             raise HTTPException(status_code=400, detail="会话已结束")
         _require_active_session_participants(request.session_id)
-        
+
         # 处理对话
         result = process_multi_character_turn(
             session_id=request.session_id,
@@ -544,7 +567,7 @@ def multi_dialogue_turn(
             event_executions = result.get("event_executions", [])
             event_notifications = result.get("event_notifications", [])
             result = result["turn_response"]
-        
+
         # 根据是否为讨论模式返回不同格式
         if request.discussion_mode:
             # 讨论模式：返回多个角色的回应
@@ -553,12 +576,16 @@ def multi_dialogue_turn(
                     responses=[MultiDialogueTurnResponse(**r) for r in result],
                     total_speakers=len(result),
                     discussion_mode=True,
-                    event_executions=event_executions if event_executions is not None else [
+                    event_executions=event_executions
+                    if event_executions is not None
+                    else [
                         execution
                         for response in result
                         for execution in response.get("event_executions", [])
                     ],
-                    event_notifications=event_notifications if event_notifications is not None else [
+                    event_notifications=event_notifications
+                    if event_notifications is not None
+                    else [
                         notification
                         for response in result
                         for notification in response.get("event_notifications", [])
@@ -584,13 +611,15 @@ def multi_dialogue_turn(
         else:
             # 单角色模式：返回单个回应
             if not isinstance(result, dict):
-                raise HTTPException(status_code=500, detail="单角色模式返回数据格式异常")
+                raise HTTPException(
+                    status_code=500, detail="单角色模式返回数据格式异常"
+                )
             if event_executions is not None:
                 result["event_executions"] = event_executions
             if event_notifications is not None:
                 result["event_notifications"] = event_notifications
             return MultiDialogueTurnResponse(**result)
-    
+
     except HTTPException:
         raise
 
@@ -600,7 +629,7 @@ def multi_dialogue_turn(
 
     except repository.DialogueTurnConflictError as e:
         raise HTTPException(status_code=409, detail=str(e))
-    
+
     except Exception as e:
         logger.error(f"处理多角色对话异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="服务器内部错误")
@@ -674,20 +703,20 @@ def trigger_interaction(
 ):
     """
     触发角色间互动
-    
+
     让角色主动发言，而不是回应玩家消息。可用于：
     - 角色间的自发对话
     - 场景氛围营造
     - 推进剧情
-    
+
     - **session_id**: 会话ID
     - **trigger_character_id**: 指定触发角色（可选，留空则自动选择）
-    
+
     返回角色的主动发言。
     """
     try:
         logger.info(f"触发角色互动: session={request.session_id}")
-        
+
         # 验证会话
         session = _get_owned_multi_session(request.session_id, current_user_id)
         if session.get("status") != "active":
@@ -697,14 +726,14 @@ def trigger_interaction(
             p["character_id"] for p in participants
         }:
             raise HTTPException(status_code=400, detail="触发角色不在当前群聊中")
-        
+
         # 触发互动
         orchestrator = MultiCharacterOrchestrator(request.session_id)
         result = orchestrator.trigger_character_interaction(
             trigger_character_id=request.trigger_character_id,
             prompt=request.prompt,
         )
-        
+
         return result
 
     except HTTPException:
@@ -716,7 +745,7 @@ def trigger_interaction(
 
     except repository.DialogueTurnConflictError as e:
         raise HTTPException(status_code=409, detail=str(e))
-    
+
     except Exception as e:
         logger.error("触发角色互动异常: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="服务器内部错误")
@@ -729,16 +758,18 @@ def get_multi_session_info(
 ):
     """
     获取多角色会话信息
-    
+
     返回会话详情和所有参与者信息。
     """
     try:
         # 获取会话
         session = _get_owned_multi_session(session_id, current_user_id)
-        
+
         # 获取参与者
-        participants = repository.get_session_participants(session_id, only_active=False)
-        
+        participants = repository.get_session_participants(
+            session_id, only_active=False
+        )
+
         return MultiSessionInfo(
             session_id=session["session_id"],
             player_id=session["player_id"],
@@ -756,16 +787,18 @@ def get_multi_session_info(
             participants=[SessionParticipant(**p) for p in participants],
             locale=session.get("locale") or DEFAULT_LOCALE,
         )
-    
+
     except HTTPException:
         raise
-    
+
     except Exception as e:
         logger.error(f"获取会话信息异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="服务器内部错误")
 
 
-@router.post("/session/{session_id}/continue", response_model=ContinueMultiSessionResponse)
+@router.post(
+    "/session/{session_id}/continue", response_model=ContinueMultiSessionResponse
+)
 def continue_multi_session(
     session_id: str,
     current_user_id: str = Depends(require_current_user_id),
@@ -784,28 +817,36 @@ def continue_multi_session(
             participants = _require_active_session_participants(target_session_id)
             return ContinueMultiSessionResponse(
                 session_id=target_session_id,
-                group_name=active_session.get("group_name") or source_session.get("group_name"),
-                group_thread_id=active_session.get("group_thread_id") or source_session.get("group_thread_id") or session_id,
+                group_name=active_session.get("group_name")
+                or source_session.get("group_name"),
+                group_thread_id=active_session.get("group_thread_id")
+                or source_session.get("group_thread_id")
+                or session_id,
                 status="active",
                 participants=[SessionParticipant(**p) for p in participants],
-                locale=active_session.get("locale") or source_session.get("locale") or DEFAULT_LOCALE,
+                locale=active_session.get("locale")
+                or source_session.get("locale")
+                or DEFAULT_LOCALE,
             )
 
         participants = _require_active_session_participants(session_id)
-        character_ids = [p["character_id"] for p in participants if p.get("character_id")]
+        character_ids = [
+            p["character_id"] for p in participants if p.get("character_id")
+        ]
 
         new_session_id = str(uuid.uuid4())
-        group_thread_id = source_session.get("group_thread_id") or source_session["session_id"]
+        group_thread_id = (
+            source_session.get("group_thread_id") or source_session["session_id"]
+        )
         try:
             player_character = repository.get_or_create_user_character_card(
                 source_session["player_id"]
             )
         except Exception:
             player_character = None
-        player_name = (
-            (player_character or {}).get("display_name")
-            or source_session["player_name"]
-        )
+        player_name = (player_character or {}).get("display_name") or source_session[
+            "player_name"
+        ]
         target_session, _ = repository.get_or_create_active_multi_character_session(
             session_id=new_session_id,
             player_id=source_session["player_id"],
@@ -823,11 +864,14 @@ def continue_multi_session(
         )
         return ContinueMultiSessionResponse(
             session_id=target_session_id,
-            group_name=target_session.get("group_name") or source_session.get("group_name"),
+            group_name=target_session.get("group_name")
+            or source_session.get("group_name"),
             group_thread_id=target_session.get("group_thread_id") or group_thread_id,
             status="active",
             participants=[SessionParticipant(**p) for p in new_participants],
-            locale=target_session.get("locale") or source_session.get("locale") or DEFAULT_LOCALE,
+            locale=target_session.get("locale")
+            or source_session.get("locale")
+            or DEFAULT_LOCALE,
         )
 
     except HTTPException:
@@ -852,9 +896,9 @@ def get_multi_dialogue_history(
 ):
     """
     获取多角色对话历史
-    
+
     分页返回同一群聊线程的对话记录，包含每条消息的发言者信息。
-    
+
     - **session_id**: 会话ID
     - **offset**: 已加载的消息数量
     - **limit**: 返回的最大消息数（默认50，最多200）
@@ -862,8 +906,10 @@ def get_multi_dialogue_history(
     try:
         # 验证会话
         session = _get_owned_multi_session(session_id, current_user_id)
-        
-        incremental_after = after_message_id if isinstance(after_message_id, int) else None
+
+        incremental_after = (
+            after_message_id if isinstance(after_message_id, int) else None
+        )
         if incremental_after is not None:
             messages, has_more, latest_message_id = (
                 repository.get_multi_character_thread_history_after(
@@ -873,22 +919,28 @@ def get_multi_dialogue_history(
                 )
             )
         else:
-            messages, has_more = repository.get_multi_character_thread_history_paginated(
-                session_id,
-                offset=offset,
-                limit=limit,
+            messages, has_more = (
+                repository.get_multi_character_thread_history_paginated(
+                    session_id,
+                    offset=offset,
+                    limit=limit,
+                )
             )
             # latest_message_id 必须是线程真实最新 ID，而不是本页返回消息中的 max；
             # 单独查询一次（只拉 1 条用于聚合最新值）。
-            _, _, latest_message_id = repository.get_multi_character_thread_history_after(
-                session_id,
-                after_message_id=0,
-                limit=1,
+            _, _, latest_message_id = (
+                repository.get_multi_character_thread_history_after(
+                    session_id,
+                    after_message_id=0,
+                    limit=1,
+                )
             )
-        
+
         # 获取参与者信息
-        participants = repository.get_session_participants(session_id, only_active=False)
-        
+        participants = repository.get_session_participants(
+            session_id, only_active=False
+        )
+
         return MultiDialogueHistory(
             messages=messages,
             has_more=has_more,
@@ -896,7 +948,8 @@ def get_multi_dialogue_history(
             session_info={
                 "session_id": session["session_id"],
                 "current_session_id": session["session_id"],
-                "group_thread_id": session.get("group_thread_id") or session["session_id"],
+                "group_thread_id": session.get("group_thread_id")
+                or session["session_id"],
                 "player_name": session["player_name"],
                 "group_name": session.get("group_name"),
                 "created_at": session["created_at"],
@@ -904,12 +957,12 @@ def get_multi_dialogue_history(
                 "locale": session.get("locale") or DEFAULT_LOCALE,
                 "participants": participants,
                 "sessions": repository.get_multi_character_thread_sessions(session_id),
-            }
+            },
         )
-    
+
     except HTTPException:
         raise
-    
+
     except Exception as e:
         logger.error(f"获取对话历史异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="服务器内部错误")
@@ -946,21 +999,21 @@ def end_multi_session(
 ):
     """
     结束多角色会话
-    
+
     标记会话为已结束状态。
-    
+
     - **session_id**: 会话ID
     """
     try:
         session_id = request.session_id
         logger.info(f"结束多角色会话: session={session_id}")
         _get_owned_multi_session(session_id, current_user_id)
-        
+
         return finish_multi_character_session(session_id, background_tasks)
-    
+
     except HTTPException:
         raise
-    
+
     except Exception as e:
         logger.error(f"结束会话异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="服务器内部错误")

@@ -1,4 +1,5 @@
 """用户注册、登录与资料管理 — ORM 仓库。"""
+
 from __future__ import annotations
 
 import logging
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 # 用户管理
 # =========================
 
+
 def player_node_id(user_id: str) -> str:
     return f"player:{user_id}"
 
@@ -30,7 +32,9 @@ def is_player_node_id(node_id: str) -> bool:
     return isinstance(node_id, str) and node_id.startswith("player:")
 
 
-def _ensure_user_character_card(session, *, user_id: str, display_name: str, gender: str, now: str) -> None:
+def _ensure_user_character_card(
+    session, *, user_id: str, display_name: str, gender: str, now: str
+) -> None:
     """确保 user_character_card 存在（真正的 INSERT ... ON CONFLICT DO NOTHING）。
 
     不先做 SELECT 判断，而使用数据库原生的 ``ON CONFLICT DO NOTHING``，
@@ -46,13 +50,19 @@ def _ensure_user_character_card(session, *, user_id: str, display_name: str, gen
     dialect = session.get_bind().dialect.name
     if dialect == "sqlite":
         from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-        stmt = sqlite_insert(UserCharacterCard).values(**values).on_conflict_do_nothing(
-            index_elements=["user_id"]
+
+        stmt = (
+            sqlite_insert(UserCharacterCard)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=["user_id"])
         )
     else:
         from sqlalchemy.dialects.postgresql import insert as pg_insert
-        stmt = pg_insert(UserCharacterCard).values(**values).on_conflict_do_nothing(
-            index_elements=["user_id"]
+
+        stmt = (
+            pg_insert(UserCharacterCard)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=["user_id"])
         )
     session.execute(stmt)
 
@@ -75,22 +85,26 @@ def create_user(
             ).scalar()
             if has_admin:
                 raise AdminBootstrapUnavailable("管理员已完成初始化")
-            session.add(SystemBootstrapClaim(
-                claim_key="admin",
-                claimed_by_user_id=user_id,
-                claimed_at=now,
-            ))
+            session.add(
+                SystemBootstrapClaim(
+                    claim_key="admin",
+                    claimed_by_user_id=user_id,
+                    claimed_at=now,
+                )
+            )
             is_admin = True
 
-        session.add(User(
-            user_id=user_id,
-            username=username,
-            password_hash=password_hash,
-            is_admin=int(is_admin),
-            gender=gender,
-            created_at=now,
-            updated_at=now,
-        ))
+        session.add(
+            User(
+                user_id=user_id,
+                username=username,
+                password_hash=password_hash,
+                is_admin=int(is_admin),
+                gender=gender,
+                created_at=now,
+                updated_at=now,
+            )
+        )
         _ensure_user_character_card(
             session,
             user_id=user_id,
@@ -138,8 +152,17 @@ def get_or_create_user_character_card(user_id: str) -> dict | None:
 
 def update_user_character_card(user_id: str, fields: dict) -> dict | None:
     allowed = {
-        "display_name", "avatar_url", "gender", "pronouns", "age",
-        "species", "occupation", "appearance", "personality", "background", "goals",
+        "display_name",
+        "avatar_url",
+        "gender",
+        "pronouns",
+        "age",
+        "species",
+        "occupation",
+        "appearance",
+        "personality",
+        "background",
+        "goals",
     }
     updates = {k: v for k, v in fields.items() if k in allowed}
     with db_session() as session:
@@ -196,7 +219,12 @@ def update_user_password_hash(user_id: str, password_hash: str):
 _UNSET = object()
 
 
-def update_user_profile(user_id: str, username: str | None = None, gender: str | None = None, avatar_url=_UNSET):
+def update_user_profile(
+    user_id: str,
+    username: str | None = None,
+    gender: str | None = None,
+    avatar_url=_UNSET,
+):
     values: dict[str, Any] = {}
     if username is not None:
         values["username"] = username
@@ -208,9 +236,7 @@ def update_user_profile(user_id: str, username: str | None = None, gender: str |
         return
     values["updated_at"] = _now()
     with db_session() as session:
-        session.execute(
-            update(User).where(User.user_id == user_id).values(**values)
-        )
+        session.execute(update(User).where(User.user_id == user_id).values(**values))
 
 
 def update_user_speech_settings(
@@ -243,12 +269,14 @@ def create_auth_token(token: str, user_id: str, expires_at: str):
             existing.created_at = now
             existing.expires_at = expires_at
         else:
-            session.add(AuthToken(
-                token=storage_key,
-                user_id=user_id,
-                created_at=now,
-                expires_at=expires_at,
-            ))
+            session.add(
+                AuthToken(
+                    token=storage_key,
+                    user_id=user_id,
+                    created_at=now,
+                    expires_at=expires_at,
+                )
+            )
 
 
 def get_user_id_for_auth_token(token: str) -> str | None:
@@ -261,7 +289,9 @@ def get_user_id_for_auth_token(token: str) -> str | None:
             select(AuthToken)
             .where(AuthToken.token.in_([storage_key, token]))
             .where(AuthToken.expires_at > now)
-            .order_by((AuthToken.token == storage_key).desc())  # prefer storage_key digest
+            .order_by(
+                (AuthToken.token == storage_key).desc()
+            )  # prefer storage_key digest
         ).scalar_one_or_none()
         if row:
             if row.token == token:
@@ -274,12 +304,14 @@ def get_user_id_for_auth_token(token: str) -> str | None:
                     existing.created_at = row.created_at
                     existing.expires_at = row.expires_at
                 else:
-                    session.add(AuthToken(
-                        token=storage_key,
-                        user_id=row.user_id,
-                        created_at=row.created_at,
-                        expires_at=row.expires_at,
-                    ))
+                    session.add(
+                        AuthToken(
+                            token=storage_key,
+                            user_id=row.user_id,
+                            created_at=row.created_at,
+                            expires_at=row.expires_at,
+                        )
+                    )
                 session.execute(delete(AuthToken).where(AuthToken.token == token))
             return row.user_id
 
@@ -289,9 +321,7 @@ def get_user_id_for_auth_token(token: str) -> str | None:
             .where(AuthToken.expires_at <= now)
         )
         if random.random() < 0.01:
-            session.execute(
-                delete(AuthToken).where(AuthToken.expires_at <= now)
-            )
+            session.execute(delete(AuthToken).where(AuthToken.expires_at <= now))
     return None
 
 

@@ -38,6 +38,7 @@ def _cfg() -> Any:
     if _cfg_cache is None and not _cfg_load_attempted:
         _cfg_load_attempted = True
         from memoria.core.config import configs
+
         _cfg_cache = configs
     return _cfg_cache
 
@@ -125,9 +126,7 @@ def clarity_for(retention_value: float) -> str:
 # Fix 2: sampling with per-turn salt for cross-turn variation
 # ──────────────────────────────────────────────────────────────
 def stable_sample(recall_key: str, memory_id: str) -> float:
-    digest = hashlib.sha256(
-        f"{recall_key}\0{memory_id}".encode()
-    ).digest()
+    digest = hashlib.sha256(f"{recall_key}\0{memory_id}".encode()).digest()
     return int.from_bytes(digest[:8], "big") / float(1 << 64)
 
 
@@ -138,9 +137,7 @@ def volatile_sample(recall_key: str, memory_id: str, turn_salt: str) -> float:
     but different turn_salt values yield different outcomes — giving fuzzy and
     fragment memories genuine cross-turn variation.
     """
-    digest = hashlib.sha256(
-        f"{recall_key}\0{memory_id}\0{turn_salt}".encode()
-    ).digest()
+    digest = hashlib.sha256(f"{recall_key}\0{memory_id}\0{turn_salt}".encode()).digest()
     return int.from_bytes(digest[:8], "big") / float(1 << 64)
 
 
@@ -235,10 +232,12 @@ def candidate_importance(record: dict, memory_type: str) -> float:
         details = evidence.get("details") or {}
         if not isinstance(details, dict) or "importance" not in details:
             continue
-        candidates.append(normalized_importance(
-            details["importance"],
-            integer_scale=(evidence.get("source_kind") == "legacy"),
-        ))
+        candidates.append(
+            normalized_importance(
+                details["importance"],
+                integer_scale=(evidence.get("source_kind") == "legacy"),
+            )
+        )
     return max(candidates, default=0.5)
 
 
@@ -262,7 +261,10 @@ def state_retention(state: dict, world_now: datetime | str) -> float:
     # Permanent-memory pin: if reinforced stability is very high, pin retention.
     cfg = _cfg()
     threshold = float(cfg.memory_curve_permanent_threshold)
-    if float(state.get("stability_days", 0)) >= max_stability_days() * 0.95 and r >= threshold:
+    if (
+        float(state.get("stability_days", 0)) >= max_stability_days() * 0.95
+        and r >= threshold
+    ):
         return 1.0
     return r
 
@@ -328,13 +330,15 @@ def evaluate_records(
         memory_id = memory_identity(record, memory_type)
         importance = candidate_importance(record, memory_type)
         source_kind = candidate_source(record, memory_type)
-        batch_items.append({
-            "index": index,
-            "record": record,
-            "memory_id": memory_id,
-            "importance": importance,
-            "source_kind": source_kind,
-        })
+        batch_items.append(
+            {
+                "index": index,
+                "record": record,
+                "memory_id": memory_id,
+                "importance": importance,
+                "source_kind": source_kind,
+            }
+        )
 
     # Single batch DB call
     states = repository.batch_advance_or_initialize_memory_curve_states(
@@ -370,25 +374,27 @@ def evaluate_records(
             exclusion_reason = "deterministic_sample_miss"
 
         cumulative = effective_elapsed_seconds(state, world_iso)
-        record.update({
-            "memory_id": item["memory_id"],
-            "memory_type": memory_type,
-            "source_kind": item["source_kind"],
-            "importance": item["importance"],
-            "retention": retention_value,
-            "clarity": clarity,
-            "stability_days": float(state["stability_days"]),
-            "elapsed_decay_seconds": cumulative,
-            "reinforcement_count": int(state.get("reinforcement_count") or 0),
-            "recall_probability": probability,
-            "sample_value": sample,
-            "sampled": sampled,
-            "exclusion_reason": exclusion_reason,
-            "memory_curve_rank": rank_score(
-                item["index"], total, retention_value, item["importance"]
-            ),
-            "memory_curve_original_text": str(record.get(text_key) or ""),
-        })
+        record.update(
+            {
+                "memory_id": item["memory_id"],
+                "memory_type": memory_type,
+                "source_kind": item["source_kind"],
+                "importance": item["importance"],
+                "retention": retention_value,
+                "clarity": clarity,
+                "stability_days": float(state["stability_days"]),
+                "elapsed_decay_seconds": cumulative,
+                "reinforcement_count": int(state.get("reinforcement_count") or 0),
+                "recall_probability": probability,
+                "sample_value": sample,
+                "sampled": sampled,
+                "exclusion_reason": exclusion_reason,
+                "memory_curve_rank": rank_score(
+                    item["index"], total, retention_value, item["importance"]
+                ),
+                "memory_curve_original_text": str(record.get(text_key) or ""),
+            }
+        )
         if sampled:
             record[text_key] = prompt_memory_text(
                 str(record.get(text_key) or ""), clarity
@@ -398,7 +404,7 @@ def evaluate_records(
     included = [record for record in evaluated if record["sampled"]]
     included.sort(key=lambda item: item["memory_curve_rank"], reverse=True)
     if limit is not None:
-        return included[:max(0, int(limit))]
+        return included[: max(0, int(limit))]
     return included
 
 
@@ -453,29 +459,35 @@ def inspect_records(
             exclusion_reason = "deterministic_sample_miss"
 
         cumulative = effective_elapsed_seconds(state, world_iso)
-        record.update({
-            "memory_id": memory_id,
-            "memory_type": memory_type,
-            "source_kind": source_kind,
-            "importance": importance,
-            "retention": retention_value,
-            "clarity": clarity,
-            "stability_days": float(state["stability_days"]),
-            "elapsed_decay_seconds": cumulative,
-            "reinforcement_count": int(state.get("reinforcement_count") or 0),
-            "recall_probability": probability,
-            "sample_value": sample,
-            "sampled": sampled,
-            "exclusion_reason": exclusion_reason,
-            "memory_curve_rank": rank_score(index, total, retention_value, importance),
-            "memory_curve_original_text": str(record.get(text_key) or ""),
-            "text": str(record.get(text_key) or ""),
-        })
+        record.update(
+            {
+                "memory_id": memory_id,
+                "memory_type": memory_type,
+                "source_kind": source_kind,
+                "importance": importance,
+                "retention": retention_value,
+                "clarity": clarity,
+                "stability_days": float(state["stability_days"]),
+                "elapsed_decay_seconds": cumulative,
+                "reinforcement_count": int(state.get("reinforcement_count") or 0),
+                "recall_probability": probability,
+                "sample_value": sample,
+                "sampled": sampled,
+                "exclusion_reason": exclusion_reason,
+                "memory_curve_rank": rank_score(
+                    index, total, retention_value, importance
+                ),
+                "memory_curve_original_text": str(record.get(text_key) or ""),
+                "text": str(record.get(text_key) or ""),
+            }
+        )
         inspected.append(record)
 
     result = inspected
     if not include_forgotten:
-        result = [r for r in result if r["exclusion_reason"] != "retention_below_threshold"]
+        result = [
+            r for r in result if r["exclusion_reason"] != "retention_below_threshold"
+        ]
     result.sort(key=lambda item: item["memory_curve_rank"], reverse=True)
     return result
 
@@ -490,6 +502,7 @@ def cleanup_forgotten_states(owner_user_id: str | None = None) -> int:
     Returns the number of deleted rows.
     """
     from memoria.db import repository
+
     return repository.cleanup_forgotten_memory_curve_states(
         owner_user_id=owner_user_id,
         forgotten_threshold_days=float(_cfg().memory_curve_forgotten_cleanup_days),

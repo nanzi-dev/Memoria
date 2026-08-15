@@ -81,9 +81,7 @@ def test_load_story_module_normalizes_legacy_group_without_removing_it(tmp_path)
 
     module = api.load_story_module(module_root)
 
-    assert module["manifest"]["group"]["thread_id"] == (
-        "nd_dorm_thread"
-    )
+    assert module["manifest"]["group"]["thread_id"] == ("nd_dorm_thread")
     assert module["manifest"]["groups"] == [module["manifest"]["group"]]
 
 
@@ -356,9 +354,10 @@ def test_reset_ends_latest_session_for_each_manifest_thread(
         group_name="其他用户同线程群聊",
         group_thread_id=group["thread_id"],
     )
-    assert repository.get_latest_group_thread_session(group["thread_id"])[
-        "session_id"
-    ] == competing_session_id
+    assert (
+        repository.get_latest_group_thread_session(group["thread_id"])["session_id"]
+        == competing_session_id
+    )
 
     api.reset_story_module(owner_user_id, module)
 
@@ -384,9 +383,9 @@ def test_seed_and_reset_are_idempotent_and_owner_scoped(isolated_story_module):
     assert second["group_thread_ids"] == first["group_thread_ids"]
     assert len(repository.list_character_cards_from_db(owner_user_id)) == 4
     assert len(repository.list_all_character_relationships(owner_user_id)) == 10
-    assert len(
-        repository.list_event_definitions(owner_user_id, only_active=False)
-    ) == 10
+    assert (
+        len(repository.list_event_definitions(owner_user_id, only_active=False)) == 10
+    )
     assert len(repository.list_knowledge_bases(owner_user_id)) == 3
 
     unrelated_character_id = "unrelated_character"
@@ -456,22 +455,22 @@ def test_seed_and_reset_are_idempotent_and_owner_scoped(isolated_story_module):
         other_user_id,
         other_card.character_id,
     )
-    assert repository.get_session("other_user_colliding_session")[
-        "status"
-    ] == "active"
+    assert repository.get_session("other_user_colliding_session")["status"] == "active"
     assert all(
-        repository.get_session(group["session_id"])["status"]
-        == "ended"
+        repository.get_session(group["session_id"])["status"] == "ended"
         for group in module["manifest"]["groups"]
     )
     assert not any(
         card["character_id"].startswith("nd_")
         for card in repository.list_character_cards_from_db(owner_user_id)
     )
-    assert repository.list_event_definitions(
-        owner_user_id,
-        only_active=False,
-    ) == []
+    assert (
+        repository.list_event_definitions(
+            owner_user_id,
+            only_active=False,
+        )
+        == []
+    )
 
 
 def test_generic_cli_help_and_errors_are_module_specific(

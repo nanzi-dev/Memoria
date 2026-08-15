@@ -132,7 +132,9 @@ class EventExecutor:
             player_id=context.player_id,
             execution_key=execution_key,
             trigger_source=context.trigger_source,
-            results_data=json.dumps([result.model_dump(mode="json")], ensure_ascii=False),
+            results_data=json.dumps(
+                [result.model_dump(mode="json")], ensure_ascii=False
+            ),
             executions=[execution],
         )
         if commit["deduplicated"]:
@@ -199,7 +201,9 @@ class EventExecutor:
             return "状态已规划", dict(effect.state_changes)
 
         if effect_type == EffectType.UNLOCK_CONTENT:
-            keys = [str(key).strip() for key in effect.unlock_keys or [] if str(key).strip()]
+            keys = [
+                str(key).strip() for key in effect.unlock_keys or [] if str(key).strip()
+            ]
             if not keys:
                 raise ValueError("解锁内容效果缺少 unlock_keys")
             operations["unlock_keys"].extend(keys)
@@ -220,31 +224,35 @@ class EventExecutor:
             text = str(effect.memory_text or "").strip()
             if not text:
                 raise ValueError("添加记忆效果缺少 memory_text")
-            operations["memories"].append({
-                "character_id": context.character_id,
-                "player_id": context.player_id,
-                "fact_text": text,
-                "importance": effect.memory_importance or 5,
-            })
-            operations["fact_claims"].append({
-                "scope_type": "story" if event.story_id else "character",
-                "scope_id": event.story_id or context.character_id,
-                "fact_text": text,
-                "source_kind": "authored_event",
-                "source_ids": [event.event_id],
-                "provenance": {
-                    "event_id": event.event_id,
-                    "event_name": event.event_name,
-                    "execution_id": result.execution_id,
-                    "importance": max(
-                        0.0,
-                        min(1.0, float(effect.memory_importance or 5) / 10.0),
-                    ),
-                },
-                "direct_support": True,
-                "session_id": context.session_id,
-                "world_occurred_at": context.world_time,
-            })
+            operations["memories"].append(
+                {
+                    "character_id": context.character_id,
+                    "player_id": context.player_id,
+                    "fact_text": text,
+                    "importance": effect.memory_importance or 5,
+                }
+            )
+            operations["fact_claims"].append(
+                {
+                    "scope_type": "story" if event.story_id else "character",
+                    "scope_id": event.story_id or context.character_id,
+                    "fact_text": text,
+                    "source_kind": "authored_event",
+                    "source_ids": [event.event_id],
+                    "provenance": {
+                        "event_id": event.event_id,
+                        "event_name": event.event_name,
+                        "execution_id": result.execution_id,
+                        "importance": max(
+                            0.0,
+                            min(1.0, float(effect.memory_importance or 5) / 10.0),
+                        ),
+                    },
+                    "direct_support": True,
+                    "session_id": context.session_id,
+                    "world_occurred_at": context.world_time,
+                }
+            )
             return "记忆已加入原子提交", {"memory_text": text}
 
         if effect_type == EffectType.CHANGE_MOOD:
@@ -266,15 +274,19 @@ class EventExecutor:
             )
             result.notifications.append(notification)
             result.notification = message
-            operations["inbox_items"].append({
-                "title": event.event_name,
-                "content": message,
-                "session_id": (
-                    None if context.session_id.startswith("schedule:") else context.session_id
-                ),
-                "payload": notification.model_dump_json(),
-                "world_created_at": context.world_time,
-            })
+            operations["inbox_items"].append(
+                {
+                    "title": event.event_name,
+                    "content": message,
+                    "session_id": (
+                        None
+                        if context.session_id.startswith("schedule:")
+                        else context.session_id
+                    ),
+                    "payload": notification.model_dump_json(),
+                    "world_created_at": context.world_time,
+                }
+            )
             return "通知已加入原子提交", notification.model_dump(mode="json")
 
         if effect_type in {EffectType.GRANT_ITEM, EffectType.START_QUEST}:
@@ -286,44 +298,46 @@ class EventExecutor:
                 target_id = repository.player_node_id(context.player_id)
             if not target_id:
                 raise ValueError("修改关系效果缺少 target_character_id")
-            if (
-                repository.is_player_node_id(target_id)
-                and target_id != repository.player_node_id(context.player_id)
-            ):
+            if repository.is_player_node_id(
+                target_id
+            ) and target_id != repository.player_node_id(context.player_id):
                 raise ValueError("修改关系效果只能使用当前玩家的 @player 节点")
             if target_id == context.character_id:
                 raise ValueError("修改关系效果不能以当前事件角色自身为目标")
             changes = dict(effect.relationship_change or {})
-            if "relationship_type" in changes and not str(
-                changes.get("relationship_type") or ""
-            ).strip():
+            if (
+                "relationship_type" in changes
+                and not str(changes.get("relationship_type") or "").strip()
+            ):
                 changes.pop("relationship_type", None)
             allowed = {"relationship_type", "affinity", "affinity_delta", "description"}
             unknown = set(changes) - allowed
             if unknown:
-                raise ValueError(
-                    f"不支持的关系字段: {', '.join(sorted(unknown))}"
-                )
+                raise ValueError(f"不支持的关系字段: {', '.join(sorted(unknown))}")
             if not changes:
                 raise ValueError("修改关系效果缺少 relationship_change")
             if not any(key in changes for key in allowed):
                 raise ValueError("修改关系效果缺少可应用的关系变化")
-            operations["relationship_updates"].append({
-                "character_id_a": context.character_id,
-                "character_id_b": target_id,
-                "relationship_type": changes.get("relationship_type"),
-                "affinity": changes.get("affinity"),
-                "affinity_delta": changes.get("affinity_delta"),
-                "description": changes.get("description"),
-            })
+            operations["relationship_updates"].append(
+                {
+                    "character_id_a": context.character_id,
+                    "character_id_b": target_id,
+                    "relationship_type": changes.get("relationship_type"),
+                    "affinity": changes.get("affinity"),
+                    "affinity_delta": changes.get("affinity_delta"),
+                    "description": changes.get("description"),
+                }
+            )
             result.state_changes["relationship_updates"] = (
                 result.state_changes.get("relationship_updates") or []
             )
-            result.state_changes["relationship_updates"].append({
-                "character_id_a": context.character_id,
-                "character_id_b": target_id,
-                **{key: changes[key] for key in sorted(changes)},
-            })
+            result.state_changes["relationship_updates"].append(
+                {
+                    "character_id_a": context.character_id,
+                    "character_id_b": target_id,
+                    **{key: changes[key] for key in sorted(changes)},
+                }
+            )
             return "关系修改已加入原子提交", changes
 
         if effect_type == EffectType.TRIGGER_EVENT:
@@ -347,14 +361,16 @@ class EventExecutor:
         if effect_type == EffectType.NPC_PROACTIVE_DIALOGUE:
             proactive = self._plan_npc_proactive_dialogue(effect, context)
             result.proactive_dialogues.append(proactive)
-            operations["proactive_messages"].append({
-                "session_id": proactive["session_id"],
-                "content": proactive["dialogue"],
-                "character_id": proactive["character_id"],
-                "character_name": proactive.get("character_name"),
-                "knowledge_sources": proactive.get("knowledge_sources") or [],
-                "world_created_at": context.world_time,
-            })
+            operations["proactive_messages"].append(
+                {
+                    "session_id": proactive["session_id"],
+                    "content": proactive["dialogue"],
+                    "character_id": proactive["character_id"],
+                    "character_name": proactive.get("character_name"),
+                    "knowledge_sources": proactive.get("knowledge_sources") or [],
+                    "world_created_at": context.world_time,
+                }
+            )
             return "NPC 主动对白已生成，等待原子提交", proactive
 
         if effect_type == EffectType.UPDATE_EVENT_PROGRESS:
@@ -364,24 +380,33 @@ class EventExecutor:
             if effect.progress_delta is not None:
                 progress_update["progress_delta"] = float(effect.progress_delta)
             if effect.event_status is not None:
-                if effect.event_status not in {"pending", "active", "completed", "failed"}:
+                if effect.event_status not in {
+                    "pending",
+                    "active",
+                    "completed",
+                    "failed",
+                }:
                     raise ValueError("无效的事件进度状态")
                 progress_update["status"] = effect.event_status
             if not progress_update:
-                raise ValueError("更新事件进度效果缺少 progress/progress_delta/event_status")
+                raise ValueError(
+                    "更新事件进度效果缺少 progress/progress_delta/event_status"
+                )
             result.state_changes["event_progress"] = progress_update
             if event.story_id:
-                operations["story_updates"].append({
-                    "story_id": event.story_id,
-                    "progress": progress_update.get("progress"),
-                    "progress_delta": progress_update.get("progress_delta"),
-                    "status": progress_update.get("status"),
-                    "source_event_id": event.event_id,
-                    "source_event_name": event.event_name,
-                    "execution_id": result.execution_id,
-                    "session_id": context.session_id,
-                    "world_occurred_at": context.world_time,
-                })
+                operations["story_updates"].append(
+                    {
+                        "story_id": event.story_id,
+                        "progress": progress_update.get("progress"),
+                        "progress_delta": progress_update.get("progress_delta"),
+                        "status": progress_update.get("status"),
+                        "source_event_id": event.event_id,
+                        "source_event_name": event.event_name,
+                        "execution_id": result.execution_id,
+                        "session_id": context.session_id,
+                        "world_occurred_at": context.world_time,
+                    }
+                )
             return "事件进度已规划", progress_update
 
         raise ValueError(f"不支持的效果类型: {effect_type.value}")
@@ -430,7 +455,9 @@ class EventExecutor:
         context: EventContext,
     ) -> dict[str, Any]:
         target_session_id = effect.target_session_id
-        session = repository.get_session(target_session_id) if target_session_id else None
+        session = (
+            repository.get_session(target_session_id) if target_session_id else None
+        )
         if not target_session_id:
             current_session = (
                 repository.get_session(context.session_id)
@@ -452,7 +479,11 @@ class EventExecutor:
                     if target_session_id
                     else None
                 )
-        if not session or not session.get("is_multi_character") or session.get("status") == "ended":
+        if (
+            not session
+            or not session.get("is_multi_character")
+            or session.get("status") == "ended"
+        ):
             raise ValueError("NPC 主动对白目标不是可用群聊")
         if session.get("player_id") != context.player_id:
             raise ValueError("NPC 主动对白目标群聊不属于当前玩家")

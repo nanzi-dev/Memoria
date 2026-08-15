@@ -54,13 +54,17 @@ async def test_world_clock_http_api_auth_validation_sync_and_isolation(
         base_url="http://testserver",
     ) as client:
         assert (await client.get("/api/v1/user/world-clock")).status_code == 401
-        assert (await client.put(
-            "/api/v1/user/world-clock",
-            json={"time_scale": 2},
-        )).status_code == 401
-        assert (await client.post(
-            "/api/v1/user/world-clock/sync",
-        )).status_code == 401
+        assert (
+            await client.put(
+                "/api/v1/user/world-clock",
+                json={"time_scale": 2},
+            )
+        ).status_code == 401
+        assert (
+            await client.post(
+                "/api/v1/user/world-clock/sync",
+            )
+        ).status_code == 401
 
         headers_a = {"Authorization": f"Bearer {token_a}"}
         headers_b = {"Authorization": f"Bearer {token_b}"}

@@ -1,6 +1,7 @@
 """
 CLI 调试模式测试
 """
+
 import importlib.util
 from pathlib import Path
 
@@ -18,12 +19,17 @@ def test_cli_parses_debug_flag():
     cli_chat = load_cli_chat_module()
     parser = cli_chat.build_parser()
 
-    args = parser.parse_args([
-        "--debug",
-        "--character-id", "npc_test",
-        "--player-id", "player_test",
-        "--player-name", "测试者",
-    ])
+    args = parser.parse_args(
+        [
+            "--debug",
+            "--character-id",
+            "npc_test",
+            "--player-id",
+            "player_test",
+            "--player-name",
+            "测试者",
+        ]
+    )
 
     assert args.debug is True
     assert args.character_id == "npc_test"

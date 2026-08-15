@@ -1,6 +1,7 @@
 """
 API 请求/响应模型验证
 """
+
 import sys
 from pathlib import Path
 
@@ -14,50 +15,68 @@ from pydantic import ValidationError
 class TestDialogueAPI:
     def test_session_start_request(self):
         from memoria.api.dialogue import SessionStartRequest
-        r = SessionStartRequest(character_id="c1",player_id="p1",player_name="T")
+
+        r = SessionStartRequest(character_id="c1", player_id="p1", player_name="T")
         assert r.character_id == "c1"
 
     def test_session_start_missing_field(self):
         from memoria.api.dialogue import SessionStartRequest
+
         with pytest.raises(ValidationError):
             SessionStartRequest()
 
     def test_turn_request(self):
         from memoria.api.dialogue import DialogueTurnRequest
-        r = DialogueTurnRequest(session_id="s1",player_message="Hi")
+
+        r = DialogueTurnRequest(session_id="s1", player_message="Hi")
         assert r.player_message == "Hi"
 
     def test_turn_request_rejects_overlong_message(self):
         from memoria.api.dialogue import DialogueTurnRequest
+
         with pytest.raises(ValidationError):
             DialogueTurnRequest(session_id="s1", player_message="x" * 8001)
 
     def test_end_session_request(self):
         from memoria.api.dialogue import SessionEndRequest
+
         r = SessionEndRequest(session_id="s1")
         assert r.session_id == "s1"
+
 
 class TestCharacterAdminAPI:
     def test_create_request(self):
         from memoria.api.character_admin import (
             CharacterCardCreateRequest as CreateCharacterRequest,
         )
-        r = CreateCharacterRequest(character_data={"character_id":"x","meta":{"name":"X","display_name":"X"}})
+
+        r = CreateCharacterRequest(
+            character_data={
+                "character_id": "x",
+                "meta": {"name": "X", "display_name": "X"},
+            }
+        )
         assert r.character_data["character_id"] == "x"
 
     def test_import_request(self):
         from memoria.api.character_admin import (
             ImportFromFileRequest as ImportCharacterRequest,
         )
+
         r = ImportCharacterRequest(character_id="x")
         assert r.character_id == "x"
+
 
 class TestEventAdminAPI:
     def test_create_event_request(self):
         from memoria.api.event_admin import EventCreateRequest as CreateEventRequest
-        r = CreateEventRequest(event_id="e1",event_name="E",
-                               trigger_condition={"trigger_type":"affinity_threshold","threshold":10},
-                               effects=[{"effect_type":"notify_player"}])
+
+        r = CreateEventRequest(
+            event_id="e1",
+            event_name="E",
+            trigger_condition={"trigger_type": "affinity_threshold", "threshold": 10},
+            effects=[{"effect_type": "notify_player"}],
+        )
         assert r.event_id == "e1"
 
     def test_toggle_event(self):
@@ -66,6 +85,7 @@ class TestEventAdminAPI:
 
     def test_deep_event_effect_fields(self):
         from memoria.api.event_admin import EventEffectDTO, ScheduleRegisterRequest
+
         effect = EventEffectDTO(
             effect_type="npc_proactive_dialogue",
             proactive_character_id="npc_a",
@@ -84,24 +104,33 @@ class TestEventAdminAPI:
         assert req.schedule == "*/10 * * * *"
 
         from memoria.api.event_admin import TriggerConditionDTO
+
         condition = TriggerConditionDTO(trigger_type="time_based", schedule="0 9 * * 0")
         assert condition.schedule == "0 9 * * 0"
 
     def test_time_event_catch_up_replay_limit_defaults_and_bounds(self):
         from memoria.api.event_admin import TriggerConditionDTO
 
-        default_condition = TriggerConditionDTO(trigger_type="time_based", schedule="0 * * * *")
+        default_condition = TriggerConditionDTO(
+            trigger_type="time_based", schedule="0 * * * *"
+        )
         assert default_condition.catch_up_replay_limit == 1
-        assert TriggerConditionDTO(
-            trigger_type="time_based",
-            schedule="0 * * * *",
-            catch_up_replay_limit=1,
-        ).catch_up_replay_limit == 1
-        assert TriggerConditionDTO(
-            trigger_type="time_based",
-            schedule="0 * * * *",
-            catch_up_replay_limit=100,
-        ).catch_up_replay_limit == 100
+        assert (
+            TriggerConditionDTO(
+                trigger_type="time_based",
+                schedule="0 * * * *",
+                catch_up_replay_limit=1,
+            ).catch_up_replay_limit
+            == 1
+        )
+        assert (
+            TriggerConditionDTO(
+                trigger_type="time_based",
+                schedule="0 * * * *",
+                catch_up_replay_limit=100,
+            ).catch_up_replay_limit
+            == 100
+        )
 
         with pytest.raises(ValidationError):
             TriggerConditionDTO(
@@ -116,40 +145,52 @@ class TestEventAdminAPI:
                 catch_up_replay_limit=101,
             )
 
+
 class TestRelationshipAPI:
     def test_create_relationship(self):
         from memoria.api.relationship import (
             RelationshipCreateRequest as CreateRelationshipRequest,
         )
-        r = CreateRelationshipRequest(character_id_a="a",character_id_b="b",
-                                       relationship_type="friend",affinity=50.0)
+
+        r = CreateRelationshipRequest(
+            character_id_a="a",
+            character_id_b="b",
+            relationship_type="friend",
+            affinity=50.0,
+        )
         assert r.relationship_type == "friend"
 
     def test_update_relationship(self):
         from memoria.api.relationship import (
             RelationshipUpdateRequest as UpdateRelationshipRequest,
         )
-        r = UpdateRelationshipRequest(relationship_type="enemy",affinity=-30.0)
+
+        r = UpdateRelationshipRequest(relationship_type="enemy", affinity=-30.0)
         assert r.relationship_type == "enemy"
+
 
 class TestMultiDialogueAPI:
     def test_start_multi_request(self):
         from memoria.api.multi_dialogue import StartMultiSessionRequest
-        r = StartMultiSessionRequest(player_id="p",player_name="P",
-                                      character_ids=["a","b"])
+
+        r = StartMultiSessionRequest(
+            player_id="p", player_name="P", character_ids=["a", "b"]
+        )
         assert len(r.character_ids) == 2
 
     def test_turn_request(self):
         from memoria.api.multi_dialogue import (
             MultiDialogueTurnRequest as MultiTurnRequest,
         )
-        r = MultiTurnRequest(session_id="s",player_message="Hi")
+
+        r = MultiTurnRequest(session_id="s", player_message="Hi")
         assert r.player_message == "Hi"
 
     def test_multi_turn_request_rejects_overlong_message(self):
         from memoria.api.multi_dialogue import (
             MultiDialogueTurnRequest as MultiTurnRequest,
         )
+
         with pytest.raises(ValidationError):
             MultiTurnRequest(session_id="s", player_message="x" * 8001)
 
@@ -176,11 +217,13 @@ class TestMultiDialogueAPI:
         assert session.model_dump()["latest_message_id"] == 42
         assert session.model_dump()["unread_count"] == 3
 
+
 class TestCodeReviewFixesAPI:
     """P0-2/P2-10: 新增 API 模型验证"""
 
     def test_dialogue_turn_response_with_message_ids(self):
         from memoria.api.dialogue import DialogueTurnResponse
+
         r = DialogueTurnResponse(
             dialogue="你好",
             action="smile",
@@ -189,7 +232,7 @@ class TestCodeReviewFixesAPI:
             current_trust=30,
             current_mood="neutral",
             user_message_id=101,
-            assistant_message_id=102
+            assistant_message_id=102,
         )
         assert r.current_trust == 30
         assert r.user_message_id == 101
@@ -198,14 +241,20 @@ class TestCodeReviewFixesAPI:
     def test_user_gender_models_reject_unknown_values(self):
         from memoria.api.user import RegisterRequest, UpdateProfileRequest
 
-        assert RegisterRequest(
-            username="tester",
-            password="password1",
-        ).gender == "unknown"
-        assert RegisterRequest(
-            username="tester",
-            password="password1",
-        ).admin_bootstrap_token is None
+        assert (
+            RegisterRequest(
+                username="tester",
+                password="password1",
+            ).gender
+            == "unknown"
+        )
+        assert (
+            RegisterRequest(
+                username="tester",
+                password="password1",
+            ).admin_bootstrap_token
+            is None
+        )
         with pytest.raises(ValidationError):
             RegisterRequest(
                 username="tester",
@@ -234,19 +283,21 @@ class TestCodeReviewFixesAPI:
 
     def test_dialogue_turn_response_message_ids_optional(self):
         from memoria.api.dialogue import DialogueTurnResponse
+
         r = DialogueTurnResponse(
             dialogue="你好",
             action="smile",
             affinity_delta=1,
             current_affinity=50,
             current_trust=30,
-            current_mood="neutral"
+            current_mood="neutral",
         )
         assert r.user_message_id is None
         assert r.assistant_message_id is None
 
     def test_session_start_response_with_message_id(self):
         from memoria.api.dialogue import SessionStartResponse
+
         r = SessionStartResponse(
             session_id="test-sid",
             opening_line="欢迎",
@@ -254,7 +305,7 @@ class TestCodeReviewFixesAPI:
             current_affinity=20,
             current_trust=15,
             world_created_at="2026-07-14T08:30:00+00:00",
-            assistant_message_id=99
+            assistant_message_id=99,
         )
         assert r.current_trust == 15
         assert r.world_created_at == "2026-07-14T08:30:00+00:00"
@@ -262,6 +313,7 @@ class TestCodeReviewFixesAPI:
 
     def test_history_message_with_message_id(self):
         from memoria.api.dialogue import HistoryMessage
+
         m = HistoryMessage(
             role="user",
             content="你好",
@@ -273,6 +325,7 @@ class TestCodeReviewFixesAPI:
 
     def test_session_recovery_response(self):
         from memoria.api.dialogue import HistoryMessage, SessionRecoveryResponse
+
         r = SessionRecoveryResponse(
             found=True,
             session_id="sid-1",
@@ -280,7 +333,7 @@ class TestCodeReviewFixesAPI:
             character={"character_id": "char-1", "display_name": "测试角色"},
             messages=[
                 HistoryMessage(role="assistant", content="欢迎回来", message_id=1)
-            ]
+            ],
         )
         assert r.found is True
         assert r.session_id == "sid-1"
@@ -289,6 +342,7 @@ class TestCodeReviewFixesAPI:
 
     def test_session_recovery_not_found(self):
         from memoria.api.dialogue import SessionRecoveryResponse
+
         r = SessionRecoveryResponse(found=False)
         assert r.found is False
         assert r.session_id is None

@@ -60,9 +60,7 @@ def seed_next_door_demo(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="播种《隔壁寝室》日常聊天示例数据。"
-    )
+    parser = argparse.ArgumentParser(description="播种《隔壁寝室》日常聊天示例数据。")
     parser.add_argument(
         "--password",
         help="仅在首次创建 memoria_demo 时使用；也可设置 MEMORIA_DEMO_PASSWORD。",

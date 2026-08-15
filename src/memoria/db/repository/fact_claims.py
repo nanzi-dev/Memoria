@@ -1,4 +1,5 @@
 """Domain repository functions (split from monolith)."""
+
 from __future__ import annotations
 
 # Standard/third-party imports used across repository domains.
@@ -81,14 +82,18 @@ def _get_fact_claim_in_transaction(
     owner_user_id: str,
     claim_id: str,
 ) -> dict | None:
-    row = conn.execute(
-        text("""
+    row = (
+        conn.execute(
+            text("""
         SELECT *
         FROM fact_claim
         WHERE owner_user_id = :owner_user_id AND claim_id = :claim_id
         """),
-        {"owner_user_id": owner_user_id, "claim_id": claim_id},
-    ).mappings().fetchone()
+            {"owner_user_id": owner_user_id, "claim_id": claim_id},
+        )
+        .mappings()
+        .fetchone()
+    )
     return _decode_fact_claim_row(row)
 
 
@@ -99,9 +104,7 @@ def _begin_fact_claim_write(conn) -> None:
 def _lock_fact_claim_for_write(conn, claim_id: str) -> None:
     if _is_postgres_enabled():
         conn.execute(
-            text(
-                "SELECT pg_advisory_xact_lock(hashtextextended(:claim_id, 0))"
-            ),
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:claim_id, 0))"),
             {"claim_id": claim_id},
         )
 
@@ -158,12 +161,14 @@ def _canonical_fact_claim_json(value: Any) -> str:
 
 
 def _fact_claim_evidence(payload: dict[str, Any]) -> dict[str, Any]:
-    return normalize_evidence_entry({
-        "source_kind": payload["source_kind"],
-        "source_ids": payload["source_ids"],
-        "direct_support": payload["direct_support"],
-        "details": dict(payload.get("provenance") or {}),
-    })
+    return normalize_evidence_entry(
+        {
+            "source_kind": payload["source_kind"],
+            "source_ids": payload["source_ids"],
+            "direct_support": payload["direct_support"],
+            "details": dict(payload.get("provenance") or {}),
+        }
+    )
 
 
 def _guard_fact_claim_update(cursor, message: str) -> None:
@@ -250,9 +255,7 @@ def _insert_fact_claim_from_event(
         and concurrent["ledger_version"] >= event.aggregate_version
     ):
         return concurrent
-    raise FactClaimConcurrencyError(
-        "fact claim initial projection conflict"
-    )
+    raise FactClaimConcurrencyError("fact claim initial projection conflict")
 
 
 def _validate_fact_claim_event(event: StoredDomainEvent) -> dict[str, Any]:
@@ -267,12 +270,8 @@ def _validate_fact_claim_event(event: StoredDomainEvent) -> dict[str, Any]:
         raise ValueError("fact claim event tenant identity mismatch")
     if event.event_type == "fact.claimed.v1":
         source_kind = payload.get("source_kind")
-        if source_kind not in (
-            CLAIM_SOURCE_KINDS | {ADMIN_VERIFICATION_SOURCE_KIND}
-        ):
-            raise ValueError(
-                f"unsupported fact claim source_kind: {source_kind}"
-            )
+        if source_kind not in (CLAIM_SOURCE_KINDS | {ADMIN_VERIFICATION_SOURCE_KIND}):
+            raise ValueError(f"unsupported fact claim source_kind: {source_kind}")
         clean_source_ids(payload.get("source_ids"))
         if not isinstance(payload.get("direct_support"), bool):
             raise ValueError("direct_support must be a boolean")
@@ -291,9 +290,7 @@ def _validate_fact_claim_event(event: StoredDomainEvent) -> dict[str, Any]:
             "claim_id",
         ):
             if payload[field_name] != expected_identity[field_name]:
-                raise ValueError(
-                    f"fact claim {field_name} identity mismatch"
-                )
+                raise ValueError(f"fact claim {field_name} identity mismatch")
     return payload
 
 
@@ -310,17 +307,12 @@ def _project_fact_claim_event_in_transaction(
     if claim is not None and event.aggregate_version <= claim["ledger_version"]:
         return claim
     if claim is None:
-        if (
-            event.event_type != "fact.claimed.v1"
-            or event.aggregate_version != 1
-        ):
+        if event.event_type != "fact.claimed.v1" or event.aggregate_version != 1:
             raise FactClaimConcurrencyError(
                 "fact claim projection version gap before initial event"
             )
         if payload["source_kind"] == ADMIN_VERIFICATION_SOURCE_KIND:
-            raise ValueError(
-                "admin verification requires an existing fact claim"
-            )
+            raise ValueError("admin verification requires an existing fact claim")
         return _insert_fact_claim_from_event(conn, event, payload)
     if event.aggregate_version != claim["ledger_version"] + 1:
         raise FactClaimConcurrencyError(
@@ -345,21 +337,20 @@ def _project_fact_claim_event_in_transaction(
             "normalized_content_hash",
         )
         if any(
-            payload[field_name] != claim[field_name]
-            for field_name in identity_fields
+            payload[field_name] != claim[field_name] for field_name in identity_fields
         ):
             raise ValueError("fact claim evidence identity mismatch")
-        evidence_entries = list(
-            (claim.get("provenance") or {}).get("evidence") or []
-        )
+        evidence_entries = list((claim.get("provenance") or {}).get("evidence") or [])
         evidence = _fact_claim_evidence(payload)
         if evidence not in evidence_entries:
             evidence_entries.append(evidence)
-        source_ids = sorted({
-            source_id
-            for item in evidence_entries
-            for source_id in item.get("source_ids") or []
-        })
+        source_ids = sorted(
+            {
+                source_id
+                for item in evidence_entries
+                for source_id in item.get("source_ids") or []
+            }
+        )
         cursor = conn.execute(
             text("""
             UPDATE fact_claim
@@ -401,23 +392,17 @@ def _project_fact_claim_event_in_transaction(
             )
         raw_snapshot = payload["verification_snapshot"]
         if not isinstance(raw_snapshot, dict):
-            raise ValueError(
-                "fact claim verification_snapshot must be an object"
-            )
+            raise ValueError("fact claim verification_snapshot must be an object")
         snapshot = dict(raw_snapshot)
         evidence_entries = [
-            normalize_evidence_entry(item)
-            for item in snapshot.get("evidence") or []
+            normalize_evidence_entry(item) for item in snapshot.get("evidence") or []
         ]
         current_evidence = [
             normalize_evidence_entry(item)
-            for item in (
-                (claim.get("provenance") or {}).get("evidence") or []
-            )
+            for item in ((claim.get("provenance") or {}).get("evidence") or [])
         ]
-        if (
-            _canonical_fact_claim_json(evidence_entries)
-            != _canonical_fact_claim_json(current_evidence)
+        if _canonical_fact_claim_json(evidence_entries) != _canonical_fact_claim_json(
+            current_evidence
         ):
             raise ValueError(
                 "fact claim verification evidence does not match claimed events"
@@ -429,23 +414,17 @@ def _project_fact_claim_event_in_transaction(
         for field_name, expected_value in decision.items():
             if field_name == "source_ids":
                 continue
-            if (
-                _canonical_fact_claim_json(snapshot.get(field_name))
-                != _canonical_fact_claim_json(expected_value)
-            ):
+            if _canonical_fact_claim_json(
+                snapshot.get(field_name)
+            ) != _canonical_fact_claim_json(expected_value):
                 raise ValueError(
-                    "fact claim verification decision mismatch: "
-                    f"{field_name}"
+                    f"fact claim verification decision mismatch: {field_name}"
                 )
         if not decision["verified"]:
-            raise ValueError(
-                "fact claim verification policy is not satisfied"
-            )
+            raise ValueError("fact claim verification policy is not satisfied")
         source_ids = clean_source_ids(snapshot.get("source_ids"))
         if source_ids != decision["source_ids"]:
-            raise ValueError(
-                "fact claim verification source_ids do not match evidence"
-        )
+            raise ValueError("fact claim verification source_ids do not match evidence")
         cursor = conn.execute(
             text("""
             UPDATE fact_claim
@@ -539,16 +518,9 @@ def _project_fact_claim_event_in_transaction(
         ):
             raise ValueError("superseding claims must share a scope")
         if replacement["status"] in {"retracted", "superseded"}:
-            raise FactClaimConcurrencyError(
-                "fact claim replacement is terminal"
-            )
-        if (
-            replacement["ledger_version"]
-            != payload["replacement_ledger_version"]
-        ):
-            raise FactClaimConcurrencyError(
-                "fact claim replacement version conflict"
-            )
+            raise FactClaimConcurrencyError("fact claim replacement is terminal")
+        if replacement["ledger_version"] != payload["replacement_ledger_version"]:
+            raise FactClaimConcurrencyError("fact claim replacement version conflict")
         if replacement["supersedes_claim_id"] not in {
             None,
             event.aggregate_id,
@@ -609,9 +581,7 @@ def _project_fact_claim_event_in_transaction(
             "fact claim replacement projection changed concurrently",
         )
     else:
-        raise ValueError(
-            f"unsupported fact claim event type: {event.event_type}"
-        )
+        raise ValueError(f"unsupported fact claim event type: {event.event_type}")
     return _get_fact_claim_in_transaction(
         conn,
         event.owner_user_id,
@@ -655,14 +625,18 @@ def _get_projection_checkpoint_in_transaction(
     projector_name: str,
     owner_user_id: str,
 ) -> dict | None:
-    row = conn.execute(
-        text("""
+    row = (
+        conn.execute(
+            text("""
         SELECT projector_name, owner_user_id, last_sequence, updated_at
         FROM projection_checkpoint
         WHERE projector_name = :projector_name AND owner_user_id = :owner_user_id
         """),
-        {"projector_name": projector_name, "owner_user_id": owner_user_id},
-    ).mappings().fetchone()
+            {"projector_name": projector_name, "owner_user_id": owner_user_id},
+        )
+        .mappings()
+        .fetchone()
+    )
     if row is None:
         return None
     checkpoint = dict(row)
@@ -761,15 +735,19 @@ def rebuild_domain_projections(owner_user_id: str) -> dict:
                 "story_projector": STORY_STATE_PROJECTOR,
             },
         )
-        rows = conn.execute(
-            text("""
+        rows = (
+            conn.execute(
+                text("""
             SELECT *
             FROM domain_event
             WHERE owner_user_id = :owner_user_id
             ORDER BY sequence ASC
             """),
-            {"owner_user_id": owner_user_id},
-        ).mappings().fetchall()
+                {"owner_user_id": owner_user_id},
+            )
+            .mappings()
+            .fetchall()
+        )
 
         for row in rows:
             event = _domain_event_from_row(row)
@@ -821,10 +799,7 @@ def _record_fact_claim_in_transaction(
         owner_user_id,
         claim_id,
     )
-    if (
-        existing is not None
-        and existing["status"] in {"retracted", "superseded"}
-    ):
+    if existing is not None and existing["status"] in {"retracted", "superseded"}:
         logger.warning(
             "拒绝向终态 fact_claim 重录证据: claim_id=%s status=%s",
             claim_id,
@@ -872,18 +847,14 @@ def _record_fact_claim_in_transaction(
             identity_parts=(evidence_identity,),
             event_context=event_context,
         ),
-        expected_version=(
-            existing["ledger_version"] if existing is not None else 0
-        ),
+        expected_version=(existing["ledger_version"] if existing is not None else 0),
         conn=conn,
     )
     projected = _project_fact_claim_event_in_transaction(
         conn,
         claimed_event,
     )
-    evidence_entries = list(
-        (projected.get("provenance") or {}).get("evidence") or []
-    )
+    evidence_entries = list((projected.get("provenance") or {}).get("evidence") or [])
     decision = verification_policy(evidence_entries)
     if projected["status"] == "candidate" and decision["verified"]:
         snapshot = {
@@ -1051,9 +1022,7 @@ def _supersede_fact_claim(
                     "owner_user_id": owner_user_id,
                     "claim_id": claim_id,
                     "superseded_by_claim_id": superseded_by_claim_id,
-                    "replacement_ledger_version": (
-                        replacement["ledger_version"]
-                    ),
+                    "replacement_ledger_version": (replacement["ledger_version"]),
                     "reason": reason,
                 },
             ),
@@ -1069,8 +1038,9 @@ def list_fact_claims(
     scope_id: str,
 ) -> list[dict]:
     with db_session() as conn:
-        rows = conn.execute(
-            text("""
+        rows = (
+            conn.execute(
+                text("""
             SELECT *
             FROM fact_claim
             WHERE owner_user_id = :owner_user_id
@@ -1078,12 +1048,15 @@ def list_fact_claims(
               AND scope_id = :scope_id
             ORDER BY created_at ASC, claim_id ASC
             """),
-            {
-                "owner_user_id": owner_user_id,
-                "scope_type": scope_type,
-                "scope_id": scope_id,
-            },
-        ).mappings().fetchall()
+                {
+                    "owner_user_id": owner_user_id,
+                    "scope_type": scope_type,
+                    "scope_id": scope_id,
+                },
+            )
+            .mappings()
+            .fetchall()
+        )
     return [_decode_fact_claim_row(row) for row in rows]
 
 
@@ -1093,8 +1066,9 @@ def list_verified_fact_claims(
     scope_id: str,
 ) -> list[dict]:
     with db_session() as conn:
-        rows = conn.execute(
-            text("""
+        rows = (
+            conn.execute(
+                text("""
             SELECT *
             FROM fact_claim
             WHERE owner_user_id = :owner_user_id
@@ -1103,30 +1077,35 @@ def list_verified_fact_claims(
               AND status = 'verified'
             ORDER BY created_at ASC, claim_id ASC
             """),
-            {
-                "owner_user_id": owner_user_id,
-                "scope_type": scope_type,
-                "scope_id": scope_id,
-            },
-        ).mappings().fetchall()
+                {
+                    "owner_user_id": owner_user_id,
+                    "scope_type": scope_type,
+                    "scope_id": scope_id,
+                },
+            )
+            .mappings()
+            .fetchall()
+        )
     return [_decode_fact_claim_row(row) for row in rows]
 
 
-LONG_TERM_FACT_BACKFILL_MIGRATION = (
-    "2026-07-15-long-term-fact-event-backfill"
-)
+LONG_TERM_FACT_BACKFILL_MIGRATION = "2026-07-15-long-term-fact-event-backfill"
 
 
 def has_data_migration(migration_key: str) -> bool:
     with db_session() as conn:
-        row = conn.execute(
-            text("""
+        row = (
+            conn.execute(
+                text("""
             SELECT 1
             FROM data_migration
             WHERE migration_key = :migration_key
             """),
-            {"migration_key": migration_key},
-        ).mappings().fetchone()
+                {"migration_key": migration_key},
+            )
+            .mappings()
+            .fetchone()
+        )
     return row is not None
 
 
@@ -1180,14 +1159,18 @@ def backfill_legacy_long_term_fact_events() -> dict:
     """Backfill legacy facts into candidate claim events without deleting sources."""
     with db_session() as conn:
         _begin_fact_claim_write(conn)
-        existing = conn.execute(
-            text("""
+        existing = (
+            conn.execute(
+                text("""
             SELECT metadata, applied_at
             FROM data_migration
             WHERE migration_key = :migration_key
             """),
-            {"migration_key": LONG_TERM_FACT_BACKFILL_MIGRATION},
-        ).mappings().fetchone()
+                {"migration_key": LONG_TERM_FACT_BACKFILL_MIGRATION},
+            )
+            .mappings()
+            .fetchone()
+        )
         if existing is not None:
             metadata = json.loads(existing["metadata"])
             return {
@@ -1205,7 +1188,9 @@ def backfill_legacy_long_term_fact_events() -> dict:
                 FROM long_term_fact
                 ORDER BY id ASC
                 """)
-            ).mappings().fetchall()
+            )
+            .mappings()
+            .fetchall()
         ]
         for row in rows:
             stored_event = append_domain_event(
@@ -1242,4 +1227,3 @@ def backfill_legacy_long_term_fact_events() -> dict:
             "applied_at": applied_at,
             "already_applied": False,
         }
-

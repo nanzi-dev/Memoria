@@ -39,8 +39,7 @@ DebugSink = Callable[[str], None]
 def _replace_unpaired_surrogates(value):
     if isinstance(value, str):
         return "".join(
-            "\ufffd" if 0xD800 <= ord(char) <= 0xDFFF else char
-            for char in value
+            "\ufffd" if 0xD800 <= ord(char) <= 0xDFFF else char for char in value
         )
     if isinstance(value, list):
         return [_replace_unpaired_surrogates(item) for item in value]
@@ -92,7 +91,7 @@ class _DialogueJsonStream:
             if index + 6 > len(raw_value):
                 break
             try:
-                codepoint = int(raw_value[index + 2:index + 6], 16)
+                codepoint = int(raw_value[index + 2 : index + 6], 16)
             except ValueError:
                 break
             index += 6
@@ -102,11 +101,11 @@ class _DialogueJsonStream:
                     break
                 if raw_value[index] == "\\" and index + 2 > len(raw_value):
                     break
-                if raw_value[index:index + 2] == "\\u":
+                if raw_value[index : index + 2] == "\\u":
                     if index + 6 > len(raw_value):
                         break
                     try:
-                        low_surrogate = int(raw_value[index + 2:index + 6], 16)
+                        low_surrogate = int(raw_value[index + 2 : index + 6], 16)
                     except ValueError:
                         low_surrogate = -1
                     if 0xDC00 <= low_surrogate <= 0xDFFF:
@@ -126,7 +125,7 @@ class _DialogueJsonStream:
         decoded = _replace_unpaired_surrogates(decoded)
         if len(decoded) <= len(self._decoded_value):
             return []
-        delta = decoded[len(self._decoded_value):]
+        delta = decoded[len(self._decoded_value) :]
         self._decoded_value = decoded
         return [delta] if delta else []
 
@@ -208,21 +207,27 @@ class _DialogueJsonStream:
                 self._awaiting_dialogue_value = False
                 if char == '"':
                     self._in_value = True
-                    return self._feed_value(text[index + 1:])
+                    return self._feed_value(text[index + 1 :])
 
             if char == '"':
                 self._in_token_string = True
-                self._token_is_top_level_key = (
-                    self._stack == ["{"]
-                    and self._previous_significant in {"{", ","}
-                )
+                self._token_is_top_level_key = self._stack == [
+                    "{"
+                ] and self._previous_significant in {"{", ","}
                 self._token_raw = ""
                 self._token_escaped = False
                 continue
 
             if char in "{[":
                 self._stack.append(char)
-            elif char == "}" and self._stack and self._stack[-1] == "{" or char == "]" and self._stack and self._stack[-1] == "[":
+            elif (
+                char == "}"
+                and self._stack
+                and self._stack[-1] == "{"
+                or char == "]"
+                and self._stack
+                and self._stack[-1] == "["
+            ):
                 self._stack.pop()
 
             if not char.isspace():
@@ -348,8 +353,7 @@ def _record_provider_usage(usage, *, task_name: str) -> None:
 
 def _has_dedicated_light_client() -> bool:
     return bool(
-        configs.llm_light_base_url
-        and configs.llm_light_api_key.get_secret_value()
+        configs.llm_light_base_url and configs.llm_light_api_key.get_secret_value()
     )
 
 
@@ -366,7 +370,9 @@ def _resolve_http_proxy(base_url: str) -> str | None:
 
     proxy_scheme = urlsplit(proxy_url).scheme.lower()
     if proxy_scheme not in {"http", "https"}:
-        logger.warning("Ignoring unsupported LLM proxy scheme: %s", proxy_scheme or "unknown")
+        logger.warning(
+            "Ignoring unsupported LLM proxy scheme: %s", proxy_scheme or "unknown"
+        )
         return None
     return proxy_url
 
@@ -408,6 +414,7 @@ def _create_openai_client(
         kwargs["max_retries"] = 0
     return OpenAI(**kwargs)
 
+
 def _get_client():
     global _client
     if _client is None:
@@ -441,17 +448,21 @@ def _get_light_client():
                         timeout=configs.llm_light_timeout_seconds,
                     )
                     _light_client_signature = signature
-                    logger.info("Light task client initialized: %s", configs.llm_light_base_url)
+                    logger.info(
+                        "Light task client initialized: %s", configs.llm_light_base_url
+                    )
         return _light_client
 
     logger.warning("Light task client is not fully configured; using main LLM client")
     return _get_client()
+
 
 # =========================
 # 自定义异常（保留扩展能力）
 # =========================
 class LLMOutputParseError(Exception):
     pass
+
 
 # =========================
 # JSON 提取器（宽松模式）
@@ -468,7 +479,7 @@ def _extract_json(raw_text: str) -> dict | None:
     if not raw_text:
         return None
     text = raw_text.strip()
-    
+
     # -------------------------
     # 情况1：完整 JSON
     # -------------------------
@@ -476,7 +487,7 @@ def _extract_json(raw_text: str) -> dict | None:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    
+
     # -------------------------
     # 情况2：```json 或 ``` 包裹
     # -------------------------
@@ -486,7 +497,7 @@ def _extract_json(raw_text: str) -> dict | None:
             return json.loads(code_block.group(1).strip())
         except json.JSONDecodeError:
             pass
-        
+
     # -------------------------
     # 情况3：提取第一个 JSON 对象（非贪婪）
     # -------------------------
@@ -512,7 +523,7 @@ def _extract_json(raw_text: str) -> dict | None:
             return json.loads(cleaned)
         except json.JSONDecodeError:
             pass
-    
+
     return None
 
 
@@ -556,12 +567,14 @@ def _extract_balanced_json_object(raw_text: str) -> str | None:
         elif ch == "}":
             depth -= 1
             if depth == 0:
-                return text[start:index + 1]
+                return text[start : index + 1]
     return text[start:] if start >= 0 else None
 
 
 def _cleanup_jsonish_text(raw_text: str) -> str:
-    text = _extract_balanced_json_object(raw_text) or _strip_markdown_code_fence(raw_text)
+    text = _extract_balanced_json_object(raw_text) or _strip_markdown_code_fence(
+        raw_text
+    )
     text = text.strip()
     text = text.replace("“", '"').replace("”", '"')
     text = text.replace("‘", "'").replace("’", "'")
@@ -583,8 +596,12 @@ def _extract_jsonish_string_field(text: str, field: str) -> str | None:
     通过下一个已知字段名或对象结尾作为边界，避免把整段 JSON 都吃进 dialogue。
     """
     next_fields = (
-        "dialogue", "action", "affinity_delta", "trust_delta",
-        "mood_after", "memory_worth_keeping",
+        "dialogue",
+        "action",
+        "affinity_delta",
+        "trust_delta",
+        "mood_after",
+        "memory_worth_keeping",
     )
     boundary_fields = [name for name in next_fields if name != field]
     boundary = "|".join(re.escape(name) for name in boundary_fields)
@@ -639,7 +656,9 @@ def looks_like_provider_rejection(raw_text: str) -> bool:
     return _looks_like_provider_rejection(raw_text)
 
 
-def _local_role_turn_fallback(raw_text: str, default_action: str = "neutral") -> dict | None:
+def _local_role_turn_fallback(
+    raw_text: str, default_action: str = "neutral"
+) -> dict | None:
     """
     修复模型也失败时，在本地从 JSON-ish 输出里保底提取角色回合字段。
     """
@@ -670,7 +689,9 @@ def _local_role_turn_fallback(raw_text: str, default_action: str = "neutral") ->
         "affinity_delta": _extract_jsonish_number_field(cleaned, "affinity_delta"),
         "trust_delta": _extract_jsonish_number_field(cleaned, "trust_delta"),
         "mood_after": _extract_jsonish_string_field(cleaned, "mood_after"),
-        "memory_worth_keeping": _extract_jsonish_string_field(cleaned, "memory_worth_keeping"),
+        "memory_worth_keeping": _extract_jsonish_string_field(
+            cleaned, "memory_worth_keeping"
+        ),
         "_fallback_mode": True,
         "_fallback_parser": "local_fields",
     }
@@ -685,6 +706,8 @@ def _emit_debug(debug_sink: DebugSink | None, title: str, payload) -> None:
         + "\n"
         + json.dumps(payload, ensure_ascii=False, indent=2, default=str)
     )
+
+
 # =========================
 # 最终兜底策略（保证系统不崩）
 # =========================
@@ -717,7 +740,6 @@ def _plain_text_fallback(raw_text: str, default_action: str = "neutral") -> dict
         "_fallback_mode": True,
         "_fallback_parser": "plain_text",
     }
-    
 
 
 import time as _time
@@ -762,7 +784,7 @@ def _retry_call(fn, *args, max_attempts: int = _MAX_RETRIES, **kwargs):
                 raise
             if attempt < max_attempts - 1:
                 performance.increment("llm.retry")
-                delay = _BASE_DELAY * (2 ** attempt)
+                delay = _BASE_DELAY * (2**attempt)
                 logger.warning(
                     "LLM重试 %d/%d (%.1fs后): %s",
                     attempt + 1,
@@ -792,7 +814,7 @@ def call_role_turn(
     1. 正常 JSON 输出解析
     2. 本地 JSON-ish / 文本兜底返回
     """
-    
+
     model = model or configs.llm_model
     task_name = "role_turn"
     messages = [{"role": "system", "content": system_prompt}] + history
@@ -816,7 +838,7 @@ def call_role_turn(
     performance.observe("llm.prompt_chars.role_turn", prompt_chars)
     if debug:
         _emit_debug(debug_sink, "role_turn.request", request_payload)
-    
+
     # =========================
     # 1. 主请求
     # =========================
@@ -826,74 +848,82 @@ def call_role_turn(
     stream_mode = "json"
     response_format_name = "json_object" if supports_response_format else "none"
     with (
-        tracing.start_span("llm.role_turn", **{"llm.model": model, "llm.response_format": response_format_name}),
+        tracing.start_span(
+            "llm.role_turn",
+            **{"llm.model": model, "llm.response_format": response_format_name},
+        ),
         performance.measure("llm.role_turn"),
     ):
-            request_started_at = perf_counter()
-            _record_llm_call(kind="role", task_name=task_name, model=model)
-            try:
-                response = _retry_call(
-                    _get_client().chat.completions.create,
-                    **request_payload,
-                )
-            except BadRequestError as exc:
-                if "stream_options" in str(exc).lower() and "stream_options" in request_payload:
-                    # 部分厂商不支持 stream_options，去掉后重试一次。
-                    request_payload.pop("stream_options", None)
-                    try:
-                        response = _retry_call(
-                            _get_client().chat.completions.create,
-                            **request_payload,
-                        )
-                    except BadRequestError as retry_exc:
-                        performance.increment("llm.calls.failed")
-                        if supports_response_format and _is_response_format_error(retry_exc):
-                            response_format_unsupported = True
-                            _response_format_unsupported.add(response_format_key)
-                        else:
-                            raise
+        request_started_at = perf_counter()
+        _record_llm_call(kind="role", task_name=task_name, model=model)
+        try:
+            response = _retry_call(
+                _get_client().chat.completions.create,
+                **request_payload,
+            )
+        except BadRequestError as exc:
+            if (
+                "stream_options" in str(exc).lower()
+                and "stream_options" in request_payload
+            ):
+                # 部分厂商不支持 stream_options，去掉后重试一次。
+                request_payload.pop("stream_options", None)
+                try:
+                    response = _retry_call(
+                        _get_client().chat.completions.create,
+                        **request_payload,
+                    )
+                except BadRequestError as retry_exc:
+                    performance.increment("llm.calls.failed")
+                    if supports_response_format and _is_response_format_error(
+                        retry_exc
+                    ):
+                        response_format_unsupported = True
+                        _response_format_unsupported.add(response_format_key)
                     else:
-                        if on_dialogue_delta is not None:
-                            (
-                                raw_text,
-                                streamed_dialogue,
-                                stream_error,
-                                stream_mode,
-                            ) = _consume_role_stream(
-                                response,
-                                on_dialogue_delta,
-                                request_started_at,
-                            )
-                        if stream_error is None:
-                            performance.increment("llm.calls.succeeded")
-                        else:
-                            performance.increment("llm.calls.failed")
-                elif supports_response_format and _is_response_format_error(exc):
-                    performance.increment("llm.calls.failed")
-                    response_format_unsupported = True
-                    _response_format_unsupported.add(response_format_key)
+                        raise
                 else:
-                    performance.increment("llm.calls.failed")
-                    raise
-            except Exception:
+                    if on_dialogue_delta is not None:
+                        (
+                            raw_text,
+                            streamed_dialogue,
+                            stream_error,
+                            stream_mode,
+                        ) = _consume_role_stream(
+                            response,
+                            on_dialogue_delta,
+                            request_started_at,
+                        )
+                    if stream_error is None:
+                        performance.increment("llm.calls.succeeded")
+                    else:
+                        performance.increment("llm.calls.failed")
+            elif supports_response_format and _is_response_format_error(exc):
+                performance.increment("llm.calls.failed")
+                response_format_unsupported = True
+                _response_format_unsupported.add(response_format_key)
+            else:
                 performance.increment("llm.calls.failed")
                 raise
+        except Exception:
+            performance.increment("llm.calls.failed")
+            raise
+        else:
+            if on_dialogue_delta is not None:
+                (
+                    raw_text,
+                    streamed_dialogue,
+                    stream_error,
+                    stream_mode,
+                ) = _consume_role_stream(
+                    response,
+                    on_dialogue_delta,
+                    request_started_at,
+                )
+            if stream_error is None:
+                performance.increment("llm.calls.succeeded")
             else:
-                if on_dialogue_delta is not None:
-                    (
-                        raw_text,
-                        streamed_dialogue,
-                        stream_error,
-                        stream_mode,
-                    ) = _consume_role_stream(
-                        response,
-                        on_dialogue_delta,
-                        request_started_at,
-                    )
-                if stream_error is None:
-                    performance.increment("llm.calls.succeeded")
-                else:
-                    performance.increment("llm.calls.failed")
+                performance.increment("llm.calls.failed")
 
     if response_format_unsupported:
         # 某些厂商不支持 response_format
@@ -902,38 +932,44 @@ def call_role_turn(
         fallback_request = dict(request_payload)
         fallback_request.pop("response_format", None)
         if debug:
-            _emit_debug(debug_sink, "role_turn.request_without_response_format", fallback_request)
+            _emit_debug(
+                debug_sink,
+                "role_turn.request_without_response_format",
+                fallback_request,
+            )
 
         with (
-            tracing.start_span("llm.role_turn", **{"llm.model": model, "llm.response_format": "none"}),
+            tracing.start_span(
+                "llm.role_turn", **{"llm.model": model, "llm.response_format": "none"}
+            ),
             performance.measure("llm.role_turn"),
         ):
-                request_started_at = perf_counter()
-                _record_llm_call(kind="role", task_name=task_name, model=model)
-                try:
-                    response = _retry_call(
-                        _get_client().chat.completions.create,
-                        **fallback_request,
-                    )
-                except Exception:
-                    performance.increment("llm.calls.failed")
-                    raise
-                if on_dialogue_delta is not None:
-                    (
-                        raw_text,
-                        streamed_dialogue,
-                        stream_error,
-                        stream_mode,
-                    ) = _consume_role_stream(
-                        response,
-                        on_dialogue_delta,
-                        request_started_at,
-                    )
-                if stream_error is None:
-                    performance.increment("llm.calls.succeeded")
-                else:
-                    performance.increment("llm.calls.failed")
-    
+            request_started_at = perf_counter()
+            _record_llm_call(kind="role", task_name=task_name, model=model)
+            try:
+                response = _retry_call(
+                    _get_client().chat.completions.create,
+                    **fallback_request,
+                )
+            except Exception:
+                performance.increment("llm.calls.failed")
+                raise
+            if on_dialogue_delta is not None:
+                (
+                    raw_text,
+                    streamed_dialogue,
+                    stream_error,
+                    stream_mode,
+                ) = _consume_role_stream(
+                    response,
+                    on_dialogue_delta,
+                    request_started_at,
+                )
+            if stream_error is None:
+                performance.increment("llm.calls.succeeded")
+            else:
+                performance.increment("llm.calls.failed")
+
     if on_dialogue_delta is None:
         if not getattr(response, "choices", None):
             logger.warning(
@@ -960,7 +996,7 @@ def call_role_turn(
     performance.observe("llm.output_chars.role_turn", len(raw_text))
     if debug:
         _emit_debug(debug_sink, "role_turn.raw_response", {"content": raw_text})
-    
+
     # =========================
     # 2. JSON 解析
     # =========================
@@ -974,7 +1010,7 @@ def call_role_turn(
         if debug:
             _emit_debug(debug_sink, "role_turn.parsed_response", result)
         return result
-    
+
     # =========================
     # 3. 本地兜底返回
     # =========================
@@ -990,6 +1026,7 @@ def call_role_turn(
         _emit_debug(debug_sink, "role_turn.fallback_response", result)
     return result
 
+
 # =========================
 # 轻量任务模型（记忆/摘要等）
 # =========================
@@ -1004,7 +1041,7 @@ def call_light_task(
     """
     使用轻量模型处理辅助任务（低成本）
     """
-    
+
     model = configs.light_model
     task = _metric_segment(task_name)
     output_limit = max_tokens or configs.light_task_max_output_tokens
@@ -1014,12 +1051,15 @@ def call_light_task(
     performance.observe(f"llm.prompt_chars.{task}", prompt_chars)
     if not _has_dedicated_light_client():
         performance.increment("llm.light.fallback_to_main")
-    
+
     try:
-        with tracing.start_span(
-            "llm.light_task",
-            **{"llm.model": model, "llm.task": task_name},
-        ), performance.measure("llm.light_task"):
+        with (
+            tracing.start_span(
+                "llm.light_task",
+                **{"llm.model": model, "llm.task": task_name},
+            ),
+            performance.measure("llm.light_task"),
+        ):
             _record_llm_call(kind="light", task_name=task_name, model=model)
             try:
                 response = _retry_call(
@@ -1035,31 +1075,35 @@ def call_light_task(
                 raise
         performance.increment("llm.calls.succeeded")
         _record_provider_usage(getattr(response, "usage", None), task_name=task_name)
-        
+
         if not response.choices:
             logger.warning("No choices in LLM response")
             return ""
-        
+
         message = response.choices[0].message
-        
+
         # 优先使用 content。推理内容通常不是最终答案，只在调用方允许时兜底使用。
         content = message.content
-        
+
         if not content or content.strip() == "":
-            if allow_reasoning_fallback and hasattr(message, 'reasoning_content') and message.reasoning_content:
+            if (
+                allow_reasoning_fallback
+                and hasattr(message, "reasoning_content")
+                and message.reasoning_content
+            ):
                 logger.debug("Using reasoning_content instead of content")
                 content = message.reasoning_content
             else:
                 logger.warning("Light task final content is empty")
                 return ""
-        
+
         result = content.strip()
         performance.observe("llm.output_chars", len(result))
         performance.observe(f"llm.output_chars.{task}", len(result))
         logger.debug(f"Light task completed, result length: {len(result)}")
-        
+
         return result
-        
+
     except Exception as e:
         logger.error(f"Exception in call_light_task: {e}")
         if raise_on_error:

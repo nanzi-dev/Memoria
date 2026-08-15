@@ -52,8 +52,14 @@ def test_character_card_update_keeps_account_avatar_independent():
     assert card is not None
     assert card["display_name"] == "星野"
     assert card["age"] == 27
-    assert repository.get_user_by_id(user_id)["avatar_url"] == "data:image/png;base64,account"
-    assert repository.get_user_character_card(user_id)["avatar_url"] == "data:image/png;base64,persona"
+    assert (
+        repository.get_user_by_id(user_id)["avatar_url"]
+        == "data:image/png;base64,account"
+    )
+    assert (
+        repository.get_user_character_card(user_id)["avatar_url"]
+        == "data:image/png;base64,persona"
+    )
 
 
 def test_runtime_affection_creates_player_edge_without_touching_semantic_revision():
@@ -78,11 +84,14 @@ def test_runtime_affection_creates_player_edge_without_touching_semantic_revisio
     assert relationship is not None
     assert relationship["relationship_type"] == "相识"
     assert relationship["affinity"] == 35
-    assert repository.get_character_relationship_updated_at(
-        user_id,
-        player_id,
-        character_id,
-    ) is None
+    assert (
+        repository.get_character_relationship_updated_at(
+            user_id,
+            player_id,
+            character_id,
+        )
+        is None
+    )
 
     assert repository.save_character_relationship(
         user_id,
@@ -111,16 +120,22 @@ def test_runtime_affection_creates_player_edge_without_touching_semantic_revisio
     assert runtime["current_mood"] == "curious"
 
     repository.save_runtime_state(character_id, user_id, 72, 29, "warm")
-    assert repository.get_character_relationship(
-        user_id,
-        player_id,
-        character_id,
-    )["affinity"] == 72
-    assert repository.get_character_relationship_updated_at(
-        user_id,
-        player_id,
-        character_id,
-    ) == revision
+    assert (
+        repository.get_character_relationship(
+            user_id,
+            player_id,
+            character_id,
+        )["affinity"]
+        == 72
+    )
+    assert (
+        repository.get_character_relationship_updated_at(
+            user_id,
+            player_id,
+            character_id,
+        )
+        == revision
+    )
 
 
 def test_deleting_player_edge_resets_affection_and_next_chat_recreates_it():

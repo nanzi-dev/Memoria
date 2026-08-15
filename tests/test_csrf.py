@@ -19,17 +19,27 @@ def test_login_sets_csrf_cookie_readable():
     username = "csrf_login_user"
     password = "Secret123"
     if not repository.get_user_by_username(username):
-        repository.create_user("usr_csrf1", username, user._hash_password(password), "unknown")
+        repository.create_user(
+            "usr_csrf1", username, user._hash_password(password), "unknown"
+        )
 
     response = Response()
     user.login(user.LoginRequest(username=username, password=password), response)
-    set_cookie = response.headers.getlist("set-cookie") if hasattr(response.headers, "getlist") else [response.headers.get("set-cookie", "")]
+    set_cookie = (
+        response.headers.getlist("set-cookie")
+        if hasattr(response.headers, "getlist")
+        else [response.headers.get("set-cookie", "")]
+    )
     joined = "\n".join(set_cookie)
     assert "memoria-csrf=" in joined
     # CSRF cookie must be JS-readable (no HttpOnly on that cookie line).
     csrf_lines = [line for line in joined.split("\n") if "memoria-csrf=" in line]
     assert csrf_lines
-    assert "HttpOnly" not in csrf_lines[0] or "memoria-csrf=" in csrf_lines[0] and "HttpOnly" not in csrf_lines[0].split("memoria-csrf=")[1].split(",")[0]
+    assert (
+        "HttpOnly" not in csrf_lines[0]
+        or "memoria-csrf=" in csrf_lines[0]
+        and "HttpOnly" not in csrf_lines[0].split("memoria-csrf=")[1].split(",")[0]
+    )
 
 
 def test_validate_csrf_rejects_cookie_write_without_header():
@@ -194,9 +204,6 @@ def test_validate_csrf_blocks_cross_site_login():
     blocked = validate_csrf(request)
     assert blocked is not None
     assert blocked.status_code == 403
-
-
-
 
 
 def _csrf_scope(path: str, query_string: bytes = b"", headers=None):

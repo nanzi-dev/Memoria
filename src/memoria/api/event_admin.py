@@ -34,8 +34,10 @@ router = APIRouter(dependencies=[Depends(require_current_user_id)])
 # 请求 / 响应模型
 # =========================
 
+
 class TriggerConditionDTO(BaseModel):
     """触发条件 DTO（与 event_schema.TriggerCondition 对齐）"""
+
     trigger_type: str
     threshold: float | None = None
     comparison: str | None = "gte"
@@ -69,6 +71,7 @@ TriggerConditionDTO.model_rebuild()
 
 class EventEffectDTO(BaseModel):
     """事件效果 DTO"""
+
     effect_type: str
     state_changes: dict | None = None
     unlock_keys: list[str] | None = None
@@ -94,10 +97,12 @@ class EventEffectDTO(BaseModel):
 
 
 class EventCreateRequest(BaseModel):
-    event_id: str = Field(..., description="事件唯一 ID，建议格式: evt_{character}_{name}")
+    event_id: str = Field(
+        ..., description="事件唯一 ID，建议格式: evt_{character}_{name}"
+    )
     event_name: str
     description: str | None = None
-    character_id: str | None = None          # None 表示全局事件
+    character_id: str | None = None  # None 表示全局事件
     story_id: str | None = None
     trigger_condition: TriggerConditionDTO
     effects: list[EventEffectDTO] = Field(default_factory=list)
@@ -334,11 +339,27 @@ def _validate_condition_semantics(
             status_code=400,
             detail=f"触发类型 {condition.trigger_type.value} 尚未实现，不能保存",
         )
-    if condition.comparison not in {"gte", ">=", "lte", "<=", "eq", "==", "gt", ">", "lt", "<"}:
+    if condition.comparison not in {
+        "gte",
+        ">=",
+        "lte",
+        "<=",
+        "eq",
+        "==",
+        "gt",
+        ">",
+        "lt",
+        "<",
+    }:
         raise HTTPException(status_code=400, detail="比较运算符无效")
-    if condition.trigger_type in {TriggerType.KEYWORD_MATCH, TriggerType.NPC_KEYWORD_MATCH}:
+    if condition.trigger_type in {
+        TriggerType.KEYWORD_MATCH,
+        TriggerType.NPC_KEYWORD_MATCH,
+    }:
         if not any(str(keyword or "").strip() for keyword in condition.keywords or []):
-            raise HTTPException(status_code=400, detail="关键词触发条件至少需要一个非空关键词")
+            raise HTTPException(
+                status_code=400, detail="关键词触发条件至少需要一个非空关键词"
+            )
         if condition.match_mode not in {"any", "all", "exact", "whole_word", "regex"}:
             raise HTTPException(status_code=400, detail="关键词匹配模式无效")
         if condition.match_mode == "regex":
@@ -346,10 +367,16 @@ def _validate_condition_semantics(
                 for pattern in condition.keywords or []:
                     re.compile(pattern)
             except re.error as exc:
-                raise HTTPException(status_code=400, detail=f"关键词正则表达式无效: {exc}") from exc
+                raise HTTPException(
+                    status_code=400, detail=f"关键词正则表达式无效: {exc}"
+                ) from exc
     if (
         condition.trigger_type
-        in {TriggerType.AFFINITY_THRESHOLD, TriggerType.TRUST_THRESHOLD, TriggerType.STATE_DELTA}
+        in {
+            TriggerType.AFFINITY_THRESHOLD,
+            TriggerType.TRUST_THRESHOLD,
+            TriggerType.STATE_DELTA,
+        }
         and condition.threshold is None
     ):
         raise HTTPException(status_code=400, detail="阈值触发条件必须提供 threshold")
@@ -376,28 +403,47 @@ def _validate_condition_semantics(
                 detail="character_ids 不能全为空",
             )
         condition.character_ids = cleaned_character_ids
-    if condition.trigger_type == TriggerType.DIALOGUE_COUNT and (condition.count is None or condition.count < 0):
+    if condition.trigger_type == TriggerType.DIALOGUE_COUNT and (
+        condition.count is None or condition.count < 0
+    ):
         raise HTTPException(status_code=400, detail="对话次数条件必须提供非负 count")
     if condition.trigger_type == TriggerType.TIME_BASED:
         if condition.duration_minutes is None and not condition.schedule:
-            raise HTTPException(status_code=400, detail="时间条件必须提供 duration_minutes 或 schedule")
+            raise HTTPException(
+                status_code=400, detail="时间条件必须提供 duration_minutes 或 schedule"
+            )
         if condition.duration_minutes is not None and condition.duration_minutes < 0:
             raise HTTPException(status_code=400, detail="duration_minutes 不能为负数")
-    if condition.trigger_type == TriggerType.MOOD_MATCH and not str(condition.mood or "").strip():
+    if (
+        condition.trigger_type == TriggerType.MOOD_MATCH
+        and not str(condition.mood or "").strip()
+    ):
         raise HTTPException(status_code=400, detail="情绪条件必须提供 mood")
-    if condition.trigger_type == TriggerType.STATE_DELTA and condition.state_field not in {"affinity", "trust"}:
-        raise HTTPException(status_code=400, detail="状态变化条件的 state_field 必须为 affinity 或 trust")
+    if (
+        condition.trigger_type == TriggerType.STATE_DELTA
+        and condition.state_field not in {"affinity", "trust"}
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="状态变化条件的 state_field 必须为 affinity 或 trust",
+        )
     if condition.trigger_type == TriggerType.EVENT_HISTORY:
-        if not condition.event_id or not repository.get_event_definition(current_user_id, condition.event_id):
-            raise HTTPException(status_code=400, detail="事件历史条件引用了不存在的当前用户事件")
+        if not condition.event_id or not repository.get_event_definition(
+            current_user_id, condition.event_id
+        ):
+            raise HTTPException(
+                status_code=400, detail="事件历史条件引用了不存在的当前用户事件"
+            )
         if condition.event_status not in {"succeeded", "failed", "partial", "skipped"}:
             raise HTTPException(status_code=400, detail="事件历史状态无效")
     if condition.trigger_type == TriggerType.WORLD_TIME_WINDOW:
         if not condition.time_window_start or not condition.time_window_end:
-            raise HTTPException(status_code=400, detail="世界时间窗口需要开始和结束时间")
-        if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", condition.time_window_start) or not re.fullmatch(
-            r"(?:[01]\d|2[0-3]):[0-5]\d", condition.time_window_end
-        ):
+            raise HTTPException(
+                status_code=400, detail="世界时间窗口需要开始和结束时间"
+            )
+        if not re.fullmatch(
+            r"(?:[01]\d|2[0-3]):[0-5]\d", condition.time_window_start
+        ) or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", condition.time_window_end):
             raise HTTPException(status_code=400, detail="世界时间窗口必须使用 HH:MM")
         if any(day < 0 or day > 6 for day in condition.weekdays or []):
             raise HTTPException(status_code=400, detail="weekdays 必须位于 0 到 6")
@@ -421,19 +467,35 @@ def _validate_condition_semantics(
                         detail="关系变化条件不能以当前事件角色自身为目标",
                     )
         if condition.crossing:
-            raise HTTPException(status_code=400, detail="关系变化条件暂不支持 crossing，请使用事件冷却管理重复触发")
+            raise HTTPException(
+                status_code=400,
+                detail="关系变化条件暂不支持 crossing，请使用事件冷却管理重复触发",
+            )
         state_field = str(condition.state_field or "affinity").strip().lower()
         if state_field not in {"affinity", "relationship_type"}:
-            raise HTTPException(status_code=400, detail="关系变化条件的 state_field 必须为 affinity 或 relationship_type")
+            raise HTTPException(
+                status_code=400,
+                detail="关系变化条件的 state_field 必须为 affinity 或 relationship_type",
+            )
         if state_field == "affinity" and condition.threshold is None:
-            raise HTTPException(status_code=400, detail="按 affinity 判断关系变化必须提供 threshold")
-        if state_field == "relationship_type" and not str(condition.relationship_type or "").strip():
-            raise HTTPException(status_code=400, detail="按 relationship_type 判断关系变化必须提供 relationship_type")
+            raise HTTPException(
+                status_code=400, detail="按 affinity 判断关系变化必须提供 threshold"
+            )
+        if (
+            state_field == "relationship_type"
+            and not str(condition.relationship_type or "").strip()
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="按 relationship_type 判断关系变化必须提供 relationship_type",
+            )
     if condition.trigger_type == TriggerType.COMPOSITE:
         if not condition.sub_conditions:
             raise HTTPException(status_code=400, detail="复合条件至少需要一个子条件")
         if condition.logic_operator not in {"and", "or"}:
-            raise HTTPException(status_code=400, detail="复合条件逻辑运算符必须为 and 或 or")
+            raise HTTPException(
+                status_code=400, detail="复合条件逻辑运算符必须为 and 或 or"
+            )
     if condition.schedule:
         _validate_cron(condition.schedule)
     for child in condition.sub_conditions or []:
@@ -457,26 +519,56 @@ def _validate_effect_semantics(
         )
     if effect.effect_type == EffectType.MODIFY_STATE:
         if not effect.state_changes:
-            raise HTTPException(status_code=400, detail="修改状态效果必须提供 state_changes")
-        unknown = set(effect.state_changes) - {"affection_level", "trust_level", "current_mood"}
+            raise HTTPException(
+                status_code=400, detail="修改状态效果必须提供 state_changes"
+            )
+        unknown = set(effect.state_changes) - {
+            "affection_level",
+            "trust_level",
+            "current_mood",
+        }
         if unknown:
-            raise HTTPException(status_code=400, detail=f"不支持的状态字段: {', '.join(sorted(unknown))}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"不支持的状态字段: {', '.join(sorted(unknown))}",
+            )
     if effect.effect_type == EffectType.UNLOCK_CONTENT and not any(
         str(key or "").strip() for key in effect.unlock_keys or []
     ):
-        raise HTTPException(status_code=400, detail="解锁内容效果至少需要一个 unlock_key")
-    if effect.effect_type == EffectType.TRIGGER_DIALOGUE and not str(effect.dialogue_text or "").strip():
-        raise HTTPException(status_code=400, detail="触发对话效果必须提供 dialogue_text")
-    if effect.effect_type == EffectType.ADD_MEMORY and not str(effect.memory_text or "").strip():
+        raise HTTPException(
+            status_code=400, detail="解锁内容效果至少需要一个 unlock_key"
+        )
+    if (
+        effect.effect_type == EffectType.TRIGGER_DIALOGUE
+        and not str(effect.dialogue_text or "").strip()
+    ):
+        raise HTTPException(
+            status_code=400, detail="触发对话效果必须提供 dialogue_text"
+        )
+    if (
+        effect.effect_type == EffectType.ADD_MEMORY
+        and not str(effect.memory_text or "").strip()
+    ):
         raise HTTPException(status_code=400, detail="添加记忆效果必须提供 memory_text")
-    if effect.effect_type == EffectType.CHANGE_MOOD and not str(effect.target_mood or "").strip():
+    if (
+        effect.effect_type == EffectType.CHANGE_MOOD
+        and not str(effect.target_mood or "").strip()
+    ):
         raise HTTPException(status_code=400, detail="改变情绪效果必须提供 target_mood")
-    if effect.effect_type == EffectType.NOTIFY_PLAYER and not str(effect.notification_message or "").strip():
-        raise HTTPException(status_code=400, detail="通知效果必须提供 notification_message")
+    if (
+        effect.effect_type == EffectType.NOTIFY_PLAYER
+        and not str(effect.notification_message or "").strip()
+    ):
+        raise HTTPException(
+            status_code=400, detail="通知效果必须提供 notification_message"
+        )
     if effect.effect_type == EffectType.MODIFY_RELATIONSHIP:
         target_id = str(effect.target_character_id or "").strip()
         if not target_id:
-            raise HTTPException(status_code=400, detail="修改关系效果必须提供 target_character_id（可使用 @player）")
+            raise HTTPException(
+                status_code=400,
+                detail="修改关系效果必须提供 target_character_id（可使用 @player）",
+            )
         if target_id != "@player":
             if repository.is_player_node_id(target_id):
                 if target_id != repository.player_node_id(current_user_id):
@@ -497,31 +589,46 @@ def _validate_effect_semantics(
                 detail="修改关系效果不能以当前事件角色自身为目标",
             )
         changes = dict(effect.relationship_change or {})
-        if "relationship_type" in changes and not str(
-            changes.get("relationship_type") or ""
-        ).strip():
+        if (
+            "relationship_type" in changes
+            and not str(changes.get("relationship_type") or "").strip()
+        ):
             changes.pop("relationship_type", None)
         effect.relationship_change = changes
         allowed = {"relationship_type", "affinity", "affinity_delta", "description"}
         unknown = set(changes) - allowed
         if unknown:
-            raise HTTPException(status_code=400, detail=f"不支持的关系字段: {', '.join(sorted(unknown))}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"不支持的关系字段: {', '.join(sorted(unknown))}",
+            )
         if not any(key in changes for key in allowed):
-            raise HTTPException(status_code=400, detail="修改关系效果必须至少提供一个关系变化字段")
+            raise HTTPException(
+                status_code=400, detail="修改关系效果必须至少提供一个关系变化字段"
+            )
         if "affinity" in changes:
             try:
                 if not -100 <= float(changes["affinity"]) <= 100:
                     raise ValueError
             except (TypeError, ValueError) as exc:
-                raise HTTPException(status_code=400, detail="关系 affinity 必须位于 -100 到 100") from exc
+                raise HTTPException(
+                    status_code=400, detail="关系 affinity 必须位于 -100 到 100"
+                ) from exc
         if "affinity_delta" in changes:
             try:
                 if not -100 <= float(changes["affinity_delta"]) <= 100:
                     raise ValueError
             except (TypeError, ValueError) as exc:
-                raise HTTPException(status_code=400, detail="关系 affinity_delta 必须位于 -100 到 100") from exc
-    if effect.effect_type == EffectType.TRIGGER_EVENT and not str(effect.next_event_id or "").strip():
-        raise HTTPException(status_code=400, detail="触发事件效果必须提供 next_event_id")
+                raise HTTPException(
+                    status_code=400, detail="关系 affinity_delta 必须位于 -100 到 100"
+                ) from exc
+    if (
+        effect.effect_type == EffectType.TRIGGER_EVENT
+        and not str(effect.next_event_id or "").strip()
+    ):
+        raise HTTPException(
+            status_code=400, detail="触发事件效果必须提供 next_event_id"
+        )
     referenced_events: list[str] = []
     if effect.effect_type == EffectType.TRIGGER_EVENT and effect.next_event_id:
         referenced_events.append(effect.next_event_id)
@@ -529,13 +636,20 @@ def _validate_effect_semantics(
         if effect.next_event_id:
             referenced_events.append(effect.next_event_id)
         referenced_events.extend(
-            str(branch.get("event_id") or "") for branch in effect.branch_conditions or []
+            str(branch.get("event_id") or "")
+            for branch in effect.branch_conditions or []
         )
     for event_id in referenced_events:
-        if not event_id or not repository.get_event_definition(current_user_id, event_id):
-            raise HTTPException(status_code=400, detail=f"引用事件 '{event_id}' 不存在或不属于当前用户")
+        if not event_id or not repository.get_event_definition(
+            current_user_id, event_id
+        ):
+            raise HTTPException(
+                status_code=400, detail=f"引用事件 '{event_id}' 不存在或不属于当前用户"
+            )
     if effect.effect_type == EffectType.BRANCH_EVENT and not effect.branch_conditions:
-        raise HTTPException(status_code=400, detail="分支事件效果必须提供 branch_conditions")
+        raise HTTPException(
+            status_code=400, detail="分支事件效果必须提供 branch_conditions"
+        )
     if effect.effect_type == EffectType.BRANCH_EVENT:
         for branch in effect.branch_conditions or []:
             condition_data = branch.get("condition")
@@ -544,7 +658,9 @@ def _validate_effect_semantics(
             try:
                 branch_condition = TriggerCondition.model_validate(condition_data)
             except Exception as exc:
-                raise HTTPException(status_code=400, detail=f"分支条件无效: {exc}") from exc
+                raise HTTPException(
+                    status_code=400, detail=f"分支条件无效: {exc}"
+                ) from exc
             _validate_condition_semantics(
                 branch_condition,
                 current_user_id,
@@ -597,7 +713,12 @@ def _validate_effect_semantics(
                 status_code=400,
                 detail="更新事件进度效果必须提供 progress、progress_delta 或 event_status",
             )
-        if effect.event_status and effect.event_status not in {"pending", "active", "completed", "failed"}:
+        if effect.event_status and effect.event_status not in {
+            "pending",
+            "active",
+            "completed",
+            "failed",
+        }:
             raise HTTPException(status_code=400, detail="事件进度状态无效")
         if effect.progress is not None and not 0 <= effect.progress <= 1:
             raise HTTPException(status_code=400, detail="事件进度必须位于 0 到 1")
@@ -612,7 +733,9 @@ def _validate_event_configuration(
 ) -> tuple[TriggerCondition, list[EventEffect]]:
     try:
         condition = TriggerCondition.model_validate(trigger_condition.model_dump())
-        parsed_effects = [EventEffect.model_validate(effect.model_dump()) for effect in effects]
+        parsed_effects = [
+            EventEffect.model_validate(effect.model_dump()) for effect in effects
+        ]
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"配置校验失败: {exc}") from exc
     _validate_condition_semantics(
@@ -654,6 +777,7 @@ def _build_definition_schedule_state(
 # =========================
 # 列出事件
 # =========================
+
 
 @router.get("/admin/events", response_model=list[EventListItem])
 def list_events(
@@ -697,32 +821,33 @@ def list_events(
             )
             next_schedule = event_schedules[0] if event_schedules else {}
 
-            result.append(EventListItem(
-                event_id=r["event_id"],
-                event_name=r["event_name"],
-                description=r.get("description"),
-                character_id=r.get("character_id"),
-                story_id=r.get("story_id"),
-                priority=r.get("priority", 0),
-                exclusive_group=r.get("exclusive_group"),
-                exclusive_scope=r.get("exclusive_scope") or "turn",
-                max_triggers_per_turn=r.get("max_triggers_per_turn") or 3,
-                stop_processing=bool(r.get("stop_processing", 0)),
-                is_active=bool(r.get("is_active", 1)),
-                trigger_count=r.get("trigger_count", 0),
-                last_triggered_at=r.get("last_triggered_at"),
-                created_at=r.get("created_at"),
-                updated_at=r.get("updated_at"),
-                trigger_type=trigger_type,
-                schedule=r.get("schedule"),
-                template_id=r.get("template_id"),
-                next_run_at=next_schedule.get("next_run_at"),
-                next_due_real_at=next_schedule.get("next_due_real_at"),
-                missed_count=sum(
-                    int(item.get("missed_count") or 0)
-                    for item in event_schedules
-                ),
-            ))
+            result.append(
+                EventListItem(
+                    event_id=r["event_id"],
+                    event_name=r["event_name"],
+                    description=r.get("description"),
+                    character_id=r.get("character_id"),
+                    story_id=r.get("story_id"),
+                    priority=r.get("priority", 0),
+                    exclusive_group=r.get("exclusive_group"),
+                    exclusive_scope=r.get("exclusive_scope") or "turn",
+                    max_triggers_per_turn=r.get("max_triggers_per_turn") or 3,
+                    stop_processing=bool(r.get("stop_processing", 0)),
+                    is_active=bool(r.get("is_active", 1)),
+                    trigger_count=r.get("trigger_count", 0),
+                    last_triggered_at=r.get("last_triggered_at"),
+                    created_at=r.get("created_at"),
+                    updated_at=r.get("updated_at"),
+                    trigger_type=trigger_type,
+                    schedule=r.get("schedule"),
+                    template_id=r.get("template_id"),
+                    next_run_at=next_schedule.get("next_run_at"),
+                    next_due_real_at=next_schedule.get("next_due_real_at"),
+                    missed_count=sum(
+                        int(item.get("missed_count") or 0) for item in event_schedules
+                    ),
+                )
+            )
         return result
     except Exception:
         logger.error("列出事件失败", exc_info=True)
@@ -733,6 +858,7 @@ def list_events(
 # =========================
 # 获取事件详情
 # =========================
+
 
 @router.get("/admin/events/{event_id}", response_model=EventDetail)
 def get_event(
@@ -779,6 +905,7 @@ def get_event(
 # =========================
 # 创建事件
 # =========================
+
 
 @router.post("/admin/events", response_model=OperationResponse)
 def create_event(
@@ -861,6 +988,7 @@ def create_event(
 # 更新事件
 # =========================
 
+
 @router.put("/admin/events/{event_id}", response_model=OperationResponse)
 def update_event(
     event_id: str,
@@ -876,7 +1004,9 @@ def update_event(
 
     # 合并字段
     event_name = req.event_name or existing["event_name"]
-    description = req.description if req.description is not None else existing.get("description")
+    description = (
+        req.description if req.description is not None else existing.get("description")
+    )
     priority = req.priority if req.priority is not None else existing.get("priority", 0)
     exclusive_group = (
         req.exclusive_group
@@ -894,7 +1024,11 @@ def update_event(
         if req.stop_processing is not None
         else bool(existing.get("stop_processing", 0))
     )
-    is_active = req.is_active if req.is_active is not None else bool(existing.get("is_active", 1))
+    is_active = (
+        req.is_active
+        if req.is_active is not None
+        else bool(existing.get("is_active", 1))
+    )
     schedule = (
         sanitize_schedule(req.schedule)
         or sanitize_schedule(
@@ -912,9 +1046,7 @@ def update_event(
     if "character_id" in req.model_fields_set:
         character_id = _require_owned_character(current_user_id, req.character_id)
     story_id = (
-        req.story_id
-        if "story_id" in req.model_fields_set
-        else existing.get("story_id")
+        req.story_id if "story_id" in req.model_fields_set else existing.get("story_id")
     )
 
     condition_dto = req.trigger_condition or TriggerConditionDTO.model_validate_json(
@@ -983,6 +1115,7 @@ def update_event(
 # 删除事件
 # =========================
 
+
 @router.delete("/admin/events/{event_id}", response_model=OperationResponse)
 def delete_event(
     event_id: str,
@@ -1007,6 +1140,7 @@ def delete_event(
 # =========================
 # 启用 / 禁用事件
 # =========================
+
 
 @router.post("/admin/events/{event_id}/toggle", response_model=OperationResponse)
 def toggle_event(
@@ -1067,6 +1201,7 @@ def toggle_event(
 # 查询触发历史
 # =========================
 
+
 @router.get("/admin/events/{event_id}/history", response_model=list[TriggerLogItem])
 def get_trigger_history(
     event_id: str,
@@ -1115,6 +1250,7 @@ def get_all_trigger_history(
 # 重置触发记录（调试用）
 # =========================
 
+
 @router.delete("/admin/events/{event_id}/history", response_model=OperationResponse)
 def reset_trigger_history(
     event_id: str,
@@ -1144,6 +1280,7 @@ def reset_trigger_history(
 # 事件深度集成：模板 / 调度 / 上下文
 # =========================
 
+
 @router.get("/admin/event-templates", response_model=list[EventTemplateItem])
 def list_event_templates(
     category: str | None = None,
@@ -1161,15 +1298,17 @@ def list_event_templates(
         except Exception:
             logger.exception("解析事件模板失败")
             raise HTTPException(status_code=500, detail="解析事件模板失败")
-        result.append(EventTemplateItem(
-            template_id=row["template_id"],
-            template_name=row["template_name"],
-            category=row.get("category"),
-            description=row.get("description"),
-            trigger_config=trigger_config,
-            effects_config=effects_config,
-            metadata=metadata,
-        ))
+        result.append(
+            EventTemplateItem(
+                template_id=row["template_id"],
+                template_name=row["template_name"],
+                category=row.get("category"),
+                description=row.get("description"),
+                trigger_config=trigger_config,
+                effects_config=effects_config,
+                metadata=metadata,
+            )
+        )
     return result
 
 
@@ -1191,8 +1330,12 @@ def create_event_template(
         category=req.category,
         description=req.description,
         trigger_config=req.trigger_config.model_dump_json(),
-        effects_config=json.dumps([e.model_dump() for e in req.effects_config], ensure_ascii=False),
-        metadata=json.dumps(req.metadata, ensure_ascii=False) if req.metadata is not None else None,
+        effects_config=json.dumps(
+            [e.model_dump() for e in req.effects_config], ensure_ascii=False
+        ),
+        metadata=json.dumps(req.metadata, ensure_ascii=False)
+        if req.metadata is not None
+        else None,
     )
     if not success:
         raise HTTPException(status_code=500, detail="保存事件模板失败")
@@ -1391,7 +1534,9 @@ def simulate_event(
         req.character_id or event.character_id,
     )
     if not character_id:
-        raise HTTPException(status_code=400, detail="模拟全局事件时必须提供 character_id")
+        raise HTTPException(
+            status_code=400, detail="模拟全局事件时必须提供 character_id"
+        )
 
     session_id = req.session_id or f"simulate:{event_id}"
     state = repository.get_event_context_state(
@@ -1406,9 +1551,7 @@ def simulate_event(
         current_affinity=(
             req.current_affinity if req.current_affinity is not None else 0.0
         ),
-        current_trust=(
-            req.current_trust if req.current_trust is not None else 0.0
-        ),
+        current_trust=(req.current_trust if req.current_trust is not None else 0.0),
         current_mood=req.current_mood or "neutral",
         previous_affinity=req.previous_affinity,
         previous_trust=req.previous_trust,
@@ -1418,7 +1561,11 @@ def simulate_event(
         npc_response=req.npc_response,
         character_relationships=req.character_relationships,
         event_data={
-            **(json.loads(state["context_data"]) if state and state.get("context_data") else {}),
+            **(
+                json.loads(state["context_data"])
+                if state and state.get("context_data")
+                else {}
+            ),
             **req.event_data,
         },
         world_time=req.world_time,
@@ -1464,7 +1611,9 @@ def run_due_event_schedules(
 ):
     """手动检查并执行到期的时间驱动事件。仅管理员可触发，防止被用来刷 LLM 预算。"""
     try:
-        results = event_runtime.run_due_time_events(limit=limit, player_id=current_user_id)
+        results = event_runtime.run_due_time_events(
+            limit=limit, player_id=current_user_id
+        )
     except Exception:
         logger.exception("执行调度失败")
         raise HTTPException(status_code=500, detail="执行调度失败")
@@ -1508,14 +1657,16 @@ def list_event_context_states(
             context_data = json.loads(row["context_data"])
         except Exception:
             context_data = {}
-        result.append(EventContextStateItem(
-            event_id=row["event_id"],
-            character_id=row["character_id"],
-            player_id=row["player_id"],
-            context_data=context_data,
-            status=row.get("status") or "active",
-            progress=float(row.get("progress") or 0.0),
-            last_session_id=row.get("last_session_id"),
-            updated_at=row.get("updated_at"),
-        ))
+        result.append(
+            EventContextStateItem(
+                event_id=row["event_id"],
+                character_id=row["character_id"],
+                player_id=row["player_id"],
+                context_data=context_data,
+                status=row.get("status") or "active",
+                progress=float(row.get("progress") or 0.0),
+                last_session_id=row.get("last_session_id"),
+                updated_at=row.get("updated_at"),
+            )
+        )
     return result

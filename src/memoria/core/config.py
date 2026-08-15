@@ -16,10 +16,9 @@ class Configs(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env", 
-        env_file_encoding="utf-8", 
-        extra="ignore")
-    
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
     # LLM 配置
     llm_base_url: str = "https://api.deepseek.com/v1"
     llm_api_key: SecretStr = ""
@@ -28,7 +27,7 @@ class Configs(BaseSettings):
     llm_timeout_seconds: float = Field(default=45.0, gt=0, le=300)
     llm_light_timeout_seconds: float = Field(default=12.0, gt=0, le=300)
     light_task_max_output_tokens: int = Field(default=400, ge=1, le=4096)
-    
+
     # 轻量任务专用 LLM 配置（可选，留空则使用主 LLM）
     llm_light_base_url: str = ""
     llm_light_api_key: SecretStr = ""
@@ -36,7 +35,9 @@ class Configs(BaseSettings):
     # Speech 配置（与角色对话模型独立）
     # speech_provider / speech_api_key / speech_base_url / speech_timeout_seconds
     # remain as a deprecated compatibility fallback for pre-split deployments.
-    speech_provider: Literal["openai", "openai_compatible", "mimo", "minimax"] = "openai"
+    speech_provider: Literal["openai", "openai_compatible", "mimo", "minimax"] = (
+        "openai"
+    )
     speech_api_key: SecretStr = ""
     speech_base_url: str = "https://api.openai.com/v1"
 
@@ -68,7 +69,7 @@ class Configs(BaseSettings):
     speech_custom_voice_upload_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1024)
     speech_cache_max_age_seconds: int = Field(default=7 * 24 * 60 * 60, ge=0)
     speech_cache_max_bytes: int = Field(default=512 * 1024 * 1024, ge=0)
-    
+
     # 应用配置
     # development | production。production 下强制 Secure Cookie，并关闭进程内 token 回退。
     memoria_env: Literal["development", "production"] = "development"
@@ -82,8 +83,8 @@ class Configs(BaseSettings):
     # 请求体总量上限，必须大于最大的单文件上传限制（默认 STT 的 25 MB）。
     # 仅在声明了 Content-Length 时生效；chunked 传输仍需网关侧兜底。
     max_request_body_bytes: int = Field(default=32 * 1024 * 1024, ge=1024)
-    short_term_memory_turns: int = Field(default = 8, ge = 1, le = 50)
-    long_term_memory_interval_turns: int = Field(default = 5, ge = 1, le = 50)
+    short_term_memory_turns: int = Field(default=8, ge=1, le=50)
+    long_term_memory_interval_turns: int = Field(default=5, ge=1, le=50)
     memory_curve_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices(
@@ -197,16 +198,16 @@ class Configs(BaseSettings):
             "relationship_delta_max",
         ),
     )
-    max_output_tokens: int = Field(default = 400, ge = 1, le = 4096)
+    max_output_tokens: int = Field(default=400, ge=1, le=4096)
     world_clock_default_timezone: str = "UTC"
     world_clock_scheduler_interval_seconds: float = Field(default=30.0, gt=0)
     world_clock_scheduler_lease_seconds: int = Field(default=90, ge=5)
-    
+
     # 向量数据库配置
     vector_db_path: str = "./data/chroma_db"
     embedding_model: str = "./models/sentence-transformers/all-MiniLM-L6-v2"
     embedding_model_revision: str = ""
-    vector_search_top_k: int = Field(default = 10, ge = 1, le = 50)
+    vector_search_top_k: int = Field(default=10, ge=1, le=50)
 
     # 世界观知识库 / RAG 配置
     knowledge_storage_path: str = "./data/knowledge"
@@ -221,7 +222,7 @@ class Configs(BaseSettings):
     knowledge_chunk_target_tokens: int = Field(default=200, ge=64, le=230)
     knowledge_chunk_overlap_tokens: int = Field(default=36, ge=0, le=80)
     knowledge_chunk_max_tokens: int = Field(default=240, ge=128, le=256)
-    
+
     @model_validator(mode="after")
     def _apply_production_security_defaults(self) -> "Configs":
         """生产环境默认启用 Secure Cookie，避免明文 HTTP 下误配。"""
@@ -251,9 +252,11 @@ class Configs(BaseSettings):
         获取轻量模型名称，如果未配置则返回默认值。
         """
         return self.llm_light_model or self.llm_model
-        
+
+
 @lru_cache
 def get_config() -> Configs:
     return Configs()
+
 
 configs = get_config()

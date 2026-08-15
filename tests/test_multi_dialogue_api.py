@@ -1,6 +1,7 @@
 """
 Multi-dialogue API behavior tests.
 """
+
 import sys
 from pathlib import Path
 
@@ -48,19 +49,25 @@ class FakeBackgroundTasks:
 def _patch_multi_summary(monkeypatch, multi_dialogue, saved_summary):
     placeholder_summaries = []
     saved_impressions = []
-    monkeypatch.setattr(multi_dialogue.repository, "get_session_summary", lambda session_id: None)
+    monkeypatch.setattr(
+        multi_dialogue.repository, "get_session_summary", lambda session_id: None
+    )
     monkeypatch.setattr(
         multi_dialogue.repository,
         "get_multi_character_history",
-        lambda session_id, limit_messages=None, created_after=None: [
-            {
-                "role": "user" if i % 2 == 0 else "assistant",
-                "content": f"制定计划 {i}",
-                "character_id": None if i % 2 == 0 else "c1",
-                "character_name": None if i % 2 == 0 else "角色一",
-            }
-            for i in range(7)
-        ] if limit_messages is None else [],
+        lambda session_id, limit_messages=None, created_after=None: (
+            [
+                {
+                    "role": "user" if i % 2 == 0 else "assistant",
+                    "content": f"制定计划 {i}",
+                    "character_id": None if i % 2 == 0 else "c1",
+                    "character_name": None if i % 2 == 0 else "角色一",
+                }
+                for i in range(7)
+            ]
+            if limit_messages is None
+            else []
+        ),
     )
     monkeypatch.setattr(
         multi_dialogue.repository,
@@ -85,12 +92,14 @@ def _patch_multi_summary(monkeypatch, multi_dialogue, saved_summary):
         "generate_multi_character_insights",
         lambda **kwargs: {
             "summary": "玩家和角色一制定了侦查计划。",
-            "character_impressions": [{
-                "observer_id": "c1",
-                "target_id": "c2",
-                "impression": "角色一认为角色二很可靠",
-                "importance": 0.7,
-            }],
+            "character_impressions": [
+                {
+                    "observer_id": "c1",
+                    "target_id": "c2",
+                    "impression": "角色一认为角色二很可靠",
+                    "importance": 0.7,
+                }
+            ],
         },
     )
     monkeypatch.setattr(
@@ -236,7 +245,9 @@ async def test_multi_dialogue_history_uses_incremental_message_id(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_mark_group_thread_read_handles_not_found_forbidden_and_success(monkeypatch):
+async def test_mark_group_thread_read_handles_not_found_forbidden_and_success(
+    monkeypatch,
+):
     from memoria.api import multi_dialogue
 
     monkeypatch.setattr(
@@ -267,10 +278,13 @@ async def test_mark_group_thread_read_handles_not_found_forbidden_and_success(mo
     monkeypatch.setattr(
         multi_dialogue.repository,
         "mark_group_thread_notifications_read",
-        lambda player_id, group_thread_id: marked.update(
-            player_id=player_id,
-            group_thread_id=group_thread_id,
-        ) or 2,
+        lambda player_id, group_thread_id: (
+            marked.update(
+                player_id=player_id,
+                group_thread_id=group_thread_id,
+            )
+            or 2
+        ),
     )
     response = multi_dialogue.mark_group_thread_read(
         "thread-1",
@@ -285,8 +299,16 @@ async def test_mark_group_thread_read_handles_not_found_forbidden_and_success(mo
 async def test_start_multi_session_rejects_duplicate_group_name(monkeypatch):
     from memoria.api import multi_dialogue
 
-    monkeypatch.setattr(multi_dialogue.repository, "is_character_card_active", lambda owner_user_id, character_id: True)
-    monkeypatch.setattr(multi_dialogue.repository, "player_group_name_exists", lambda player_id, group_name: True)
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "is_character_card_active",
+        lambda owner_user_id, character_id: True,
+    )
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "player_group_name_exists",
+        lambda player_id, group_name: True,
+    )
 
     with pytest.raises(HTTPException) as exc:
         multi_dialogue.start_multi_session(
@@ -354,8 +376,14 @@ async def test_end_multi_session_accepts_json_body(monkeypatch):
     ended = {}
     saved_summary = {}
 
-    monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: _multi_session(session_id))
-    _, saved_impressions = _patch_multi_summary(monkeypatch, multi_dialogue, saved_summary)
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session",
+        lambda session_id: _multi_session(session_id),
+    )
+    _, saved_impressions = _patch_multi_summary(
+        monkeypatch, multi_dialogue, saved_summary
+    )
     monkeypatch.setattr(
         multi_dialogue.repository,
         "end_session",
@@ -395,8 +423,16 @@ def test_dialogue_end_routes_multi_session_to_group_summary(monkeypatch):
     ended = {}
     saved_summary = {}
 
-    monkeypatch.setattr(dialogue.repository, "get_session", lambda session_id: _multi_session(session_id))
-    monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: _multi_session(session_id))
+    monkeypatch.setattr(
+        dialogue.repository,
+        "get_session",
+        lambda session_id: _multi_session(session_id),
+    )
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session",
+        lambda session_id: _multi_session(session_id),
+    )
     _patch_multi_summary(monkeypatch, multi_dialogue, saved_summary)
     monkeypatch.setattr(
         multi_dialogue.repository,
@@ -404,7 +440,9 @@ def test_dialogue_end_routes_multi_session_to_group_summary(monkeypatch):
         lambda session_id: ended.update(session_id=session_id),
     )
 
-    monkeypatch.setattr(dialogue.repository, "get_session_summary", lambda session_id: None)
+    monkeypatch.setattr(
+        dialogue.repository, "get_session_summary", lambda session_id: None
+    )
 
     tasks = FakeBackgroundTasks()
     response = dialogue.session_end(
@@ -431,7 +469,11 @@ async def test_end_multi_session_backfills_summary_when_already_ended(monkeypatc
     end_called = False
     saved_summary = {}
 
-    monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: _multi_session(session_id, status="ended"))
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session",
+        lambda session_id: _multi_session(session_id, status="ended"),
+    )
     _patch_multi_summary(monkeypatch, multi_dialogue, saved_summary)
 
     def fake_end_session(session_id):
@@ -464,7 +506,11 @@ async def test_end_multi_session_summary_failure_does_not_block_end(monkeypatch)
     end_called = False
     placeholder_summaries = []
 
-    monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: _multi_session(session_id))
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session",
+        lambda session_id: _multi_session(session_id),
+    )
     _patch_multi_summary(monkeypatch, multi_dialogue, {})
 
     def fake_save_summary(**kwargs):
@@ -474,7 +520,11 @@ async def test_end_multi_session_summary_failure_does_not_block_end(monkeypatch)
         nonlocal end_called
         end_called = True
 
-    monkeypatch.setattr(multi_dialogue.multi_character_memory, "save_multi_character_summary", fake_save_summary)
+    monkeypatch.setattr(
+        multi_dialogue.multi_character_memory,
+        "save_multi_character_summary",
+        fake_save_summary,
+    )
     monkeypatch.setattr(
         multi_dialogue.repository,
         "save_session_summary",
@@ -505,22 +555,32 @@ async def test_end_multi_session_empty_summary_still_processes_impressions(monke
 
     saved_summary = {}
 
-    monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: _multi_session(session_id))
-    _, saved_impressions = _patch_multi_summary(monkeypatch, multi_dialogue, saved_summary)
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session",
+        lambda session_id: _multi_session(session_id),
+    )
+    _, saved_impressions = _patch_multi_summary(
+        monkeypatch, multi_dialogue, saved_summary
+    )
     monkeypatch.setattr(
         multi_dialogue.multi_character_memory,
         "generate_multi_character_insights",
         lambda **kwargs: {
             "summary": "  ",
-            "character_impressions": [{
-                "observer_id": "c1",
-                "target_id": "c2",
-                "impression": "角色一认为角色二很可靠",
-                "importance": 0.7,
-            }],
+            "character_impressions": [
+                {
+                    "observer_id": "c1",
+                    "target_id": "c2",
+                    "impression": "角色一认为角色二很可靠",
+                    "importance": 0.7,
+                }
+            ],
         },
     )
-    monkeypatch.setattr(multi_dialogue.repository, "end_session", lambda session_id: None)
+    monkeypatch.setattr(
+        multi_dialogue.repository, "end_session", lambda session_id: None
+    )
 
     tasks = FakeBackgroundTasks()
     response = multi_dialogue.end_multi_session(
@@ -542,18 +602,31 @@ async def test_end_multi_session_empty_summary_still_processes_impressions(monke
 
 
 @pytest.mark.asyncio
-async def test_end_multi_session_skips_summary_when_message_count_not_enough(monkeypatch):
+async def test_end_multi_session_skips_summary_when_message_count_not_enough(
+    monkeypatch,
+):
     from memoria.api import multi_dialogue
 
     ended = {}
     saved_summary = {}
     short_history = [
-        {"role": "user", "content": f"消息 {i}", "character_id": None, "character_name": None}
+        {
+            "role": "user",
+            "content": f"消息 {i}",
+            "character_id": None,
+            "character_name": None,
+        }
         for i in range(6)
     ]
 
-    monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: _multi_session(session_id))
-    monkeypatch.setattr(multi_dialogue.repository, "get_session_summary", lambda session_id: None)
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session",
+        lambda session_id: _multi_session(session_id),
+    )
+    monkeypatch.setattr(
+        multi_dialogue.repository, "get_session_summary", lambda session_id: None
+    )
     monkeypatch.setattr(
         multi_dialogue.repository,
         "get_multi_character_history",
@@ -602,8 +675,14 @@ async def test_end_multi_session_chunks_long_history_before_saving_summary(monke
         for i in range(multi_dialogue.SUMMARY_CHUNK_MESSAGE_LIMIT * 2 + 5)
     ]
 
-    monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: _multi_session(session_id))
-    monkeypatch.setattr(multi_dialogue.repository, "get_session_summary", lambda session_id: None)
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session",
+        lambda session_id: _multi_session(session_id),
+    )
+    monkeypatch.setattr(
+        multi_dialogue.repository, "get_session_summary", lambda session_id: None
+    )
     monkeypatch.setattr(
         multi_dialogue.repository,
         "get_multi_character_history",
@@ -624,21 +703,32 @@ async def test_end_multi_session_chunks_long_history_before_saving_summary(monke
     )
 
     def fake_generate_summary(**kwargs):
-        summary_calls.append({"session_id": kwargs["session_id"], "message_count": len(kwargs["messages"])})
+        summary_calls.append(
+            {
+                "session_id": kwargs["session_id"],
+                "message_count": len(kwargs["messages"]),
+            }
+        )
         return f"分段摘要 {len(summary_calls)}"
 
     def fake_generate_insights(**kwargs):
-        insight_calls.append({
-            "session_id": kwargs["session_id"],
-            "summary_message_count": len(kwargs["summary_messages"]),
-            "impression_message_count": len(kwargs["impression_messages"]),
-        })
+        insight_calls.append(
+            {
+                "session_id": kwargs["session_id"],
+                "summary_message_count": len(kwargs["summary_messages"]),
+                "impression_message_count": len(kwargs["impression_messages"]),
+            }
+        )
         return {
             "summary": "整场群聊最终摘要",
             "character_impressions": [],
         }
 
-    monkeypatch.setattr(multi_dialogue.multi_character_memory, "generate_multi_character_summary", fake_generate_summary)
+    monkeypatch.setattr(
+        multi_dialogue.multi_character_memory,
+        "generate_multi_character_summary",
+        fake_generate_summary,
+    )
     monkeypatch.setattr(
         multi_dialogue.multi_character_memory,
         "generate_multi_character_insights",
@@ -649,7 +739,9 @@ async def test_end_multi_session_chunks_long_history_before_saving_summary(monke
         "save_multi_character_summary",
         lambda **kwargs: saved_summary.update(kwargs),
     )
-    monkeypatch.setattr(multi_dialogue.repository, "save_session_summary", lambda **kwargs: None)
+    monkeypatch.setattr(
+        multi_dialogue.repository, "save_session_summary", lambda **kwargs: None
+    )
     monkeypatch.setattr(
         multi_dialogue.multi_character_memory,
         "save_extracted_character_impressions",
@@ -676,11 +768,13 @@ async def test_end_multi_session_chunks_long_history_before_saving_summary(monke
     func, args, kwargs = tasks.tasks[0]
     func(*args, **kwargs)
     assert [call["message_count"] for call in summary_calls] == [80, 80, 5]
-    assert insight_calls == [{
-        "session_id": "session-1",
-        "summary_message_count": 3,
-        "impression_message_count": 80,
-    }]
+    assert insight_calls == [
+        {
+            "session_id": "session-1",
+            "summary_message_count": 3,
+            "impression_message_count": 80,
+        }
+    ]
     assert saved_summary["summary_text"] == "整场群聊最终摘要"
     assert saved_summary["message_count"] == len(long_history)
     assert len(saved_impressions) == 1
@@ -713,9 +807,12 @@ def test_multi_summary_reuses_exact_completed_summary(monkeypatch):
     )
 
     assert saved_summary == {}
-    assert multi_dialogue.performance.snapshot()["counters"][
-        "llm.calls_avoided.summary_reuse"
-    ] == 1
+    assert (
+        multi_dialogue.performance.snapshot()["counters"][
+            "llm.calls_avoided.summary_reuse"
+        ]
+        == 1
+    )
 
 
 def test_multi_summary_regenerates_stale_completed_summary(monkeypatch):
@@ -748,13 +845,17 @@ def test_multi_summary_regenerates_stale_completed_summary(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_continue_multi_session_creates_new_active_session_without_reactivating_old(monkeypatch):
+async def test_continue_multi_session_creates_new_active_session_without_reactivating_old(
+    monkeypatch,
+):
     from memoria.api import multi_dialogue
 
     created = {}
     ended_source = {**_multi_session("old-session", status="ended"), "locale": "en-US"}
 
-    monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: ended_source)
+    monkeypatch.setattr(
+        multi_dialogue.repository, "get_session", lambda session_id: ended_source
+    )
     monkeypatch.setattr(
         multi_dialogue.repository,
         "get_multi_character_thread_sessions",
@@ -818,7 +919,9 @@ async def test_continue_multi_session_creates_new_active_session_without_reactiv
 
 
 @pytest.mark.asyncio
-async def test_continue_multi_session_reuses_session_created_after_initial_lookup(monkeypatch):
+async def test_continue_multi_session_reuses_session_created_after_initial_lookup(
+    monkeypatch,
+):
     from memoria.api import multi_dialogue
 
     ended_source = {**_multi_session("old-session", status="ended"), "locale": "en-US"}
@@ -929,11 +1032,17 @@ async def test_continue_multi_session_rejects_disabled_participants(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_continue_multi_session_reuses_existing_active_thread_session(monkeypatch):
+async def test_continue_multi_session_reuses_existing_active_thread_session(
+    monkeypatch,
+):
     from memoria.api import multi_dialogue
 
     create_called = False
-    monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: _multi_session(session_id, status="ended"))
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session",
+        lambda session_id: _multi_session(session_id, status="ended"),
+    )
     monkeypatch.setattr(
         multi_dialogue.repository,
         "get_multi_character_thread_sessions",
@@ -991,7 +1100,11 @@ async def test_continue_multi_session_reuses_existing_active_thread_session(monk
 async def test_multi_dialogue_turn_wraps_discussion_response(monkeypatch):
     from memoria.api import multi_dialogue
 
-    monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: _multi_session(session_id))
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session",
+        lambda session_id: _multi_session(session_id),
+    )
     monkeypatch.setattr(
         multi_dialogue.repository,
         "get_session_participants",
@@ -1036,7 +1149,10 @@ async def test_multi_dialogue_turn_wraps_discussion_response(monkeypatch):
     body = response.model_dump()
     assert body["discussion_mode"] is True
     assert body["total_speakers"] == 2
-    assert [r["dialogue"] for r in body["responses"]] == ["我负责侦查。", "我准备装备。"]
+    assert [r["dialogue"] for r in body["responses"]] == [
+        "我负责侦查。",
+        "我准备装备。",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1099,7 +1215,11 @@ async def test_trigger_interaction_rejects_ended_session(monkeypatch):
 async def test_multi_dialogue_turn_rejects_other_player_session(monkeypatch):
     from memoria.api import multi_dialogue
 
-    monkeypatch.setattr(multi_dialogue.repository, "get_session", lambda session_id: _multi_session(session_id))
+    monkeypatch.setattr(
+        multi_dialogue.repository,
+        "get_session",
+        lambda session_id: _multi_session(session_id),
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         multi_dialogue.multi_dialogue_turn(

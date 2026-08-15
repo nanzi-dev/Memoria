@@ -1,6 +1,7 @@
 """
 Phase 5 系统级测试：健康检查、配置校验、速率限制、懒加载
 """
+
 import asyncio
 import json
 import logging
@@ -149,6 +150,7 @@ class TestRateLimiting:
         import uuid
 
         from memoria.main import _check_rate_limit
+
         pid = f"rl_test_{uuid.uuid4().hex[:6]}"
         # First requests should pass
         for _ in range(10):
@@ -158,6 +160,7 @@ class TestRateLimiting:
         import uuid
 
         from memoria.main import _check_rate_limit
+
         pid = f"rl_max_{uuid.uuid4().hex[:6]}"
         # Fill to limit
         for _ in range(60):
@@ -169,6 +172,7 @@ class TestRateLimiting:
         import uuid
 
         from memoria.main import _check_rate_limit
+
         p1 = f"p1_{uuid.uuid4().hex[:6]}"
         p2 = f"p2_{uuid.uuid4().hex[:6]}"
         for _ in range(60):
@@ -225,13 +229,17 @@ class TestRateLimiting:
 
         assert _get_rate_limit_key(request) == "ip:127.0.0.1"
 
+
 class TestLazyLLMClient:
     def test_lazy_init_no_instantiation(self):
         """LLM client should not instantiate OpenAI on import"""
         # If llm_client imported without error, lazy init works
         try:
             from memoria.core import llm_client
-            assert hasattr(llm_client, '_get_client'), "Should have _get_client function"
+
+            assert hasattr(llm_client, "_get_client"), (
+                "Should have _get_client function"
+            )
         except Exception as e:
             # Only fail if it's not a proxy/auth error
             if "socks" not in str(e).lower() and "api_key" not in str(e).lower():

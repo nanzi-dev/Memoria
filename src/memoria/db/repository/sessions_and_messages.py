@@ -1,4 +1,5 @@
 """Domain repository functions (split from monolith)."""
+
 from __future__ import annotations
 
 # Standard/third-party imports used across repository domains.
@@ -79,8 +80,9 @@ def get_or_create_active_session(
             conn,
             f"active-single-session:{player_id}:{character_id}",
         )
-        row = conn.execute(
-            text("""
+        row = (
+            conn.execute(
+                text("""
             SELECT *
             FROM session
             WHERE player_id = :player_id
@@ -90,8 +92,11 @@ def get_or_create_active_session(
             ORDER BY created_at DESC, session_id DESC
             LIMIT 1
             """),
-            {"player_id": player_id, "character_id": character_id},
-        ).mappings().fetchone()
+                {"player_id": player_id, "character_id": character_id},
+            )
+            .mappings()
+            .fetchone()
+        )
         if row is not None:
             return dict(row), False
 
@@ -113,21 +118,30 @@ def get_or_create_active_session(
                 "story_id": (story_id or "").strip() or None,
             },
         )
-        row = conn.execute(
-            text("SELECT * FROM session WHERE session_id = :session_id"),
-            {"session_id": session_id},
-        ).mappings().fetchone()
+        row = (
+            conn.execute(
+                text("SELECT * FROM session WHERE session_id = :session_id"),
+                {"session_id": session_id},
+            )
+            .mappings()
+            .fetchone()
+        )
         return dict(row), True
 
 
 def get_session(session_id: str) -> dict | None:
     with db_session() as conn:
-        row = conn.execute(
-            text("SELECT * FROM session WHERE session_id = :session_id"),
-            {"session_id": session_id},
-        ).mappings().fetchone()
+        row = (
+            conn.execute(
+                text("SELECT * FROM session WHERE session_id = :session_id"),
+                {"session_id": session_id},
+            )
+            .mappings()
+            .fetchone()
+        )
 
     return _row_to_dict(row)
+
 
 def end_session(session_id: str):
     """标记会话为结束状态"""
@@ -142,12 +156,15 @@ def end_session(session_id: str):
         )
 
 
-def get_latest_active_session(player_id: str, character_id: str | None = None) -> dict | None:
+def get_latest_active_session(
+    player_id: str, character_id: str | None = None
+) -> dict | None:
     """获取玩家最近的 active session（用于断线恢复）"""
     with db_session() as conn:
         if character_id:
-            row = conn.execute(
-                text("""
+            row = (
+                conn.execute(
+                    text("""
                 SELECT
                     s.*,
                     (
@@ -167,14 +184,18 @@ def get_latest_active_session(player_id: str, character_id: str | None = None) -
                     s.created_at) DESC
                 LIMIT 1
                 """),
-                {
-                    "player_id": player_id,
-                    "character_id": character_id,
-                },
-            ).mappings().fetchone()
+                    {
+                        "player_id": player_id,
+                        "character_id": character_id,
+                    },
+                )
+                .mappings()
+                .fetchone()
+            )
         else:
-            row = conn.execute(
-                text("""
+            row = (
+                conn.execute(
+                    text("""
                 SELECT
                     s.*,
                     (
@@ -192,8 +213,11 @@ def get_latest_active_session(player_id: str, character_id: str | None = None) -
                     s.created_at) DESC
                 LIMIT 1
                 """),
-                {"player_id": player_id},
-            ).mappings().fetchone()
+                    {"player_id": player_id},
+                )
+                .mappings()
+                .fetchone()
+            )
     return _row_to_dict(row)
 
 
@@ -213,8 +237,9 @@ def get_latest_session_locale(
             return preferred.get("locale") or "zh-CN"
 
     with db_session() as conn:
-        row = conn.execute(
-            text("""
+        row = (
+            conn.execute(
+                text("""
             SELECT locale
             FROM session
             WHERE character_id = :character_id AND player_id = :player_id
@@ -222,8 +247,11 @@ def get_latest_session_locale(
             ORDER BY created_at DESC, session_id DESC
             LIMIT 1
             """),
-            {"character_id": character_id, "player_id": player_id},
-        ).mappings().fetchone()
+                {"character_id": character_id, "player_id": player_id},
+            )
+            .mappings()
+            .fetchone()
+        )
     return (row["locale"] if row else None) or "zh-CN"
 
 
@@ -289,17 +317,22 @@ def append_short_term_message(
 def get_short_term_message(session_id: str, message_id: int) -> dict | None:
     """Return one persisted message, scoped to its session."""
     with db_session() as conn:
-        row = conn.execute(
-            text("""
+        row = (
+            conn.execute(
+                text("""
             SELECT *
             FROM short_term_message
             WHERE session_id = :session_id AND id = :message_id
             LIMIT 1
             """),
-            {"session_id": session_id, "message_id": message_id},
-        ).mappings().fetchone()
+                {"session_id": session_id, "message_id": message_id},
+            )
+            .mappings()
+            .fetchone()
+        )
     return _decode_message_row(row) if row else None
-        
+
+
 def get_short_term_history(session_id: str, limit_turns: int) -> list[dict]:
     """
     获取短期记忆（最近 N 轮对话）
@@ -310,16 +343,20 @@ def get_short_term_history(session_id: str, limit_turns: int) -> list[dict]:
     """
 
     with db_session() as conn:
-        rows = conn.execute(
-            text("""
+        rows = (
+            conn.execute(
+                text("""
             SELECT role, content
             FROM short_term_message
             WHERE session_id = :session_id
             ORDER BY id DESC
             LIMIT :limit
             """),
-            {"session_id": session_id, "limit": limit_turns * 2},
-        ).mappings().fetchall()
+                {"session_id": session_id, "limit": limit_turns * 2},
+            )
+            .mappings()
+            .fetchall()
+        )
 
     messages = [{"role": r["role"], "content": r["content"]} for r in rows]
     messages.reverse()
@@ -329,22 +366,27 @@ def get_short_term_history(session_id: str, limit_turns: int) -> list[dict]:
 def get_session_user_turn_count(session_id: str) -> int:
     """获取当前会话已经写入的玩家回合数。"""
     with db_session() as conn:
-        row = conn.execute(
-            text("""
+        row = (
+            conn.execute(
+                text("""
             SELECT COUNT(*) AS turn_count
             FROM short_term_message
             WHERE session_id = :session_id AND role = 'user'
             """),
-            {"session_id": session_id},
-        ).mappings().fetchone()
+                {"session_id": session_id},
+            )
+            .mappings()
+            .fetchone()
+        )
     return int(row["turn_count"]) if row else 0
 
 
 def count_character_user_turns(player_id: str, character_id: str) -> int:
     """Count player turns across every single and group chat involving a character."""
     with db_session() as conn:
-        row = conn.execute(
-            text("""
+        row = (
+            conn.execute(
+                text("""
             SELECT COUNT(*) AS turn_count
             FROM short_term_message m
             INNER JOIN session s ON s.session_id = m.session_id
@@ -365,8 +407,11 @@ def count_character_user_turns(player_id: str, character_id: str) -> int:
                   )
               )
             """),
-            {"player_id": player_id, "character_id": character_id},
-        ).mappings().fetchone()
+                {"player_id": player_id, "character_id": character_id},
+            )
+            .mappings()
+            .fetchone()
+        )
     return int(row["turn_count"]) if row else 0
 
 
@@ -379,11 +424,14 @@ def is_long_term_memory_checkpoint(session_id: str, interval_turns: int) -> bool
 # =========================
 # session 查询（列表页）
 # =========================
-def get_sessions_by_player_and_character(character_id: str, player_id: str) -> list[dict]:
+def get_sessions_by_player_and_character(
+    character_id: str, player_id: str
+) -> list[dict]:
     """查询玩家与角色的所有会话"""
     with db_session() as conn:
-        rows = conn.execute(
-            text("""
+        rows = (
+            conn.execute(
+                text("""
             SELECT
                 s.session_id,
                 s.character_id,
@@ -458,16 +506,20 @@ def get_sessions_by_player_and_character(character_id: str, player_id: str) -> l
                  WHERE m.session_id = s.session_id ORDER BY m.id DESC LIMIT 1),
                 s.created_at) DESC
             """),
-            {"character_id": character_id, "player_id": player_id},
-        ).mappings().fetchall()
+                {"character_id": character_id, "player_id": player_id},
+            )
+            .mappings()
+            .fetchall()
+        )
     return [dict(r) for r in rows]
 
 
 def get_all_player_sessions(player_id: str) -> list[dict]:
     """查询玩家会话；群聊按逻辑线程聚合，单聊保持原有物理会话结果。"""
     with db_session() as conn:
-        single_rows = conn.execute(
-            text("""
+        single_rows = (
+            conn.execute(
+                text("""
             SELECT
                 s.session_id,
                 s.character_id,
@@ -525,19 +577,26 @@ def get_all_player_sessions(player_id: str) -> list[dict]:
                  WHERE m.session_id = s.session_id ORDER BY m.id DESC LIMIT 1),
                 s.created_at) DESC
             """),
-            {"player_id": player_id},
-        ).mappings().fetchall()
+                {"player_id": player_id},
+            )
+            .mappings()
+            .fetchall()
+        )
 
-        group_sessions = conn.execute(
-            text("""
+        group_sessions = (
+            conn.execute(
+                text("""
             SELECT s.*
             FROM session s
             WHERE s.player_id = :player_id AND COALESCE(s.is_multi_character, 0) = 1
             ORDER BY CASE WHEN s.status = 'active' THEN 0 ELSE 1 END,
                      s.created_at DESC, s.session_id DESC
             """),
-            {"player_id": player_id},
-        ).mappings().fetchall()
+                {"player_id": player_id},
+            )
+            .mappings()
+            .fetchall()
+        )
 
         # 批量统计各群聊线程的消息数、最新消息与未读数，避免 N+1 查询。
         message_stats = {
@@ -554,7 +613,9 @@ def get_all_player_sessions(player_id: str) -> list[dict]:
                 GROUP BY COALESCE(sm.group_thread_id, sm.session_id)
                 """),
                 {"player_id": player_id},
-            ).mappings().fetchall()
+            )
+            .mappings()
+            .fetchall()
         }
         latest_ids = [
             stats["latest_message_id"]
@@ -579,7 +640,9 @@ def get_all_player_sessions(player_id: str) -> list[dict]:
                     WHERE id IN ({placeholders})
                     """),
                     latest_params,
-                ).mappings().fetchall()
+                )
+                .mappings()
+                .fetchall()
             }
         unread_stats = {
             row["group_thread_id"]: int(row["unread_count"] or 0)
@@ -593,7 +656,9 @@ def get_all_player_sessions(player_id: str) -> list[dict]:
                 GROUP BY group_thread_id
                 """),
                 {"player_id": player_id},
-            ).mappings().fetchall()
+            )
+            .mappings()
+            .fetchall()
         }
 
         group_rows = []
@@ -607,14 +672,16 @@ def get_all_player_sessions(player_id: str) -> list[dict]:
 
             stats = message_stats.get(thread_id) or {}
             latest = latest_messages.get(stats.get("latest_message_id")) or {}
-            session.update({
-                "group_thread_id": thread_id,
-                "last_message": latest.get("content"),
-                "last_message_at": latest.get("created_at"),
-                "latest_message_id": stats.get("latest_message_id"),
-                "message_count": int(stats.get("message_count") or 0),
-                "unread_count": unread_stats.get(thread_id, 0),
-            })
+            session.update(
+                {
+                    "group_thread_id": thread_id,
+                    "last_message": latest.get("content"),
+                    "last_message_at": latest.get("created_at"),
+                    "latest_message_id": stats.get("latest_message_id"),
+                    "message_count": int(stats.get("message_count") or 0),
+                    "unread_count": unread_stats.get(thread_id, 0),
+                }
+            )
             group_rows.append(session)
 
     rows = [dict(row) for row in single_rows] + group_rows
@@ -632,8 +699,9 @@ def player_group_name_exists(player_id: str, group_name: str) -> bool:
         return False
 
     with db_session() as conn:
-        row = conn.execute(
-            text("""
+        row = (
+            conn.execute(
+                text("""
             SELECT 1
             FROM session
             WHERE player_id = :player_id
@@ -641,26 +709,32 @@ def player_group_name_exists(player_id: str, group_name: str) -> bool:
               AND LOWER(TRIM(group_name)) = LOWER(:group_name)
             LIMIT 1
             """),
-            {"player_id": player_id, "group_name": clean_group_name},
-        ).mappings().fetchone()
+                {"player_id": player_id, "group_name": clean_group_name},
+            )
+            .mappings()
+            .fetchone()
+        )
     return row is not None
 
 
 # =========================
 # 分页消息
 # =========================
-def get_messages_paginated(session_id: str, offset: int, limit: int) -> tuple[list[dict], bool]:
+def get_messages_paginated(
+    session_id: str, offset: int, limit: int
+) -> tuple[list[dict], bool]:
     """
     分页查询消息
-    
+
     策略：倒序获取（最新的在前），前端需要反转顺序显示
     - offset=0, limit=20: 获取最新的20条
     - offset=20, limit=20: 获取次新的20条（用于"加载更多"）
     """
     with db_session() as conn:
         # 倒序查询（最新的在前）
-        rows = conn.execute(
-            text("""
+        rows = (
+            conn.execute(
+                text("""
             SELECT id AS message_id, role, content, action,
                    affinity_delta, trust_delta,
                    current_affinity, current_trust, current_mood,
@@ -671,12 +745,15 @@ def get_messages_paginated(session_id: str, offset: int, limit: int) -> tuple[li
             ORDER BY id DESC
             LIMIT :limit OFFSET :offset
             """),
-            {
-                "session_id": session_id,
-                "limit": limit + 1,
-                "offset": offset,
-            },
-        ).mappings().fetchall()
+                {
+                    "session_id": session_id,
+                    "limit": limit + 1,
+                    "offset": offset,
+                },
+            )
+            .mappings()
+            .fetchall()
+        )
 
     has_more = len(rows) > limit
     # 取前 limit 条，并反转顺序（变回正序）
@@ -688,8 +765,9 @@ def get_messages_paginated(session_id: str, offset: int, limit: int) -> tuple[li
 def get_session_messages(session_id: str, limit: int = 1000) -> list[dict]:
     """按时间正序获取单个 session 的消息，用于回放和质量评分。"""
     with db_session() as conn:
-        rows = conn.execute(
-            text("""
+        rows = (
+            conn.execute(
+                text("""
             SELECT id AS message_id, role, content, character_id, character_name,
                    action, affinity_delta, trust_delta,
                    current_affinity, current_trust, current_mood,
@@ -700,8 +778,11 @@ def get_session_messages(session_id: str, limit: int = 1000) -> list[dict]:
             ORDER BY id ASC
             LIMIT :limit
             """),
-            {"session_id": session_id, "limit": limit},
-        ).mappings().fetchall()
+                {"session_id": session_id, "limit": limit},
+            )
+            .mappings()
+            .fetchall()
+        )
     return [_decode_message_row(r) for r in rows]
 
 
@@ -734,8 +815,9 @@ def get_messages_by_player_and_character(
         params["limit"] = limit + 1
         params["offset"] = offset
 
-        rows = conn.execute(
-            text(f"""
+        rows = (
+            conn.execute(
+                text(f"""
             SELECT
                 m.id AS message_id,
                 m.role,
@@ -764,8 +846,11 @@ def get_messages_by_player_and_character(
             LIMIT :limit
             OFFSET :offset
             """),
-            params,
-        ).mappings().fetchall()
+                params,
+            )
+            .mappings()
+            .fetchall()
+        )
 
     has_more = len(rows) > limit
 
@@ -781,8 +866,9 @@ def get_last_character_interaction_world_at(
 ) -> str | None:
     """Return the latest world-semantic interaction timestamp for a character."""
     with db_session() as conn:
-        row = conn.execute(
-            text("""
+        row = (
+            conn.execute(
+                text("""
             SELECT COALESCE(m.world_created_at, m.created_at) AS interaction_at
             FROM short_term_message m
             INNER JOIN session s ON s.session_id = m.session_id
@@ -797,8 +883,11 @@ def get_last_character_interaction_world_at(
             ORDER BY m.id DESC
             LIMIT 1
             """),
-            {"player_id": player_id, "character_id": character_id},
-        ).mappings().fetchone()
+                {"player_id": player_id, "character_id": character_id},
+            )
+            .mappings()
+            .fetchone()
+        )
     return row["interaction_at"] if row else None
 
 
@@ -811,7 +900,7 @@ def save_session_summary(
     player_id: str,
     summary_text: str,
     message_count: int,
-    summary_status: str = "completed"
+    summary_status: str = "completed",
 ):
     """
     保存会话摘要。同一 session+character+player 只保留一条。
@@ -838,31 +927,36 @@ def save_session_summary(
                 "created_at": _now(),
             },
         )
-        
+
+
 def get_session_summary(session_id: str) -> dict | None:
     """获取指定会话的摘要"""
     with db_session() as conn:
-        row = conn.execute(
-            text("""
+        row = (
+            conn.execute(
+                text("""
             SELECT * FROM session_summary
             WHERE session_id = :session_id
             ORDER BY created_at DESC
             LIMIT 1
             """),
-            {"session_id": session_id},
-        ).mappings().fetchone()
-        
+                {"session_id": session_id},
+            )
+            .mappings()
+            .fetchone()
+        )
+
     return _row_to_dict(row)
 
+
 def get_recent_summaries(
-    character_id: str,
-    player_id: str,
-    limit: int = 5
+    character_id: str, player_id: str, limit: int = 5
 ) -> list[dict]:
     """获取角色与玩家的最近会话摘要"""
     with db_session() as conn:
-        rows = conn.execute(
-            text("""
+        rows = (
+            conn.execute(
+                text("""
             SELECT ss.*, s.created_at as session_created_at
             FROM session_summary ss
             JOIN session s ON ss.session_id = s.session_id
@@ -870,11 +964,13 @@ def get_recent_summaries(
             ORDER BY ss.created_at DESC
             LIMIT :limit
             """),
-            {"character_id": character_id, "player_id": player_id, "limit": limit},
-        ).mappings().fetchall()
-        
-    return [dict(r) for r in rows]
+                {"character_id": character_id, "player_id": player_id, "limit": limit},
+            )
+            .mappings()
+            .fetchall()
+        )
 
+    return [dict(r) for r in rows]
 
 
 # =========================
@@ -986,7 +1082,7 @@ def get_character_impressions(
     observer_character_id: str,
     target_character_id: str,
     limit: int = 10,
-    created_after: str | None = None
+    created_after: str | None = None,
 ) -> list[dict]:
     """获取观察者对目标角色的定向印象。"""
     if not owner_user_id:
@@ -1007,8 +1103,9 @@ def get_character_impressions(
         params["created_after"] = created_after
     params["limit"] = limit
     with db_session() as conn:
-        rows = conn.execute(
-            text(f"""
+        rows = (
+            conn.execute(
+                text(f"""
             SELECT id, observer_character_id, target_character_id,
                    memory_text, context, importance, created_at
             FROM shared_memory
@@ -1016,7 +1113,11 @@ def get_character_impressions(
             ORDER BY importance DESC, last_referenced DESC
             LIMIT :limit
             """),
-            params).mappings().fetchall()
+                params,
+            )
+            .mappings()
+            .fetchall()
+        )
     return [dict(r) for r in rows]
 
 
@@ -1029,8 +1130,9 @@ def get_observer_character_impressions(
     if not owner_user_id:
         raise ValueError("owner_user_id is required for shared_memory isolation")
     with db_session() as conn:
-        rows = conn.execute(
-            text("""
+        rows = (
+            conn.execute(
+                text("""
             SELECT id, owner_user_id, observer_character_id,
                    target_character_id, memory_text, context, importance,
                    created_at
@@ -1041,12 +1143,15 @@ def get_observer_character_impressions(
             ORDER BY importance DESC, last_referenced DESC
             LIMIT :limit
             """),
-            {
-                "owner_user_id": owner_user_id,
-                "observer_character_id": observer_character_id,
-                "limit": limit,
-            },
-        ).mappings().fetchall()
+                {
+                    "owner_user_id": owner_user_id,
+                    "observer_character_id": observer_character_id,
+                    "limit": limit,
+                },
+            )
+            .mappings()
+            .fetchall()
+        )
     return [dict(r) for r in rows]
 
 
@@ -1113,15 +1218,20 @@ def save_group_memory(
 ) -> str:
     """保存多角色会话的群体记忆。含去重检查。"""
     import uuid
+
     memory_id = str(uuid.uuid4())
     participants_json = json.dumps(participants) if participants else None
     session = get_session(session_id)
 
     with db_session() as conn:
         existing = _dedup_check(
-            conn, "group_memory", "memory_text", memory_text,
+            conn,
+            "group_memory",
+            "memory_text",
+            memory_text,
             "session_id = :session_id",
-            {"session_id": session_id}, threshold=0.75
+            {"session_id": session_id},
+            threshold=0.75,
         )
         if existing:
             new_imp = max(existing.get("importance", 0), importance)
@@ -1165,20 +1275,20 @@ def save_group_memory(
         and participants
         and session
     ):
-            for character_id in dict.fromkeys(participants):
-                try:
-                    record_memory_curve_evidence(
-                        owner_user_id=session["player_id"],
-                        character_id=character_id,
-                        memory_type="group_experience",
-                        memory_id=memory_id,
-                        evidence_id=evidence_id,
-                        world_occurred_at=world_occurred_at,
-                        source_kind="model_inference",
-                        importance=importance,
-                    )
-                except Exception as exc:
-                    logger.warning("群体记忆曲线写入失败，保留原始记忆: %s", exc)
+        for character_id in dict.fromkeys(participants):
+            try:
+                record_memory_curve_evidence(
+                    owner_user_id=session["player_id"],
+                    character_id=character_id,
+                    memory_type="group_experience",
+                    memory_id=memory_id,
+                    evidence_id=evidence_id,
+                    world_occurred_at=world_occurred_at,
+                    source_kind="model_inference",
+                    importance=importance,
+                )
+            except Exception as exc:
+                logger.warning("群体记忆曲线写入失败，保留原始记忆: %s", exc)
     return memory_id
 
 
@@ -1201,13 +1311,19 @@ def get_session_group_memories(
         params["created_after"] = created_after
     params["limit"] = limit
     with db_session() as conn:
-        rows = conn.execute(
-            text(f"SELECT gm.id, gm.memory_text, gm.participants, gm.context, "
-            f"gm.importance, gm.created_at FROM {table_clause} "
-            f"WHERE {where_clause} "
-            "ORDER BY gm.importance DESC, gm.last_referenced DESC LIMIT :limit"),
-            params,
-        ).mappings().fetchall()
+        rows = (
+            conn.execute(
+                text(
+                    f"SELECT gm.id, gm.memory_text, gm.participants, gm.context, "
+                    f"gm.importance, gm.created_at FROM {table_clause} "
+                    f"WHERE {where_clause} "
+                    "ORDER BY gm.importance DESC, gm.last_referenced DESC LIMIT :limit"
+                ),
+                params,
+            )
+            .mappings()
+            .fetchall()
+        )
     return [dict(r) for r in rows]
 
 
@@ -1231,14 +1347,10 @@ def get_character_group_memories(
     # participants 以 JSON 数组存储（如 ["char_a","char_b"]）。
     # 用带引号的精确 token 匹配并转义 LIKE 通配符，避免 char-a 误命中 char-a-2。
     escaped_id = (
-        character_id
-        .replace("\\", "\\\\")
-        .replace("%", "\\%")
-        .replace("_", "\\_")
+        character_id.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     )
     where_clause = (
-        "gm.participants LIKE :escaped_id ESCAPE '\\' "
-        "AND s.player_id = :owner_user_id"
+        "gm.participants LIKE :escaped_id ESCAPE '\\' AND s.player_id = :owner_user_id"
     )
     params = {"escaped_id": f'%"{escaped_id}"%', "owner_user_id": owner_user_id}
     if created_after:
@@ -1246,11 +1358,18 @@ def get_character_group_memories(
         params["created_after"] = created_after
     params["limit"] = limit
     with db_session() as conn:
-        rows = conn.execute(
-            text("SELECT gm.id, gm.session_id, gm.memory_text, gm.participants, gm.context,"
-            " gm.importance, gm.created_at"
-            " FROM group_memory gm JOIN session s ON s.session_id = gm.session_id"
-            f" WHERE {where_clause}"
-            " ORDER BY gm.importance DESC, gm.last_referenced DESC LIMIT :limit"),
-            params).mappings().fetchall()
+        rows = (
+            conn.execute(
+                text(
+                    "SELECT gm.id, gm.session_id, gm.memory_text, gm.participants, gm.context,"
+                    " gm.importance, gm.created_at"
+                    " FROM group_memory gm JOIN session s ON s.session_id = gm.session_id"
+                    f" WHERE {where_clause}"
+                    " ORDER BY gm.importance DESC, gm.last_referenced DESC LIMIT :limit"
+                ),
+                params,
+            )
+            .mappings()
+            .fetchall()
+        )
     return [dict(r) for r in rows]

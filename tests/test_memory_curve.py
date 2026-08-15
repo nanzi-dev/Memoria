@@ -29,36 +29,50 @@ def test_retention_half_life_and_curve_multipliers():
     assert memory_curve.initial_stability_days(0.5, "player_message") == 10.5
     assert memory_curve.initial_stability_days(0.5, "legacy") == 7
     assert memory_curve.initial_stability_days(0.5, "model_inference") == 5.25
-    assert memory_curve.candidate_importance(
-        {"claim_id": "claim", "provenance": {}}, "player_fact"
-    ) == 0.5
-    assert memory_curve.candidate_importance(
-        {"id": 1, "importance": 5}, "player_fact"
-    ) == 0.5
-    assert memory_curve.candidate_importance(
-        {
-            "claim_id": "authored",
-            "provenance": {
-                "evidence": [{
-                    "source_kind": "authored_event",
-                    "details": {"importance": 0.9},
-                }],
+    assert (
+        memory_curve.candidate_importance(
+            {"claim_id": "claim", "provenance": {}}, "player_fact"
+        )
+        == 0.5
+    )
+    assert (
+        memory_curve.candidate_importance({"id": 1, "importance": 5}, "player_fact")
+        == 0.5
+    )
+    assert (
+        memory_curve.candidate_importance(
+            {
+                "claim_id": "authored",
+                "provenance": {
+                    "evidence": [
+                        {
+                            "source_kind": "authored_event",
+                            "details": {"importance": 0.9},
+                        }
+                    ],
+                },
             },
-        },
-        "player_fact",
-    ) == 0.9
-    assert memory_curve.candidate_importance(
-        {
-            "claim_id": "legacy",
-            "provenance": {
-                "evidence": [{
-                    "source_kind": "legacy",
-                    "details": {"importance": 9},
-                }],
+            "player_fact",
+        )
+        == 0.9
+    )
+    assert (
+        memory_curve.candidate_importance(
+            {
+                "claim_id": "legacy",
+                "provenance": {
+                    "evidence": [
+                        {
+                            "source_kind": "legacy",
+                            "details": {"importance": 9},
+                        }
+                    ],
+                },
             },
-        },
-        "player_fact",
-    ) == 0.9
+            "player_fact",
+        )
+        == 0.9
+    )
     assert memory_curve.candidate_limit(0) == 20
     assert memory_curve.candidate_limit(10) == 30
     assert memory_curve.candidate_limit(20) == 60
@@ -68,24 +82,32 @@ def test_legacy_backfill_preserves_memory_identity():
     migrated = {
         "claim_id": "claim-new",
         "provenance": {
-            "evidence": [{
-                "source_kind": "legacy",
-                "details": {
-                    "legacy_backfill": True,
-                    "legacy_fact_id": 42,
-                },
-            }],
+            "evidence": [
+                {
+                    "source_kind": "legacy",
+                    "details": {
+                        "legacy_backfill": True,
+                        "legacy_fact_id": 42,
+                    },
+                }
+            ],
         },
     }
     assert memory_curve.memory_identity(migrated, "player_fact") == "42"
-    assert memory_curve.memory_identity(
-        {"claim_id": "claim-new", "provenance": {}},
-        "player_fact",
-    ) == "claim-new"
-    assert memory_curve.memory_identity(
-        migrated,
-        "character_impression",
-    ) == "claim-new"
+    assert (
+        memory_curve.memory_identity(
+            {"claim_id": "claim-new", "provenance": {}},
+            "player_fact",
+        )
+        == "claim-new"
+    )
+    assert (
+        memory_curve.memory_identity(
+            migrated,
+            "character_impression",
+        )
+        == "claim-new"
+    )
 
 
 def test_memoria_memory_curve_environment_flag(monkeypatch):
@@ -95,10 +117,13 @@ def test_memoria_memory_curve_environment_flag(monkeypatch):
     monkeypatch.setenv("MEMORY_CURVE_ENABLED", "true")
 
     assert Configs(_env_file=None).memory_curve_enabled is False
-    assert Configs(
-        _env_file=None,
-        memory_curve_enabled=False,
-    ).memory_curve_enabled is False
+    assert (
+        Configs(
+            _env_file=None,
+            memory_curve_enabled=False,
+        ).memory_curve_enabled
+        is False
+    )
 
 
 @pytest.mark.parametrize(
@@ -148,9 +173,7 @@ def test_world_time_watermark_pause_jump_and_rollback_do_not_restore():
         importance=0.5,
     )
     assert jumped["elapsed_decay_seconds"] == pytest.approx(10 * 86_400)
-    before_rollback = memory_curve.state_retention(
-        jumped, start + timedelta(days=10)
-    )
+    before_rollback = memory_curve.state_retention(jumped, start + timedelta(days=10))
 
     rolled_back = repository.advance_or_initialize_memory_curve_state(
         **identity,
@@ -280,14 +303,16 @@ def test_admin_verification_reinforces_legacy_backfill_identity(monkeypatch):
         "content_hash": "content-hash",
         "normalized_content_hash": "normalized-hash",
         "provenance": {
-            "evidence": [{
-                "source_kind": "legacy",
-                "details": {
-                    "legacy_backfill": True,
-                    "legacy_fact_id": int(legacy_memory_id),
-                    "importance": 5,
-                },
-            }],
+            "evidence": [
+                {
+                    "source_kind": "legacy",
+                    "details": {
+                        "legacy_backfill": True,
+                        "legacy_fact_id": int(legacy_memory_id),
+                        "importance": 5,
+                    },
+                }
+            ],
         },
     }
     repository.record_memory_curve_evidence(
@@ -321,12 +346,15 @@ def test_admin_verification_reinforces_legacy_backfill_identity(monkeypatch):
         legacy_memory_id,
     )
     assert legacy_state["reinforcement_count"] == 1
-    assert repository.get_memory_curve_state(
-        owner_user_id,
-        character_id,
-        "player_fact",
-        claim_id,
-    ) is None
+    assert (
+        repository.get_memory_curve_state(
+            owner_user_id,
+            character_id,
+            "player_fact",
+            claim_id,
+        )
+        is None
+    )
 
 
 def test_concurrent_duplicate_evidence_reinforces_once():
@@ -347,10 +375,12 @@ def test_concurrent_duplicate_evidence_reinforces_once():
         "importance": 0.5,
     }
     with ThreadPoolExecutor(max_workers=4) as pool:
-        states = list(pool.map(
-            lambda _: repository.record_memory_curve_evidence(**kwargs),
-            range(4),
-        ))
+        states = list(
+            pool.map(
+                lambda _: repository.record_memory_curve_evidence(**kwargs),
+                range(4),
+            )
+        )
     assert {state["reinforcement_count"] for state in states} == {1}
 
 
@@ -360,8 +390,7 @@ def test_deterministic_sampling_and_fuzzy_prompt():
         memory_curve.stable_sample("turn-1", memory_id)
     )
     samples = {
-        memory_curve.stable_sample(f"turn-{index}", memory_id)
-        for index in range(20)
+        memory_curve.stable_sample(f"turn-{index}", memory_id) for index in range(20)
     }
     assert len(samples) > 1
     assert "不确定表达" in memory_curve.prompt_memory_text("细节", "fuzzy")
@@ -392,18 +421,22 @@ def test_distinct_persisted_pulses_reinforce_identical_memory(monkeypatch):
             "secret_facts": [],
         },
     )
-    first = [{
-        "message_id": 101,
-        "role": "assistant",
-        "content": "同意。",
-        "world_created_at": "2026-03-01T00:00:00+00:00",
-    }]
-    second = [{
-        "message_id": 102,
-        "role": "assistant",
-        "content": "同意。",
-        "world_created_at": "2026-03-08T00:00:00+00:00",
-    }]
+    first = [
+        {
+            "message_id": 101,
+            "role": "assistant",
+            "content": "同意。",
+            "world_created_at": "2026-03-01T00:00:00+00:00",
+        }
+    ]
+    second = [
+        {
+            "message_id": 102,
+            "role": "assistant",
+            "content": "同意。",
+            "world_created_at": "2026-03-08T00:00:00+00:00",
+        }
+    ]
     multi_character_memory.process_dialogue_pulse_memories(
         session_id, first, character_ids, owner_user_id
     )
@@ -437,7 +470,9 @@ def test_distinct_persisted_pulses_reinforce_identical_memory(monkeypatch):
 
 def test_legacy_candidate_initializes_at_full_strength_on_first_recall():
     identity = _identity()
-    records = [{"id": identity["memory_id"], "fact_text": "玩家喜欢茶", "importance": 5}]
+    records = [
+        {"id": identity["memory_id"], "fact_text": "玩家喜欢茶", "importance": 5}
+    ]
     recalled = memory_curve.evaluate_records(
         records,
         owner_user_id=identity["owner_user_id"],
@@ -476,17 +511,13 @@ def test_feature_disabled_and_curve_failure_preserve_existing_recall(monkeypatch
         "evaluate_records",
         lambda *args, **kwargs: pytest.fail("disabled curve was evaluated"),
     )
-    monkeypatch.setattr(
-        multi_character_memory.configs, "memory_curve_enabled", False
-    )
+    monkeypatch.setattr(multi_character_memory.configs, "memory_curve_enabled", False)
     assert multi_character_memory.load_player_memories_for_relationship_graph(
         "character-1", "owner-1", [], world_now="2026-01-01T00:00:00+00:00"
     ) == ["玩家喜欢茶"]
     assert requested_limits[-1] == 30
 
-    monkeypatch.setattr(
-        multi_character_memory.configs, "memory_curve_enabled", True
-    )
+    monkeypatch.setattr(multi_character_memory.configs, "memory_curve_enabled", True)
     monkeypatch.setattr(
         multi_character_memory.memory_curve,
         "evaluate_records",
@@ -569,7 +600,9 @@ def test_single_context_curve_failure_restores_all_raw_records(monkeypatch):
         if kwargs["memory_type"] == "character_impression":
             raise RuntimeError("curve down")
         text_key = kwargs["text_key"]
-        result = [{**record, text_key: f"曲线:{record[text_key]}"} for record in records]
+        result = [
+            {**record, text_key: f"曲线:{record[text_key]}"} for record in records
+        ]
         limit = kwargs.get("limit")
         if limit is not None:
             result = result[:limit]
@@ -598,9 +631,9 @@ def test_single_context_curve_failure_restores_all_raw_records(monkeypatch):
         f"曲线:原始玩家事实 {index}" for index in range(20)
     ]
     # character_impression failed, context manager fell back to originals
-    assert "共享记忆（与other-character）：原始角色印象" in context[
-        "cross_mode_memories"
-    ]
+    assert (
+        "共享记忆（与other-character）：原始角色印象" in context["cross_mode_memories"]
+    )
     # group_experience succeeded through curve, text was transformed
     assert "群体记忆：曲线:原始群体经历" in context["cross_mode_memories"]
     assert requested_limits == {"shared": 60, "group": 60, "fact": 60}
@@ -615,8 +648,7 @@ def test_multi_context_overfetches_before_curve_ranking(monkeypatch):
         for index in range(20)
     ]
     groups = [
-        {"id": f"group-{index}", "memory_text": f"经历 {index}"}
-        for index in range(20)
+        {"id": f"group-{index}", "memory_text": f"经历 {index}"} for index in range(20)
     ]
     monkeypatch.setattr(multi_character_memory.configs, "memory_curve_enabled", True)
     monkeypatch.setattr(
@@ -658,9 +690,11 @@ def test_multi_context_overfetches_before_curve_ranking(monkeypatch):
 
     def evaluate(records, **kwargs):
         seen[kwargs["memory_type"]] = (len(records), kwargs["limit"])
-        return list(reversed(records))[:kwargs["limit"]]
+        return list(reversed(records))[: kwargs["limit"]]
 
-    monkeypatch.setattr(multi_character_memory.memory_curve, "evaluate_records", evaluate)
+    monkeypatch.setattr(
+        multi_character_memory.memory_curve, "evaluate_records", evaluate
+    )
 
     context = multi_character_memory.integrate_multi_character_context(
         character_id="character-a",
@@ -720,9 +754,7 @@ def test_feature_disabled_preserves_multi_opening_prompt(monkeypatch):
     monkeypatch.setattr(
         orchestrator,
         "_load_memory_context",
-        lambda *args, **kwargs: pytest.fail(
-            "disabled opening loaded memory context"
-        ),
+        lambda *args, **kwargs: pytest.fail("disabled opening loaded memory context"),
     )
     monkeypatch.setattr(module.configs, "memory_curve_enabled", False)
     captured = {}
@@ -771,7 +803,9 @@ def test_developer_diagnostics_does_not_advance_curve(monkeypatch):
     monkeypatch.setattr(
         developer.repository,
         "get_prompt_memory_fact_records",
-        lambda **kwargs: [{"claim_id": "claim-1", "fact_text": "玩家喜欢茶", "source_kind": "legacy"}],
+        lambda **kwargs: [
+            {"claim_id": "claim-1", "fact_text": "玩家喜欢茶", "source_kind": "legacy"}
+        ],
     )
     monkeypatch.setattr(
         developer.repository,
@@ -821,12 +855,14 @@ def test_developer_diagnostics_marks_stale_relationship_memory(monkeypatch):
     monkeypatch.setattr(
         developer.repository,
         "get_prompt_memory_fact_records",
-        lambda **kwargs: [{
-            "claim_id": "stale-claim",
-            "fact_text": "character-1 与 other-1 是朋友",
-            "source_kind": "legacy",
-            "created_at": "2026-01-01T00:00:00+00:00",
-        }],
+        lambda **kwargs: [
+            {
+                "claim_id": "stale-claim",
+                "fact_text": "character-1 与 other-1 是朋友",
+                "source_kind": "legacy",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            }
+        ],
     )
     monkeypatch.setattr(
         developer.repository,
@@ -846,11 +882,13 @@ def test_developer_diagnostics_marks_stale_relationship_memory(monkeypatch):
     monkeypatch.setattr(
         developer.repository,
         "list_character_relationship_revisions",
-        lambda *args: [{
-            "character_id_a": "character-1",
-            "character_id_b": "other-1",
-            "updated_at": "2026-02-01T00:00:00+00:00",
-        }],
+        lambda *args: [
+            {
+                "character_id_a": "character-1",
+                "character_id_b": "other-1",
+                "updated_at": "2026-02-01T00:00:00+00:00",
+            }
+        ],
     )
     monkeypatch.setattr(
         developer.repository,
@@ -871,9 +909,7 @@ def test_developer_diagnostics_marks_stale_relationship_memory(monkeypatch):
         current_user_id="owner-1",
     )
     assert result["items"][0]["sampled"] is False
-    assert result["items"][0]["exclusion_reason"] == (
-        "stale_relationship_history"
-    )
+    assert result["items"][0]["exclusion_reason"] == ("stale_relationship_history")
 
 
 # ──────────────────────────────────────────────────────────────
@@ -888,13 +924,19 @@ def test_batch_advance_or_initialize(monkeypatch):
     start = datetime(2026, 1, 1, tzinfo=UTC)
 
     items = [
-        {"memory_id": f"mem-{i}", "world_now": start.isoformat(),
-         "source_kind": "legacy", "importance": 0.5}
+        {
+            "memory_id": f"mem-{i}",
+            "world_now": start.isoformat(),
+            "source_kind": "legacy",
+            "importance": 0.5,
+        }
         for i in range(10)
     ]
     states = repo.batch_advance_or_initialize_memory_curve_states(
-        owner_user_id=uid, character_id=cid,
-        memory_type="player_fact", items=items,
+        owner_user_id=uid,
+        character_id=cid,
+        memory_type="player_fact",
+        items=items,
     )
     assert len(states) == 10
     for state in states.values():
@@ -904,13 +946,19 @@ def test_batch_advance_or_initialize(monkeypatch):
     # Second call should advance, not re-initialize
     future = start + timedelta(days=5)
     items2 = [
-        {"memory_id": f"mem-{i}", "world_now": future.isoformat(),
-         "source_kind": "legacy", "importance": 0.5}
+        {
+            "memory_id": f"mem-{i}",
+            "world_now": future.isoformat(),
+            "source_kind": "legacy",
+            "importance": 0.5,
+        }
         for i in range(10)
     ]
     states2 = repo.batch_advance_or_initialize_memory_curve_states(
-        owner_user_id=uid, character_id=cid,
-        memory_type="player_fact", items=items2,
+        owner_user_id=uid,
+        character_id=cid,
+        memory_type="player_fact",
+        items=items2,
     )
     assert len(states2) == 10
     for state in states2.values():
@@ -991,10 +1039,13 @@ def test_cleanup_forgotten_states():
 
     # Create a state that's been "forgotten" for a long time
     repo.initialize_memory_curve_state(
-        owner_user_id=uid, character_id=cid,
-        memory_type="player_fact", memory_id="old-forgotten",
+        owner_user_id=uid,
+        character_id=cid,
+        memory_type="player_fact",
+        memory_id="old-forgotten",
         world_occurred_at="2020-01-01T00:00:00+00:00",
-        source_kind="legacy", importance=0.1,
+        source_kind="legacy",
+        importance=0.1,
     )
     # Manually set updated_at far in the past and high elapsed
     with repo.get_conn() as conn:
@@ -1006,16 +1057,22 @@ def test_cleanup_forgotten_states():
 
     # Create a recent state that should NOT be cleaned
     repo.initialize_memory_curve_state(
-        owner_user_id=uid, character_id=cid,
-        memory_type="player_fact", memory_id="recent-active",
+        owner_user_id=uid,
+        character_id=cid,
+        memory_type="player_fact",
+        memory_id="recent-active",
         world_occurred_at="2026-07-01T00:00:00+00:00",
-        source_kind="player_message", importance=0.9,
+        source_kind="player_message",
+        importance=0.9,
     )
 
     deleted = memory_curve.cleanup_forgotten_states(owner_user_id=uid)
     assert deleted >= 1
     assert repo.get_memory_curve_state(uid, cid, "player_fact", "old-forgotten") is None
-    assert repo.get_memory_curve_state(uid, cid, "player_fact", "recent-active") is not None
+    assert (
+        repo.get_memory_curve_state(uid, cid, "player_fact", "recent-active")
+        is not None
+    )
 
 
 # ──────────────────────────────────────────────────────────────
@@ -1054,16 +1111,24 @@ def test_cleanup_cascades_reinforcement_rows():
     mid = "cascade-memory"
 
     repo.record_memory_curve_evidence(
-        owner_user_id=uid, character_id=cid,
-        memory_type="player_fact", memory_id=mid,
-        evidence_id="ev-1", world_occurred_at="2020-01-01T00:00:00+00:00",
-        source_kind="legacy", importance=0.1,
+        owner_user_id=uid,
+        character_id=cid,
+        memory_type="player_fact",
+        memory_id=mid,
+        evidence_id="ev-1",
+        world_occurred_at="2020-01-01T00:00:00+00:00",
+        source_kind="legacy",
+        importance=0.1,
     )
     repo.record_memory_curve_evidence(
-        owner_user_id=uid, character_id=cid,
-        memory_type="player_fact", memory_id=mid,
-        evidence_id="ev-2", world_occurred_at="2020-06-01T00:00:00+00:00",
-        source_kind="legacy", importance=0.1,
+        owner_user_id=uid,
+        character_id=cid,
+        memory_type="player_fact",
+        memory_id=mid,
+        evidence_id="ev-2",
+        world_occurred_at="2020-06-01T00:00:00+00:00",
+        source_kind="legacy",
+        importance=0.1,
     )
     # Verify reinforcement rows exist
     with repo.get_conn() as conn:
@@ -1112,20 +1177,28 @@ def test_permanent_threshold_reached_via_reinforcement():
 
     # Initial state with high importance authored_event
     repo.record_memory_curve_evidence(
-        owner_user_id=uid, character_id=cid,
-        memory_type="player_fact", memory_id=mid,
-        evidence_id="ev-init", world_occurred_at=start.isoformat(),
-        source_kind="authored_event", importance=0.9,
+        owner_user_id=uid,
+        character_id=cid,
+        memory_type="player_fact",
+        memory_id=mid,
+        evidence_id="ev-init",
+        world_occurred_at=start.isoformat(),
+        source_kind="authored_event",
+        importance=0.9,
     )
 
     # Reinforce frequently (every 3 days) to keep retention high while building stability
     for i in range(1, 20):
         t = start + timedelta(days=i * 3)
         repo.record_memory_curve_evidence(
-            owner_user_id=uid, character_id=cid,
-            memory_type="player_fact", memory_id=mid,
-            evidence_id=f"ev-{i}", world_occurred_at=t.isoformat(),
-            source_kind="authored_event", importance=0.9,
+            owner_user_id=uid,
+            character_id=cid,
+            memory_type="player_fact",
+            memory_id=mid,
+            evidence_id=f"ev-{i}",
+            world_occurred_at=t.isoformat(),
+            source_kind="authored_event",
+            importance=0.9,
         )
 
     state = repo.get_memory_curve_state(uid, cid, "player_fact", mid)
@@ -1134,11 +1207,15 @@ def test_permanent_threshold_reached_via_reinforcement():
 
     # Check that retention is pinned to 1.0 when raw retention is still >= threshold
     # At day 57 (last anchor), raw retention = 1.0, which is >= 0.95 → pinned
-    r_at_anchor = memory_curve.state_retention(state, (start + timedelta(days=57)).isoformat())
+    r_at_anchor = memory_curve.state_retention(
+        state, (start + timedelta(days=57)).isoformat()
+    )
     assert r_at_anchor == 1.0
     # At day 100, raw retention = 1/(1+43/730) ≈ 0.944, below 0.95 → not pinned
     # At day 60, raw retention = 1/(1+3/730) ≈ 0.996, >= 0.95 → pinned
-    r_near = memory_curve.state_retention(state, (start + timedelta(days=60)).isoformat())
+    r_near = memory_curve.state_retention(
+        state, (start + timedelta(days=60)).isoformat()
+    )
     assert r_near == 1.0
 
 
@@ -1152,23 +1229,36 @@ def test_batch_advance_partial_items():
 
     # Pre-initialize one state
     repo.initialize_memory_curve_state(
-        owner_user_id=uid, character_id=cid,
-        memory_type="player_fact", memory_id="existing-mem",
+        owner_user_id=uid,
+        character_id=cid,
+        memory_type="player_fact",
+        memory_id="existing-mem",
         world_occurred_at=start.isoformat(),
-        source_kind="legacy", importance=0.5,
+        source_kind="legacy",
+        importance=0.5,
     )
 
     # Batch with mix of existing and new
     future = start + timedelta(days=5)
     items = [
-        {"memory_id": "existing-mem", "world_now": future.isoformat(),
-         "source_kind": "legacy", "importance": 0.5},
-        {"memory_id": "brand-new-mem", "world_now": future.isoformat(),
-         "source_kind": "player_message", "importance": 0.8},
+        {
+            "memory_id": "existing-mem",
+            "world_now": future.isoformat(),
+            "source_kind": "legacy",
+            "importance": 0.5,
+        },
+        {
+            "memory_id": "brand-new-mem",
+            "world_now": future.isoformat(),
+            "source_kind": "player_message",
+            "importance": 0.8,
+        },
     ]
     states = repo.batch_advance_or_initialize_memory_curve_states(
-        owner_user_id=uid, character_id=cid,
-        memory_type="player_fact", items=items,
+        owner_user_id=uid,
+        character_id=cid,
+        memory_type="player_fact",
+        items=items,
     )
     assert len(states) == 2
     # Existing should have advanced

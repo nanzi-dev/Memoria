@@ -38,10 +38,7 @@ class _FrozenDict(dict):
 
 def _freeze_json(value: JsonValue) -> Any:
     if isinstance(value, dict):
-        return _FrozenDict({
-            key: _freeze_json(item)
-            for key, item in value.items()
-        })
+        return _FrozenDict({key: _freeze_json(item) for key, item in value.items()})
     if isinstance(value, list):
         return tuple(_freeze_json(item) for item in value)
     return value
@@ -49,10 +46,7 @@ def _freeze_json(value: JsonValue) -> Any:
 
 def _thaw_json(value: Any) -> JsonValue:
     if isinstance(value, dict):
-        return {
-            key: _thaw_json(item)
-            for key, item in value.items()
-        }
+        return {key: _thaw_json(item) for key, item in value.items()}
     if isinstance(value, tuple):
         return [_thaw_json(item) for item in value]
     return value

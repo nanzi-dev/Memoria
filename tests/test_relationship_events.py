@@ -1,4 +1,5 @@
 """Tests for the implemented relationship event types."""
+
 from __future__ import annotations
 
 import json
@@ -51,7 +52,9 @@ def _save_event(player_id: str, event: EventDefinition) -> None:
     )
 
 
-def _make_context(player_id: str, character_id: str = "npc_luo_xiaohei") -> EventContext:
+def _make_context(
+    player_id: str, character_id: str = "npc_luo_xiaohei"
+) -> EventContext:
     return EventContext(
         character_id=character_id,
         player_id=player_id,
@@ -108,11 +111,13 @@ def test_modify_relationship_updates_graph_and_player_edge():
     npc_event = _direct_event(
         f"evt_rel_npc_{uuid.uuid4().hex[:8]}",
         character_id=character_id,
-        effects=[EventEffect(
-            effect_type=EffectType.MODIFY_RELATIONSHIP,
-            target_character_id=npc_target,
-            relationship_change={"affinity_delta": 5, "relationship_type": "rival"},
-        )],
+        effects=[
+            EventEffect(
+                effect_type=EffectType.MODIFY_RELATIONSHIP,
+                target_character_id=npc_target,
+                relationship_change={"affinity_delta": 5, "relationship_type": "rival"},
+            )
+        ],
     )
     _save_event(player_id, npc_event)
     result = event_runtime.execute_event_with_chain(
@@ -128,11 +133,13 @@ def test_modify_relationship_updates_graph_and_player_edge():
     player_event = _direct_event(
         f"evt_rel_player_{uuid.uuid4().hex[:8]}",
         character_id=character_id,
-        effects=[EventEffect(
-            effect_type=EffectType.MODIFY_RELATIONSHIP,
-            target_character_id="@player",
-            relationship_change={"affinity_delta": -3},
-        )],
+        effects=[
+            EventEffect(
+                effect_type=EffectType.MODIFY_RELATIONSHIP,
+                target_character_id="@player",
+                relationship_change={"affinity_delta": -3},
+            )
+        ],
     )
     _save_event(player_id, player_event)
     event_runtime.execute_event_with_chain(
@@ -143,6 +150,7 @@ def test_modify_relationship_updates_graph_and_player_edge():
     assert rel["affinity"] == 17
 
     from memoria.core.character_loader import load_character_card
+
     runtime = repository.get_runtime_state(
         character_id,
         player_id,
@@ -249,11 +257,13 @@ def test_relationship_change_condition_defaults_to_player_edge():
             state_field="affinity",
             threshold=35,
         ),
-        [EventEffectDTO(
-            effect_type="modify_relationship",
-            target_character_id="@player",
-            relationship_change={"affinity_delta": 1},
-        )],
+        [
+            EventEffectDTO(
+                effect_type="modify_relationship",
+                target_character_id="@player",
+                relationship_change={"affinity_delta": 1},
+            )
+        ],
         player_id,
     )
     assert condition.target_character_id is None
@@ -287,11 +297,13 @@ def test_event_admin_accepts_implemented_relationship_configuration():
             state_field="affinity",
             threshold=1,
         ),
-        [EventEffectDTO(
-            effect_type="modify_relationship",
-            target_character_id="npc_wuxian",
-            relationship_change={"affinity": 1},
-        )],
+        [
+            EventEffectDTO(
+                effect_type="modify_relationship",
+                target_character_id="npc_wuxian",
+                relationship_change={"affinity": 1},
+            )
+        ],
         owner_user_id,
     )
     assert condition.trigger_type == TriggerType.RELATIONSHIP_CHANGE

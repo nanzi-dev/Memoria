@@ -72,35 +72,37 @@ class MultiCharacterOrchestrator(
     - 处理角色间关系
     - 管理发言轮次
     """
-    
+
     def __init__(self, session_id: str):
         """
         初始化编排器
-        
+
         Args:
             session_id: 会话 ID
         """
         self.session_id = session_id
         self.session = repository.get_session(session_id)
-        
+
         if not self.session:
             raise ValueError(f"会话不存在: {session_id}")
-        
+
         if not self.session.get("is_multi_character"):
             raise ValueError(f"会话 {session_id} 不是多角色会话")
         if self.session.get("status") == "ended":
             raise ValueError("会话已经结束")
-        
+
         self.player_id = self.session["player_id"]
         self.player_name = self.session["player_name"]
         self.player_character = {}
         self._refresh_player_character()
         self.locale = self.session.get("locale") or DEFAULT_LOCALE
-        
+
         # 加载参与者
-        self.participants = repository.get_session_participants(session_id, only_active=True)
+        self.participants = repository.get_session_participants(
+            session_id, only_active=True
+        )
         self.character_ids = [p["character_id"] for p in self.participants]
-        
+
         # 加载角色卡
         self.character_cards = {}
         for char_id in self.character_ids:
@@ -109,10 +111,10 @@ class MultiCharacterOrchestrator(
                 self.character_cards[char_id] = card
             except Exception as e:
                 logger.error(f"加载角色卡失败 {char_id}: {e}")
-        
+
         # 初始化发言策略
         self.speaking_strategy = HybridStrategy()
-        
+
         # 缓存最后发言者（跨请求还原“避免连续发言”约束）
         self.last_speaker_id = None
         try:
@@ -130,13 +132,12 @@ class MultiCharacterOrchestrator(
         self._checkpoint_memory_fact = None
         self._checkpoint_memory_ready = False
         # 实例级缓存（随编排器生命周期，不做跨请求长期缓存）
-        self._relationship_cutoff_cache: dict[
-            tuple, str | None
-        ] = {}
+        self._relationship_cutoff_cache: dict[tuple, str | None] = {}
         self._memory_context_cache: dict[tuple, list[str]] = {}
-        
-        logger.info(f"多角色编排器已初始化: session={session_id}, 参与角色={self.character_ids}")
 
+        logger.info(
+            f"多角色编排器已初始化: session={session_id}, 参与角色={self.character_ids}"
+        )
 
     def _refresh_player_character(self) -> dict:
         fallback_name = getattr(self, "player_name", None) or "玩家"
@@ -147,11 +148,12 @@ class MultiCharacterOrchestrator(
             card = None
         player_character = dict(card or getattr(self, "player_character", {}) or {})
         player_character.setdefault("display_name", fallback_name)
-        player_character.setdefault("node_id", repository.player_node_id(self.player_id))
+        player_character.setdefault(
+            "node_id", repository.player_node_id(self.player_id)
+        )
         self.player_character = player_character
         self.player_name = player_character["display_name"]
         return player_character
-
 
     def _load_group_turn_context(self) -> GroupTurnContext:
         player_character = self._refresh_player_character()
@@ -182,32 +184,29 @@ class MultiCharacterOrchestrator(
             authorized_knowledge_base_ids=authorized_knowledge_base_ids,
         )
 
-
     def _ensure_has_active_participants(self) -> None:
         if not self.participants:
             raise ValueError("群聊中没有可回复的在线角色")
-    
-    
+
     def start_conversation(self) -> dict:
         """
         开始多角色对话
-        
+
         Returns:
             dict: 包含开场白的响应
         """
         # 选择第一个角色发言（按加入顺序）
         self._ensure_has_active_participants()
-        
+
         first_speaker = self.participants[0]
         character_id = first_speaker["character_id"]
-        
+
         # 生成开场白
         clock_snapshot = _clock_snapshot_for_player(getattr(self, "player_id", None))
         result = self._generate_opening(character_id, clock_snapshot=clock_snapshot)
-        
+
         return result
-    
-    
+
     def process_player_message(
         self,
         player_message: str,
@@ -218,12 +217,12 @@ class MultiCharacterOrchestrator(
     ) -> dict | list[dict]:
         """
         处理玩家消息，决定哪个角色回应
-        
+
         Args:
             player_message: 玩家消息内容
             allow_multiple_responses: 是否允许多个角色连续回应（讨论模式）
             max_responses: 最多允许几个角色回应；实际人数会按群聊语境动态决定
-        
+
         Returns:
             dict | list[dict]: 单个角色回应或多个角色回应列表
         """
@@ -354,37 +353,6 @@ class MultiCharacterOrchestrator(
                 )
             raise
 
-
-
-
-
-
-
-
-
-
-
-
-    
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    
-    
     def trigger_character_interaction(
         self,
         trigger_character_id: str | None = None,
@@ -394,10 +362,10 @@ class MultiCharacterOrchestrator(
     ) -> dict:
         """
         触发角色间互动（角色主动发言）
-        
+
         Args:
             trigger_character_id: 触发角色ID，如果为None则自动选择
-        
+
         Returns:
             dict: 角色发言结果
         """
@@ -445,7 +413,9 @@ class MultiCharacterOrchestrator(
             if not responses:
                 return {
                     "character_id": trigger_character_id,
-                    "character_name": self.character_cards[trigger_character_id].meta.display_name,
+                    "character_name": self.character_cards[
+                        trigger_character_id
+                    ].meta.display_name,
                     "dialogue": "",
                     "action": "wait",
                 }
@@ -465,8 +435,7 @@ class MultiCharacterOrchestrator(
                     request_id,
                 )
             raise
-    
-    
+
     def _decide_next_speaker(
         self,
         player_message: str,
@@ -475,10 +444,10 @@ class MultiCharacterOrchestrator(
     ) -> str:
         """
         决定下一个发言的角色（使用策略系统）
-        
+
         Args:
             player_message: 玩家消息
-        
+
         Returns:
             str: 选中的角色 ID
         """
@@ -492,43 +461,32 @@ class MultiCharacterOrchestrator(
                 else self._load_all_relationships()
             ),
         }
-        
+
         # 使用策略选择
         selected_id = self.speaking_strategy.select_speaker(
-            self.participants,
-            self.character_cards,
-            context
+            self.participants, self.character_cards, context
         )
-        
+
         # 更新缓存
         self.last_speaker_id = selected_id
-        
+
         return selected_id
-    
-    
-
-
-
-
-
-
-
 
     def _select_character_for_interaction(self) -> str:
         """
         选择一个角色发起互动（用于角色主动发言）
-        
+
         Returns:
             str: 选中的角色 ID
         """
         # 简单策略：选择最久没发言的角色
         candidates = []
-        
+
         for participant in self.participants:
             char_id = participant["character_id"]
             last_spoke = participant.get("last_spoke_at")
             message_count = participant.get("message_count", 0)
-            
+
             # 计算权重：发言次数少的优先；钳制非负避免长会话后权重为负
             weight = max(0.0, 100.0 - message_count * 5)
 
@@ -540,36 +498,37 @@ class MultiCharacterOrchestrator(
             weight = max(weight, 1.0)
 
             candidates.append((char_id, weight))
-        
+
         if not candidates:
             raise ValueError("群聊中没有可回复的在线角色")
-        
+
         # 加权随机选择
         total_weight = sum(w for _, w in candidates)
         rand = random.uniform(0, total_weight)
-        
+
         cumulative = 0
         for char_id, weight in candidates:
             cumulative += weight
             if rand <= cumulative:
                 return char_id
-        
+
         return candidates[0][0]
-    
-    
+
     def _generate_opening(self, character_id: str, *, clock_snapshot=None) -> dict:
         """
         生成多角色对话开场白
-        
+
         Args:
             character_id: 发言角色 ID
-        
+
         Returns:
             dict: 开场白结果
         """
         self._refresh_player_character()
         card = self.character_cards[character_id]
-        clock_snapshot = clock_snapshot or world_clock.get_clock_snapshot(self.player_id)
+        clock_snapshot = clock_snapshot or world_clock.get_clock_snapshot(
+            self.player_id
+        )
         character_relationships = self._load_all_relationships()
         relationship_history_cutoff = self._cached_relationship_history_cutoff(
             character_relationships
@@ -599,12 +558,14 @@ class MultiCharacterOrchestrator(
             if other_id != character_id:
                 other_card = self.character_cards.get(other_id)
                 if other_card:
-                    other_characters.append({
-                        "character_id": other_id,
-                        "name": other_card.meta.name,
-                        "display_name": other_card.meta.display_name,
-                        "occupation": other_card.identity.occupation
-                    })
+                    other_characters.append(
+                        {
+                            "character_id": other_id,
+                            "name": other_card.meta.name,
+                            "display_name": other_card.meta.display_name,
+                            "occupation": other_card.identity.occupation,
+                        }
+                    )
 
         opening_memory_context = {}
         if configs.memory_curve_enabled:
@@ -645,10 +606,10 @@ class MultiCharacterOrchestrator(
                 character_relationships=character_relationships,
             ),
         )
-        
+
         dialogue = safety_check(result.get("dialogue", ""))
         action = result.get("action", card.action_vocabulary.default_action)
-        
+
         # 记录消息
         character_name = card.meta.display_name or card.meta.name
         message_id = repository.append_multi_character_message(
@@ -659,7 +620,7 @@ class MultiCharacterOrchestrator(
             character_name=character_name,
             world_created_at=clock_snapshot.world_now.isoformat(),
         )
-        
+
         return {
             "message_id": message_id,
             "character_id": character_id,
@@ -670,10 +631,7 @@ class MultiCharacterOrchestrator(
             "current_mood": runtime_state.get("current_mood", "neutral"),
             "world_created_at": clock_snapshot.world_now.isoformat(),
         }
-    
-    
-    
-    
+
     def _generate_character_interaction(
         self,
         trigger_character_id: str,
@@ -684,10 +642,10 @@ class MultiCharacterOrchestrator(
     ) -> dict:
         """
         生成角色间互动（角色主动发言）
-        
+
         Args:
             trigger_character_id: 触发角色 ID
-        
+
         Returns:
             dict: 角色互动结果
         """
@@ -695,7 +653,9 @@ class MultiCharacterOrchestrator(
         if trigger_character_id not in self.character_cards:
             raise ValueError(f"角色不可回复: {trigger_character_id}")
         card = self.character_cards[trigger_character_id]
-        clock_snapshot = clock_snapshot or world_clock.get_clock_snapshot(self.player_id)
+        clock_snapshot = clock_snapshot or world_clock.get_clock_snapshot(
+            self.player_id
+        )
         character_relationships = self._load_all_relationships()
         relationship_history_cutoff = self._cached_relationship_history_cutoff(
             character_relationships
@@ -722,9 +682,11 @@ class MultiCharacterOrchestrator(
         history = repository.get_multi_character_thread_history(
             self.session_id,
             limit_messages=20,
-            created_after=relationship_history_cutoff
+            created_after=relationship_history_cutoff,
         )
-        interaction_prompt = prompt or "（现在可以主动说些什么，或者对其他角色的发言做出反应）"
+        interaction_prompt = (
+            prompt or "（现在可以主动说些什么，或者对其他角色的发言做出反应）"
+        )
         knowledge = retrieve_knowledge(
             owner_user_id=self.player_id,
             character_id=trigger_character_id,
@@ -732,20 +694,22 @@ class MultiCharacterOrchestrator(
             current_message=interaction_prompt,
             recent_history=history,
         )
-        
+
         # 准备其他角色信息
         other_characters = []
         for other_id in self.character_ids:
             if other_id != trigger_character_id:
                 other_card = self.character_cards.get(other_id)
                 if other_card:
-                    other_characters.append({
-                        "character_id": other_id,
-                        "name": other_card.meta.name,
-                        "display_name": other_card.meta.display_name,
-                        "occupation": other_card.identity.occupation
-                    })
-        
+                    other_characters.append(
+                        {
+                            "character_id": other_id,
+                            "name": other_card.meta.name,
+                            "display_name": other_card.meta.display_name,
+                            "occupation": other_card.identity.occupation,
+                        }
+                    )
+
         # 使用 prompt_builder 构建系统提示
         system_prompt = _build_multi_character_system_prompt(
             locale=getattr(self, "locale", DEFAULT_LOCALE),
@@ -765,25 +729,24 @@ class MultiCharacterOrchestrator(
             time_context=time_context,
             knowledge_context=knowledge.prompt_section,
         )
-        
+
         messages = self._format_history_for_llm(
             history,
             trigger_character_id,
-            character_relationships=character_relationships
+            character_relationships=character_relationships,
         )
-        
+
         # 添加互动提示
         messages.append({"role": "user", "content": interaction_prompt})
-        
+
         # 调用 LLM
         result = llm_client.call_role_turn(
-            system_prompt=system_prompt,
-            history=messages
+            system_prompt=system_prompt, history=messages
         )
-        
+
         dialogue = safety_check(result.get("dialogue", ""))
         action = result.get("action", card.action_vocabulary.default_action)
-        
+
         # 记录消息
         character_name = card.meta.display_name or card.meta.name
         message_id = None
@@ -797,7 +760,7 @@ class MultiCharacterOrchestrator(
                 world_created_at=clock_snapshot.world_now.isoformat(),
                 knowledge_sources=knowledge.sources,
             )
-        
+
         return {
             "character_id": trigger_character_id,
             "character_name": character_name,
@@ -807,27 +770,12 @@ class MultiCharacterOrchestrator(
             "knowledge_sources": knowledge.sources,
             "message_id": message_id,
         }
-    
-    
-
-
-
-
-
-
-
-
-
-
-
-
-    
-    
 
 
 # =========================
 # 便捷函数
 # =========================
+
 
 def start_multi_character_session(
     player_id: str,
@@ -840,12 +788,12 @@ def start_multi_character_session(
 ) -> dict:
     """
     创建并启动多角色会话
-    
+
     Args:
         player_id: 玩家 ID
         player_name: 玩家名称
         character_ids: 参与角色 ID 列表
-    
+
     Returns:
         dict: 包含 session_id 和开场白的结果
     """
@@ -856,7 +804,7 @@ def start_multi_character_session(
         player_character = None
     player_name = (player_character or {}).get("display_name") or player_name
     session_id = str(uuid.uuid4())
-    
+
     # 创建会话
     success = repository.create_multi_character_session(
         session_id=session_id,
@@ -868,7 +816,7 @@ def start_multi_character_session(
         locale=locale,
         story_id=story_id,
     )
-    
+
     if not success:
         raise ValueError("创建多角色会话失败")
 
@@ -895,7 +843,7 @@ def process_multi_character_turn(
 ) -> dict | list[dict]:
     """
     处理多角色对话轮次
-    
+
     Args:
         session_id: 会话 ID
         player_message: 玩家消息
@@ -926,14 +874,12 @@ def process_multi_character_turn(
         )
         stored_results = json.loads(batch["results_data"]) if batch else []
         event_results = [
-            EventTriggerResult.model_validate(item)
-            for item in stored_results
+            EventTriggerResult.model_validate(item) for item in stored_results
         ]
         return {
             "turn_response": result,
             "event_executions": [
-                event_result.model_dump(mode="json")
-                for event_result in event_results
+                event_result.model_dump(mode="json") for event_result in event_results
             ],
             "event_notifications": event_runtime.collect_event_notifications(
                 event_results

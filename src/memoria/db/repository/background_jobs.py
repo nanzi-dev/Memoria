@@ -1,4 +1,5 @@
 """Domain repository functions (split from monolith)."""
+
 from __future__ import annotations
 
 import json
@@ -19,6 +20,7 @@ from memoria.db.repository._common import (
 )
 
 logger = logging.getLogger(__name__)
+
 
 # =========================
 # 持久化后台任务
@@ -89,10 +91,14 @@ def _enqueue_background_job_in_transaction(
             "now": now_iso,
         },
     )
-    row = conn.execute(
-        text("SELECT * FROM background_job WHERE dedupe_key = :dedupe_key"),
-        {"dedupe_key": dedupe_key},
-    ).mappings().fetchone()
+    row = (
+        conn.execute(
+            text("SELECT * FROM background_job WHERE dedupe_key = :dedupe_key"),
+            {"dedupe_key": dedupe_key},
+        )
+        .mappings()
+        .fetchone()
+    )
     if row["job_type"] != job_type:
         raise ValueError("dedupe_key is already used by another job type")
     return _decode_background_job(row)
@@ -191,10 +197,14 @@ def claim_background_job(
                 select_sql,
                 "FOR UPDATE SKIP LOCKED",
             )
-        candidate = session.execute(
-            text(select_sql),
-            {"claimed_at": claimed_at_iso},
-        ).mappings().fetchone()
+        candidate = (
+            session.execute(
+                text(select_sql),
+                {"claimed_at": claimed_at_iso},
+            )
+            .mappings()
+            .fetchone()
+        )
         if candidate is None:
             return None
 
@@ -286,19 +296,27 @@ def record_background_job_failure(
 
     with db_session() as session:
         if _is_postgres_enabled():
-            row = session.execute(
-                text("""
+            row = (
+                session.execute(
+                    text("""
                     SELECT * FROM background_job
                     WHERE job_id = :job_id
                     FOR UPDATE
                 """),
-                {"job_id": job_id},
-            ).mappings().fetchone()
+                    {"job_id": job_id},
+                )
+                .mappings()
+                .fetchone()
+            )
         else:
-            row = session.execute(
-                text("SELECT * FROM background_job WHERE job_id = :job_id"),
-                {"job_id": job_id},
-            ).mappings().fetchone()
+            row = (
+                session.execute(
+                    text("SELECT * FROM background_job WHERE job_id = :job_id"),
+                    {"job_id": job_id},
+                )
+                .mappings()
+                .fetchone()
+            )
         if (
             row is None
             or row["status"] != "running"

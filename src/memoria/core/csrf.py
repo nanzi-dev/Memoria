@@ -21,17 +21,21 @@ CSRF_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # align with auth cookie
 
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
 # Auth bootstrap endpoints authenticate via body credentials, not cookie session.
-_EXEMPT_PATHS = frozenset({
-    "/api/v1/user/login",
-    "/api/v1/user/register",
-})
+_EXEMPT_PATHS = frozenset(
+    {
+        "/api/v1/user/login",
+        "/api/v1/user/register",
+    }
+)
 # 页面卸载时结束会话只能走 sendBeacon/keepalive，二者都无法携带自定义请求头。
 # 仅这两条路径允许用 query 参数完成双提交校验——放开到全部写接口会让 CSRF
 # token 进入访问日志、浏览器历史与 Referer。
-_QUERY_TOKEN_PATHS = frozenset({
-    "/api/v1/dialogue/session/end",
-    "/api/v1/multi-dialogue/session/end",
-})
+_QUERY_TOKEN_PATHS = frozenset(
+    {
+        "/api/v1/dialogue/session/end",
+        "/api/v1/multi-dialogue/session/end",
+    }
+)
 
 
 def generate_csrf_token() -> str:

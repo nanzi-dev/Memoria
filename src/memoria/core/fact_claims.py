@@ -83,9 +83,7 @@ def record_claim(
         source_ids=_clean_source_ids(source_ids),
         provenance=dict(provenance or {}),
         direct_support=direct_support,
-        verification_policy=_verification_policy(
-            identity["normalized_fact_text"]
-        ),
+        verification_policy=_verification_policy(identity["normalized_fact_text"]),
     )
 
 
@@ -134,9 +132,7 @@ def record_admin_verification(
         source_ids=clean_source_ids,
         provenance=dict(provenance or {}),
         direct_support=True,
-        verification_policy=_verification_policy(
-            claim["normalized_fact_text"]
-        ),
+        verification_policy=_verification_policy(claim["normalized_fact_text"]),
     )
     try:
         from memoria.core import memory_curve, world_clock
@@ -177,16 +173,20 @@ def record_admin_verification(
                 )
         if not witness_ids:
             return projected
-        occurred_at = world_occurred_at or world_clock.get_clock_snapshot(
-            owner_user_id
-        ).world_now.isoformat()
-        evidence_id = "admin-verification:" + hashlib.sha256(
-            json.dumps(
-                clean_source_ids,
-                ensure_ascii=False,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
+        occurred_at = (
+            world_occurred_at
+            or world_clock.get_clock_snapshot(owner_user_id).world_now.isoformat()
+        )
+        evidence_id = (
+            "admin-verification:"
+            + hashlib.sha256(
+                json.dumps(
+                    clean_source_ids,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+        )
         importance = memory_curve.candidate_importance(
             projected,
             "player_fact",

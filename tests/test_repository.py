@@ -1,6 +1,7 @@
 """
 数据库持久化层完整单元测试
 """
+
 import json
 import sys
 import uuid
@@ -20,27 +21,39 @@ from memoria.db import repository
 
 class TestRuntimeState:
     def test_get_state_new_player(self):
-        class Mood: default_mood = "neutral"
-        rel = type("R",(),{"target_id":"player","affection_level":5,"trust_level":15})()
+        class Mood:
+            default_mood = "neutral"
+
+        rel = type(
+            "R", (), {"target_id": "player", "affection_level": 5, "trust_level": 15}
+        )()
+
         class RTS:
             relationships: ClassVar[list] = [rel]
             current_mood = Mood()
+
         class Fake:
             runtime_state_schema = RTS()
-        state = repository.get_runtime_state("tCe837a1","tPe837a1",Fake())
+
+        state = repository.get_runtime_state("tCe837a1", "tPe837a1", Fake())
         assert state["affection_level"] == 0  # DB default, schema not read directly
         assert state["trust_level"] == 10  # DB default
         assert state["current_mood"] == "neutral"
 
     def test_save_runtime_state(self):
-        repository.save_runtime_state("tC2e837a1","tP2e837a1",50.0,60.0,"happy")
-        class Mood: default_mood = "neutral"
+        repository.save_runtime_state("tC2e837a1", "tP2e837a1", 50.0, 60.0, "happy")
+
+        class Mood:
+            default_mood = "neutral"
+
         class RTS:
             relationships: ClassVar[list] = []
             current_mood = Mood()
+
         class Fake:
             runtime_state_schema = RTS()
-        s = repository.get_runtime_state("tC2e837a1","tP2e837a1",Fake())
+
+        s = repository.get_runtime_state("tC2e837a1", "tP2e837a1", Fake())
         assert s["affection_level"] == 50.0
         assert s["current_mood"] == "happy"
 
@@ -56,13 +69,13 @@ class TestRuntimeState:
         @contextmanager
         def synchronized_get_conn():
             with original_get_conn() as conn:
+
                 class SynchronizedConnection:
                     def execute(self, sql, parameters=()):
                         normalized_sql = " ".join(sql.split())
-                        if (
-                            "INSERT INTO relationship_state" in normalized_sql
-                            and tuple(parameters[:2]) == (character_id, player_id)
-                        ):
+                        if "INSERT INTO relationship_state" in normalized_sql and tuple(
+                            parameters[:2]
+                        ) == (character_id, player_id):
                             start.wait(timeout=5)
                         return conn.execute(sql, parameters)
 
@@ -103,7 +116,7 @@ class TestRuntimeState:
 class TestSession:
     def test_create_and_get(self):
         sid = str(uuid.uuid4())
-        repository.create_session(sid,"tc","tp","Tester")
+        repository.create_session(sid, "tc", "tp", "Tester")
         s = repository.get_session(sid)
         assert s is not None
         assert s["status"] == "active"
@@ -147,16 +160,19 @@ class TestSession:
             session_id,
             owner_user_id=owner_id,
         )
-        assert repository.get_session_group_memories(
-            session_id,
-            owner_user_id=other_owner_id,
-        ) == []
+        assert (
+            repository.get_session_group_memories(
+                session_id,
+                owner_user_id=other_owner_id,
+            )
+            == []
+        )
 
     def test_get_sessions_list(self):
         sid = str(uuid.uuid4())
-        repository.create_session(sid,"tc3","tp3","T3")
-        sessions = repository.get_sessions_by_player_and_character("tc3","tp3")
-        assert any(s["session_id"]==sid for s in sessions)
+        repository.create_session(sid, "tc3", "tp3", "T3")
+        sessions = repository.get_sessions_by_player_and_character("tc3", "tp3")
+        assert any(s["session_id"] == sid for s in sessions)
 
     def test_get_or_create_active_session_is_atomic_under_concurrency(self):
         player_id = f"atomic-player-{uuid.uuid4().hex}"
@@ -287,15 +303,17 @@ class TestMultiSessionCreation:
         assert session_count == 1
         assert participant_count == len(character_ids)
 
+
 class TestShortTerm:
     def test_append_and_get(self):
         # Single-char messages are appended via orchestrator, not repository directly
         pass
 
+
 class TestLongTermFact:
     def test_save_and_get(self):
-        repository.save_long_term_fact("fC","fP","玩家喜欢猫",7)
-        facts = repository.get_long_term_facts("fC","fP",5)
+        repository.save_long_term_fact("fC", "fP", "玩家喜欢猫", 7)
+        facts = repository.get_long_term_facts("fC", "fP", 5)
         assert any("猫" in f for f in facts)
 
     @pytest.mark.parametrize(
@@ -319,7 +337,9 @@ class TestLongTermFact:
 
         for turn in range(1, 5):
             repository.append_short_term_message(session_id, "user", f"玩家消息 {turn}")
-            repository.append_short_term_message(session_id, "assistant", f"角色回复 {turn}")
+            repository.append_short_term_message(
+                session_id, "assistant", f"角色回复 {turn}"
+            )
             fact_id = repository.save_long_term_fact_if_checkpoint(
                 session_id,
                 character_id,
@@ -353,7 +373,9 @@ class TestLongTermFact:
 
         for turn in range(5):
             repository.append_short_term_message(session_id, "user", f"玩家消息 {turn}")
-            repository.append_short_term_message(session_id, "assistant", f"角色回复 {turn}")
+            repository.append_short_term_message(
+                session_id, "assistant", f"角色回复 {turn}"
+            )
 
         fact_id = repository.save_long_term_fact_if_checkpoint(
             session_id,
@@ -375,11 +397,23 @@ class TestLongTermFact:
         with repository.get_conn() as conn:
             conn.execute(
                 "UPDATE long_term_fact SET created_at=?, last_referenced=? WHERE character_id=? AND player_id=? AND fact_text=?",
-                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", character_id, player_id, "旧关系事实：师徒"),
+                (
+                    "2026-01-01T00:00:00+00:00",
+                    "2026-01-01T00:00:00+00:00",
+                    character_id,
+                    player_id,
+                    "旧关系事实：师徒",
+                ),
             )
             conn.execute(
                 "UPDATE long_term_fact SET created_at=?, last_referenced=? WHERE character_id=? AND player_id=? AND fact_text=?",
-                ("2026-01-02T00:00:00+00:00", "2026-01-02T00:00:00+00:00", character_id, player_id, "新关系事实：情侣"),
+                (
+                    "2026-01-02T00:00:00+00:00",
+                    "2026-01-02T00:00:00+00:00",
+                    character_id,
+                    player_id,
+                    "新关系事实：情侣",
+                ),
             )
 
         facts = repository.get_long_term_facts(
@@ -391,29 +425,44 @@ class TestLongTermFact:
         assert "新关系事实：情侣" in facts
         assert "旧关系事实：师徒" not in facts
 
+
 class TestCharacterCard:
     def test_save_list_delete(self):
         import json
+
         owner = f"user_{uuid.uuid4().hex[:8]}"
         cid = f"tc_{uuid.uuid4().hex[:8]}"
-        card = json.dumps({"character_id":cid,"meta":{"name":"T","display_name":"T"}})
-        assert repository.save_character_card_to_db(owner,cid,card,name="T",display_name="T")
+        card = json.dumps(
+            {"character_id": cid, "meta": {"name": "T", "display_name": "T"}}
+        )
+        assert repository.save_character_card_to_db(
+            owner, cid, card, name="T", display_name="T"
+        )
         cards = repository.list_character_cards_from_db(owner, only_active=False)
-        assert any(c["character_id"]==cid for c in cards)
+        assert any(c["character_id"] == cid for c in cards)
         assert repository.delete_character_card_from_db(owner, cid)
         assert repository.activate_character_card(owner, cid)
         assert repository.delete_character_card_from_db(owner, cid, soft_delete=False)
 
     def test_same_character_id_is_isolated_by_owner(self):
         import json
+
         cid = f"tc_shared_{uuid.uuid4().hex[:8]}"
         owner_a = f"user_a_{uuid.uuid4().hex[:8]}"
         owner_b = f"user_b_{uuid.uuid4().hex[:8]}"
-        card_a = json.dumps({"character_id":cid,"meta":{"name":"A","display_name":"A"}})
-        card_b = json.dumps({"character_id":cid,"meta":{"name":"B","display_name":"B"}})
+        card_a = json.dumps(
+            {"character_id": cid, "meta": {"name": "A", "display_name": "A"}}
+        )
+        card_b = json.dumps(
+            {"character_id": cid, "meta": {"name": "B", "display_name": "B"}}
+        )
 
-        assert repository.save_character_card_to_db(owner_a,cid,card_a,name="A",display_name="A")
-        assert repository.save_character_card_to_db(owner_b,cid,card_b,name="B",display_name="B")
+        assert repository.save_character_card_to_db(
+            owner_a, cid, card_a, name="A", display_name="A"
+        )
+        assert repository.save_character_card_to_db(
+            owner_b, cid, card_b, name="B", display_name="B"
+        )
         assert repository.get_character_card_from_db(owner_a, cid)["name"] == "A"
         assert repository.get_character_card_from_db(owner_b, cid)["name"] == "B"
 
@@ -540,7 +589,9 @@ class TestCharacterCard:
             character_id,
             soft_delete=False,
         )
-        assert repository.get_character_relationship(owner, character_id, other_id) is None
+        assert (
+            repository.get_character_relationship(owner, character_id, other_id) is None
+        )
         assert (
             repository.get_character_relationship_updated_at(
                 owner,
@@ -556,10 +607,12 @@ class TestCharacterCard:
         character_id = f"curve-delete-{uuid.uuid4().hex[:8]}"
         owner_a = f"curve-owner-a-{uuid.uuid4().hex[:8]}"
         owner_b = f"curve-owner-b-{uuid.uuid4().hex[:8]}"
-        card = json.dumps({
-            "character_id": character_id,
-            "meta": {"name": "Curve", "display_name": "Curve"},
-        })
+        card = json.dumps(
+            {
+                "character_id": character_id,
+                "meta": {"name": "Curve", "display_name": "Curve"},
+            }
+        )
         for owner in (owner_a, owner_b):
             assert repository.save_character_card_to_db(
                 owner,
@@ -584,30 +637,39 @@ class TestCharacterCard:
             character_id,
             soft_delete=True,
         )
-        assert repository.get_memory_curve_state(
-            owner_a,
-            character_id,
-            "player_fact",
-            "shared-memory-id",
-        ) is not None
+        assert (
+            repository.get_memory_curve_state(
+                owner_a,
+                character_id,
+                "player_fact",
+                "shared-memory-id",
+            )
+            is not None
+        )
 
         assert repository.delete_character_card_from_db(
             owner_a,
             character_id,
             soft_delete=False,
         )
-        assert repository.get_memory_curve_state(
-            owner_a,
-            character_id,
-            "player_fact",
-            "shared-memory-id",
-        ) is None
-        assert repository.get_memory_curve_state(
-            owner_b,
-            character_id,
-            "player_fact",
-            "shared-memory-id",
-        ) is not None
+        assert (
+            repository.get_memory_curve_state(
+                owner_a,
+                character_id,
+                "player_fact",
+                "shared-memory-id",
+            )
+            is None
+        )
+        assert (
+            repository.get_memory_curve_state(
+                owner_b,
+                character_id,
+                "player_fact",
+                "shared-memory-id",
+            )
+            is not None
+        )
         with repository.get_conn() as conn:
             reinforcement_owners = {
                 row["owner_user_id"]
@@ -622,21 +684,24 @@ class TestCharacterCard:
             }
         assert reinforcement_owners == {owner_b}
 
+
 class TestEventDefinition:
     def test_crud(self):
         owner = f"user_{uuid.uuid4().hex[:8]}"
         eid = f"ev_{uuid.uuid4().hex[:8]}"
-        assert repository.save_event_definition(owner,eid,"Test Evt","{}","[]",priority=5)
+        assert repository.save_event_definition(
+            owner, eid, "Test Evt", "{}", "[]", priority=5
+        )
         evt = repository.get_event_definition(owner, eid)
         assert evt is not None
         assert evt["priority"] == 5
         lst = repository.list_event_definitions(owner, only_active=False)
-        assert any(e["event_id"]==eid for e in lst)
+        assert any(e["event_id"] == eid for e in lst)
         repository.increment_event_trigger_count(owner, eid)
-        repository.log_event_trigger(eid,"tc",owner,"sess",'{}','[]')
+        repository.log_event_trigger(eid, "tc", owner, "sess", "{}", "[]")
         hist = repository.get_event_trigger_history(event_id=eid)
         assert len(hist) >= 1
-        assert repository.delete_trigger_history(eid,"tc",owner) >= 1
+        assert repository.delete_trigger_history(eid, "tc", owner) >= 1
         assert repository.delete_event_definition(owner, eid)
 
     def test_same_event_id_is_isolated_by_owner(self):
@@ -644,8 +709,12 @@ class TestEventDefinition:
         owner_b = f"user_b_{uuid.uuid4().hex[:8]}"
         eid = f"ev_shared_{uuid.uuid4().hex[:8]}"
 
-        assert repository.save_event_definition(owner_a,eid,"Evt A","{}","[]",priority=1)
-        assert repository.save_event_definition(owner_b,eid,"Evt B","{}","[]",priority=2)
+        assert repository.save_event_definition(
+            owner_a, eid, "Evt A", "{}", "[]", priority=1
+        )
+        assert repository.save_event_definition(
+            owner_b, eid, "Evt B", "{}", "[]", priority=2
+        )
 
         assert repository.get_event_definition(owner_a, eid)["event_name"] == "Evt A"
         assert repository.get_event_definition(owner_b, eid)["event_name"] == "Evt B"
@@ -676,22 +745,25 @@ class TestEventDefinition:
             status="active",
         )
 
-        assert repository.save_event_definition_with_schedule(
-            owner_user_id=owner,
-            event_id=event_id,
-            event_name="New event",
-            trigger_config="{}",
-            effects_config="[]",
-            schedule_state={
-                "event_id": "different-event",
-                "character_id": character_id,
-                "player_id": owner,
-                "schedule": "0 10 * * *",
-                "next_run_at": "2026-07-15T10:00:00+00:00",
-            },
-            character_id=character_id,
-            schedule="0 10 * * *",
-        ) is False
+        assert (
+            repository.save_event_definition_with_schedule(
+                owner_user_id=owner,
+                event_id=event_id,
+                event_name="New event",
+                trigger_config="{}",
+                effects_config="[]",
+                schedule_state={
+                    "event_id": "different-event",
+                    "character_id": character_id,
+                    "player_id": owner,
+                    "schedule": "0 10 * * *",
+                    "next_run_at": "2026-07-15T10:00:00+00:00",
+                },
+                character_id=character_id,
+                schedule="0 10 * * *",
+            )
+            is False
+        )
 
         definition = repository.get_event_definition(owner, event_id)
         schedule = repository.get_event_schedule(event_id, character_id, owner)
@@ -712,7 +784,9 @@ class TestEventDefinition:
             "[]",
             story_id="test-story",
         )
-        assert repository.get_event_definition(owner, event_id)["story_id"] == "test-story"
+        assert (
+            repository.get_event_definition(owner, event_id)["story_id"] == "test-story"
+        )
 
         assert repository.save_event_definition_with_schedule(
             owner_user_id=owner,
@@ -740,7 +814,10 @@ class TestEventDefinition:
             exclusive_group="ending",
             exclusive_scope="player",
         )
-        assert repository.get_event_definition(owner, event_id)["exclusive_scope"] == "player"
+        assert (
+            repository.get_event_definition(owner, event_id)["exclusive_scope"]
+            == "player"
+        )
 
         assert repository.save_event_definition_with_schedule(
             owner_user_id=owner,
@@ -752,7 +829,10 @@ class TestEventDefinition:
             exclusive_group="ending",
             exclusive_scope="turn",
         )
-        assert repository.get_event_definition(owner, event_id)["exclusive_scope"] == "turn"
+        assert (
+            repository.get_event_definition(owner, event_id)["exclusive_scope"]
+            == "turn"
+        )
 
     def test_player_exclusive_claim_backfills_earliest_legacy_trigger(self):
         owner = f"user_legacy_scope_{uuid.uuid4().hex[:8]}"
@@ -851,27 +931,37 @@ class TestEventDeepIntegrationRepository:
         )
         template = repository.get_event_template(tid)
         assert template["template_name"] == "测试模板"
-        assert any(t["template_id"] == tid for t in repository.list_event_templates(category="test"))
+        assert any(
+            t["template_id"] == tid
+            for t in repository.list_event_templates(category="test")
+        )
         assert repository.delete_event_template(tid)
         assert repository.get_event_template(tid) is None
+
 
 class TestRelationship:
     def test_crud(self):
         owner = f"user_{uuid.uuid4().hex[:8]}"
-        assert repository.save_character_relationship(owner,"rA","rB","friend",50.0,"friends")
-        rel = repository.get_character_relationship(owner,"rA","rB")
+        assert repository.save_character_relationship(
+            owner, "rA", "rB", "friend", 50.0, "friends"
+        )
+        rel = repository.get_character_relationship(owner, "rA", "rB")
         assert rel is not None
         assert rel["relationship_type"] == "friend"
-        rels = repository.list_character_relationships(owner,"rA")
+        rels = repository.list_character_relationships(owner, "rA")
         assert len(rels) >= 1
-        repository.update_relationship_affinity(owner,"rA","rB",10.0)
-        rel2 = repository.get_character_relationship(owner,"rA","rB")
+        repository.update_relationship_affinity(owner, "rA", "rB", 10.0)
+        rel2 = repository.get_character_relationship(owner, "rA", "rB")
         assert rel2["affinity"] == 60.0
-        updated_before_delete = repository.get_character_relationship_updated_at(owner, "rA", "rB")
+        updated_before_delete = repository.get_character_relationship_updated_at(
+            owner, "rA", "rB"
+        )
         assert updated_before_delete is not None
-        assert repository.delete_character_relationship(owner,"rA","rB")
+        assert repository.delete_character_relationship(owner, "rA", "rB")
         assert repository.get_character_relationship(owner, "rA", "rB") is None
-        updated_after_delete = repository.get_character_relationship_updated_at(owner, "rA", "rB")
+        updated_after_delete = repository.get_character_relationship_updated_at(
+            owner, "rA", "rB"
+        )
         assert updated_after_delete is not None
         assert updated_after_delete >= updated_before_delete
 
@@ -879,24 +969,45 @@ class TestRelationship:
         owner_a = f"user_a_{uuid.uuid4().hex[:8]}"
         owner_b = f"user_b_{uuid.uuid4().hex[:8]}"
 
-        assert repository.save_character_relationship(owner_a,"rA","rB","friend",50.0,"A")
-        assert repository.save_character_relationship(owner_b,"rA","rB","enemy",-20.0,"B")
+        assert repository.save_character_relationship(
+            owner_a, "rA", "rB", "friend", 50.0, "A"
+        )
+        assert repository.save_character_relationship(
+            owner_b, "rA", "rB", "enemy", -20.0, "B"
+        )
 
-        assert repository.get_character_relationship(owner_a,"rA","rB")["relationship_type"] == "friend"
-        assert repository.get_character_relationship(owner_b,"rA","rB")["relationship_type"] == "enemy"
+        assert (
+            repository.get_character_relationship(owner_a, "rA", "rB")[
+                "relationship_type"
+            ]
+            == "friend"
+        )
+        assert (
+            repository.get_character_relationship(owner_b, "rA", "rB")[
+                "relationship_type"
+            ]
+            == "enemy"
+        )
+
 
 class TestMultiSession:
     def test_create_and_participants(self):
         sid = str(uuid.uuid4())
         for cid in ("c1", "c2"):
-            card = json.dumps({"character_id": cid, "meta": {"name": cid, "display_name": cid}})
-            assert repository.save_character_card_to_db("p1", cid, card, name=cid, display_name=cid)
-        assert repository.create_multi_character_session(sid,"p1","Player",["c1","c2"])
+            card = json.dumps(
+                {"character_id": cid, "meta": {"name": cid, "display_name": cid}}
+            )
+            assert repository.save_character_card_to_db(
+                "p1", cid, card, name=cid, display_name=cid
+            )
+        assert repository.create_multi_character_session(
+            sid, "p1", "Player", ["c1", "c2"]
+        )
         parts = repository.get_session_participants(sid)
         assert len(parts) == 2
-        repository.append_multi_character_message(sid,"assistant","Hi","c1","Char1")
-        repository.update_participant_speak_time(sid,"c1")
-        hist = repository.get_multi_character_history(sid,5)
+        repository.append_multi_character_message(sid, "assistant", "Hi", "c1", "Char1")
+        repository.update_participant_speak_time(sid, "c1")
+        hist = repository.get_multi_character_history(sid, 5)
         assert len(hist) >= 1
 
     def test_multi_message_returns_stable_id_and_history_exposes_it(self):
@@ -942,20 +1053,34 @@ class TestSpeechSettings:
         sid = str(uuid.uuid4())
         active_id = f"ga_{uuid.uuid4().hex[:8]}"
         disabled_id = f"gd_{uuid.uuid4().hex[:8]}"
-        active_card = json.dumps({"character_id": active_id, "meta": {"name": "A", "display_name": "A"}})
-        disabled_card = json.dumps({"character_id": disabled_id, "meta": {"name": "D", "display_name": "D"}})
+        active_card = json.dumps(
+            {"character_id": active_id, "meta": {"name": "A", "display_name": "A"}}
+        )
+        disabled_card = json.dumps(
+            {"character_id": disabled_id, "meta": {"name": "D", "display_name": "D"}}
+        )
 
-        assert repository.save_character_card_to_db("p1", active_id, active_card, name="A", display_name="A")
-        assert repository.save_character_card_to_db("p1", disabled_id, disabled_card, name="D", display_name="D")
-        assert repository.create_multi_character_session(sid, "p1", "Player", [active_id, disabled_id])
-        assert repository.delete_character_card_from_db("p1", disabled_id, soft_delete=True)
+        assert repository.save_character_card_to_db(
+            "p1", active_id, active_card, name="A", display_name="A"
+        )
+        assert repository.save_character_card_to_db(
+            "p1", disabled_id, disabled_card, name="D", display_name="D"
+        )
+        assert repository.create_multi_character_session(
+            sid, "p1", "Player", [active_id, disabled_id]
+        )
+        assert repository.delete_character_card_from_db(
+            "p1", disabled_id, soft_delete=True
+        )
 
         visible_parts = repository.get_session_participants(sid, only_active=False)
         active_parts = repository.get_session_participants(sid, only_active=True)
 
         assert {p["character_id"] for p in visible_parts} == {active_id, disabled_id}
         assert [p["character_id"] for p in active_parts] == [active_id]
-        disabled_part = next(p for p in visible_parts if p["character_id"] == disabled_id)
+        disabled_part = next(
+            p for p in visible_parts if p["character_id"] == disabled_id
+        )
         assert not disabled_part["is_active"]
 
     def test_group_name_visible_in_player_sessions(self):
@@ -1063,12 +1188,16 @@ class TestSpeechSettings:
         )
 
         repository.append_multi_character_message(first_sid, "user", "第一段消息")
-        repository.append_multi_character_message(second_sid, "assistant", "第二段消息", "gc1", "角色一")
+        repository.append_multi_character_message(
+            second_sid, "assistant", "第二段消息", "gc1", "角色一"
+        )
 
         sessions = repository.get_multi_character_thread_sessions(first_sid)
         assert [s["session_id"] for s in sessions] == [first_sid, second_sid]
 
-        history = repository.get_multi_character_thread_history(first_sid, limit_messages=None)
+        history = repository.get_multi_character_thread_history(
+            first_sid, limit_messages=None
+        )
         assert [m["content"] for m in history] == ["第一段消息", "第二段消息"]
         assert [m["session_id"] for m in history] == [first_sid, second_sid]
 
@@ -1096,7 +1225,9 @@ class TestSpeechSettings:
         )
 
         for index in range(3):
-            repository.append_multi_character_message(first_sid, "user", f"旧消息-{index}")
+            repository.append_multi_character_message(
+                first_sid, "user", f"旧消息-{index}"
+            )
         for index in range(3):
             repository.append_multi_character_message(
                 second_sid,
@@ -1119,7 +1250,12 @@ class TestSpeechSettings:
 
         assert [m["content"] for m in latest] == ["新消息-1", "新消息-2"]
         assert has_more is True
-        assert [m["content"] for m in older] == ["旧消息-0", "旧消息-1", "旧消息-2", "新消息-0"]
+        assert [m["content"] for m in older] == [
+            "旧消息-0",
+            "旧消息-1",
+            "旧消息-2",
+            "新消息-0",
+        ]
         assert older_has_more is False
 
     def test_multi_character_thread_history_keeps_same_name_threads_isolated(self):
@@ -1154,13 +1290,19 @@ class TestSpeechSettings:
         )
 
         repository.append_multi_character_message(first_sid, "user", "同名第一段")
-        repository.append_multi_character_message(second_sid, "assistant", "同名第二段", "gc1", "角色一")
-        repository.append_multi_character_message(other_player_sid, "user", "其他玩家消息")
+        repository.append_multi_character_message(
+            second_sid, "assistant", "同名第二段", "gc1", "角色一"
+        )
+        repository.append_multi_character_message(
+            other_player_sid, "user", "其他玩家消息"
+        )
 
         sessions = repository.get_multi_character_thread_sessions(first_sid)
         assert [s["session_id"] for s in sessions] == [first_sid]
 
-        history = repository.get_multi_character_thread_history(first_sid, limit_messages=None)
+        history = repository.get_multi_character_thread_history(
+            first_sid, limit_messages=None
+        )
         assert [m["content"] for m in history] == ["同名第一段"]
 
     def test_multi_character_thread_incremental_history_is_stable_across_sessions(self):
@@ -1212,28 +1354,39 @@ class TestSpeechSettings:
             world_created_at="2026-01-01T08:02:00+00:00",
         )
 
-        first_page, has_more, latest_id = repository.get_multi_character_thread_history_after(
-            first_sid,
-            after_message_id=0,
-            limit=2,
+        first_page, has_more, latest_id = (
+            repository.get_multi_character_thread_history_after(
+                first_sid,
+                after_message_id=0,
+                limit=2,
+            )
         )
-        second_page, second_has_more, second_latest_id = repository.get_multi_character_thread_history_after(
-            first_sid,
-            after_message_id=second_id,
-            limit=2,
+        second_page, second_has_more, second_latest_id = (
+            repository.get_multi_character_thread_history_after(
+                first_sid,
+                after_message_id=second_id,
+                limit=2,
+            )
         )
-        repeated, repeated_has_more, repeated_latest_id = repository.get_multi_character_thread_history_after(
-            first_sid,
-            after_message_id=second_id,
-            limit=2,
+        repeated, repeated_has_more, repeated_latest_id = (
+            repository.get_multi_character_thread_history_after(
+                first_sid,
+                after_message_id=second_id,
+                limit=2,
+            )
         )
-        empty, empty_has_more, empty_latest_id = repository.get_multi_character_thread_history_after(
-            first_sid,
-            after_message_id=third_id,
-            limit=2,
+        empty, empty_has_more, empty_latest_id = (
+            repository.get_multi_character_thread_history_after(
+                first_sid,
+                after_message_id=third_id,
+                limit=2,
+            )
         )
 
-        assert [message["message_id"] for message in first_page] == [first_id, second_id]
+        assert [message["message_id"] for message in first_page] == [
+            first_id,
+            second_id,
+        ]
         assert has_more is True
         assert latest_id == third_id
         assert second_page == repeated
@@ -1261,10 +1414,12 @@ class TestSpeechSettings:
         character_id = f"update-character-{suffix}"
         other_character_id = f"update-other-{suffix}"
         for candidate_id in (character_id, other_character_id):
-            card = json.dumps({
-                "character_id": candidate_id,
-                "meta": {"name": candidate_id, "display_name": candidate_id},
-            })
+            card = json.dumps(
+                {
+                    "character_id": candidate_id,
+                    "meta": {"name": candidate_id, "display_name": candidate_id},
+                }
+            )
             assert repository.save_character_card_to_db(
                 player_id,
                 candidate_id,
@@ -1320,11 +1475,14 @@ class TestSpeechSettings:
         assert history[-1]["message_id"] == message_id
         assert history[-1]["intent"] == "reveal"
         assert history[-1]["knowledge_sources"] == [{"document_id": "doc-1"}]
-        assert next(
-            participant["message_count"]
-            for participant in participants
-            if participant["character_id"] == character_id
-        ) == 1
+        assert (
+            next(
+                participant["message_count"]
+                for participant in participants
+                if participant["character_id"] == character_id
+            )
+            == 1
+        )
 
     def test_group_message_notifications_aggregate_and_mark_only_owned_thread(self):
         player_id = f"gun_{uuid.uuid4().hex[:8]}"
@@ -1367,7 +1525,9 @@ class TestSpeechSettings:
         assert thread_notification["unread_count"] == 5
         assert thread_notification["content"] == "群聊中有 5 条新消息"
 
-        assert repository.mark_group_thread_notifications_read(player_id, thread_id) == 1
+        assert (
+            repository.mark_group_thread_notifications_read(player_id, thread_id) == 1
+        )
         remaining = repository.list_player_event_inbox(player_id)
         assert [row["group_thread_id"] for row in remaining] == [other_thread_id]
         other_player_unread = repository.list_player_event_inbox(other_player_id)
@@ -1384,7 +1544,9 @@ class TestSpeechSettings:
             group_name="关系变更群聊",
         )
         repository.append_multi_character_message(sid, "user", "旧关系历史")
-        repository.append_multi_character_message(sid, "assistant", "新关系历史", "gc1", "角色一")
+        repository.append_multi_character_message(
+            sid, "assistant", "新关系历史", "gc1", "角色一"
+        )
 
         with repository.get_conn() as conn:
             conn.execute(
@@ -1414,7 +1576,9 @@ class TestSpeechSettings:
             group_name="当前会话过滤",
         )
         repository.append_multi_character_message(sid, "user", "旧当前会话历史")
-        repository.append_multi_character_message(sid, "assistant", "新当前会话历史", "gc1", "角色一")
+        repository.append_multi_character_message(
+            sid, "assistant", "新当前会话历史", "gc1", "角色一"
+        )
 
         with repository.get_conn() as conn:
             conn.execute(
@@ -1463,31 +1627,38 @@ class TestSpeechSettings:
         )
         repository.append_multi_character_message(group_sid, "user", "群聊消息")
 
-        messages, _ = repository.get_messages_by_player_and_character(character_id, player_id, limit=20)
+        messages, _ = repository.get_messages_by_player_and_character(
+            character_id, player_id, limit=20
+        )
         contents = [m["content"] for m in messages]
         assert "单聊消息" in contents
         assert "群聊消息" not in contents
 
+
 class TestDedup:
     def test_long_term_dedup(self):
-        i1 = repository.save_long_term_fact("dC","dP","测试记忆去重功能",5)
-        i2 = repository.save_long_term_fact("dC","dP","测试记忆去重功能",8)
+        i1 = repository.save_long_term_fact("dC", "dP", "测试记忆去重功能", 5)
+        i2 = repository.save_long_term_fact("dC", "dP", "测试记忆去重功能", 8)
         assert i2 == i1
 
     def test_session_summary_dedup(self):
-        repository.save_session_summary("ds1","dC","dP","v1",5)
-        repository.save_session_summary("ds1","dC","dP","v2",10)
+        repository.save_session_summary("ds1", "dC", "dP", "v1", 5)
+        repository.save_session_summary("ds1", "dC", "dP", "v2", 10)
         s = repository.get_session_summary("ds1")
         assert s["summary_text"] == "v2"
 
     def test_shared_memory_dedup(self):
-        m1 = repository.save_shared_memory("user_dedup","dA","dB","一起去探险",importance=0.5)
-        m2 = repository.save_shared_memory("user_dedup","dA","dB","一起去探险",importance=0.9)
+        m1 = repository.save_shared_memory(
+            "user_dedup", "dA", "dB", "一起去探险", importance=0.5
+        )
+        m2 = repository.save_shared_memory(
+            "user_dedup", "dA", "dB", "一起去探险", importance=0.9
+        )
         assert m2 == m1
 
     def test_group_memory_dedup(self):
-        g1 = repository.save_group_memory("dg1","全体集结出发",["x"],0.5)
-        g2 = repository.save_group_memory("dg1","全体集结出发了",["x"],0.8)
+        g1 = repository.save_group_memory("dg1", "全体集结出发", ["x"], 0.5)
+        g2 = repository.save_group_memory("dg1", "全体集结出发了", ["x"], 0.8)
         assert g2 == g1
 
 
@@ -1527,7 +1698,9 @@ class TestBackgroundJobs:
         session_id = f"atomic-job-session-{suffix}"
         player_id = f"atomic-job-player-{suffix}"
         request_id = f"atomic-job-request-{suffix}"
-        repository.create_session(session_id, "atomic-job-character", player_id, "Player")
+        repository.create_session(
+            session_id, "atomic-job-character", player_id, "Player"
+        )
         claim = repository.claim_dialogue_turn(
             session_id=session_id,
             request_id=request_id,
@@ -1544,14 +1717,16 @@ class TestBackgroundJobs:
                 "lease_owner": claim["lease_owner"],
                 "response": {"dialogue": "记住了"},
                 "messages": [{"role": "user", "content": "我喜欢茉莉花茶"}],
-                "background_jobs": [{
-                    "job_type": "single_checkpoint_memory",
-                    "dedupe_key": dedupe_key,
-                    "payload": {
-                        "session_id": session_id,
-                        "history": [{"role": "user", "content": "我喜欢茉莉花茶"}],
-                    },
-                }],
+                "background_jobs": [
+                    {
+                        "job_type": "single_checkpoint_memory",
+                        "dedupe_key": dedupe_key,
+                        "payload": {
+                            "session_id": session_id,
+                            "history": [{"role": "user", "content": "我喜欢茉莉花茶"}],
+                        },
+                    }
+                ],
             },
         )
 
@@ -1578,7 +1753,9 @@ class TestBackgroundJobs:
         player_id = f"rollback-job-player-{suffix}"
         request_id = f"rollback-job-request-{suffix}"
         dedupe_key = f"checkpoint-conflict:{suffix}"
-        repository.create_session(session_id, "rollback-job-character", player_id, "Player")
+        repository.create_session(
+            session_id, "rollback-job-character", player_id, "Player"
+        )
         repository.enqueue_background_job(
             job_type="single_checkpoint_memory",
             dedupe_key=dedupe_key,
@@ -1600,11 +1777,13 @@ class TestBackgroundJobs:
                     "lease_owner": claim["lease_owner"],
                     "response": {"dialogue": "不应提交"},
                     "messages": [{"role": "user", "content": "这条消息应回滚"}],
-                    "background_jobs": [{
-                        "job_type": "group_checkpoint_memory",
-                        "dedupe_key": dedupe_key,
-                        "payload": {"history": ["replacement"]},
-                    }],
+                    "background_jobs": [
+                        {
+                            "job_type": "group_checkpoint_memory",
+                            "dedupe_key": dedupe_key,
+                            "payload": {"history": ["replacement"]},
+                        }
+                    ],
                 },
             )
 
@@ -1623,12 +1802,16 @@ class TestBackgroundJobs:
         assert message_count == 0
         assert turn["status"] == "processing"
 
-    def test_expired_dialogue_turn_lease_cannot_commit_after_another_turn_is_claimed(self):
+    def test_expired_dialogue_turn_lease_cannot_commit_after_another_turn_is_claimed(
+        self,
+    ):
         suffix = uuid.uuid4().hex[:8]
         session_id = f"expired-turn-session-{suffix}"
         player_id = f"expired-turn-player-{suffix}"
         stale_request_id = f"stale-request-{suffix}"
-        repository.create_session(session_id, "expired-turn-character", player_id, "Player")
+        repository.create_session(
+            session_id, "expired-turn-character", player_id, "Player"
+        )
         stale_claim = repository.claim_dialogue_turn(
             session_id=session_id,
             request_id=stale_request_id,
@@ -1666,12 +1849,14 @@ class TestBackgroundJobs:
                     "response": {"dialogue": "过期结果"},
                     "messages": [{"role": "user", "content": "不应落库"}],
                 },
-                runtime_states=[{
-                    "character_id": "expired-turn-character",
-                    "affection_level": 99,
-                    "trust_level": 99,
-                    "current_mood": "stale",
-                }],
+                runtime_states=[
+                    {
+                        "character_id": "expired-turn-character",
+                        "affection_level": 99,
+                        "trust_level": 99,
+                        "current_mood": "stale",
+                    }
+                ],
             )
 
         with repository.get_conn() as conn:
@@ -1800,11 +1985,14 @@ class TestBackgroundJobs:
         assert retry["status"] == "retry"
         assert retry["available_at"] == (now + timedelta(seconds=46)).isoformat()
         assert retry["payload"] == {"history": ["immutable snapshot"]}
-        assert repository.claim_background_job(
-            lease_owner="too-early",
-            lease_seconds=60,
-            now=now + timedelta(seconds=45),
-        ) is None
+        assert (
+            repository.claim_background_job(
+                lease_owner="too-early",
+                lease_seconds=60,
+                now=now + timedelta(seconds=45),
+            )
+            is None
+        )
 
         claimed_again = repository.claim_background_job(
             lease_owner="worker-2",
@@ -1900,7 +2088,9 @@ class TestGroupDialoguePulseCommit:
         assert state["daily_message_count"] == 2
         participants = {
             row["character_id"]: row
-            for row in repository.get_session_participants(session_id, only_active=False)
+            for row in repository.get_session_participants(
+                session_id, only_active=False
+            )
         }
         assert participants["c1"]["message_count"] == 1
         assert participants["c2"]["message_count"] == 1
@@ -2009,15 +2199,17 @@ class TestGroupDialoguePulseCommit:
                 thread_id,
                 session_id,
                 player_id,
-                [{
-                    "message_id": -1,
-                    "character_id": "c1",
-                    "character_name": "甲",
-                    "dialogue": "准备。",
-                    "current_affinity": 9,
-                    "current_trust": 18,
-                    "current_mood": "警觉",
-                }],
+                [
+                    {
+                        "message_id": -1,
+                        "character_id": "c1",
+                        "character_name": "甲",
+                        "dialogue": "准备。",
+                        "current_affinity": 9,
+                        "current_trust": 18,
+                        "current_mood": "警觉",
+                    }
+                ],
                 lease_owner="worker-rollback",
                 real_now_iso="2026-01-02T12:00:00+00:00",
                 world_now_iso="2026-01-02T20:00:00+00:00",
@@ -2032,14 +2224,19 @@ class TestGroupDialoguePulseCommit:
                 unresolved_hooks=[],
             )
 
-        assert repository.get_multi_character_history(
-            session_id,
-            limit_messages=None,
-        ) == []
+        assert (
+            repository.get_multi_character_history(
+                session_id,
+                limit_messages=None,
+            )
+            == []
+        )
         state = repository.get_group_dialogue_state(thread_id)
         assert state["lease_owner"] == "worker-rollback"
         assert state["daily_message_count"] == 0
-        participants = repository.get_session_participants(session_id, only_active=False)
+        participants = repository.get_session_participants(
+            session_id, only_active=False
+        )
         assert all(row["message_count"] == 0 for row in participants)
         assert repository.list_player_event_inbox(player_id) == []
         with repository.get_conn() as conn:
@@ -2056,6 +2253,7 @@ class TestGroupDialoguePulseCommit:
 # ═══════════════════════════════════════════════
 # 新增测试 — 代码审查修复验证
 # ═══════════════════════════════════════════════
+
 
 class TestMessageId:
     """P2-10: append_short_term_message 返回消息 ID"""
@@ -2080,7 +2278,9 @@ class TestSummaryStatus:
 
     def test_save_with_status(self):
         sid = str(uuid.uuid4())
-        repository.save_session_summary(sid, "ssC", "ssP", "测试摘要", 10, summary_status="generating")
+        repository.save_session_summary(
+            sid, "ssC", "ssP", "测试摘要", 10, summary_status="generating"
+        )
         s = repository.get_session_summary(sid)
         assert s is not None
         assert s.get("summary_status") == "generating"
@@ -2094,8 +2294,12 @@ class TestSummaryStatus:
 
     def test_status_transition(self):
         sid = str(uuid.uuid4())
-        repository.save_session_summary(sid, "stC", "stP", "", 3, summary_status="generating")
-        repository.save_session_summary(sid, "stC", "stP", "最终摘要", 3, summary_status="completed")
+        repository.save_session_summary(
+            sid, "stC", "stP", "", 3, summary_status="generating"
+        )
+        repository.save_session_summary(
+            sid, "stC", "stP", "最终摘要", 3, summary_status="completed"
+        )
         s = repository.get_session_summary(sid)
         assert s is not None
         assert s.get("summary_status") == "completed"
@@ -2129,7 +2333,9 @@ class TestLatestActiveSession:
         sid2 = str(uuid.uuid4())
         repository.create_session(sid1, "cfA", "cfP", "Tester")
         repository.create_session(sid2, "cfB", "cfP", "Tester")
-        result = repository.get_latest_active_session(player_id="cfP", character_id="cfA")
+        result = repository.get_latest_active_session(
+            player_id="cfP", character_id="cfA"
+        )
         assert result is not None
         assert result["character_id"] == "cfA"
 
@@ -2138,7 +2344,9 @@ class TestSessionListFields:
     def test_player_sessions_include_display_fields_and_last_message_time(self):
         cid = f"sl_{uuid.uuid4().hex[:8]}"
         sid = str(uuid.uuid4())
-        card = json.dumps({"character_id": cid, "meta": {"name": "列表角色", "display_name": "列表"}})
+        card = json.dumps(
+            {"character_id": cid, "meta": {"name": "列表角色", "display_name": "列表"}}
+        )
         assert repository.save_character_card_to_db(
             "slP",
             cid,
@@ -2159,7 +2367,9 @@ class TestSessionListFields:
         assert session["last_message"] == "最后一句"
         assert session["last_message_at"] is not None
 
-    def test_single_player_session_preview_uses_latest_character_message_across_sessions(self):
+    def test_single_player_session_preview_uses_latest_character_message_across_sessions(
+        self,
+    ):
         cid = f"slc_{uuid.uuid4().hex[:8]}"
         player_id = f"slp_{uuid.uuid4().hex[:8]}"
         old_sid = str(uuid.uuid4())
@@ -2276,8 +2486,12 @@ class TestSessionListFields:
         repository.append_short_term_message(sid2, "user", "new-1")
         repository.append_short_term_message(sid2, "assistant", "new-2")
 
-        latest, has_more = repository.get_messages_by_player_and_character(cid, player_id, offset=0, limit=2)
-        older, older_has_more = repository.get_messages_by_player_and_character(cid, player_id, offset=2, limit=2)
+        latest, has_more = repository.get_messages_by_player_and_character(
+            cid, player_id, offset=0, limit=2
+        )
+        older, older_has_more = repository.get_messages_by_player_and_character(
+            cid, player_id, offset=2, limit=2
+        )
 
         assert [m["content"] for m in latest] == ["new-1", "new-2"]
         assert has_more is True

@@ -1,6 +1,7 @@
 """
 编排器工具函数单元测试
 """
+
 import json
 import sys
 import uuid
@@ -14,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 class TestClipping:
     def test_clip(self):
         from memoria.core.multi_character_orchestrator import _clip
+
         assert _clip(150, -100, 100) == 100
         assert _clip(-150, -100, 100) == -100
         assert _clip(0, -100, 100) == 0
@@ -21,26 +23,48 @@ class TestClipping:
 
     def test_safe_float(self):
         from memoria.core.multi_character_orchestrator import _safe_float
+
         assert _safe_float("3.14") == 3.14
         assert _safe_float("invalid") == 0.0
         assert _safe_float(None) == 0.0
         assert _safe_float(5.5, 99.0) == 5.5
         assert _safe_float("abc", -1.0) == -1.0
 
+
 class TestHistoryFormatting:
     def test_format_single_role(self):
-        _ = type('obj',(object,),{'player_name':'Player','session_id':'s','player_id':'p'})()
+        _ = type(
+            "obj",
+            (object,),
+            {"player_name": "Player", "session_id": "s", "player_id": "p"},
+        )()
 
     def test_format_with_character_names(self):
         from memoria.core.multi_character_orchestrator import MultiCharacterOrchestrator
         from memoria.db import repository
+
         sid = str(uuid.uuid4())
-        repository.create_multi_character_session(sid,"p","Player",["c1","c2"])
+        repository.create_multi_character_session(sid, "p", "Player", ["c1", "c2"])
         orch = MultiCharacterOrchestrator(sid)
         hist = [
-            {"role":"user","content":"Hi","character_id":None,"character_name":None},
-            {"role":"assistant","content":"Hi!","character_id":"c1","character_name":"Char1"},
-            {"role":"assistant","content":"Hello!","character_id":"c2","character_name":"Char2"},
+            {
+                "role": "user",
+                "content": "Hi",
+                "character_id": None,
+                "character_name": None,
+            },
+            {
+                "role": "assistant",
+                "content": "Hi!",
+                "character_id": "c1",
+                "character_name": "Char1",
+            },
+            {
+                "role": "assistant",
+                "content": "Hello!",
+                "character_id": "c2",
+                "character_name": "Char2",
+            },
         ]
         formatted = orch._format_history_for_llm(hist, "c1")
         assert len(formatted) == 3
@@ -118,8 +142,12 @@ class TestHistoryFormatting:
         orch.player_name = "Player"
         orch.character_ids = ["c1", "c2"]
         orch.character_cards = {
-            "c1": SimpleNamespace(meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])),
-            "c2": SimpleNamespace(meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])),
+            "c1": SimpleNamespace(
+                meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])
+            ),
+            "c2": SimpleNamespace(
+                meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])
+            ),
         }
 
         formatted = orch._format_history_for_llm(
@@ -145,32 +173,44 @@ class TestHistoryFormatting:
         assert not any("师徒" in content for content in contents)
         assert any("门边" in content for content in contents)
 
+
 class TestLoadRelationships:
     def test_load_all_relationships(self):
         from memoria.core.multi_character_orchestrator import MultiCharacterOrchestrator
         from memoria.db import repository
+
         sid = str(uuid.uuid4())
         for cid in ("a", "b", "c"):
-            card = json.dumps({"character_id": cid, "meta": {"name": cid, "display_name": cid}})
-            repository.save_character_card_to_db("p", cid, card, name=cid, display_name=cid)
-        repository.create_multi_character_session(sid,"p","Player",["a","b","c"])
-        repository.save_character_relationship("p","a","b","friend",50.0)
+            card = json.dumps(
+                {"character_id": cid, "meta": {"name": cid, "display_name": cid}}
+            )
+            repository.save_character_card_to_db(
+                "p", cid, card, name=cid, display_name=cid
+            )
+        repository.create_multi_character_session(sid, "p", "Player", ["a", "b", "c"])
+        repository.save_character_relationship("p", "a", "b", "friend", 50.0)
         orch = MultiCharacterOrchestrator(sid)
         rels = orch._load_all_relationships()
         assert len(rels) >= 1
+
 
 class TestCharacterInteraction:
     def test_select_character_for_interaction(self):
         from memoria.core.multi_character_orchestrator import MultiCharacterOrchestrator
         from memoria.db import repository
+
         sid = str(uuid.uuid4())
         for cid in ("x", "y", "z"):
-            card = json.dumps({"character_id": cid, "meta": {"name": cid, "display_name": cid}})
-            repository.save_character_card_to_db("p", cid, card, name=cid, display_name=cid)
-        repository.create_multi_character_session(sid,"p","Player",["x","y","z"])
+            card = json.dumps(
+                {"character_id": cid, "meta": {"name": cid, "display_name": cid}}
+            )
+            repository.save_character_card_to_db(
+                "p", cid, card, name=cid, display_name=cid
+            )
+        repository.create_multi_character_session(sid, "p", "Player", ["x", "y", "z"])
         orch = MultiCharacterOrchestrator(sid)
         selected = orch._select_character_for_interaction()
-        assert selected in ["x","y","z"]
+        assert selected in ["x", "y", "z"]
 
     def test_decide_group_response_count_uses_discussion_pressure(self, monkeypatch):
         from types import SimpleNamespace
@@ -180,19 +220,33 @@ class TestCharacterInteraction:
         orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
             multi_character_orchestrator.MultiCharacterOrchestrator
         )
-        orch.participants = [{"character_id": "a"}, {"character_id": "b"}, {"character_id": "c"}]
+        orch.participants = [
+            {"character_id": "a"},
+            {"character_id": "b"},
+            {"character_id": "c"},
+        ]
         orch.character_cards = {
-            "a": SimpleNamespace(meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])),
-            "b": SimpleNamespace(meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])),
-            "c": SimpleNamespace(meta=SimpleNamespace(name="丙", display_name="丙", aliases=[])),
+            "a": SimpleNamespace(
+                meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])
+            ),
+            "b": SimpleNamespace(
+                meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])
+            ),
+            "c": SimpleNamespace(
+                meta=SimpleNamespace(name="丙", display_name="丙", aliases=[])
+            ),
         }
         orch._load_all_relationships = lambda: {
             "a_b": {"affinity": 85, "relationship_type": "宿敌"},
             "b_c": {"affinity": 60, "relationship_type": "盟友"},
         }
-        monkeypatch.setattr(multi_character_orchestrator.random, "uniform", lambda a, b: a + 0.2)
+        monkeypatch.setattr(
+            multi_character_orchestrator.random, "uniform", lambda a, b: a + 0.2
+        )
 
-        count = orch._decide_group_response_count("大家马上商量一个调查计划，线索很危险，怎么办？", 3)
+        count = orch._decide_group_response_count(
+            "大家马上商量一个调查计划，线索很危险，怎么办？", 3
+        )
 
         assert count >= 2
 
@@ -204,11 +258,21 @@ class TestCharacterInteraction:
         orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
             multi_character_orchestrator.MultiCharacterOrchestrator
         )
-        orch.participants = [{"character_id": "a"}, {"character_id": "b"}, {"character_id": "c"}]
+        orch.participants = [
+            {"character_id": "a"},
+            {"character_id": "b"},
+            {"character_id": "c"},
+        ]
         orch.character_cards = {
-            "a": SimpleNamespace(meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])),
-            "b": SimpleNamespace(meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])),
-            "c": SimpleNamespace(meta=SimpleNamespace(name="丙", display_name="丙", aliases=[])),
+            "a": SimpleNamespace(
+                meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])
+            ),
+            "b": SimpleNamespace(
+                meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])
+            ),
+            "c": SimpleNamespace(
+                meta=SimpleNamespace(name="丙", display_name="丙", aliases=[])
+            ),
         }
 
         assert orch._decide_group_response_count("乙，你怎么看？", 3) == 1
@@ -230,9 +294,15 @@ class TestCharacterInteraction:
             {"character_id": "c"},
         ]
         orch.character_cards = {
-            "a": SimpleNamespace(meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])),
-            "b": SimpleNamespace(meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])),
-            "c": SimpleNamespace(meta=SimpleNamespace(name="丙", display_name="丙", aliases=[])),
+            "a": SimpleNamespace(
+                meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])
+            ),
+            "b": SimpleNamespace(
+                meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])
+            ),
+            "c": SimpleNamespace(
+                meta=SimpleNamespace(name="丙", display_name="丙", aliases=[])
+            ),
         }
         orch._load_all_relationships = dict
         monkeypatch.setattr(
@@ -262,9 +332,15 @@ class TestCharacterInteraction:
             {"character_id": "c"},
         ]
         orch.character_cards = {
-            "a": SimpleNamespace(meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])),
-            "b": SimpleNamespace(meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])),
-            "c": SimpleNamespace(meta=SimpleNamespace(name="丙", display_name="丙", aliases=[])),
+            "a": SimpleNamespace(
+                meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])
+            ),
+            "b": SimpleNamespace(
+                meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])
+            ),
+            "c": SimpleNamespace(
+                meta=SimpleNamespace(name="丙", display_name="丙", aliases=[])
+            ),
         }
         monkeypatch.setattr(
             multi_character_orchestrator.random,
@@ -310,7 +386,9 @@ class TestMultiCharacterGroupMemory:
         assert "群体记忆：大家决定一起调查旧仓库" in memory_context
         assert "对角色二的印象：行动很谨慎" in memory_context
 
-    def test_load_memory_context_filters_relationship_memories_conflicting_with_graph(self, monkeypatch):
+    def test_load_memory_context_filters_relationship_memories_conflicting_with_graph(
+        self, monkeypatch
+    ):
         from types import SimpleNamespace
 
         from memoria.core import multi_character_orchestrator
@@ -322,8 +400,12 @@ class TestMultiCharacterGroupMemory:
         orch.player_id = "player-1"
         orch.character_ids = ["c1", "c2"]
         orch.character_cards = {
-            "c1": SimpleNamespace(meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])),
-            "c2": SimpleNamespace(meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])),
+            "c1": SimpleNamespace(
+                meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])
+            ),
+            "c2": SimpleNamespace(
+                meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])
+            ),
         }
 
         monkeypatch.setattr(
@@ -349,7 +431,9 @@ class TestMultiCharacterGroupMemory:
         assert "群体记忆：大家决定调查旧仓库" in memory_context
         assert "对乙的印象：行动很谨慎" in memory_context
 
-    def test_load_runtime_state_filters_conflicting_relation_facts_only(self, monkeypatch):
+    def test_load_runtime_state_filters_conflicting_relation_facts_only(
+        self, monkeypatch
+    ):
         from types import SimpleNamespace
 
         from memoria.core import multi_character_orchestrator
@@ -361,8 +445,12 @@ class TestMultiCharacterGroupMemory:
         orch.session_id = "group-session-1"
         orch.character_ids = ["c1", "c2"]
         orch.character_cards = {
-            "c1": SimpleNamespace(meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])),
-            "c2": SimpleNamespace(meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])),
+            "c1": SimpleNamespace(
+                meta=SimpleNamespace(name="甲", display_name="甲", aliases=[])
+            ),
+            "c2": SimpleNamespace(
+                meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])
+            ),
         }
         captured = {}
 
@@ -378,8 +466,10 @@ class TestMultiCharacterGroupMemory:
         monkeypatch.setattr(
             multi_character_orchestrator.multi_character_memory,
             "load_player_memories_for_relationship_graph",
-            lambda **kwargs: captured.update(kwargs)
-            or ["甲和乙是师徒", "玩家喜欢猫", "大家一起调查旧仓库"],
+            lambda **kwargs: (
+                captured.update(kwargs)
+                or ["甲和乙是师徒", "玩家喜欢猫", "大家一起调查旧仓库"]
+            ),
         )
 
         state = orch._load_runtime_state_for_prompt(
@@ -431,22 +521,24 @@ class TestMultiCharacterGroupMemory:
         orch.player_name = "Player"
         orch.participants = [{"character_id": "c1"}, {"character_id": "c2"}]
         orch.character_ids = ["c1", "c2"]
-        orch._decide_next_speaker = (
-            lambda player_message, turn_context=None: "c1"
-        )
+        orch._decide_next_speaker = lambda player_message, turn_context=None: "c1"
         orch._build_pulse_state = lambda *args, **kwargs: {}
-        orch._generate_character_response = lambda character_id, player_message, **kwargs: {
-            "character_id": character_id,
-            "character_name": "角色一",
-            "dialogue": "我们马上出发。",
-        }
+        orch._generate_character_response = (
+            lambda character_id, player_message, **kwargs: {
+                "character_id": character_id,
+                "character_name": "角色一",
+                "dialogue": "我们马上出发。",
+            }
+        )
 
         result = orch.process_player_message("去旧仓库看看")
 
         assert result["dialogue"] == "我们马上出发。"
         assert save_called is False
 
-    def test_process_player_message_discussion_does_not_save_group_memory(self, monkeypatch):
+    def test_process_player_message_discussion_does_not_save_group_memory(
+        self, monkeypatch
+    ):
         from memoria.core import multi_character_orchestrator
 
         monkeypatch.setattr(
@@ -462,7 +554,9 @@ class TestMultiCharacterGroupMemory:
         monkeypatch.setattr(
             multi_character_orchestrator.multi_character_memory,
             "save_group_event_memory",
-            lambda **kwargs: (_ for _ in ()).throw(AssertionError("不应在每轮群聊保存群体记忆")),
+            lambda **kwargs: (_ for _ in ()).throw(
+                AssertionError("不应在每轮群聊保存群体记忆")
+            ),
         )
 
         orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
@@ -471,13 +565,27 @@ class TestMultiCharacterGroupMemory:
         orch.session_id = "session-3"
         orch.player_id = "player-1"
         orch.player_name = "Player"
-        orch.participants = [{"character_id": "c1"}, {"character_id": "c2"}, {"character_id": "c3"}]
+        orch.participants = [
+            {"character_id": "c1"},
+            {"character_id": "c2"},
+            {"character_id": "c3"},
+        ]
         orch.character_ids = ["c1", "c2", "c3"]
         orch.character_cards = {}
-        orch._generate_group_discussion = lambda player_message, max_responses, **kwargs: [
-            {"character_id": "c1", "character_name": "角色一", "dialogue": "我去侦查。"},
-            {"character_id": "c2", "character_name": "角色二", "dialogue": "我准备装备。"},
-        ]
+        orch._generate_group_discussion = (
+            lambda player_message, max_responses, **kwargs: [
+                {
+                    "character_id": "c1",
+                    "character_name": "角色一",
+                    "dialogue": "我去侦查。",
+                },
+                {
+                    "character_id": "c2",
+                    "character_name": "角色二",
+                    "dialogue": "我准备装备。",
+                },
+            ]
+        )
 
         result = orch.process_player_message(
             "制定一个计划", allow_multiple_responses=True, max_responses=2
@@ -622,6 +730,7 @@ class TestSessionLifecycle:
         import uuid
 
         from memoria.db import repository
+
         self.sid = str(uuid.uuid4())
         repository.create_session(self.sid, "lcC", "lcP", "Tester")
         repository.end_session(self.sid)
@@ -631,6 +740,7 @@ class TestSessionLifecycle:
         import pytest
 
         from memoria.core.orchestrator import run_dialogue_turn
+
         with pytest.raises(ValueError, match="会话已经结束"):
             run_dialogue_turn(self.sid, "你好")
 
@@ -662,20 +772,32 @@ class TestDialogueTurn:
             ),
         )
 
-        monkeypatch.setattr(orchestrator.repository, "get_session", lambda session_id: {
-            "session_id": session_id,
-            "character_id": "char",
-            "player_id": "player",
-            "player_name": "Tester",
-            "created_at": None,
-            "status": "active",
-        })
-        monkeypatch.setattr(orchestrator.character_loader, "load_character_card", lambda character_id, owner_user_id=None: card)
-        monkeypatch.setattr(orchestrator.repository, "get_runtime_state", lambda *args, **kwargs: {
-            "affection_level": 0,
-            "trust_level": 0,
-            "current_mood": "neutral",
-        })
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_session",
+            lambda session_id: {
+                "session_id": session_id,
+                "character_id": "char",
+                "player_id": "player",
+                "player_name": "Tester",
+                "created_at": None,
+                "status": "active",
+            },
+        )
+        monkeypatch.setattr(
+            orchestrator.character_loader,
+            "load_character_card",
+            lambda character_id, owner_user_id=None: card,
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_runtime_state",
+            lambda *args, **kwargs: {
+                "affection_level": 0,
+                "trust_level": 0,
+                "current_mood": "neutral",
+            },
+        )
         monkeypatch.setattr(
             orchestrator.repository,
             "get_short_term_history",
@@ -684,16 +806,26 @@ class TestDialogueTurn:
                 for _, role, content in saved_messages
             ],
         )
-        monkeypatch.setattr(orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: [])
-        monkeypatch.setattr(orchestrator.prompt_builder, "build_system_prompt", lambda *args, **kwargs: "prompt")
-        monkeypatch.setattr(orchestrator.llm_client, "call_role_turn", lambda *args, **kwargs: {
-            "dialogue": "你好",
-            "action": "idle",
-            "affinity_delta": 0,
-            "trust_delta": 0,
-            "mood_after": "neutral",
-            "memory_worth_keeping": "玩家主动打招呼",
-        })
+        monkeypatch.setattr(
+            orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: []
+        )
+        monkeypatch.setattr(
+            orchestrator.prompt_builder,
+            "build_system_prompt",
+            lambda *args, **kwargs: "prompt",
+        )
+        monkeypatch.setattr(
+            orchestrator.llm_client,
+            "call_role_turn",
+            lambda *args, **kwargs: {
+                "dialogue": "你好",
+                "action": "idle",
+                "affinity_delta": 0,
+                "trust_delta": 0,
+                "mood_after": "neutral",
+                "memory_worth_keeping": "玩家主动打招呼",
+            },
+        )
 
         monkeypatch.setattr(
             orchestrator.repository,
@@ -719,7 +851,9 @@ class TestDialogueTurn:
             queued_jobs.extend(dialogue_turn.get("background_jobs") or [])
             return dialogue_turn["response"]
 
-        monkeypatch.setattr(orchestrator.repository, "commit_dialogue_turn", commit_turn)
+        monkeypatch.setattr(
+            orchestrator.repository, "commit_dialogue_turn", commit_turn
+        )
         monkeypatch.setattr(
             orchestrator.repository,
             "get_session_user_turn_count",
@@ -731,10 +865,15 @@ class TestDialogueTurn:
             "save_long_term_fact",
             lambda *args, **kwargs: legacy_writes.append((args, kwargs)),
         )
+
         def fail_list_event_definitions(*args, **kwargs):
             raise RuntimeError("event storage unavailable")
 
-        monkeypatch.setattr(orchestrator.repository, "list_event_definitions", fail_list_event_definitions)
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "list_event_definitions",
+            fail_list_event_definitions,
+        )
 
         orchestrator.performance.reset()
         result = orchestrator.run_dialogue_turn(
@@ -766,7 +905,9 @@ class TestDialogueTurn:
         )
         assert legacy_writes == []
 
-    def test_single_dialogue_prompt_uses_graph_and_cross_mode_memories(self, monkeypatch):
+    def test_single_dialogue_prompt_uses_graph_and_cross_mode_memories(
+        self, monkeypatch
+    ):
         """单聊 prompt 应读取当前关系图谱，并共享同角色的群聊/共享记忆。"""
         from types import SimpleNamespace
 
@@ -789,63 +930,101 @@ class TestDialogueTurn:
             ),
         )
 
-        monkeypatch.setattr(orchestrator.repository, "get_session", lambda session_id: {
-            "session_id": session_id,
-            "character_id": "char_a",
-            "player_id": "player",
-            "player_name": "Tester",
-            "created_at": None,
-            "status": "active",
-        })
-        monkeypatch.setattr(orchestrator.character_loader, "load_character_card", lambda *args, **kwargs: card)
-        monkeypatch.setattr(orchestrator.repository, "get_runtime_state", lambda *args, **kwargs: {
-            "affection_level": 0,
-            "trust_level": 10,
-            "current_mood": "neutral",
-            "known_player_facts": ["未过滤的默认记忆"],
-        })
-        monkeypatch.setattr(orchestrator.repository, "get_short_term_history", lambda *args, **kwargs: [])
-        monkeypatch.setattr(orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: [
-            {"summary_text": "单聊旧摘要"}
-        ])
-        monkeypatch.setattr(orchestrator.repository, "list_character_relationships", lambda *args, **kwargs: [
-            {
-                "character_id_a": "char_a",
-                "character_id_b": "char_b",
-                "relationship_type": "血盟契约",
-                "affinity": 80,
-                "description": "当前图谱确认的自定义关系",
-                "updated_at": "2026-01-03T00:00:00+00:00",
-            }
-        ])
-        monkeypatch.setattr(orchestrator.repository, "get_character_relationship_updated_at", lambda *args, **kwargs: "2026-01-03T00:00:00+00:00")
-        monkeypatch.setattr(orchestrator.repository, "get_character_card_from_db", lambda *args, **kwargs: {
-            "name": "乙",
-            "display_name": "乙",
-            "card_data": json.dumps({"meta": {"name": "乙", "display_name": "乙", "aliases": ["小乙"]}}),
-        })
-        monkeypatch.setattr(orchestrator.repository, "get_character_shared_memories", lambda *args, **kwargs: [
-            {
-                "character_a_id": "char_a",
-                "character_b_id": "char_b",
-                "memory_text": "甲和乙是师徒。",
-                "created_at": "2026-01-01T00:00:00+00:00",
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_session",
+            lambda session_id: {
+                "session_id": session_id,
+                "character_id": "char_a",
+                "player_id": "player",
+                "player_name": "Tester",
+                "created_at": None,
+                "status": "active",
             },
-            {
-                "character_a_id": "char_a",
-                "character_b_id": "char_b",
-                "memory_text": "甲和乙一起巡逻。",
-                "created_at": "2026-01-01T00:00:00+00:00",
+        )
+        monkeypatch.setattr(
+            orchestrator.character_loader,
+            "load_character_card",
+            lambda *args, **kwargs: card,
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_runtime_state",
+            lambda *args, **kwargs: {
+                "affection_level": 0,
+                "trust_level": 10,
+                "current_mood": "neutral",
+                "known_player_facts": ["未过滤的默认记忆"],
             },
-            {
-                "character_a_id": "char_a",
-                "character_b_id": "char_b",
-                "memory_text": "一起调查旧仓库",
-                "created_at": "2026-01-04T00:00:00+00:00",
-            }
-        ])
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_short_term_history",
+            lambda *args, **kwargs: [],
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_recent_summaries",
+            lambda *args, **kwargs: [{"summary_text": "单聊旧摘要"}],
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "list_character_relationships",
+            lambda *args, **kwargs: [
+                {
+                    "character_id_a": "char_a",
+                    "character_id_b": "char_b",
+                    "relationship_type": "血盟契约",
+                    "affinity": 80,
+                    "description": "当前图谱确认的自定义关系",
+                    "updated_at": "2026-01-03T00:00:00+00:00",
+                }
+            ],
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_character_relationship_updated_at",
+            lambda *args, **kwargs: "2026-01-03T00:00:00+00:00",
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_character_card_from_db",
+            lambda *args, **kwargs: {
+                "name": "乙",
+                "display_name": "乙",
+                "card_data": json.dumps(
+                    {"meta": {"name": "乙", "display_name": "乙", "aliases": ["小乙"]}}
+                ),
+            },
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_character_shared_memories",
+            lambda *args, **kwargs: [
+                {
+                    "character_a_id": "char_a",
+                    "character_b_id": "char_b",
+                    "memory_text": "甲和乙是师徒。",
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                },
+                {
+                    "character_a_id": "char_a",
+                    "character_b_id": "char_b",
+                    "memory_text": "甲和乙一起巡逻。",
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                },
+                {
+                    "character_a_id": "char_a",
+                    "character_b_id": "char_b",
+                    "memory_text": "一起调查旧仓库",
+                    "created_at": "2026-01-04T00:00:00+00:00",
+                },
+            ],
+        )
 
-        def fake_group_memories(character_id, limit=20, created_after=None, owner_user_id=None):
+        def fake_group_memories(
+            character_id, limit=20, created_after=None, owner_user_id=None
+        ):
             captured["group_owner"] = owner_user_id
             return [
                 {
@@ -862,10 +1041,12 @@ class TestDialogueTurn:
                     "memory_text": "群聊里约好保管钥匙",
                     "participants": json.dumps(["char_a", "char_b"]),
                     "created_at": "2026-01-04T00:00:00+00:00",
-                }
+                },
             ]
 
-        monkeypatch.setattr(orchestrator.repository, "get_character_group_memories", fake_group_memories)
+        monkeypatch.setattr(
+            orchestrator.repository, "get_character_group_memories", fake_group_memories
+        )
 
         def fake_get_prompt_memory_fact_records(*args, **kwargs):
             captured["memory_query_context"] = kwargs.get("query_context")
@@ -891,32 +1072,59 @@ class TestDialogueTurn:
             fake_get_prompt_memory_fact_records,
         )
 
-        def fake_build_system_prompt(card_arg, runtime_state, player_name, past_summaries=None, relationship_graph_lines=None):
+        def fake_build_system_prompt(
+            card_arg,
+            runtime_state,
+            player_name,
+            past_summaries=None,
+            relationship_graph_lines=None,
+        ):
             captured["runtime_state"] = runtime_state
             captured["past_summaries"] = past_summaries
             captured["relationship_graph_lines"] = relationship_graph_lines
             return "prompt"
 
-        monkeypatch.setattr(orchestrator.prompt_builder, "build_system_prompt", fake_build_system_prompt)
-        monkeypatch.setattr(orchestrator.llm_client, "call_role_turn", lambda *args, **kwargs: {
-            "dialogue": "记得。",
-            "action": "idle",
-            "affinity_delta": 0,
-            "trust_delta": 0,
-            "mood_after": "neutral",
-            "memory_worth_keeping": None,
-        })
-        monkeypatch.setattr(orchestrator.event_runtime, "detect_and_execute_events", lambda *args, **kwargs: [])
+        monkeypatch.setattr(
+            orchestrator.prompt_builder, "build_system_prompt", fake_build_system_prompt
+        )
+        monkeypatch.setattr(
+            orchestrator.llm_client,
+            "call_role_turn",
+            lambda *args, **kwargs: {
+                "dialogue": "记得。",
+                "action": "idle",
+                "affinity_delta": 0,
+                "trust_delta": 0,
+                "mood_after": "neutral",
+                "memory_worth_keeping": None,
+            },
+        )
+        monkeypatch.setattr(
+            orchestrator.event_runtime,
+            "detect_and_execute_events",
+            lambda *args, **kwargs: [],
+        )
         monkeypatch.setattr(
             orchestrator.event_runtime,
             "apply_event_results_to_dialogue_state",
-            lambda event_results, dialogue, affinity, trust, mood: (dialogue, affinity, trust, mood, [], None),
+            lambda event_results, dialogue, affinity, trust, mood: (
+                dialogue,
+                affinity,
+                trust,
+                mood,
+                [],
+                None,
+            ),
         )
-        monkeypatch.setattr(orchestrator.repository, "save_runtime_state", lambda *args, **kwargs: None)
+        monkeypatch.setattr(
+            orchestrator.repository, "save_runtime_state", lambda *args, **kwargs: None
+        )
         monkeypatch.setattr(
             orchestrator.repository,
             "append_short_term_message",
-            lambda session_id, role, content, **kwargs: saved_messages.append((role, content, kwargs)) or len(saved_messages),
+            lambda session_id, role, content, **kwargs: (
+                saved_messages.append((role, content, kwargs)) or len(saved_messages)
+            ),
         )
 
         result = orchestrator.run_dialogue_turn("sid", "你还记得群聊的事吗？")
@@ -929,7 +1137,10 @@ class TestDialogueTurn:
         assert "你还记得群聊的事吗？" in captured["memory_query_context"]
         assert captured["prompt_session_id"] == "sid"
         assert "当前关系类型 = 血盟契约" in captured["memory_query_context"]
-        assert not any("甲和乙是师徒" in fact for fact in captured["runtime_state"]["known_player_facts"])
+        assert not any(
+            "甲和乙是师徒" in fact
+            for fact in captured["runtime_state"]["known_player_facts"]
+        )
         assert "玩家喜欢猫。" in captured["runtime_state"]["known_player_facts"]
         assert "甲喜欢猫。" in captured["runtime_state"]["known_player_facts"]
         assert not any("师徒" in summary for summary in captured["past_summaries"])
@@ -959,32 +1170,62 @@ class TestDialogueTurn:
             ),
         )
 
-        monkeypatch.setattr(orchestrator.repository, "get_session", lambda session_id: {
-            "session_id": session_id,
-            "character_id": "char",
-            "player_id": "player",
-            "player_name": "Tester",
-            "created_at": None,
-            "status": "active",
-        })
-        monkeypatch.setattr(orchestrator.character_loader, "load_character_card", lambda *args, **kwargs: card)
-        monkeypatch.setattr(orchestrator.repository, "get_runtime_state", lambda *args, **kwargs: {
-            "affection_level": 10,
-            "trust_level": 20,
-            "current_mood": "neutral",
-        })
-        monkeypatch.setattr(orchestrator.repository, "get_short_term_history", lambda *args, **kwargs: [])
-        monkeypatch.setattr(orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: [])
-        monkeypatch.setattr(orchestrator.prompt_builder, "build_system_prompt", lambda *args, **kwargs: "prompt")
-        monkeypatch.setattr(orchestrator.llm_client, "call_role_turn", lambda *args, **kwargs: {
-            "dialogue": "可以",
-            "action": "idle",
-            "affinity_delta": 1,
-            "trust_delta": 0,
-            "mood_after": "neutral",
-            "memory_worth_keeping": None,
-        })
-        monkeypatch.setattr(orchestrator.event_runtime, "detect_and_execute_events", lambda *args, **kwargs: [object()])
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_session",
+            lambda session_id: {
+                "session_id": session_id,
+                "character_id": "char",
+                "player_id": "player",
+                "player_name": "Tester",
+                "created_at": None,
+                "status": "active",
+            },
+        )
+        monkeypatch.setattr(
+            orchestrator.character_loader,
+            "load_character_card",
+            lambda *args, **kwargs: card,
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_runtime_state",
+            lambda *args, **kwargs: {
+                "affection_level": 10,
+                "trust_level": 20,
+                "current_mood": "neutral",
+            },
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_short_term_history",
+            lambda *args, **kwargs: [],
+        )
+        monkeypatch.setattr(
+            orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: []
+        )
+        monkeypatch.setattr(
+            orchestrator.prompt_builder,
+            "build_system_prompt",
+            lambda *args, **kwargs: "prompt",
+        )
+        monkeypatch.setattr(
+            orchestrator.llm_client,
+            "call_role_turn",
+            lambda *args, **kwargs: {
+                "dialogue": "可以",
+                "action": "idle",
+                "affinity_delta": 1,
+                "trust_delta": 0,
+                "mood_after": "neutral",
+                "memory_worth_keeping": None,
+            },
+        )
+        monkeypatch.setattr(
+            orchestrator.event_runtime,
+            "detect_and_execute_events",
+            lambda *args, **kwargs: [object()],
+        )
         monkeypatch.setattr(
             orchestrator.event_runtime,
             "apply_event_results_to_dialogue_state",
@@ -997,7 +1238,9 @@ class TestDialogueTurn:
                 "信任提升",
             ),
         )
-        monkeypatch.setattr(orchestrator.repository, "save_runtime_state", lambda *args, **kwargs: None)
+        monkeypatch.setattr(
+            orchestrator.repository, "save_runtime_state", lambda *args, **kwargs: None
+        )
 
         def commit_turn(*, dialogue_turn, runtime_states):
             saved_messages.extend(dialogue_turn["messages"])
@@ -1008,7 +1251,9 @@ class TestDialogueTurn:
             "claim_dialogue_turn",
             lambda **kwargs: {"completed": False, "lease_owner": "lease"},
         )
-        monkeypatch.setattr(orchestrator.repository, "commit_dialogue_turn", commit_turn)
+        monkeypatch.setattr(
+            orchestrator.repository, "commit_dialogue_turn", commit_turn
+        )
 
         result = orchestrator.run_dialogue_turn("sid", "你好")
 
@@ -1040,48 +1285,89 @@ class TestDialogueTurn:
             ),
         )
 
-        monkeypatch.setattr(orchestrator.repository, "get_session", lambda session_id: {
-            "session_id": session_id,
-            "character_id": "char",
-            "player_id": "player",
-            "player_name": "Tester",
-            "created_at": None,
-            "status": "active",
-        })
-        monkeypatch.setattr(orchestrator.character_loader, "load_character_card", lambda character_id, owner_user_id=None: card)
-        monkeypatch.setattr(orchestrator.repository, "get_runtime_state", lambda *args, **kwargs: {
-            "affection_level": 0,
-            "trust_level": 0,
-            "current_mood": "neutral",
-        })
-        monkeypatch.setattr(orchestrator.repository, "get_short_term_history", lambda *args, **kwargs: [])
-        monkeypatch.setattr(orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: [])
-        monkeypatch.setattr(orchestrator.prompt_builder, "build_system_prompt", lambda *args, **kwargs: "prompt")
-        monkeypatch.setattr(orchestrator.llm_client, "call_role_turn", lambda *args, **kwargs: {
-            "dialogue": "你好",
-            "action": "idle",
-            "affinity_delta": 0,
-            "trust_delta": 0,
-            "mood_after": "neutral",
-            "memory_worth_keeping": None,
-        })
-        monkeypatch.setattr(orchestrator.event_runtime, "detect_and_execute_events", lambda *args, **kwargs: [])
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_session",
+            lambda session_id: {
+                "session_id": session_id,
+                "character_id": "char",
+                "player_id": "player",
+                "player_name": "Tester",
+                "created_at": None,
+                "status": "active",
+            },
+        )
+        monkeypatch.setattr(
+            orchestrator.character_loader,
+            "load_character_card",
+            lambda character_id, owner_user_id=None: card,
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_runtime_state",
+            lambda *args, **kwargs: {
+                "affection_level": 0,
+                "trust_level": 0,
+                "current_mood": "neutral",
+            },
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_short_term_history",
+            lambda *args, **kwargs: [],
+        )
+        monkeypatch.setattr(
+            orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: []
+        )
+        monkeypatch.setattr(
+            orchestrator.prompt_builder,
+            "build_system_prompt",
+            lambda *args, **kwargs: "prompt",
+        )
+        monkeypatch.setattr(
+            orchestrator.llm_client,
+            "call_role_turn",
+            lambda *args, **kwargs: {
+                "dialogue": "你好",
+                "action": "idle",
+                "affinity_delta": 0,
+                "trust_delta": 0,
+                "mood_after": "neutral",
+                "memory_worth_keeping": None,
+            },
+        )
+        monkeypatch.setattr(
+            orchestrator.event_runtime,
+            "detect_and_execute_events",
+            lambda *args, **kwargs: [],
+        )
         monkeypatch.setattr(
             orchestrator.event_runtime,
             "apply_event_results_to_dialogue_state",
-            lambda event_results, dialogue, affinity, trust, mood: (dialogue, affinity, trust, mood, [], None),
+            lambda event_results, dialogue, affinity, trust, mood: (
+                dialogue,
+                affinity,
+                trust,
+                mood,
+                [],
+                None,
+            ),
         )
         monkeypatch.setattr(
             orchestrator.repository,
             "commit_dialogue_turn",
-            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("db write failed")),
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                RuntimeError("db write failed")
+            ),
         )
         monkeypatch.setattr(
             orchestrator.repository,
             "claim_dialogue_turn",
             lambda **kwargs: {"completed": False, "lease_owner": "lease"},
         )
-        monkeypatch.setattr(orchestrator.repository, "fail_dialogue_turn", lambda *args: None)
+        monkeypatch.setattr(
+            orchestrator.repository, "fail_dialogue_turn", lambda *args: None
+        )
 
         with pytest.raises(RuntimeError, match="db write failed"):
             orchestrator.run_dialogue_turn("sid", "你好")
@@ -1111,31 +1397,58 @@ class TestDialogueTurn:
             ),
         )
 
-        monkeypatch.setattr(orchestrator.repository, "get_session", lambda session_id: {
-            "session_id": session_id,
-            "character_id": "char",
-            "player_id": "player",
-            "player_name": "Tester",
-            "created_at": None,
-            "status": "active",
-        })
-        monkeypatch.setattr(orchestrator.character_loader, "load_character_card", lambda character_id, owner_user_id=None: card)
-        monkeypatch.setattr(orchestrator.repository, "get_runtime_state", lambda *args, **kwargs: {
-            "affection_level": 0,
-            "trust_level": 0,
-            "current_mood": "neutral",
-        })
-        monkeypatch.setattr(orchestrator.repository, "get_short_term_history", lambda *args, **kwargs: [])
-        monkeypatch.setattr(orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: [])
-        monkeypatch.setattr(orchestrator.prompt_builder, "build_system_prompt", lambda *args, **kwargs: "prompt")
-        monkeypatch.setattr(orchestrator.llm_client, "call_role_turn", lambda *args, **kwargs: {
-            "dialogue": "你好",
-            "action": "idle",
-            "affinity_delta": 0,
-            "trust_delta": 0,
-            "mood_after": "neutral",
-            "memory_worth_keeping": None,
-        })
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_session",
+            lambda session_id: {
+                "session_id": session_id,
+                "character_id": "char",
+                "player_id": "player",
+                "player_name": "Tester",
+                "created_at": None,
+                "status": "active",
+            },
+        )
+        monkeypatch.setattr(
+            orchestrator.character_loader,
+            "load_character_card",
+            lambda character_id, owner_user_id=None: card,
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_runtime_state",
+            lambda *args, **kwargs: {
+                "affection_level": 0,
+                "trust_level": 0,
+                "current_mood": "neutral",
+            },
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_short_term_history",
+            lambda *args, **kwargs: [],
+        )
+        monkeypatch.setattr(
+            orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: []
+        )
+        monkeypatch.setattr(
+            orchestrator.prompt_builder,
+            "build_system_prompt",
+            lambda *args, **kwargs: "prompt",
+        )
+        monkeypatch.setattr(
+            orchestrator.llm_client,
+            "call_role_turn",
+            lambda *args, **kwargs: {
+                "dialogue": "你好",
+                "action": "idle",
+                "affinity_delta": 0,
+                "trust_delta": 0,
+                "mood_after": "neutral",
+                "memory_worth_keeping": None,
+            },
+        )
+
         def commit_batch_fails(context, dialogue_turn_factory=None, **kwargs):
             # 模拟 _commit_planned_batch：先构建 turn（写入 turn_holder），再提交失败
             assert dialogue_turn_factory is not None
@@ -1150,7 +1463,14 @@ class TestDialogueTurn:
         monkeypatch.setattr(
             orchestrator.event_runtime,
             "apply_event_results_to_dialogue_state",
-            lambda event_results, dialogue, affinity, trust, mood: (dialogue, affinity, trust, mood, [], None),
+            lambda event_results, dialogue, affinity, trust, mood: (
+                dialogue,
+                affinity,
+                trust,
+                mood,
+                [],
+                None,
+            ),
         )
         monkeypatch.setattr(
             orchestrator.repository,
@@ -1194,41 +1514,80 @@ class TestDialogueTurn:
             ),
         )
 
-        monkeypatch.setattr(orchestrator.repository, "get_session", lambda session_id: {
-            "session_id": session_id,
-            "character_id": "char",
-            "player_id": "player",
-            "player_name": "Tester",
-            "created_at": None,
-            "status": "active",
-        })
-        monkeypatch.setattr(orchestrator.character_loader, "load_character_card", lambda character_id, owner_user_id=None: card)
-        monkeypatch.setattr(orchestrator.repository, "get_runtime_state", lambda *args, **kwargs: {
-            "affection_level": 0,
-            "trust_level": 0,
-            "current_mood": "neutral",
-        })
-        monkeypatch.setattr(orchestrator.repository, "get_short_term_history", lambda *args, **kwargs: [])
-        monkeypatch.setattr(orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: [])
-        monkeypatch.setattr(orchestrator.prompt_builder, "build_system_prompt", lambda *args, **kwargs: "prompt")
-        monkeypatch.setattr(orchestrator.llm_client, "call_role_turn", lambda *args, **kwargs: {
-            "dialogue": "你好",
-            "action": "idle",
-            "affinity_delta": 0,
-            "trust_delta": 0,
-            "mood_after": "neutral",
-            "memory_worth_keeping": None,
-        })
-        monkeypatch.setattr(orchestrator.event_runtime, "detect_and_execute_events", lambda *args, **kwargs: [])
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_session",
+            lambda session_id: {
+                "session_id": session_id,
+                "character_id": "char",
+                "player_id": "player",
+                "player_name": "Tester",
+                "created_at": None,
+                "status": "active",
+            },
+        )
+        monkeypatch.setattr(
+            orchestrator.character_loader,
+            "load_character_card",
+            lambda character_id, owner_user_id=None: card,
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_runtime_state",
+            lambda *args, **kwargs: {
+                "affection_level": 0,
+                "trust_level": 0,
+                "current_mood": "neutral",
+            },
+        )
+        monkeypatch.setattr(
+            orchestrator.repository,
+            "get_short_term_history",
+            lambda *args, **kwargs: [],
+        )
+        monkeypatch.setattr(
+            orchestrator.repository, "get_recent_summaries", lambda *args, **kwargs: []
+        )
+        monkeypatch.setattr(
+            orchestrator.prompt_builder,
+            "build_system_prompt",
+            lambda *args, **kwargs: "prompt",
+        )
+        monkeypatch.setattr(
+            orchestrator.llm_client,
+            "call_role_turn",
+            lambda *args, **kwargs: {
+                "dialogue": "你好",
+                "action": "idle",
+                "affinity_delta": 0,
+                "trust_delta": 0,
+                "mood_after": "neutral",
+                "memory_worth_keeping": None,
+            },
+        )
+        monkeypatch.setattr(
+            orchestrator.event_runtime,
+            "detect_and_execute_events",
+            lambda *args, **kwargs: [],
+        )
         monkeypatch.setattr(
             orchestrator.event_runtime,
             "apply_event_results_to_dialogue_state",
-            lambda event_results, dialogue, affinity, trust, mood: (dialogue, affinity, trust, mood, [], None),
+            lambda event_results, dialogue, affinity, trust, mood: (
+                dialogue,
+                affinity,
+                trust,
+                mood,
+                [],
+                None,
+            ),
         )
         monkeypatch.setattr(
             orchestrator.repository,
             "commit_dialogue_turn",
-            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("db write failed")),
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                RuntimeError("db write failed")
+            ),
         )
         monkeypatch.setattr(
             orchestrator.repository,
@@ -1267,7 +1626,9 @@ def test_group_dialogue_saves_one_logical_thread_player_memory(monkeypatch):
     legacy_writes = []
     operation_order = []
 
-    monkeypatch.setattr(module, "_clock_snapshot_for_player", lambda player_id: clock_snapshot)
+    monkeypatch.setattr(
+        module, "_clock_snapshot_for_player", lambda player_id: clock_snapshot
+    )
     monkeypatch.setattr(
         module.repository,
         "claim_dialogue_turn",
@@ -1276,9 +1637,11 @@ def test_group_dialogue_saves_one_logical_thread_player_memory(monkeypatch):
     monkeypatch.setattr(
         module.repository,
         "commit_dialogue_turn",
-        lambda **kwargs: operation_order.append("commit")
-        or queued_jobs.extend(kwargs["dialogue_turn"].get("background_jobs") or [])
-        or kwargs["dialogue_turn"]["response"],
+        lambda **kwargs: (
+            operation_order.append("commit")
+            or queued_jobs.extend(kwargs["dialogue_turn"].get("background_jobs") or [])
+            or kwargs["dialogue_turn"]["response"]
+        ),
     )
     monkeypatch.setattr(
         module.repository,
@@ -1306,7 +1669,9 @@ def test_group_dialogue_saves_one_logical_thread_player_memory(monkeypatch):
     )
     monkeypatch.setattr(orchestrator, "_ensure_has_active_participants", lambda: None)
     monkeypatch.setattr(orchestrator, "_decide_group_response_count", lambda *args: 2)
-    monkeypatch.setattr(orchestrator, "_generate_group_discussion", generate_group_discussion)
+    monkeypatch.setattr(
+        orchestrator, "_generate_group_discussion", generate_group_discussion
+    )
 
     result = orchestrator.process_player_message(
         "我喜欢茉莉花茶",
@@ -1317,27 +1682,29 @@ def test_group_dialogue_saves_one_logical_thread_player_memory(monkeypatch):
     assert result == [{"dialogue": "记住了"}]
     assert extracted_histories == []
     assert saved_claims == []
-    assert queued_jobs == [{
-        "job_type": "group_checkpoint_memory",
-        "dedupe_key": (
-            "group_checkpoint_memory:group-session:"
-            f"{module.configs.long_term_memory_interval_turns}"
-        ),
-        "payload": {
-            "owner_user_id": "player",
-            "scope_type": "group_thread",
-            "scope_id": "thread-1",
-            "session_id": "group-session",
-            "witness_character_ids": ["char-a", "char-b"],
-            "evidence_id": "group-checkpoint:group-session:5",
-            "world_occurred_at": "2026-07-12T12:00:00+08:00",
-            "history": [
-                {"role": "assistant", "content": "上次聊到饮料。"},
-                {"role": "user", "content": "我喜欢茉莉花茶"},
-                {"role": "assistant", "content": "记住了"},
-            ],
-        },
-    }]
+    assert queued_jobs == [
+        {
+            "job_type": "group_checkpoint_memory",
+            "dedupe_key": (
+                "group_checkpoint_memory:group-session:"
+                f"{module.configs.long_term_memory_interval_turns}"
+            ),
+            "payload": {
+                "owner_user_id": "player",
+                "scope_type": "group_thread",
+                "scope_id": "thread-1",
+                "session_id": "group-session",
+                "witness_character_ids": ["char-a", "char-b"],
+                "evidence_id": "group-checkpoint:group-session:5",
+                "world_occurred_at": "2026-07-12T12:00:00+08:00",
+                "history": [
+                    {"role": "assistant", "content": "上次聊到饮料。"},
+                    {"role": "user", "content": "我喜欢茉莉花茶"},
+                    {"role": "assistant", "content": "记住了"},
+                ],
+            },
+        }
+    ]
     assert legacy_writes == []
     assert operation_order == ["commit"]
 
@@ -1366,7 +1733,9 @@ def test_group_dialogue_single_response_saves_one_logical_thread_claim(monkeypat
     queued_jobs = []
     legacy_writes = []
 
-    monkeypatch.setattr(module, "_clock_snapshot_for_player", lambda player_id: clock_snapshot)
+    monkeypatch.setattr(
+        module, "_clock_snapshot_for_player", lambda player_id: clock_snapshot
+    )
     monkeypatch.setattr(
         module.repository,
         "claim_dialogue_turn",
@@ -1375,10 +1744,10 @@ def test_group_dialogue_single_response_saves_one_logical_thread_claim(monkeypat
     monkeypatch.setattr(
         module.repository,
         "commit_dialogue_turn",
-        lambda **kwargs: queued_jobs.extend(
-            kwargs["dialogue_turn"].get("background_jobs") or []
-        )
-        or kwargs["dialogue_turn"]["response"],
+        lambda **kwargs: (
+            queued_jobs.extend(kwargs["dialogue_turn"].get("background_jobs") or [])
+            or kwargs["dialogue_turn"]["response"]
+        ),
     )
     monkeypatch.setattr(
         module.repository,
@@ -1423,29 +1792,29 @@ def test_group_dialogue_single_response_saves_one_logical_thread_claim(monkeypat
 
     assert result["character_id"] == "speaker"
     assert saved_claims == []
-    assert queued_jobs == [{
-        "job_type": "group_checkpoint_memory",
-        "dedupe_key": (
-            "group_checkpoint_memory:group-session:"
-            f"{module.configs.long_term_memory_interval_turns}"
-        ),
-        "payload": {
-            "owner_user_id": "player",
-            "scope_type": "group_thread",
-            "scope_id": "thread-1",
-            "session_id": "group-session",
-            "witness_character_ids": [
-                "speaker", "listener-a", "listener-b"
-            ],
-            "evidence_id": "group-checkpoint:group-session:5",
-            "world_occurred_at": "2026-07-12T12:00:00+08:00",
-            "history": [
-                {"role": "assistant", "content": "上次约好周末见。"},
-                {"role": "user", "content": "我周末会带蛋糕来"},
-                {"role": "assistant", "content": "我等你。"},
-            ],
-        },
-    }]
+    assert queued_jobs == [
+        {
+            "job_type": "group_checkpoint_memory",
+            "dedupe_key": (
+                "group_checkpoint_memory:group-session:"
+                f"{module.configs.long_term_memory_interval_turns}"
+            ),
+            "payload": {
+                "owner_user_id": "player",
+                "scope_type": "group_thread",
+                "scope_id": "thread-1",
+                "session_id": "group-session",
+                "witness_character_ids": ["speaker", "listener-a", "listener-b"],
+                "evidence_id": "group-checkpoint:group-session:5",
+                "world_occurred_at": "2026-07-12T12:00:00+08:00",
+                "history": [
+                    {"role": "assistant", "content": "上次约好周末见。"},
+                    {"role": "user", "content": "我周末会带蛋糕来"},
+                    {"role": "assistant", "content": "我等你。"},
+                ],
+            },
+        }
+    ]
     assert legacy_writes == []
 
 
@@ -1593,18 +1962,9 @@ def test_single_dialogue_turn_emits_stream_events(monkeypatch):
         "character_completed",
     ]
     assert events[-1][1]["response"]["dialogue"] == "你好"
-    assert (
-        performance.snapshot()["durations"]["dialogue.turn.total"]["count"]
-        == 1
-    )
-    assert (
-        performance.snapshot()["durations"]["dialogue.turn.prepare"]["count"]
-        == 1
-    )
-    assert (
-        performance.snapshot()["durations"]["dialogue.turn.prompt"]["count"]
-        == 1
-    )
+    assert performance.snapshot()["durations"]["dialogue.turn.total"]["count"] == 1
+    assert performance.snapshot()["durations"]["dialogue.turn.prepare"]["count"] == 1
+    assert performance.snapshot()["durations"]["dialogue.turn.prompt"]["count"] == 1
 
 
 def test_multi_character_turn_propagates_event_sink(monkeypatch):
@@ -1635,12 +1995,9 @@ def test_multi_character_turn_propagates_event_sink(monkeypatch):
     )
 
     assert result == {"dialogue": "收到"}
-    assert events == [
-        ("dialogue_delta", {"stream_id": "req-1:0", "delta": "收到"})
-    ]
+    assert events == [("dialogue_delta", {"stream_id": "req-1:0", "delta": "收到"})]
     assert (
-        performance.snapshot()["durations"]["multi_dialogue.turn.total"]["count"]
-        == 1
+        performance.snapshot()["durations"]["multi_dialogue.turn.total"]["count"] == 1
     )
 
 
@@ -1666,22 +2023,24 @@ def test_unpersisted_group_pulse_loads_base_history_once(monkeypatch):
 
     history_reads = 0
     observed_histories = []
-    decisions = iter([
-        module.DialogueDecision(
-            action="speak",
-            speaker_id="c1",
-            reply_to_message_id=-1,
-            intent="answer",
-        ),
-        module.DialogueDecision(
-            action="speak",
-            speaker_id="c2",
-            reply_to_message_id=-2,
-            reply_to_character_id="c1",
-            intent="agree",
-        ),
-        module.DialogueDecision(action="wait", wait_for_player=True),
-    ])
+    decisions = iter(
+        [
+            module.DialogueDecision(
+                action="speak",
+                speaker_id="c1",
+                reply_to_message_id=-1,
+                intent="answer",
+            ),
+            module.DialogueDecision(
+                action="speak",
+                speaker_id="c2",
+                reply_to_message_id=-2,
+                reply_to_character_id="c1",
+                intent="agree",
+            ),
+            module.DialogueDecision(action="wait", wait_for_player=True),
+        ]
+    )
 
     def load_history(*args, **kwargs):
         nonlocal history_reads
@@ -1689,9 +2048,7 @@ def test_unpersisted_group_pulse_loads_base_history_once(monkeypatch):
         return [{"message_id": 1, "role": "user", "content": "上一轮"}]
 
     def decide(**kwargs):
-        observed_histories.append([
-            message["content"] for message in kwargs["history"]
-        ])
+        observed_histories.append([message["content"] for message in kwargs["history"]])
         return next(decisions)
 
     def generate(character_id, player_message, **kwargs):
@@ -1728,9 +2085,7 @@ def test_unpersisted_group_pulse_loads_base_history_once(monkeypatch):
         max_messages=3,
         persist_state=False,
         persist_messages=False,
-        staged_history=[
-            {"message_id": -1, "role": "user", "content": "制定计划"}
-        ],
+        staged_history=[{"message_id": -1, "role": "user", "content": "制定计划"}],
         clock_snapshot=SimpleNamespace(
             world_now=SimpleNamespace(isoformat=lambda: "now")
         ),
@@ -1775,21 +2130,23 @@ def test_group_pulse_reuses_shared_context_and_preauthorizes_kb_ids(monkeypatch)
     }
     authorization_reads = []
     generated_contexts = []
-    decisions = iter([
-        module.DialogueDecision(
-            action="speak",
-            speaker_id="c1",
-            reply_to_message_id=1,
-            intent="answer",
-        ),
-        module.DialogueDecision(
-            action="speak",
-            speaker_id="c2",
-            reply_to_message_id=-1,
-            reply_to_character_id="c1",
-            intent="agree",
-        ),
-    ])
+    decisions = iter(
+        [
+            module.DialogueDecision(
+                action="speak",
+                speaker_id="c1",
+                reply_to_message_id=1,
+                intent="answer",
+            ),
+            module.DialogueDecision(
+                action="speak",
+                speaker_id="c2",
+                reply_to_message_id=-1,
+                reply_to_character_id="c1",
+                intent="agree",
+            ),
+        ]
+    )
 
     def refresh_player_character():
         reads["player_character"] += 1
@@ -1817,7 +2174,9 @@ def test_group_pulse_reuses_shared_context_and_preauthorizes_kb_ids(monkeypatch)
             "reply_to_message_id": kwargs["decision"].reply_to_message_id,
         }
 
-    monkeypatch.setattr(orchestrator, "_refresh_player_character", refresh_player_character)
+    monkeypatch.setattr(
+        orchestrator, "_refresh_player_character", refresh_player_character
+    )
     monkeypatch.setattr(orchestrator, "_load_all_relationships", load_relationships)
     monkeypatch.setattr(module.repository, "get_group_thread_id", load_group_thread_id)
     monkeypatch.setattr(
@@ -1828,9 +2187,7 @@ def test_group_pulse_reuses_shared_context_and_preauthorizes_kb_ids(monkeypatch)
     monkeypatch.setattr(
         module.repository,
         "get_multi_character_thread_history",
-        lambda *args, **kwargs: [
-            {"message_id": 1, "role": "user", "content": "继续"}
-        ],
+        lambda *args, **kwargs: [{"message_id": 1, "role": "user", "content": "继续"}],
     )
     monkeypatch.setattr(
         orchestrator,
@@ -1929,9 +2286,7 @@ def test_single_group_turn_reuses_context_across_selection_generation_and_commit
     monkeypatch.setattr(
         orchestrator,
         "_apply_group_event_results",
-        lambda *args, turn_context=None, **kwargs: context_users.append(
-            turn_context
-        ),
+        lambda *args, turn_context=None, **kwargs: context_users.append(turn_context),
     )
     monkeypatch.setattr(
         module,
@@ -2018,7 +2373,9 @@ def test_group_response_passes_preauthorized_kb_ids_to_retrieval(monkeypatch):
         "_build_multi_character_system_prompt",
         lambda **kwargs: "prompt",
     )
-    monkeypatch.setattr(orchestrator, "_load_memory_context", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        orchestrator, "_load_memory_context", lambda *args, **kwargs: []
+    )
     monkeypatch.setattr(
         orchestrator,
         "_format_history_for_llm",

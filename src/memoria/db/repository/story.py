@@ -1,4 +1,5 @@
 """Domain repository functions (split from monolith)."""
+
 from __future__ import annotations
 
 # Standard/third-party imports used across repository domains.
@@ -65,14 +66,18 @@ def _get_story_state_in_transaction(
     owner_user_id: str,
     story_id: str,
 ) -> dict | None:
-    row = conn.execute(
-        text("""
+    row = (
+        conn.execute(
+            text("""
         SELECT *
         FROM story_state
         WHERE owner_user_id = :owner_user_id AND story_id = :story_id
         """),
-        {"owner_user_id": owner_user_id, "story_id": story_id},
-    ).mappings().fetchone()
+            {"owner_user_id": owner_user_id, "story_id": story_id},
+        )
+        .mappings()
+        .fetchone()
+    )
     return _decode_story_state_row(row)
 
 
@@ -80,9 +85,7 @@ def _clamp_story_progress(value: Any) -> float:
     try:
         progress = float(value)
     except (TypeError, ValueError) as exc:
-        raise StoryStateTransitionError(
-            "story progress must be numeric"
-        ) from exc
+        raise StoryStateTransitionError("story progress must be numeric") from exc
     return max(0.0, min(1.0, progress))
 
 
@@ -180,11 +183,7 @@ def _project_story_event_in_transaction(
             )
         if state["status"] in _TERMINAL_STORY_STATUSES:
             raise StoryStateTransitionError("story is already terminal")
-        status = (
-            "completed"
-            if event.event_type == "story.completed.v1"
-            else "failed"
-        )
+        status = "completed" if event.event_type == "story.completed.v1" else "failed"
         progress = (
             1.0
             if status == "completed"
@@ -225,9 +224,7 @@ def _project_story_event_in_transaction(
         event.aggregate_id,
     )
     if projected is None or projected["ledger_version"] != event.aggregate_version:
-        raise DomainEventConcurrencyError(
-            "story projection changed concurrently"
-        )
+        raise DomainEventConcurrencyError("story projection changed concurrently")
     return projected
 
 
@@ -297,7 +294,9 @@ def _apply_story_update_in_transaction(
     execution_id = str(update.get("execution_id") or "").strip()
     source_event_id = str(update.get("source_event_id") or "").strip()
     if not story_id or not execution_id or not source_event_id:
-        raise ValueError("story update requires story_id, execution_id, and source_event_id")
+        raise ValueError(
+            "story update requires story_id, execution_id, and source_event_id"
+        )
 
     event_context = {
         "correlation_id": execution_id,

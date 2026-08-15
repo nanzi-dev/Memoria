@@ -30,7 +30,9 @@ def _event_row(character_id="c1"):
 def test_create_event_rejects_character_not_owned_by_user(monkeypatch):
     from memoria.api import event_admin
 
-    monkeypatch.setattr(event_admin.repository, "get_event_definition", lambda *args: None)
+    monkeypatch.setattr(
+        event_admin.repository, "get_event_definition", lambda *args: None
+    )
     monkeypatch.setattr(
         event_admin.repository,
         "get_character_card_from_db",
@@ -61,7 +63,9 @@ def test_create_event_rejects_character_not_owned_by_user(monkeypatch):
 def test_create_event_rejects_proactive_dialogue_targeting_foreign_session(monkeypatch):
     from memoria.api import event_admin
 
-    monkeypatch.setattr(event_admin.repository, "get_event_definition", lambda *args: None)
+    monkeypatch.setattr(
+        event_admin.repository, "get_event_definition", lambda *args: None
+    )
     monkeypatch.setattr(
         event_admin.repository,
         "get_character_card_from_db",
@@ -109,7 +113,9 @@ def test_create_event_uses_condition_schedule_when_top_level_is_blank(monkeypatc
     from memoria.api import event_admin
 
     saved = {}
-    monkeypatch.setattr(event_admin.repository, "get_event_definition", lambda *args: None)
+    monkeypatch.setattr(
+        event_admin.repository, "get_event_definition", lambda *args: None
+    )
     monkeypatch.setattr(
         event_admin.repository,
         "get_character_card_from_db",
@@ -150,7 +156,9 @@ def test_create_event_persists_story_id(monkeypatch):
     from memoria.api import event_admin
 
     saved = {}
-    monkeypatch.setattr(event_admin.repository, "get_event_definition", lambda *args: None)
+    monkeypatch.setattr(
+        event_admin.repository, "get_event_definition", lambda *args: None
+    )
     monkeypatch.setattr(
         event_admin.repository,
         "save_event_definition_with_schedule",
@@ -178,7 +186,9 @@ def test_create_update_and_toggle_event_preserve_exclusive_scope(monkeypatch):
     from memoria.api import event_admin
 
     saved = {}
-    monkeypatch.setattr(event_admin.repository, "get_event_definition", lambda *args: None)
+    monkeypatch.setattr(
+        event_admin.repository, "get_event_definition", lambda *args: None
+    )
     monkeypatch.setattr(
         event_admin.repository,
         "save_event_definition_with_schedule",
@@ -586,7 +596,7 @@ def test_event_simulation_plans_without_committing(monkeypatch):
     ("trigger", "effects", "expected_detail"),
     [
         (
-            {"trigger_type": "keyword_match", "keywords": ["["] , "match_mode": "regex"},
+            {"trigger_type": "keyword_match", "keywords": ["["], "match_mode": "regex"},
             [],
             "正则表达式无效",
         ),
@@ -610,7 +620,9 @@ def test_create_event_rejects_invalid_or_unimplemented_configuration(
 ):
     from memoria.api import event_admin
 
-    monkeypatch.setattr(event_admin.repository, "get_event_definition", lambda *args: None)
+    monkeypatch.setattr(
+        event_admin.repository, "get_event_definition", lambda *args: None
+    )
     monkeypatch.setattr(
         event_admin.repository,
         "save_event_definition_with_schedule",

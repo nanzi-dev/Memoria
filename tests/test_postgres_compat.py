@@ -4,6 +4,7 @@ PostgreSQL compatibility checks for the repository layer.
 These tests intentionally avoid requiring a running PostgreSQL service; they
 verify the SQL adaptation layer that is exercised when DATABASE_URL is set.
 """
+
 import sys
 from pathlib import Path
 
@@ -33,7 +34,9 @@ def test_postgres_schema_uses_bigserial():
     de_table = Base.metadata.tables["domain_event"]
     seq_col = de_table.c.sequence
     # BigInteger (with Integer variant on sqlite) maps to BIGSERIAL on PG
-    assert isinstance(seq_col.type, BigInteger), f"expected BigInteger, got {seq_col.type}"
+    assert isinstance(seq_col.type, BigInteger), (
+        f"expected BigInteger, got {seq_col.type}"
+    )
     # 编译成 PG DDL 时必须是 BIGSERIAL（而非 SERIAL）
     from sqlalchemy.schema import CreateTable
 
@@ -112,5 +115,7 @@ def test_postgres_mode_is_enabled_only_for_database_url(monkeypatch):
     monkeypatch.setattr(repository.configs, "database_url", "")
     assert repository._is_postgres_enabled() is False
 
-    monkeypatch.setattr(repository.configs, "database_url", "postgresql://localhost/memoria")
+    monkeypatch.setattr(
+        repository.configs, "database_url", "postgresql://localhost/memoria"
+    )
     assert repository._is_postgres_enabled() is True

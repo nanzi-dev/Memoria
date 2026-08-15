@@ -71,6 +71,7 @@ def _set_sqlite_pragma(dbapi_conn, connection_record) -> None:
     # 获取底层 sqlite3 连接（DBAPI 层）
     import os
     import sqlite3
+
     if isinstance(dbapi_conn, sqlite3.Connection):
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
@@ -97,6 +98,7 @@ def _build_engine(url: str | None = None) -> Engine:
 
     if is_sqlite:
         from sqlalchemy.pool import NullPool
+
         engine = create_engine(
             url,
             connect_args={
@@ -188,7 +190,11 @@ def _get_or_create_session_local() -> sessionmaker:
     # get_engine() 内部会检测 URL 变化并调用 configure_engine()，
     # 从而更新 _engine 和 _SessionLocal。
     engine = get_engine()
-    if SessionLocal is None or _SessionLocal is None or SessionLocal.kw.get("bind") is not engine:
+    if (
+        SessionLocal is None
+        or _SessionLocal is None
+        or SessionLocal.kw.get("bind") is not engine
+    ):
         SessionLocal = _SessionLocal
     return SessionLocal  # type: ignore[return-value]
 

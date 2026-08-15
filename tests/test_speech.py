@@ -38,7 +38,10 @@ from memoria.db import repository
 
 
 def _character_card(character_id: str, *, voice: str = "alloy") -> CharacterCard:
-    source = Path(__file__).resolve().parent.parent / "src/memoria/characters/npc_luo_xiaohei.json"
+    source = (
+        Path(__file__).resolve().parent.parent
+        / "src/memoria/characters/npc_luo_xiaohei.json"
+    )
     raw = normalize_character_data(json.loads(source.read_text(encoding="utf-8")))
     card = CharacterCard.model_validate(raw)
     card.character_id = character_id
@@ -122,7 +125,9 @@ class FakeSpeechProvider:
 
 
 @pytest.mark.asyncio
-async def test_speech_http_routes_enforce_auth_modes_and_audio_contract(monkeypatch, tmp_path):
+async def test_speech_http_routes_enforce_auth_modes_and_audio_contract(
+    monkeypatch, tmp_path
+):
     _run_fastapi_sync_inline(monkeypatch)
 
     def inline_file_response(path, *, media_type, filename, headers):
@@ -142,7 +147,9 @@ async def test_speech_http_routes_enforce_auth_modes_and_audio_contract(monkeypa
     session_id = str(uuid.uuid4())
     _save_card(owner, _character_card(character_id, voice="coral"))
     repository.create_session(session_id, character_id, owner, "Player", locale="en-US")
-    message_id = repository.append_short_term_message(session_id, "assistant", "Route audio")
+    message_id = repository.append_short_term_message(
+        session_id, "assistant", "Route audio"
+    )
 
     provider = FakeSpeechProvider()
     monkeypatch.setattr(configs, "speech_storage_path", str(tmp_path))
@@ -152,9 +159,13 @@ async def test_speech_http_routes_enforce_auth_modes_and_audio_contract(monkeypa
     app = FastAPI()
     app.include_router(speech_api.router, prefix="/api/v1")
     transport = httpx.ASGITransport(app=app)
-    audio_path = f"/api/v1/speech/single/sessions/{session_id}/messages/{message_id}/audio"
+    audio_path = (
+        f"/api/v1/speech/single/sessions/{session_id}/messages/{message_id}/audio"
+    )
 
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
         unauthorized = await client.get(audio_path)
         assert unauthorized.status_code == 401
 
@@ -177,7 +188,10 @@ async def test_speech_http_routes_enforce_auth_modes_and_audio_contract(monkeypa
             headers=owner_headers,
         )
         assert wrong_mode.status_code == 400
-        assert wrong_mode.json()["detail"]["message"] == "Speech mode does not match the session"
+        assert (
+            wrong_mode.json()["detail"]["message"]
+            == "Speech mode does not match the session"
+        )
 
         transcription = await client.post(
             "/api/v1/speech/transcriptions",
@@ -218,7 +232,9 @@ async def test_speech_settings_http_api_persists_and_isolates_users(monkeypatch)
     app.include_router(user_api.router, prefix="/api/v1")
     transport = httpx.ASGITransport(app=app)
 
-    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://testserver"
+    ) as client:
         unauthorized = await client.put(
             "/api/v1/user/speech-settings",
             json={"tts_auto_play": True, "stt_auto_send": True},
@@ -304,7 +320,8 @@ async def test_minimax_provider_streams_sse_audio_and_retries_before_first_chunk
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     provider = MiniMaxSpeechProvider(settings, output_format="mp3", client=client)
     chunks = [
-        chunk async for chunk in provider.synthesize_stream(
+        chunk
+        async for chunk in provider.synthesize_stream(
             "你好，世界",
             voice="female-shaonv",
         )
@@ -352,7 +369,8 @@ async def test_minimax_provider_keeps_final_audio_when_no_chunks_precede_it():
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     provider = MiniMaxSpeechProvider(settings, output_format="mp3", client=client)
     chunks = [
-        chunk async for chunk in provider.synthesize_stream(
+        chunk
+        async for chunk in provider.synthesize_stream(
             "你好，世界",
             voice="female-shaonv",
         )
@@ -379,7 +397,9 @@ async def test_minimax_provider_maps_auth_rate_limit_and_clone_ids():
         return httpx.Response(200, json={"base_resp": {"status_code": 0}})
 
     provider = MiniMaxSpeechProvider(
-        ProviderSettings("minimax", "key", "https://api.minimax.io/v1", "speech-2.8-turbo", 3, 0),
+        ProviderSettings(
+            "minimax", "key", "https://api.minimax.io/v1", "speech-2.8-turbo", 3, 0
+        ),
         output_format="mp3",
         client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
@@ -459,7 +479,9 @@ async def test_minimax_clone_invalid_params_maps_to_client_error():
 
 
 @pytest.mark.asyncio
-async def test_transcription_authorizes_session_and_passes_persisted_locale(monkeypatch, tmp_path):
+async def test_transcription_authorizes_session_and_passes_persisted_locale(
+    monkeypatch, tmp_path
+):
     owner = f"speech_{uuid.uuid4().hex[:8]}"
     session_id = str(uuid.uuid4())
     repository.create_session(session_id, "char", owner, "Player", locale="en-US")
@@ -501,7 +523,9 @@ async def test_transcription_authorizes_session_and_passes_persisted_locale(monk
 
 
 @pytest.mark.asyncio
-async def test_tts_is_assistant_only_uses_custom_voice_and_cache_invalidates(monkeypatch, tmp_path):
+async def test_tts_is_assistant_only_uses_custom_voice_and_cache_invalidates(
+    monkeypatch, tmp_path
+):
     owner = f"speech_{uuid.uuid4().hex[:8]}"
     character_id = f"character_{uuid.uuid4().hex[:8]}"
     session_id = str(uuid.uuid4())
@@ -511,8 +535,12 @@ async def test_tts_is_assistant_only_uses_custom_voice_and_cache_invalidates(mon
     card.voice.tts_instructions = "Calm and measured."
     _save_card(owner, card)
     repository.create_session(session_id, character_id, owner, "Player")
-    user_message_id = repository.append_short_term_message(session_id, "user", "Read me")
-    assistant_message_id = repository.append_short_term_message(session_id, "assistant", "Hello")
+    user_message_id = repository.append_short_term_message(
+        session_id, "user", "Read me"
+    )
+    assistant_message_id = repository.append_short_term_message(
+        session_id, "assistant", "Hello"
+    )
     provider = FakeSpeechProvider()
     monkeypatch.setattr(configs, "speech_storage_path", str(tmp_path))
     service = SpeechService(configs, provider)
@@ -583,7 +611,9 @@ async def test_tts_omits_bracketed_stage_directions(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_tts_cache_lock_cleans_up_after_failure_and_allows_retry(monkeypatch, tmp_path):
+async def test_tts_cache_lock_cleans_up_after_failure_and_allows_retry(
+    monkeypatch, tmp_path
+):
     class FlakyProvider(FakeSpeechProvider):
         async def synthesize(self, text, **kwargs):
             self.syntheses.append((text, kwargs))
@@ -596,7 +626,9 @@ async def test_tts_cache_lock_cleans_up_after_failure_and_allows_retry(monkeypat
     session_id = str(uuid.uuid4())
     _save_card(owner, _character_card(character_id))
     repository.create_session(session_id, character_id, owner, "Player")
-    message_id = repository.append_short_term_message(session_id, "assistant", "Retry me")
+    message_id = repository.append_short_term_message(
+        session_id, "assistant", "Retry me"
+    )
     provider = FlakyProvider()
     monkeypatch.setattr(configs, "speech_storage_path", str(tmp_path))
     service = SpeechService(configs, provider)
@@ -624,7 +656,9 @@ async def test_tts_cache_lock_cleans_up_after_failure_and_allows_retry(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_tts_concurrent_same_key_synthesizes_once_and_releases_lock(monkeypatch, tmp_path):
+async def test_tts_concurrent_same_key_synthesizes_once_and_releases_lock(
+    monkeypatch, tmp_path
+):
     class BlockingProvider(FakeSpeechProvider):
         def __init__(self):
             super().__init__()
@@ -642,18 +676,22 @@ async def test_tts_concurrent_same_key_synthesizes_once_and_releases_lock(monkey
     session_id = str(uuid.uuid4())
     _save_card(owner, _character_card(character_id))
     repository.create_session(session_id, character_id, owner, "Player")
-    message_id = repository.append_short_term_message(session_id, "assistant", "Once only")
+    message_id = repository.append_short_term_message(
+        session_id, "assistant", "Once only"
+    )
     provider = BlockingProvider()
     monkeypatch.setattr(configs, "speech_storage_path", str(tmp_path))
     service = SpeechService(configs, provider)
 
     requests = [
-        asyncio.create_task(service.message_audio(
-            session_id=session_id,
-            message_id=message_id,
-            current_user_id=owner,
-            mode="single",
-        ))
+        asyncio.create_task(
+            service.message_audio(
+                session_id=session_id,
+                message_id=message_id,
+                current_user_id=owner,
+                mode="single",
+            )
+        )
         for _ in range(5)
     ]
     await provider.started.wait()
@@ -703,7 +741,9 @@ async def test_group_tts_uses_persisted_message_speaker(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_custom_voice_workflow_persists_aliases_and_unbinds_locally(monkeypatch, tmp_path):
+async def test_custom_voice_workflow_persists_aliases_and_unbinds_locally(
+    monkeypatch, tmp_path
+):
     owner = f"speech_{uuid.uuid4().hex[:8]}"
     character_id = f"voice_{uuid.uuid4().hex[:8]}"
     _save_card(owner, _character_card(character_id, voice="cedar"))
@@ -731,7 +771,9 @@ async def test_custom_voice_workflow_persists_aliases_and_unbinds_locally(monkey
     assert ready_status["custom_voice_status"] == "ready"
     assert ready_status["custom_voice_id"] == "voice_1234"
 
-    stored = json.loads(repository.get_character_card_from_db(owner, character_id)["card_data"])
+    stored = json.loads(
+        repository.get_character_card_from_db(owner, character_id)["card_data"]
+    )
     assert stored["voice"]["customVoiceId"] == "voice_1234"
     assert stored["voice"]["customVoiceStatus"] == "ready"
     assert "custom_voice_id" not in stored["voice"]
@@ -743,7 +785,9 @@ async def test_custom_voice_workflow_persists_aliases_and_unbinds_locally(monkey
 
 
 @pytest.mark.asyncio
-async def test_custom_voice_does_not_require_reference_transcript(monkeypatch, tmp_path):
+async def test_custom_voice_does_not_require_reference_transcript(
+    monkeypatch, tmp_path
+):
     owner = f"speech_{uuid.uuid4().hex[:8]}"
     character_id = f"voice_{uuid.uuid4().hex[:8]}"
     _save_card(owner, _character_card(character_id))
@@ -771,7 +815,9 @@ async def test_custom_voice_does_not_require_reference_transcript(monkeypatch, t
 
 
 @pytest.mark.asyncio
-async def test_custom_voice_success_preserves_concurrent_character_edits(monkeypatch, tmp_path):
+async def test_custom_voice_success_preserves_concurrent_character_edits(
+    monkeypatch, tmp_path
+):
     class BlockingProvider(FakeSpeechProvider):
         def __init__(self):
             super().__init__()
@@ -811,7 +857,9 @@ async def test_custom_voice_success_preserves_concurrent_character_edits(monkeyp
     )
     await provider.started.wait()
     concurrent_card = CharacterCard.model_validate(
-        json.loads(repository.get_character_card_from_db(owner, character_id)["card_data"])
+        json.loads(
+            repository.get_character_card_from_db(owner, character_id)["card_data"]
+        )
     )
     concurrent_card.meta.name = "concurrent-name"
     concurrent_card.meta.display_name = "Concurrent Name"
@@ -822,7 +870,9 @@ async def test_custom_voice_success_preserves_concurrent_character_edits(monkeyp
 
     status = await create_task
     stored = CharacterCard.model_validate(
-        json.loads(repository.get_character_card_from_db(owner, character_id)["card_data"])
+        json.loads(
+            repository.get_character_card_from_db(owner, character_id)["card_data"]
+        )
     )
     assert status["custom_voice_id"] == "voice_reconfigured"
     assert stored.meta.name == "concurrent-name"
@@ -834,7 +884,9 @@ async def test_custom_voice_success_preserves_concurrent_character_edits(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_custom_voice_reconfiguration_failure_preserves_ready_voice(monkeypatch, tmp_path):
+async def test_custom_voice_reconfiguration_failure_preserves_ready_voice(
+    monkeypatch, tmp_path
+):
     class FailingVoiceProvider(FakeSpeechProvider):
         async def create_custom_voice(self, **kwargs):
             raise SpeechProviderError("provider_failure", "temporary failure", 502)
@@ -905,14 +957,18 @@ async def test_custom_voice_unavailable_persists_fallback_status(monkeypatch, tm
 
     assert exc_info.value.category == "unavailable"
     stored = CharacterCard.model_validate(
-        json.loads(repository.get_character_card_from_db(owner, character_id)["card_data"])
+        json.loads(
+            repository.get_character_card_from_db(owner, character_id)["card_data"]
+        )
     )
     assert stored.voice.custom_voice_status == "unavailable"
     assert stored.voice.builtin_voice == "marin"
 
 
 @pytest.mark.asyncio
-async def test_custom_voice_missing_provider_ids_persist_failed_workflow(monkeypatch, tmp_path):
+async def test_custom_voice_missing_provider_ids_persist_failed_workflow(
+    monkeypatch, tmp_path
+):
     class MissingVoiceIdProvider(FakeSpeechProvider):
         async def create_custom_voice(self, **kwargs):
             self.voices.append((kwargs["audio"], kwargs))
@@ -953,7 +1009,12 @@ def test_repository_get_short_term_message_is_scoped_to_session():
     second_session = str(uuid.uuid4())
     repository.create_session(first_session, "char", "owner", "Player")
     repository.create_session(second_session, "char", "owner", "Player")
-    message_id = repository.append_short_term_message(first_session, "assistant", "hello")
+    message_id = repository.append_short_term_message(
+        first_session, "assistant", "hello"
+    )
 
-    assert repository.get_short_term_message(first_session, message_id)["content"] == "hello"
+    assert (
+        repository.get_short_term_message(first_session, message_id)["content"]
+        == "hello"
+    )
     assert repository.get_short_term_message(second_session, message_id) is None

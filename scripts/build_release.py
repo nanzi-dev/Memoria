@@ -191,13 +191,13 @@ def validate_package(staging: Path, *, with_model: bool = True) -> None:
         problems.append("web/dist/assets 缺失")
     if not (staging / "start.py").is_file() or not (staging / "run.py").is_file():
         problems.append("一键启动器/入口缺失（release/ 下文件未正确映射到包根）")
-    packaged_pyc = [
-        item.relative_to(staging)
-        for item in staging.rglob("*.pyc")
-    ]
+    packaged_pyc = [item.relative_to(staging) for item in staging.rglob("*.pyc")]
     if packaged_pyc:
         problems.append(f"包内不应包含 .pyc: {len(packaged_pyc)} 个")
-    if any((staging / rel).stat().st_mode & 0o444 == 0 for rel in ("start.py", "start.sh", "run.py")):
+    if any(
+        (staging / rel).stat().st_mode & 0o444 == 0
+        for rel in ("start.py", "start.sh", "run.py")
+    ):
         problems.append("启动脚本/入口不可读（跨用户解压后无法执行）")
     if with_model and not (staging / MODEL_REL / "model.safetensors").is_file():
         problems.append(f"嵌入模型文件缺失: {MODEL_REL}/model.safetensors")
@@ -205,7 +205,11 @@ def validate_package(staging: Path, *, with_model: bool = True) -> None:
         for problem in problems:
             print(f"[build] 校验失败: {problem}")
         fail("发布包校验未通过")
-    log("发布包校验通过（无 .env、无运行数据、前端与模型完整）" if with_model else "发布包校验通过（无 .env、无运行数据、前端完整，未打包模型）")
+    log(
+        "发布包校验通过（无 .env、无运行数据、前端与模型完整）"
+        if with_model
+        else "发布包校验通过（无 .env、无运行数据、前端完整，未打包模型）"
+    )
 
 
 def make_archives(version: str) -> list[Path]:
@@ -245,7 +249,9 @@ def make_archives(version: str) -> list[Path]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="构建 Memoria 便携发布包")
-    parser.add_argument("--skip-web-build", action="store_true", help="复用现有 web/dist")
+    parser.add_argument(
+        "--skip-web-build", action="store_true", help="复用现有 web/dist"
+    )
     parser.add_argument("--no-model", action="store_true", help="不打包本地嵌入模型")
     args = parser.parse_args()
 

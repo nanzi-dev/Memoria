@@ -27,12 +27,14 @@ logger = logging.getLogger(__name__)
 def _orchestrator_module():
     """延迟获取编排器模块，确保测试对编排器模块辅助函数的 monkeypatch 依然生效。"""
     from memoria.core import multi_character_orchestrator as _module
+
     return _module
 
 
 # =========================
 # 记忆与持久化 Mixin
 # =========================
+
 
 class MultiCharacterMemoryOpsMixin:
     """Mixin：为 MultiCharacterOrchestrator 提供事件处理与持久化能力。"""
@@ -138,9 +140,7 @@ class MultiCharacterMemoryOpsMixin:
                         stored_affinity = float(
                             runtime_state.get("affection_level", 0) or 0
                         )
-                        stored_trust = float(
-                            runtime_state.get("trust_level", 0) or 0
-                        )
+                        stored_trust = float(runtime_state.get("trust_level", 0) or 0)
                     current_affinity = float(
                         response.get("current_affinity", stored_affinity)
                         if response is not None
@@ -177,28 +177,32 @@ class MultiCharacterMemoryOpsMixin:
                         if response is not None
                         else 0
                     )
-                    npc_response = response.get("dialogue") if response is not None else None
-                contexts.append(event_runtime.build_event_context(
-                    character_id=character_id,
-                    player_id=self.player_id,
-                    session_id=self.session_id,
-                    current_affinity=current_affinity,
-                    current_trust=current_trust,
-                    current_mood=current_mood,
-                    previous_affinity=previous_affinity,
-                    previous_trust=previous_trust,
-                    affinity_delta=affinity_delta,
-                    trust_delta=trust_delta,
-                    player_message=player_text,
-                    npc_response=npc_response,
-                    character_relationships=relationships,
-                    world_time=clock_snapshot.world_now.isoformat(),
-                    execution_key=f"multi:{self.session_id}:{request_id}",
-                    trigger_source="multi_dialogue",
-                    current_user_turn_persisted=False,
-                    response_index=response_index,
-                    shared_cache=event_context_cache,
-                ))
+                    npc_response = (
+                        response.get("dialogue") if response is not None else None
+                    )
+                contexts.append(
+                    event_runtime.build_event_context(
+                        character_id=character_id,
+                        player_id=self.player_id,
+                        session_id=self.session_id,
+                        current_affinity=current_affinity,
+                        current_trust=current_trust,
+                        current_mood=current_mood,
+                        previous_affinity=previous_affinity,
+                        previous_trust=previous_trust,
+                        affinity_delta=affinity_delta,
+                        trust_delta=trust_delta,
+                        player_message=player_text,
+                        npc_response=npc_response,
+                        character_relationships=relationships,
+                        world_time=clock_snapshot.world_now.isoformat(),
+                        execution_key=f"multi:{self.session_id}:{request_id}",
+                        trigger_source="multi_dialogue",
+                        current_user_turn_persisted=False,
+                        response_index=response_index,
+                        shared_cache=event_context_cache,
+                    )
+                )
 
         turn_holder: dict = {}
 
@@ -228,9 +232,7 @@ class MultiCharacterMemoryOpsMixin:
                     or (
                         result.response_index is None
                         and result.character_id == response["character_id"]
-                        and response_counts_by_character[
-                            response["character_id"]
-                        ] == 1
+                        and response_counts_by_character[response["character_id"]] == 1
                     )
                 ]
                 (
@@ -262,15 +264,11 @@ class MultiCharacterMemoryOpsMixin:
                 )
                 trust_delta_before = response.get(
                     "trust_delta",
-                    response["current_trust"]
-                    - float(context.previous_trust or 0),
+                    response["current_trust"] - float(context.previous_trust or 0),
                 )
                 response["trust_delta"] = round(
                     trust_delta_before
-                    + (
-                        response["current_trust"]
-                        - float(context.current_trust or 0)
-                    ),
+                    + (response["current_trust"] - float(context.current_trust or 0)),
                     6,
                 )
                 response["event_executions"] = [
@@ -323,8 +321,7 @@ class MultiCharacterMemoryOpsMixin:
                         or 0
                     )
                     previous_trust = float(
-                        response.get("_previous_trust", stored.get("trust_level"))
-                        or 0
+                        response.get("_previous_trust", stored.get("trust_level")) or 0
                     )
                 else:
                     # 响应缺少状态字段（如测试替身），不补算 delta
@@ -341,43 +338,49 @@ class MultiCharacterMemoryOpsMixin:
                     state.get("character_id") == response["character_id"]
                     for state in runtime_states
                 ):
-                    runtime_states.append({
-                        "character_id": response["character_id"],
-                        "affection_level": response["current_affinity"],
-                        "trust_level": response["current_trust"],
-                        "current_mood": response["current_mood"],
-                        "insert_only": True,
-                    })
-            messages = [{
-                **player_message,
-                "temporary_id": player_message["message_id"],
-            }]
+                    runtime_states.append(
+                        {
+                            "character_id": response["character_id"],
+                            "affection_level": response["current_affinity"],
+                            "trust_level": response["current_trust"],
+                            "current_mood": response["current_mood"],
+                            "insert_only": True,
+                        }
+                    )
+            messages = [
+                {
+                    **player_message,
+                    "temporary_id": player_message["message_id"],
+                }
+            ]
             for index, response in enumerate(responses):
                 response.pop("_previous_affinity", None)
                 response.pop("_previous_trust", None)
-                messages.append({
-                    "role": "assistant",
-                    "content": response.get("dialogue", ""),
-                    "character_id": response.get("character_id"),
-                    "character_name": response.get("character_name"),
-                    "action": response.get("action"),
-                    "affinity_delta": response.get("affinity_delta"),
-                    "trust_delta": response.get("trust_delta"),
-                    "current_affinity": response.get("current_affinity"),
-                    "current_trust": response.get("current_trust"),
-                    "current_mood": response.get("current_mood"),
-                    "event_notification": response.get("event_notification"),
-                    "world_created_at": response.get("world_created_at"),
-                    "knowledge_sources": response.get("knowledge_sources") or [],
-                    "reply_to_message_id": response.get("reply_to_message_id"),
-                    "reply_to_character_id": response.get("reply_to_character_id"),
-                    "intent": response.get("intent"),
-                    "topic": response.get("topic"),
-                    "trigger_source": response.get("trigger_source"),
-                    "temporary_id": response.get("message_id"),
-                    "response_index": index,
-                    "response_field": "message_id",
-                })
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": response.get("dialogue", ""),
+                        "character_id": response.get("character_id"),
+                        "character_name": response.get("character_name"),
+                        "action": response.get("action"),
+                        "affinity_delta": response.get("affinity_delta"),
+                        "trust_delta": response.get("trust_delta"),
+                        "current_affinity": response.get("current_affinity"),
+                        "current_trust": response.get("current_trust"),
+                        "current_mood": response.get("current_mood"),
+                        "event_notification": response.get("event_notification"),
+                        "world_created_at": response.get("world_created_at"),
+                        "knowledge_sources": response.get("knowledge_sources") or [],
+                        "reply_to_message_id": response.get("reply_to_message_id"),
+                        "reply_to_character_id": response.get("reply_to_character_id"),
+                        "intent": response.get("intent"),
+                        "topic": response.get("topic"),
+                        "trigger_source": response.get("trigger_source"),
+                        "temporary_id": response.get("message_id"),
+                        "response_index": index,
+                        "response_field": "message_id",
+                    }
+                )
             group_state = {
                 **getattr(self, "last_pulse_state", {}),
                 "group_thread_id": (
@@ -419,13 +422,11 @@ class MultiCharacterMemoryOpsMixin:
             )
         return event_results
 
-
     def _persist_generated_response(
         self, response: dict, clock_snapshot, runtime_state: dict | None = None
     ) -> int:
         world_created_at = (
-            response.get("world_created_at")
-            or clock_snapshot.world_now.isoformat()
+            response.get("world_created_at") or clock_snapshot.world_now.isoformat()
         )
         message_id = response.get("message_id")
         persistence_fields = {
@@ -466,16 +467,12 @@ class MultiCharacterMemoryOpsMixin:
         response["message_id"] = message_id
         return message_id
 
-
-
     def _build_player_checkpoint_background_jobs(
         self,
         messages: list[dict],
     ) -> list[dict]:
         checkpoint_interval = configs.long_term_memory_interval_turns
-        checkpoint_turn = (
-            repository.get_session_user_turn_count(self.session_id) + 1
-        )
+        checkpoint_turn = repository.get_session_user_turn_count(self.session_id) + 1
         if checkpoint_turn % checkpoint_interval != 0 or not self.player_id:
             return []
         generated_scope = multi_character_memory.resolve_generated_fact_scope(
@@ -503,33 +500,36 @@ class MultiCharacterMemoryOpsMixin:
         ):
             performance.increment("llm.calls_avoided.memory_gate")
             return []
-        world_occurred_at = next(
-            (
-                str(message.get("world_created_at"))
-                for message in reversed(messages)
-                if message.get("world_created_at")
-            ),
-            None,
-        ) or _orchestrator_module()._clock_snapshot_for_player(
-            self.player_id
-        ).world_now.isoformat()
-        return [{
-            "job_type": "group_checkpoint_memory",
-            "dedupe_key": (
-                f"group_checkpoint_memory:{self.session_id}:{checkpoint_turn}"
-            ),
-            "payload": {
-                "owner_user_id": self.player_id,
-                "scope_type": scope_type,
-                "scope_id": scope_id,
-                "session_id": self.session_id,
-                "history": history,
-                "witness_character_ids": list(self.character_ids),
-                "evidence_id": (
-                    f"group-checkpoint:{self.session_id}:{checkpoint_turn}"
+        world_occurred_at = (
+            next(
+                (
+                    str(message.get("world_created_at"))
+                    for message in reversed(messages)
+                    if message.get("world_created_at")
                 ),
-                "world_occurred_at": world_occurred_at,
-            },
-        }]
-
-
+                None,
+            )
+            or _orchestrator_module()
+            ._clock_snapshot_for_player(self.player_id)
+            .world_now.isoformat()
+        )
+        return [
+            {
+                "job_type": "group_checkpoint_memory",
+                "dedupe_key": (
+                    f"group_checkpoint_memory:{self.session_id}:{checkpoint_turn}"
+                ),
+                "payload": {
+                    "owner_user_id": self.player_id,
+                    "scope_type": scope_type,
+                    "scope_id": scope_id,
+                    "session_id": self.session_id,
+                    "history": history,
+                    "witness_character_ids": list(self.character_ids),
+                    "evidence_id": (
+                        f"group-checkpoint:{self.session_id}:{checkpoint_turn}"
+                    ),
+                    "world_occurred_at": world_occurred_at,
+                },
+            }
+        ]

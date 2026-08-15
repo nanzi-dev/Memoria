@@ -28,6 +28,7 @@ from pydantic import ValidationError
 # SECTION 1: Character Schema Validation
 # ============================================================
 
+
 class TestCharacterSchema:
     """测试角色卡 Pydantic 模型"""
 
@@ -44,23 +45,24 @@ class TestCharacterSchema:
             Personality,
             speechStyle,
         )
+
         card = CharacterCard(
             character_id="test_min",
             version="1.0.0",
             meta=Meta(name="测试", display_name="Test"),
             identity=Identity(
-                age="20", gender="未知", occupation="测试员",
-                race_or_species="人类", appearance="普通"
+                age="20",
+                gender="未知",
+                occupation="测试员",
+                race_or_species="人类",
+                appearance="普通",
             ),
             personality=Personality(),
-            speech_style=speechStyle(
-                tone_register="中性",
-                vocabulary_notes="标准"
-            ),
+            speech_style=speechStyle(tone_register="中性", vocabulary_notes="标准"),
             background=Background(story_bio="测试背景"),
             goals_and_motivations=GoalsAndMotivations(),
             interaction_rules=InteractionRules(),
-            action_vocabulary=ActionVocabulary()
+            action_vocabulary=ActionVocabulary(),
         )
         assert card.character_id == "test_min"
         assert card.meta.name == "测试"
@@ -68,18 +70,21 @@ class TestCharacterSchema:
     def test_character_card_missing_required(self):
         """测试必需字段缺失时抛出 ValidationError"""
         from memoria.core.character_schema import CharacterCard
+
         with pytest.raises(ValidationError):
             CharacterCard(character_id="", version="1.0.0", meta={})
 
     def test_character_voice_aliases_and_status_validation(self):
         from memoria.core.character_schema import CharacterVoice
 
-        voice = CharacterVoice.model_validate({
-            "builtinVoice": "coral",
-            "customVoiceId": "voice_123",
-            "customVoiceStatus": "ready",
-            "ttsInstructions": "Speak calmly.",
-        })
+        voice = CharacterVoice.model_validate(
+            {
+                "builtinVoice": "coral",
+                "customVoiceId": "voice_123",
+                "customVoiceStatus": "ready",
+                "ttsInstructions": "Speak calmly.",
+            }
+        )
 
         assert voice.builtin_voice == "coral"
         assert voice.custom_voice_id == "voice_123"
@@ -92,8 +97,10 @@ class TestCharacterSchema:
         from memoria.core.character_schema import CharacterCard
 
         raw = json.loads(
-            (Path(__file__).resolve().parent.parent / "src/memoria/characters/npc_luo_xiaohei.json")
-            .read_text(encoding="utf-8")
+            (
+                Path(__file__).resolve().parent.parent
+                / "src/memoria/characters/npc_luo_xiaohei.json"
+            ).read_text(encoding="utf-8")
         )
 
         invalid_locale = {**raw, "i18n": {"fr-FR": {"meta": {"name": "Noir"}}}}
@@ -112,8 +119,10 @@ class TestCharacterSchema:
 
         raw = normalize_character_data(
             json.loads(
-                (Path(__file__).resolve().parent.parent / "src/memoria/characters/npc_luo_xiaohei.json")
-                .read_text(encoding="utf-8")
+                (
+                    Path(__file__).resolve().parent.parent
+                    / "src/memoria/characters/npc_luo_xiaohei.json"
+                ).read_text(encoding="utf-8")
             )
         )
         original_occupation = raw["identity"]["occupation"]
@@ -142,7 +151,9 @@ class TestCharacterSchema:
         card = character_loader.load_character_card("npc_luo_xiaohei")
         runtime = {"affection_level": 0, "trust_level": 0, "current_mood": "neutral"}
 
-        english = prompt_builder.build_system_prompt(card, runtime, "Player", locale="en-US")
+        english = prompt_builder.build_system_prompt(
+            card, runtime, "Player", locale="en-US"
+        )
         chinese = prompt_builder.build_multi_character_system_prompt(
             card,
             runtime,
@@ -158,10 +169,15 @@ class TestCharacterSchema:
     def test_identity_model(self):
         """测试 Identity 模型"""
         from memoria.core.character_schema import Identity
+
         ident = Identity(
-            age=25, gender="男", occupation="战士",
-            race_or_species="人类", appearance="高大威猛",
-            social_status="贵族", core_identity_summary="勇敢的战士"
+            age=25,
+            gender="男",
+            occupation="战士",
+            race_or_species="人类",
+            appearance="高大威猛",
+            social_status="贵族",
+            core_identity_summary="勇敢的战士",
         )
         assert ident.age == 25
         assert ident.gender == "男"
@@ -170,13 +186,14 @@ class TestCharacterSchema:
     def test_personality_model(self):
         """测试 Personality 模型"""
         from memoria.core.character_schema import Personality
+
         p = Personality(
             mbti_or_archetype="INTJ",
             core_traits=["冷静", "理性"],
             values_and_beliefs=["正义至上"],
             fears_and_tabooes=["背叛"],
             quirks_and_habits=["推眼镜"],
-            moral_alignment="守序善良"
+            moral_alignment="守序善良",
         )
         assert len(p.core_traits) == 2
         assert "冷静" in p.core_traits
@@ -184,6 +201,7 @@ class TestCharacterSchema:
     def test_speech_style_model(self):
         """测试 SpeechStyle 模型"""
         from memoria.core.character_schema import speechStyle
+
         s = speechStyle(
             tone_register="轻松",
             vocabulary_notes="口语化",
@@ -191,7 +209,7 @@ class TestCharacterSchema:
             catchphrases=["喵~"],
             things_never_to_say=["我是AI"],
             language="zh-CN",
-            formality_default="casual"
+            formality_default="casual",
         )
         assert s.tone_register == "轻松"
         assert "喵~" in s.catchphrases
@@ -204,17 +222,28 @@ class TestCharacterSchema:
             Relationship,
             Secret,
         )
+
         bg = Background(
             story_bio="出身平凡但心怀梦想",
             key_events=[
-                KeyEvent(event="初次战斗", description="第一次上战场", emotional_weight=-3)
+                KeyEvent(
+                    event="初次战斗", description="第一次上战场", emotional_weight=-3
+                )
             ],
             relationships=[
-                Relationship(target="npc_friend", relationship_type="朋友", description="生死之交")
+                Relationship(
+                    target="npc_friend",
+                    relationship_type="朋友",
+                    description="生死之交",
+                )
             ],
             secrets=[
-                Secret(secret="隐藏身份", description="真实身份不为人知", reveal_conditions="信任度>80")
-            ]
+                Secret(
+                    secret="隐藏身份",
+                    description="真实身份不为人知",
+                    reveal_conditions="信任度>80",
+                )
+            ],
         )
         assert len(bg.key_events) == 1
         assert bg.relationships[0].target == "npc_friend"
@@ -223,13 +252,14 @@ class TestCharacterSchema:
     def test_action_vocabulary_model(self):
         """测试 ActionVocabulary 模型"""
         from memoria.core.character_schema import ActionVocabulary
+
         av = ActionVocabulary(
             greeting_actions=["[微笑]打招呼"],
             farewell_actions=["[挥手]告别"],
             agreement_actions=["[点头]同意"],
             disagreement_actions=["[摇头]反对"],
             emotional_reactions=["[大笑]", "[叹息]"],
-            default_action="neutral"
+            default_action="neutral",
         )
         assert av.default_action == "neutral"
         assert len(av.emotional_reactions) == 2
@@ -241,15 +271,17 @@ class TestCharacterSchema:
             RelationshipState,
             RuntmeStateSchema,
         )
+
         rs = RuntmeStateSchema(
             relationships=[
-                RelationshipState(target_id="player", affection_level=50.0, trust_level=30.0)
+                RelationshipState(
+                    target_id="player", affection_level=50.0, trust_level=30.0
+                )
             ],
             current_mood=MoodSchema(
-                emotions=["开心", "好奇", "平静"],
-                default_mood="平静"
+                emotions=["开心", "好奇", "平静"], default_mood="平静"
             ),
-            known_player_facts={"喜好": "喜欢猫"}
+            known_player_facts={"喜好": "喜欢猫"},
         )
         assert rs.relationships[0].affection_level == 50.0
         assert rs.current_mood.default_mood == "平静"
@@ -258,9 +290,10 @@ class TestCharacterSchema:
     def test_safety_constraints(self):
         """测试安全约束模型"""
         from memoria.core.character_schema import SafetyConstraints
+
         sc = SafetyConstraints(
             topics_to_avoid=["色情", "暴力", "政治"],
-            out_of_character_handling="忽略并继续角色扮演"
+            out_of_character_handling="忽略并继续角色扮演",
         )
         assert len(sc.topics_to_avoid) == 3
 
@@ -269,17 +302,19 @@ class TestCharacterSchema:
 # SECTION 2: Event Schema Validation
 # ============================================================
 
+
 class TestEventSchema:
     """测试事件系统数据模型"""
 
     def test_trigger_condition_affinity(self):
         """测试好感度触发条件"""
         from memoria.core.event_schema import TriggerCondition, TriggerType
+
         tc = TriggerCondition(
             trigger_type=TriggerType.AFFINITY_THRESHOLD,
             threshold=50.0,
             comparison="gte",
-            cooldown_hours=2
+            cooldown_hours=2,
         )
         assert tc.trigger_type == TriggerType.AFFINITY_THRESHOLD
         assert tc.threshold == 50.0
@@ -287,10 +322,11 @@ class TestEventSchema:
     def test_trigger_condition_keyword(self):
         """测试关键词触发条件"""
         from memoria.core.event_schema import TriggerCondition, TriggerType
+
         tc = TriggerCondition(
             trigger_type=TriggerType.KEYWORD_MATCH,
             keywords=["你好", "再见"],
-            match_mode="any"
+            match_mode="any",
         )
         assert len(tc.keywords) == 2
         assert tc.match_mode == "any"
@@ -298,19 +334,16 @@ class TestEventSchema:
     def test_trigger_condition_composite(self):
         """测试复合触发条件"""
         from memoria.core.event_schema import TriggerCondition, TriggerType
+
         tc = TriggerCondition(
             trigger_type=TriggerType.COMPOSITE,
             logic_operator="and",
             sub_conditions=[
                 TriggerCondition(
-                    trigger_type=TriggerType.AFFINITY_THRESHOLD,
-                    threshold=30.0
+                    trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=30.0
                 ),
-                TriggerCondition(
-                    trigger_type=TriggerType.MOOD_MATCH,
-                    mood="开心"
-                )
-            ]
+                TriggerCondition(trigger_type=TriggerType.MOOD_MATCH, mood="开心"),
+            ],
         )
         assert tc.logic_operator == "and"
         assert len(tc.sub_conditions) == 2
@@ -318,9 +351,10 @@ class TestEventSchema:
     def test_event_effect_state_change(self):
         """测试状态修改效果"""
         from memoria.core.event_schema import EffectType, EventEffect
+
         effect = EventEffect(
             effect_type=EffectType.MODIFY_STATE,
-            state_changes={"affection_level": 5, "trust_level": 3}
+            state_changes={"affection_level": 5, "trust_level": 3},
         )
         assert effect.effect_type == EffectType.MODIFY_STATE
         assert effect.state_changes["affection_level"] == 5
@@ -328,10 +362,11 @@ class TestEventSchema:
     def test_event_effect_add_memory(self):
         """测试添加记忆效果"""
         from memoria.core.event_schema import EffectType, EventEffect
+
         effect = EventEffect(
             effect_type=EffectType.ADD_MEMORY,
             memory_text="玩家喜欢猫",
-            memory_importance=7
+            memory_importance=7,
         )
         assert effect.memory_text == "玩家喜欢猫"
         assert effect.memory_importance == 7
@@ -339,10 +374,11 @@ class TestEventSchema:
     def test_event_effect_dialogue(self):
         """测试触发对话效果"""
         from memoria.core.event_schema import EffectType, EventEffect
+
         effect = EventEffect(
             effect_type=EffectType.TRIGGER_DIALOGUE,
             dialogue_text="啊，我记起来了！",
-            dialogue_action="surprised"
+            dialogue_action="surprised",
         )
         assert effect.dialogue_text == "啊，我记起来了！"
         assert effect.dialogue_action == "surprised"
@@ -356,23 +392,23 @@ class TestEventSchema:
             TriggerCondition,
             TriggerType,
         )
+
         event = EventDefinition(
             event_id="evt_test_001",
             event_name="测试事件",
             description="这是一个测试事件",
             character_id="npc_test",
             trigger_condition=TriggerCondition(
-                trigger_type=TriggerType.AFFINITY_THRESHOLD,
-                threshold=50.0
+                trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=50.0
             ),
             effects=[
                 EventEffect(
                     effect_type=EffectType.NOTIFY_PLAYER,
-                    notification_message="好感度达到50！"
+                    notification_message="好感度达到50！",
                 )
             ],
             priority=1,
-            is_active=True
+            is_active=True,
         )
         assert event.event_id == "evt_test_001"
         assert event.priority == 1
@@ -381,6 +417,7 @@ class TestEventSchema:
     def test_event_context(self):
         """测试事件上下文"""
         from memoria.core.event_schema import EventContext
+
         ctx = EventContext(
             character_id="npc_test",
             player_id="player_001",
@@ -391,7 +428,7 @@ class TestEventSchema:
             player_message="你好",
             dialogue_count=5,
             total_dialogue_count=20,
-            session_duration_minutes=10.5
+            session_duration_minutes=10.5,
         )
         assert ctx.character_id == "npc_test"
         assert ctx.current_affinity == 45.0
@@ -400,12 +437,13 @@ class TestEventSchema:
     def test_trigger_result(self):
         """测试事件触发结果"""
         from memoria.core.event_schema import EventTriggerResult
+
         result = EventTriggerResult(
             event_id="evt_001",
             event_name="测试",
             triggered=True,
             effects_applied=["状态已修改", "记忆已添加"],
-            notification="事件已触发"
+            notification="事件已触发",
         )
         assert result.triggered is True
         assert len(result.effects_applied) == 2
@@ -414,6 +452,7 @@ class TestEventSchema:
 # ============================================================
 # SECTION 3: Speaking Strategies
 # ============================================================
+
 
 class TestSpeakingStrategies:
     """测试默认混合发言策略"""
@@ -427,15 +466,17 @@ class TestSpeakingStrategies:
 
     def _make_mock_cards(self):
         """创建模拟角色卡"""
+
         class MockMeta:
             def __init__(self, name, display_name, aliases=None):
                 self.name = name
                 self.display_name = display_name
                 self.aliases = aliases or []
+
         class MockIdentity:
             def __init__(self, occupation="未知"):
                 self.occupation = occupation
-        
+
         cards = {}
         cards["char_a"] = MagicMock()
         cards["char_a"].meta = MockMeta("角色A", "A君", ["小A"])
@@ -451,21 +492,23 @@ class TestSpeakingStrategies:
     def test_smart_strategy_keyword_mention(self):
         """测试智能策略的关键词提及功能"""
         from memoria.core.speaking_strategy import SmartSelectionStrategy
+
         strategy = SmartSelectionStrategy(balance_factor=1.0)
         participants = self._make_participants()
         cards = self._make_mock_cards()
-        
+
         # 提到"B君"时，char_b 应该有更高概率被选中
         context = {"player_message": "B君你好呀！", "last_speaker_id": None}
-        
+
         # 多次运行验证趋势
         import random
+
         random.seed(42)
         counts = {"char_a": 0, "char_b": 0, "char_c": 0}
         for _ in range(100):
             speaker = strategy.select_speaker(participants, cards, context)
             counts[speaker] += 1
-        
+
         # char_b 被提及，应有高得分优势
         assert counts["char_b"] >= counts["char_a"]
         print(f"  关键词提及测试结果: {counts}")
@@ -473,10 +516,11 @@ class TestSpeakingStrategies:
     def test_smart_strategy_avoid_consecutive(self):
         """测试智能策略避免连续发言"""
         from memoria.core.speaking_strategy import SmartSelectionStrategy
+
         strategy = SmartSelectionStrategy(balance_factor=1.0)
         participants = [self._make_participants()[0]]  # 只有一个参与者
         cards = self._make_mock_cards()
-        
+
         # 即使只有一个参与者，也应该能返回结果
         context = {"last_speaker_id": "char_a", "player_message": ""}
         speaker = strategy.select_speaker(participants, cards, context)
@@ -569,8 +613,7 @@ class TestSpeakingStrategies:
         }
 
         selected = {
-            strategy.select_speaker(participants, cards, context)
-            for _ in range(20)
+            strategy.select_speaker(participants, cards, context) for _ in range(20)
         }
 
         assert len(selected) == 1
@@ -578,11 +621,13 @@ class TestSpeakingStrategies:
     def test_smart_strategy_custom_relationship_type(self):
         """测试自定义关系类型通过亲密度影响发言选择"""
         from memoria.core.speaking_strategy import SmartSelectionStrategy
+
         strategy = SmartSelectionStrategy(balance_factor=1.0)
         participants = self._make_participants()[1:]
         cards = self._make_mock_cards()
 
         import random
+
         random.seed(42)
 
         context = {
@@ -602,13 +647,15 @@ class TestSpeakingStrategies:
     def test_hybrid_strategy_strong_mention(self):
         """测试混合策略的强提及"""
         from memoria.core.speaking_strategy import HybridStrategy
+
         strategy = HybridStrategy(balance_factor=1.0)
         participants = self._make_participants()
         cards = self._make_mock_cards()
-        
+
         import random
+
         random.seed(42)
-        
+
         # 强提及"角色C"的全名
         context = {"player_message": "角色C，你来回答！", "last_speaker_id": None}
         speaker = strategy.select_speaker(participants, cards, context)
@@ -617,13 +664,15 @@ class TestSpeakingStrategies:
     def test_hybrid_strategy_display_name_mention(self):
         """测试混合策略的显示名称提及"""
         from memoria.core.speaking_strategy import HybridStrategy
+
         strategy = HybridStrategy(balance_factor=1.0)
         participants = self._make_participants()
         cards = self._make_mock_cards()
-        
+
         import random
+
         random.seed(42)
-        
+
         # 提到显示名"A君"
         context = {"player_message": "A君在吗？", "last_speaker_id": None}
         speaker = strategy.select_speaker(participants, cards, context)
@@ -632,15 +681,17 @@ class TestSpeakingStrategies:
     def test_hybrid_strategy_keyword_trigger(self):
         """测试混合策略的关键词触发注册"""
         from memoria.core.speaking_strategy import HybridStrategy
+
         strategy = HybridStrategy(balance_factor=1.0)
         strategy.add_keyword_trigger("帮助", "char_c")
-        
+
         participants = self._make_participants()
         cards = self._make_mock_cards()
-        
+
         import random
+
         random.seed(42)
-        
+
         context = {"player_message": "谁能帮助我？", "last_speaker_id": None}
         speaker = strategy.select_speaker(participants, cards, context)
         assert speaker == "char_c"
@@ -648,6 +699,7 @@ class TestSpeakingStrategies:
     def test_hybrid_strategy_empty(self):
         """测试混合策略空参与者"""
         from memoria.core.speaking_strategy import HybridStrategy
+
         strategy = HybridStrategy()
         with pytest.raises(ValueError, match="没有可用的参与者"):
             strategy.select_speaker([], {}, {})
@@ -657,11 +709,13 @@ class TestSpeakingStrategies:
 # SECTION 4: Event Detector
 # ============================================================
 
+
 class TestEventDetector:
     """测试事件检测引擎"""
 
     def _make_context(self, **kwargs):
         from memoria.core.event_schema import EventContext
+
         defaults = {
             "character_id": "npc_test",
             "player_id": "player_001",
@@ -672,13 +726,16 @@ class TestEventDetector:
             "player_message": "",
             "dialogue_count": 1,
             "total_dialogue_count": 10,
-            "session_duration_minutes": 5.0
+            "session_duration_minutes": 5.0,
         }
         defaults.update(kwargs)
         return EventContext(**defaults)
 
-    def _make_event(self, event_id, trigger_condition, priority=0, character_id="npc_test"):
+    def _make_event(
+        self, event_id, trigger_condition, priority=0, character_id="npc_test"
+    ):
         from memoria.core.event_schema import EventDefinition
+
         return EventDefinition(
             event_id=event_id,
             event_name=f"Test {event_id}",
@@ -686,19 +743,23 @@ class TestEventDetector:
             trigger_condition=trigger_condition,
             effects=[],
             priority=priority,
-            is_active=True
+            is_active=True,
         )
 
     def test_affinity_threshold_gte(self):
         """测试好感度 >= 阈值触发"""
         from memoria.core.event_detector import EventDetector
         from memoria.core.event_schema import TriggerCondition, TriggerType
-        
+
         detector = EventDetector()
-        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=40.0, comparison="gte")
+        tc = TriggerCondition(
+            trigger_type=TriggerType.AFFINITY_THRESHOLD,
+            threshold=40.0,
+            comparison="gte",
+        )
         event = self._make_event("evt_aff", tc)
         context = self._make_context(current_affinity=50.0)
-        
+
         triggered = detector.check_events(context, [event])
         assert len(triggered) == 1
         assert triggered[0].event_id == "evt_aff"
@@ -707,12 +768,16 @@ class TestEventDetector:
         """测试好感度未达阈值不触发"""
         from memoria.core.event_detector import EventDetector
         from memoria.core.event_schema import TriggerCondition, TriggerType
-        
+
         detector = EventDetector()
-        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=60.0, comparison="gte")
+        tc = TriggerCondition(
+            trigger_type=TriggerType.AFFINITY_THRESHOLD,
+            threshold=60.0,
+            comparison="gte",
+        )
         event = self._make_event("evt_aff_low", tc)
         context = self._make_context(current_affinity=50.0)
-        
+
         triggered = detector.check_events(context, [event])
         assert len(triggered) == 0
 
@@ -720,12 +785,14 @@ class TestEventDetector:
         """测试信任度 <= 阈值触发"""
         from memoria.core.event_detector import EventDetector
         from memoria.core.event_schema import TriggerCondition, TriggerType
-        
+
         detector = EventDetector()
-        tc = TriggerCondition(trigger_type=TriggerType.TRUST_THRESHOLD, threshold=40.0, comparison="lte")
+        tc = TriggerCondition(
+            trigger_type=TriggerType.TRUST_THRESHOLD, threshold=40.0, comparison="lte"
+        )
         event = self._make_event("evt_trust", tc)
         context = self._make_context(current_trust=30.0)
-        
+
         triggered = detector.check_events(context, [event])
         assert len(triggered) == 1
 
@@ -733,16 +800,16 @@ class TestEventDetector:
         """测试关键词任一匹配"""
         from memoria.core.event_detector import EventDetector
         from memoria.core.event_schema import TriggerCondition, TriggerType
-        
+
         detector = EventDetector()
         tc = TriggerCondition(
             trigger_type=TriggerType.KEYWORD_MATCH,
             keywords=["猫", "狗", "鸟"],
-            match_mode="any"
+            match_mode="any",
         )
         event = self._make_event("evt_kw", tc)
         context = self._make_context(player_message="我喜欢猫")
-        
+
         triggered = detector.check_events(context, [event])
         assert len(triggered) == 1
 
@@ -750,16 +817,16 @@ class TestEventDetector:
         """测试关键词全部匹配"""
         from memoria.core.event_detector import EventDetector
         from memoria.core.event_schema import TriggerCondition, TriggerType
-        
+
         detector = EventDetector()
         tc = TriggerCondition(
             trigger_type=TriggerType.KEYWORD_MATCH,
             keywords=["猫", "鱼"],
-            match_mode="all"
+            match_mode="all",
         )
         event = self._make_event("evt_kw_all", tc)
         context = self._make_context(player_message="我的猫喜欢吃鱼")
-        
+
         triggered = detector.check_events(context, [event])
         assert len(triggered) == 1
 
@@ -767,16 +834,16 @@ class TestEventDetector:
         """测试关键词部分匹配失败"""
         from memoria.core.event_detector import EventDetector
         from memoria.core.event_schema import TriggerCondition, TriggerType
-        
+
         detector = EventDetector()
         tc = TriggerCondition(
             trigger_type=TriggerType.KEYWORD_MATCH,
             keywords=["猫", "大象"],
-            match_mode="all"
+            match_mode="all",
         )
         event = self._make_event("evt_kw_partial", tc)
         context = self._make_context(player_message="我的猫很可爱")
-        
+
         triggered = detector.check_events(context, [event])
         assert len(triggered) == 0
 
@@ -784,12 +851,14 @@ class TestEventDetector:
         """测试对话次数触发"""
         from memoria.core.event_detector import EventDetector
         from memoria.core.event_schema import TriggerCondition, TriggerType
-        
+
         detector = EventDetector()
-        tc = TriggerCondition(trigger_type=TriggerType.DIALOGUE_COUNT, count=20, comparison="gte")
+        tc = TriggerCondition(
+            trigger_type=TriggerType.DIALOGUE_COUNT, count=20, comparison="gte"
+        )
         event = self._make_event("evt_count", tc)
         context = self._make_context(total_dialogue_count=25, dialogue_count=1)
-        
+
         triggered = detector.check_events(context, [event])
         assert len(triggered) == 1
 
@@ -797,12 +866,12 @@ class TestEventDetector:
         """测试情绪匹配"""
         from memoria.core.event_detector import EventDetector
         from memoria.core.event_schema import TriggerCondition, TriggerType
-        
+
         detector = EventDetector()
         tc = TriggerCondition(trigger_type=TriggerType.MOOD_MATCH, mood="开心")
         event = self._make_event("evt_mood", tc)
         context = self._make_context(current_mood="开心")
-        
+
         triggered = detector.check_events(context, [event])
         assert len(triggered) == 1
 
@@ -810,12 +879,12 @@ class TestEventDetector:
         """测试情绪不匹配"""
         from memoria.core.event_detector import EventDetector
         from memoria.core.event_schema import TriggerCondition, TriggerType
-        
+
         detector = EventDetector()
         tc = TriggerCondition(trigger_type=TriggerType.MOOD_MATCH, mood="愤怒")
         event = self._make_event("evt_mood_no", tc)
         context = self._make_context(current_mood="开心")
-        
+
         triggered = detector.check_events(context, [event])
         assert len(triggered) == 0
 
@@ -823,19 +892,23 @@ class TestEventDetector:
         """测试复合 AND 条件"""
         from memoria.core.event_detector import EventDetector
         from memoria.core.event_schema import TriggerCondition, TriggerType
-        
+
         detector = EventDetector()
         tc = TriggerCondition(
             trigger_type=TriggerType.COMPOSITE,
             logic_operator="and",
             sub_conditions=[
-                TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=30.0, comparison="gte"),
-                TriggerCondition(trigger_type=TriggerType.MOOD_MATCH, mood="开心")
-            ]
+                TriggerCondition(
+                    trigger_type=TriggerType.AFFINITY_THRESHOLD,
+                    threshold=30.0,
+                    comparison="gte",
+                ),
+                TriggerCondition(trigger_type=TriggerType.MOOD_MATCH, mood="开心"),
+            ],
         )
         event = self._make_event("evt_comp", tc)
         context = self._make_context(current_affinity=50.0, current_mood="开心")
-        
+
         triggered = detector.check_events(context, [event])
         assert len(triggered) == 1
 
@@ -843,19 +916,23 @@ class TestEventDetector:
         """测试复合 OR 条件"""
         from memoria.core.event_detector import EventDetector
         from memoria.core.event_schema import TriggerCondition, TriggerType
-        
+
         detector = EventDetector()
         tc = TriggerCondition(
             trigger_type=TriggerType.COMPOSITE,
             logic_operator="or",
             sub_conditions=[
-                TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=90.0, comparison="gte"),
-                TriggerCondition(trigger_type=TriggerType.MOOD_MATCH, mood="开心")
-            ]
+                TriggerCondition(
+                    trigger_type=TriggerType.AFFINITY_THRESHOLD,
+                    threshold=90.0,
+                    comparison="gte",
+                ),
+                TriggerCondition(trigger_type=TriggerType.MOOD_MATCH, mood="开心"),
+            ],
         )
         event = self._make_event("evt_comp_or", tc)
         context = self._make_context(current_affinity=50.0, current_mood="开心")
-        
+
         triggered = detector.check_events(context, [event])
         assert len(triggered) == 1
 
@@ -867,15 +944,20 @@ class TestEventDetector:
             TriggerCondition,
             TriggerType,
         )
-        
+
         detector = EventDetector()
-        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=0.0)
+        tc = TriggerCondition(
+            trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=0.0
+        )
         event = EventDefinition(
-            event_id="evt_inactive", event_name="Inactive",
-            trigger_condition=tc, effects=[], is_active=False
+            event_id="evt_inactive",
+            event_name="Inactive",
+            trigger_condition=tc,
+            effects=[],
+            is_active=False,
         )
         context = self._make_context(current_affinity=50.0)
-        
+
         triggered = detector.check_events(context, [event])
         assert len(triggered) == 0
 
@@ -883,14 +965,16 @@ class TestEventDetector:
         """测试事件按优先级排序"""
         from memoria.core.event_detector import EventDetector
         from memoria.core.event_schema import TriggerCondition, TriggerType
-        
+
         detector = EventDetector()
-        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=0.0)
+        tc = TriggerCondition(
+            trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=0.0
+        )
         e1 = self._make_event("evt_low", tc, priority=1)
         e2 = self._make_event("evt_high", tc, priority=10)
         e3 = self._make_event("evt_mid", tc, priority=5)
         context = self._make_context(current_affinity=50.0)
-        
+
         triggered = detector.check_events(context, [e1, e2, e3])
         assert len(triggered) == 3
         assert triggered[0].event_id == "evt_high"
@@ -900,16 +984,14 @@ class TestEventDetector:
         """测试基于时间的触发"""
         from memoria.core.event_detector import EventDetector
         from memoria.core.event_schema import TriggerCondition, TriggerType
-        
+
         detector = EventDetector()
         tc = TriggerCondition(
-            trigger_type=TriggerType.TIME_BASED,
-            duration_minutes=10,
-            comparison="gte"
+            trigger_type=TriggerType.TIME_BASED, duration_minutes=10, comparison="gte"
         )
         event = self._make_event("evt_time", tc)
         context = self._make_context(session_duration_minutes=15.5)
-        
+
         triggered = detector.check_events(context, [event])
         assert len(triggered) == 1
 
@@ -917,34 +999,49 @@ class TestEventDetector:
         """测试各种比较运算符"""
         from memoria.core.event_detector import EventDetector
         from memoria.core.event_schema import TriggerCondition, TriggerType
-        
+
         detector = EventDetector()
-        
+
         # gte: >=
-        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=50.0, comparison="gte")
+        tc = TriggerCondition(
+            trigger_type=TriggerType.AFFINITY_THRESHOLD,
+            threshold=50.0,
+            comparison="gte",
+        )
         context = self._make_context(current_affinity=50.0)
         assert len(detector.check_events(context, [self._make_event("t1", tc)])) == 1
-        
+
         # lte: <=
-        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=50.0, comparison="lte")
+        tc = TriggerCondition(
+            trigger_type=TriggerType.AFFINITY_THRESHOLD,
+            threshold=50.0,
+            comparison="lte",
+        )
         assert len(detector.check_events(context, [self._make_event("t2", tc)])) == 1
-        
+
         # gt: >
-        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=50.0, comparison="gt")
+        tc = TriggerCondition(
+            trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=50.0, comparison="gt"
+        )
         assert len(detector.check_events(context, [self._make_event("t3", tc)])) == 0
-        
+
         # lt: <
-        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=50.0, comparison="lt")
+        tc = TriggerCondition(
+            trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=50.0, comparison="lt"
+        )
         assert len(detector.check_events(context, [self._make_event("t4", tc)])) == 0
-        
+
         # eq: ==
-        tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=50.0, comparison="eq")
+        tc = TriggerCondition(
+            trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=50.0, comparison="eq"
+        )
         assert len(detector.check_events(context, [self._make_event("t5", tc)])) == 1
 
 
 # ============================================================
 # SECTION 5: Multi-Character Memory
 # ============================================================
+
 
 class TestMultiCharacterMemory:
     """测试多角色记忆系统"""
@@ -959,17 +1056,17 @@ class TestMultiCharacterMemory:
         monkeypatch.setattr(
             multi_character_memory.repository,
             "get_prompt_memory_fact_records",
-            lambda **kwargs: captured.update(kwargs)
-            or [{"fact_text": "已验证的群聊事实", "created_at": None}],
+            lambda **kwargs: (
+                captured.update(kwargs)
+                or [{"fact_text": "已验证的群聊事实", "created_at": None}]
+            ),
         )
 
-        memories = (
-            multi_character_memory.load_player_memories_for_relationship_graph(
-                character_id="char-a",
-                player_id="player-1",
-                session_id="group-session-1",
-                other_character_ids=["char-b"],
-            )
+        memories = multi_character_memory.load_player_memories_for_relationship_graph(
+            character_id="char-a",
+            player_id="player-1",
+            session_id="group-session-1",
+            other_character_ids=["char-b"],
         )
 
         assert memories == ["已验证的群聊事实"]
@@ -983,14 +1080,17 @@ class TestMultiCharacterMemory:
 
         mid = repository.save_shared_memory(
             "user_shared_a",
-            "char_x", "char_y",
+            "char_x",
+            "char_y",
             memory_text="一起完成了训练",
             context="train:session_001",
-            importance=0.8
+            importance=0.8,
         )
         assert mid is not None
-        
-        results = repository.get_shared_memories("user_shared_a", "char_x", "char_y", limit=5)
+
+        results = repository.get_shared_memories(
+            "user_shared_a", "char_x", "char_y", limit=5
+        )
         assert len(results) >= 1
         assert any("训练" in r["memory_text"] for r in results)
 
@@ -1005,10 +1105,12 @@ class TestMultiCharacterMemory:
             "认为对方在压力下很可靠",
             importance=0.9,
         )
-        
+
         forward = repository.get_shared_memories("user_shared_b", "char_p", "char_q", 5)
-        backward = repository.get_shared_memories("user_shared_b", "char_q", "char_p", 5)
-        
+        backward = repository.get_shared_memories(
+            "user_shared_b", "char_q", "char_p", 5
+        )
+
         assert len(forward) == 1
         assert backward == []
 
@@ -1016,10 +1118,16 @@ class TestMultiCharacterMemory:
         """测试相同角色 ID 在不同用户下共享记忆隔离"""
         from memoria.db import repository
 
-        repository.save_shared_memory("user_alpha", "char_same", "char_peer", "Alpha 的共同记忆", importance=0.8)
-        repository.save_shared_memory("user_beta", "char_same", "char_peer", "Beta 的共同记忆", importance=0.8)
+        repository.save_shared_memory(
+            "user_alpha", "char_same", "char_peer", "Alpha 的共同记忆", importance=0.8
+        )
+        repository.save_shared_memory(
+            "user_beta", "char_same", "char_peer", "Beta 的共同记忆", importance=0.8
+        )
 
-        alpha = repository.get_shared_memories("user_alpha", "char_same", "char_peer", 10)
+        alpha = repository.get_shared_memories(
+            "user_alpha", "char_same", "char_peer", 10
+        )
         beta = repository.get_shared_memories("user_beta", "char_same", "char_peer", 10)
 
         assert any("Alpha" in item["memory_text"] for item in alpha)
@@ -1031,10 +1139,16 @@ class TestMultiCharacterMemory:
         """测试获取角色的所有共享记忆"""
         from memoria.db import repository
 
-        repository.save_shared_memory("user_shared_c", "char_m", "char_n", "记忆1", importance=0.5)
-        repository.save_shared_memory("user_shared_c", "char_m", "char_o", "记忆2", importance=0.7)
-        
-        results = repository.get_character_shared_memories("user_shared_c", "char_m", limit=10)
+        repository.save_shared_memory(
+            "user_shared_c", "char_m", "char_n", "记忆1", importance=0.5
+        )
+        repository.save_shared_memory(
+            "user_shared_c", "char_m", "char_o", "记忆2", importance=0.7
+        )
+
+        results = repository.get_character_shared_memories(
+            "user_shared_c", "char_m", limit=10
+        )
         assert len(results) >= 2
 
     def test_save_and_get_group_memory(self):
@@ -1046,10 +1160,10 @@ class TestMultiCharacterMemory:
             memory_text="大家决定组队冒险",
             participants=["char_a", "char_b", "char_c"],
             context="组队场景",
-            importance=0.8
+            importance=0.8,
         )
         assert gid is not None
-        
+
         results = repository.get_session_group_memories("group_sess_001", limit=5)
         assert len(results) >= 1
         assert "冒险" in results[0]["memory_text"]
@@ -1067,62 +1181,147 @@ class TestMultiCharacterMemory:
             "Player",
             ["npc_a", "npc_b"],
         )
-        repository.save_long_term_fact("npc_a", player_id, "旧玩家记忆：npc_b只是师徒", 7)
+        repository.save_long_term_fact(
+            "npc_a", player_id, "旧玩家记忆：npc_b只是师徒", 7
+        )
         repository.save_long_term_fact("npc_a", player_id, "旧普通记忆：玩家喜欢猫", 7)
-        repository.save_long_term_fact("npc_a", player_id, "新玩家记忆：npc_b已经是情侣", 7)
-        repository.save_shared_memory(player_id, "npc_a", "npc_b", "旧印象：只是师徒", importance=0.9)
-        repository.save_shared_memory(player_id, "npc_a", "npc_b", "旧共同经历：一起巡逻", importance=0.9)
-        repository.save_shared_memory(player_id, "npc_a", "npc_b", "旧爱好记录：一起喜欢猫科动物并整理生态笔记", importance=0.9)
-        repository.save_shared_memory(player_id, "npc_a", "npc_b", "新印象：已经是情侣", importance=0.8)
-        repository.save_group_memory(session_id, "旧群体记忆：师徒训诫", ["npc_a", "npc_b"], importance=0.9)
-        repository.save_group_memory(session_id, "旧群体记忆：一起调查仓库", ["npc_a", "npc_b"], importance=0.9)
-        repository.save_group_memory(session_id, "旧群体事件：一起喜欢猫科动物并整理生态笔记", ["npc_a", "npc_b"], importance=0.9)
-        repository.save_group_memory(session_id, "新群体记忆：情侣同行", ["npc_a", "npc_b"], importance=0.8)
+        repository.save_long_term_fact(
+            "npc_a", player_id, "新玩家记忆：npc_b已经是情侣", 7
+        )
+        repository.save_shared_memory(
+            player_id, "npc_a", "npc_b", "旧印象：只是师徒", importance=0.9
+        )
+        repository.save_shared_memory(
+            player_id, "npc_a", "npc_b", "旧共同经历：一起巡逻", importance=0.9
+        )
+        repository.save_shared_memory(
+            player_id,
+            "npc_a",
+            "npc_b",
+            "旧爱好记录：一起喜欢猫科动物并整理生态笔记",
+            importance=0.9,
+        )
+        repository.save_shared_memory(
+            player_id, "npc_a", "npc_b", "新印象：已经是情侣", importance=0.8
+        )
+        repository.save_group_memory(
+            session_id, "旧群体记忆：师徒训诫", ["npc_a", "npc_b"], importance=0.9
+        )
+        repository.save_group_memory(
+            session_id, "旧群体记忆：一起调查仓库", ["npc_a", "npc_b"], importance=0.9
+        )
+        repository.save_group_memory(
+            session_id,
+            "旧群体事件：一起喜欢猫科动物并整理生态笔记",
+            ["npc_a", "npc_b"],
+            importance=0.9,
+        )
+        repository.save_group_memory(
+            session_id, "新群体记忆：情侣同行", ["npc_a", "npc_b"], importance=0.8
+        )
 
         with repository.get_conn() as conn:
             conn.execute(
                 "UPDATE long_term_fact SET created_at=?, last_referenced=? WHERE character_id=? AND player_id=? AND fact_text=?",
-                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", "npc_a", player_id, "旧玩家记忆：npc_b只是师徒"),
+                (
+                    "2026-01-01T00:00:00+00:00",
+                    "2026-01-01T00:00:00+00:00",
+                    "npc_a",
+                    player_id,
+                    "旧玩家记忆：npc_b只是师徒",
+                ),
             )
             conn.execute(
                 "UPDATE long_term_fact SET created_at=?, last_referenced=? WHERE character_id=? AND player_id=? AND fact_text=?",
-                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", "npc_a", player_id, "旧普通记忆：玩家喜欢猫"),
+                (
+                    "2026-01-01T00:00:00+00:00",
+                    "2026-01-01T00:00:00+00:00",
+                    "npc_a",
+                    player_id,
+                    "旧普通记忆：玩家喜欢猫",
+                ),
             )
             conn.execute(
                 "UPDATE long_term_fact SET created_at=?, last_referenced=? WHERE character_id=? AND player_id=? AND fact_text=?",
-                ("2026-01-02T00:00:00+00:00", "2026-01-02T00:00:00+00:00", "npc_a", player_id, "新玩家记忆：npc_b已经是情侣"),
+                (
+                    "2026-01-02T00:00:00+00:00",
+                    "2026-01-02T00:00:00+00:00",
+                    "npc_a",
+                    player_id,
+                    "新玩家记忆：npc_b已经是情侣",
+                ),
             )
             conn.execute(
                 "UPDATE shared_memory SET created_at=?, last_referenced=? WHERE owner_user_id=? AND memory_text=?",
-                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", player_id, "旧印象：只是师徒"),
+                (
+                    "2026-01-01T00:00:00+00:00",
+                    "2026-01-01T00:00:00+00:00",
+                    player_id,
+                    "旧印象：只是师徒",
+                ),
             )
             conn.execute(
                 "UPDATE shared_memory SET created_at=?, last_referenced=? WHERE owner_user_id=? AND memory_text=?",
-                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", player_id, "旧共同经历：一起巡逻"),
+                (
+                    "2026-01-01T00:00:00+00:00",
+                    "2026-01-01T00:00:00+00:00",
+                    player_id,
+                    "旧共同经历：一起巡逻",
+                ),
             )
             conn.execute(
                 "UPDATE shared_memory SET created_at=?, last_referenced=? WHERE owner_user_id=? AND memory_text=?",
-                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", player_id, "旧爱好记录：一起喜欢猫科动物并整理生态笔记"),
+                (
+                    "2026-01-01T00:00:00+00:00",
+                    "2026-01-01T00:00:00+00:00",
+                    player_id,
+                    "旧爱好记录：一起喜欢猫科动物并整理生态笔记",
+                ),
             )
             conn.execute(
                 "UPDATE shared_memory SET created_at=?, last_referenced=? WHERE owner_user_id=? AND memory_text=?",
-                ("2026-01-02T00:00:00+00:00", "2026-01-02T00:00:00+00:00", player_id, "新印象：已经是情侣"),
+                (
+                    "2026-01-02T00:00:00+00:00",
+                    "2026-01-02T00:00:00+00:00",
+                    player_id,
+                    "新印象：已经是情侣",
+                ),
             )
             conn.execute(
                 "UPDATE group_memory SET created_at=?, last_referenced=? WHERE session_id=? AND memory_text=?",
-                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", session_id, "旧群体记忆：师徒训诫"),
+                (
+                    "2026-01-01T00:00:00+00:00",
+                    "2026-01-01T00:00:00+00:00",
+                    session_id,
+                    "旧群体记忆：师徒训诫",
+                ),
             )
             conn.execute(
                 "UPDATE group_memory SET created_at=?, last_referenced=? WHERE session_id=? AND memory_text=?",
-                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", session_id, "旧群体记忆：一起调查仓库"),
+                (
+                    "2026-01-01T00:00:00+00:00",
+                    "2026-01-01T00:00:00+00:00",
+                    session_id,
+                    "旧群体记忆：一起调查仓库",
+                ),
             )
             conn.execute(
                 "UPDATE group_memory SET created_at=?, last_referenced=? WHERE session_id=? AND memory_text=?",
-                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", session_id, "旧群体事件：一起喜欢猫科动物并整理生态笔记"),
+                (
+                    "2026-01-01T00:00:00+00:00",
+                    "2026-01-01T00:00:00+00:00",
+                    session_id,
+                    "旧群体事件：一起喜欢猫科动物并整理生态笔记",
+                ),
             )
             conn.execute(
                 "UPDATE group_memory SET created_at=?, last_referenced=? WHERE session_id=? AND memory_text=?",
-                ("2026-01-02T00:00:00+00:00", "2026-01-02T00:00:00+00:00", session_id, "新群体记忆：情侣同行"),
+                (
+                    "2026-01-02T00:00:00+00:00",
+                    "2026-01-02T00:00:00+00:00",
+                    session_id,
+                    "新群体记忆：情侣同行",
+                ),
             )
 
         context = multi_character_memory.integrate_multi_character_context(
@@ -1169,9 +1368,15 @@ class TestMultiCharacterMemory:
             ["npc_a", "npc_b"],
         )
 
-        repository.save_long_term_fact("npc_a", player_id, "过期恋爱关系事实：亲昵称呼和恋人承诺", 7)
-        repository.save_shared_memory(player_id, "npc_a", "npc_b", "删除前印象：恋人关系", importance=0.9)
-        repository.save_group_memory(session_id, "旧事件：恋人约会和拥抱", ["npc_a", "npc_b"], importance=0.9)
+        repository.save_long_term_fact(
+            "npc_a", player_id, "过期恋爱关系事实：亲昵称呼和恋人承诺", 7
+        )
+        repository.save_shared_memory(
+            player_id, "npc_a", "npc_b", "删除前印象：恋人关系", importance=0.9
+        )
+        repository.save_group_memory(
+            session_id, "旧事件：恋人约会和拥抱", ["npc_a", "npc_b"], importance=0.9
+        )
 
         assert repository.save_character_relationship(
             player_id,
@@ -1182,9 +1387,15 @@ class TestMultiCharacterMemory:
         )
         assert repository.delete_character_relationship(player_id, "npc_a", "npc_b")
 
-        repository.save_long_term_fact("npc_a", player_id, "当前图谱事实：未定义关系，只能普通互动", 7)
-        repository.save_shared_memory(player_id, "npc_a", "npc_b", "删除后印象：没有定义关系", importance=0.8)
-        repository.save_group_memory(session_id, "新事件：普通队友一起巡逻", ["npc_a", "npc_b"], importance=0.8)
+        repository.save_long_term_fact(
+            "npc_a", player_id, "当前图谱事实：未定义关系，只能普通互动", 7
+        )
+        repository.save_shared_memory(
+            player_id, "npc_a", "npc_b", "删除后印象：没有定义关系", importance=0.8
+        )
+        repository.save_group_memory(
+            session_id, "新事件：普通队友一起巡逻", ["npc_a", "npc_b"], importance=0.8
+        )
 
         with repository.get_conn() as conn:
             conn.execute(
@@ -1193,31 +1404,70 @@ class TestMultiCharacterMemory:
             )
             conn.execute(
                 "UPDATE long_term_fact SET created_at=?, last_referenced=? WHERE character_id=? AND player_id=? AND fact_text=?",
-                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", "npc_a", player_id, "过期恋爱关系事实：亲昵称呼和恋人承诺"),
+                (
+                    "2026-01-01T00:00:00+00:00",
+                    "2026-01-01T00:00:00+00:00",
+                    "npc_a",
+                    player_id,
+                    "过期恋爱关系事实：亲昵称呼和恋人承诺",
+                ),
             )
             conn.execute(
                 "UPDATE long_term_fact SET created_at=?, last_referenced=? WHERE character_id=? AND player_id=? AND fact_text=?",
-                ("2026-01-03T00:00:00+00:00", "2026-01-03T00:00:00+00:00", "npc_a", player_id, "当前图谱事实：未定义关系，只能普通互动"),
+                (
+                    "2026-01-03T00:00:00+00:00",
+                    "2026-01-03T00:00:00+00:00",
+                    "npc_a",
+                    player_id,
+                    "当前图谱事实：未定义关系，只能普通互动",
+                ),
             )
             conn.execute(
                 "UPDATE shared_memory SET created_at=?, last_referenced=? WHERE owner_user_id=? AND memory_text=?",
-                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", player_id, "删除前印象：恋人关系"),
+                (
+                    "2026-01-01T00:00:00+00:00",
+                    "2026-01-01T00:00:00+00:00",
+                    player_id,
+                    "删除前印象：恋人关系",
+                ),
             )
             conn.execute(
                 "UPDATE shared_memory SET created_at=?, last_referenced=? WHERE owner_user_id=? AND memory_text=?",
-                ("2026-01-03T00:00:00+00:00", "2026-01-03T00:00:00+00:00", player_id, "删除后印象：没有定义关系"),
+                (
+                    "2026-01-03T00:00:00+00:00",
+                    "2026-01-03T00:00:00+00:00",
+                    player_id,
+                    "删除后印象：没有定义关系",
+                ),
             )
             conn.execute(
                 "UPDATE group_memory SET created_at=?, last_referenced=? WHERE session_id=? AND memory_text=?",
-                ("2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", session_id, "旧事件：恋人约会和拥抱"),
+                (
+                    "2026-01-01T00:00:00+00:00",
+                    "2026-01-01T00:00:00+00:00",
+                    session_id,
+                    "旧事件：恋人约会和拥抱",
+                ),
             )
             conn.execute(
                 "UPDATE group_memory SET created_at=?, last_referenced=? WHERE session_id=? AND memory_text=?",
-                ("2026-01-03T00:00:00+00:00", "2026-01-03T00:00:00+00:00", session_id, "新事件：普通队友一起巡逻"),
+                (
+                    "2026-01-03T00:00:00+00:00",
+                    "2026-01-03T00:00:00+00:00",
+                    session_id,
+                    "新事件：普通队友一起巡逻",
+                ),
             )
 
-        assert repository.get_character_relationship(player_id, "npc_a", "npc_b") is None
-        assert multi_character_memory.get_relationship_history_cutoff(player_id, ["npc_a", "npc_b"]) == cutoff
+        assert (
+            repository.get_character_relationship(player_id, "npc_a", "npc_b") is None
+        )
+        assert (
+            multi_character_memory.get_relationship_history_cutoff(
+                player_id, ["npc_a", "npc_b"]
+            )
+            == cutoff
+        )
 
         context = multi_character_memory.integrate_multi_character_context(
             character_id="npc_a",
@@ -1252,12 +1502,10 @@ class TestMultiCharacterMemory:
         )
 
         repository.save_group_memory(
-            sess_x, "群体事件A",
-            participants=["char_1", "char_2", "char_3"]
+            sess_x, "群体事件A", participants=["char_1", "char_2", "char_3"]
         )
         repository.save_group_memory(
-            sess_y, "群体事件B",
-            participants=["char_1", "char_4"]
+            sess_y, "群体事件B", participants=["char_1", "char_4"]
         )
 
         results = repository.get_character_group_memories(
@@ -1282,17 +1530,19 @@ class TestMultiCharacterMemory:
             get_character_impressions,
             save_character_impression,
         )
-        
+
         save_character_impression(
             observer_id="npc_a",
             target_id="npc_b",
             impression="觉得B很可靠",
             session_id="test_session",
             player_id="user_shared_d",
-            importance=0.7
+            importance=0.7,
         )
-        
-        imps = get_character_impressions("npc_a", "npc_b", player_id="user_shared_d", limit=5)
+
+        imps = get_character_impressions(
+            "npc_a", "npc_b", player_id="user_shared_d", limit=5
+        )
         assert len(imps) >= 1
         assert any("可靠" in imp["memory_text"] for imp in imps)
 
@@ -1314,14 +1564,26 @@ class TestMultiCharacterMemory:
             session_id="shared_auto_session",
             recent_messages=[
                 {"role": "user", "content": "我们分头侦查"},
-                {"role": "assistant", "character_id": "npc_a", "character_name": "A", "content": "B刚才判断很准。"},
-                {"role": "assistant", "character_id": "npc_b", "character_name": "B", "content": "我会继续盯着出口。"},
+                {
+                    "role": "assistant",
+                    "character_id": "npc_a",
+                    "character_name": "A",
+                    "content": "B刚才判断很准。",
+                },
+                {
+                    "role": "assistant",
+                    "character_id": "npc_b",
+                    "character_name": "B",
+                    "content": "我会继续盯着出口。",
+                },
             ],
             character_ids=["npc_a", "npc_b"],
             player_id="user_shared_auto",
         )
 
-        memories = repository.get_shared_memories("user_shared_auto", "npc_a", "npc_b", limit=5)
+        memories = repository.get_shared_memories(
+            "user_shared_auto", "npc_a", "npc_b", limit=5
+        )
         assert count == 1
         assert any("侦查中很可靠" in item["memory_text"] for item in memories)
 
@@ -1386,12 +1648,16 @@ class TestMultiCharacterMemory:
 
         count = multi_character_memory.process_character_impressions(
             session_id="shared_invalid_session",
-            recent_messages=[{"role": "assistant", "character_id": "npc_a", "content": "无效"}],
+            recent_messages=[
+                {"role": "assistant", "character_id": "npc_a", "content": "无效"}
+            ],
             character_ids=["npc_a", "npc_b"],
             player_id="user_shared_invalid",
         )
 
-        memories = repository.get_shared_memories("user_shared_invalid", "npc_a", "npc_b", limit=5)
+        memories = repository.get_shared_memories(
+            "user_shared_invalid", "npc_a", "npc_b", limit=5
+        )
         assert count == 0
         assert memories == []
 
@@ -1435,7 +1701,11 @@ class TestMultiCharacterMemory:
             "get_multi_character_history",
             lambda session_id, limit_messages, created_after=None: [
                 {"role": "user", "content": "行动开始"},
-                {"role": "assistant", "character_id": "npc_a", "content": "B配合得很好。"},
+                {
+                    "role": "assistant",
+                    "character_id": "npc_a",
+                    "content": "B配合得很好。",
+                },
             ],
         )
         monkeypatch.setattr(
@@ -1493,14 +1763,14 @@ class TestMultiCharacterMemory:
             get_group_memories,
             save_group_event_memory,
         )
-        
+
         save_group_event_memory(
             event_description="大家分享了一顿丰盛的晚餐",
             character_ids=["npc_a", "npc_b", "npc_c"],
             session_id="dinner_session",
-            importance=0.6
+            importance=0.6,
         )
-        
+
         mems = get_group_memories("npc_b", "dinner_session", limit=5)
         assert len(mems) >= 1
         assert any("晚餐" in m["memory_text"] for m in mems)
@@ -1510,12 +1780,14 @@ class TestMultiCharacterMemory:
 # SECTION 6: Edge Cases & Utilities
 # ============================================================
 
+
 class TestEdgeCases:
     """测试边界情况和工具函数"""
 
     def test_clip_function(self):
         """测试数值裁剪"""
         from memoria.core.multi_character_orchestrator import _clip
+
         assert _clip(150, -100, 100) == 100
         assert _clip(-150, -100, 100) == -100
         assert _clip(0, -100, 100) == 0
@@ -1523,6 +1795,7 @@ class TestEdgeCases:
     def test_safe_float(self):
         """测试安全浮点转换"""
         from memoria.core.multi_character_orchestrator import _safe_float
+
         assert _safe_float("3.14") == 3.14
         assert _safe_float("invalid") == 0.0
         assert _safe_float(None) == 0.0
@@ -1532,12 +1805,12 @@ class TestEdgeCases:
         """测试角色卡加载器缓存"""
 
         from memoria.core import character_loader
-        
+
         # 加载两次，验证缓存
         card1 = character_loader.load_character_card("npc_luo_xiaohei")
         card2 = character_loader.load_character_card("npc_luo_xiaohei")
         assert card1 is card2  # 同一对象（缓存命中）
-        
+
         # 热重载
         card3 = character_loader.reload_character_card("npc_luo_xiaohei")
         assert card3.character_id == "npc_luo_xiaohei"
@@ -1545,6 +1818,7 @@ class TestEdgeCases:
     def test_list_character_ids(self):
         """测试列出角色 ID"""
         from memoria.core import character_loader
+
         ids = character_loader.list_character_ids()
         assert len(ids) > 0
         assert "npc_luo_xiaohei" in ids
@@ -1563,7 +1837,9 @@ class TestEdgeCases:
             superstring_session, player_id, "P", ["char_xy", "char_z"]
         )
         repository.save_group_memory(exact_session, "精确命中", ["char_x", "char_y"])
-        repository.save_group_memory(superstring_session, "子串误命中", ["char_xy", "char_z"])
+        repository.save_group_memory(
+            superstring_session, "子串误命中", ["char_xy", "char_z"]
+        )
 
         results = repository.get_character_group_memories(
             "char_x", 5, owner_user_id=player_id
@@ -1575,6 +1851,7 @@ class TestEdgeCases:
     def test_event_detector_singleton(self):
         """测试事件检测器单例"""
         from memoria.core.event_detector import get_event_detector
+
         d1 = get_event_detector()
         d2 = get_event_detector()
         assert d1 is d2
@@ -1582,6 +1859,7 @@ class TestEdgeCases:
     def test_event_executor_singleton(self):
         """测试事件执行器单例"""
         from memoria.core.event_executor import get_event_executor
+
         e1 = get_event_executor()
         e2 = get_event_executor()
         assert e1 is e2
@@ -1589,6 +1867,7 @@ class TestEdgeCases:
     def test_trigger_type_enum_values(self):
         """测试触发器类型枚举值"""
         from memoria.core.event_schema import TriggerType
+
         types = [t.value for t in TriggerType]
         assert "affinity_threshold" in types
         assert "keyword_match" in types
@@ -1597,6 +1876,7 @@ class TestEdgeCases:
     def test_effect_type_enum_values(self):
         """测试效果类型枚举值"""
         from memoria.core.event_schema import EffectType
+
         types = [t.value for t in EffectType]
         assert "modify_state" in types
         assert "add_memory" in types

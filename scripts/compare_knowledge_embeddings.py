@@ -75,9 +75,7 @@ class InMemoryEmbeddingStore:
         )
         similarities = self.embeddings @ query_embedding
         allowed_bases = (
-            set(knowledge_base_ids)
-            if knowledge_base_ids is not None
-            else None
+            set(knowledge_base_ids) if knowledge_base_ids is not None else None
         )
         hits = []
         for index in np.argsort(-similarities):
@@ -204,9 +202,7 @@ def evaluate_model(
         )
         if vector_rank is not None:
             vector_hits += 1
-        vector_reciprocal_ranks.append(
-            1 / vector_rank if vector_rank else 0.0
-        )
+        vector_reciprocal_ranks.append(1 / vector_rank if vector_rank else 0.0)
 
         result = retrieve_knowledge(
             owner_user_id=owner_user_id,
@@ -226,9 +222,7 @@ def evaluate_model(
         )
         if hybrid_rank is not None and hybrid_rank <= 5:
             hybrid_hits += 1
-        hybrid_reciprocal_ranks.append(
-            1 / hybrid_rank if hybrid_rank else 0.0
-        )
+        hybrid_reciprocal_ranks.append(1 / hybrid_rank if hybrid_rank else 0.0)
 
         if case.get("table_query"):
             table_total += 1
@@ -252,12 +246,8 @@ def evaluate_model(
         "vector_mrr_at_5": sum(vector_reciprocal_ranks) / count,
         "hybrid_recall_at_5": hybrid_hits / count,
         "hybrid_mrr": sum(hybrid_reciprocal_ranks) / count,
-        "hybrid_table_top_3": (
-            table_hits / table_total if table_total else 1.0
-        ),
-        "hybrid_duplicate_context_ratio": (
-            duplicate_chunks / max(1, returned_chunks)
-        ),
+        "hybrid_table_top_3": (table_hits / table_total if table_total else 1.0),
+        "hybrid_duplicate_context_ratio": (duplicate_chunks / max(1, returned_chunks)),
     }
 
 
@@ -277,8 +267,7 @@ def main() -> int:
     unknown_prefix_labels = sorted(set(query_prefixes) - model_labels)
     if unknown_prefix_labels:
         print(
-            "评测失败: 查询前缀引用了未配置模型: "
-            + ", ".join(unknown_prefix_labels),
+            "评测失败: 查询前缀引用了未配置模型: " + ", ".join(unknown_prefix_labels),
             file=sys.stderr,
         )
         return 2

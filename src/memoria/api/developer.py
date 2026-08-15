@@ -83,10 +83,12 @@ def _diagnostic_character_aliases(
     except (FileNotFoundError, ValueError):
         return aliases
     meta = getattr(card, "meta", None)
-    aliases.extend([
-        getattr(meta, "name", ""),
-        getattr(meta, "display_name", ""),
-    ])
+    aliases.extend(
+        [
+            getattr(meta, "name", ""),
+            getattr(meta, "display_name", ""),
+        ]
+    )
     return relationship_context.normalize_aliases(aliases)
 
 
@@ -133,11 +135,9 @@ def _diagnostic_relationship_exclusions(
         )
         for current_id in [character_id, *sorted(related_ids)]
     }
-    all_aliases = relationship_context.normalize_aliases([
-        alias
-        for aliases in aliases_by_character.values()
-        for alias in aliases
-    ])
+    all_aliases = relationship_context.normalize_aliases(
+        [alias for aliases in aliases_by_character.values() for alias in aliases]
+    )
     cutoff = multi_character_memory.get_relationship_history_cutoff(
         current_user_id,
         [character_id, *sorted(related_ids)],
@@ -161,10 +161,12 @@ def _diagnostic_relationship_exclusions(
     retained_impressions = []
     for record in impression_records:
         target_id = str(record.get("target_character_id") or "")
-        pair_aliases = relationship_context.normalize_aliases([
-            *aliases_by_character.get(character_id, [character_id]),
-            *aliases_by_character.get(target_id, [target_id]),
-        ])
+        pair_aliases = relationship_context.normalize_aliases(
+            [
+                *aliases_by_character.get(character_id, [character_id]),
+                *aliases_by_character.get(target_id, [target_id]),
+            ]
+        )
         pair_cutoff = multi_character_memory.get_relationship_history_cutoff(
             current_user_id,
             [character_id, target_id],
@@ -252,7 +254,9 @@ def quality_score(
     if req.use_llm:
         admin = repository.get_user_by_id(current_user_id)
         if not admin or not bool(admin.get("is_admin")):
-            raise HTTPException(status_code=403, detail="需要管理员权限才能使用 LLM 评分")
+            raise HTTPException(
+                status_code=403, detail="需要管理员权限才能使用 LLM 评分"
+            )
 
     if req.session_id:
         session = _owned_session(req.session_id, current_user_id)
@@ -351,24 +355,24 @@ def memory_curve_diagnostics(
     )
 
     world_now = _diagnostic_world_now(current_user_id)
-    effective_recall_key = recall_key or (
-        f"diagnostic:{session_id or character_id}"
-    )
+    effective_recall_key = recall_key or (f"diagnostic:{session_id or character_id}")
     items = []
     for records, memory_type, text_key in (
         (fact_records, "player_fact", "fact_text"),
         (impression_records, "character_impression", "memory_text"),
         (group_records, "group_experience", "memory_text"),
     ):
-        items.extend(memory_curve.inspect_records(
-            records,
-            owner_user_id=current_user_id,
-            character_id=character_id,
-            memory_type=memory_type,
-            world_now=world_now,
-            recall_key=effective_recall_key,
-            text_key=text_key,
-        ))
+        items.extend(
+            memory_curve.inspect_records(
+                records,
+                owner_user_id=current_user_id,
+                character_id=character_id,
+                memory_type=memory_type,
+                world_now=world_now,
+                recall_key=effective_recall_key,
+                text_key=text_key,
+            )
+        )
     for item in items:
         identity = (item["memory_type"], item["memory_id"])
         if identity in relationship_exclusions:

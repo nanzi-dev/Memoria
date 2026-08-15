@@ -105,7 +105,7 @@ def _could_be_risk_prefix(text: str) -> bool:
             return True
         if not text.startswith(prefix):
             continue
-        remainder = text[len(prefix):]
+        remainder = text[len(prefix) :]
         for wildcard_length in range(4):
             if len(remainder) <= wildcard_length:
                 return True
@@ -155,7 +155,7 @@ class DialogueSafetyStream:
         emit_end = len(self._text) - _ambiguous_suffix_length(self._text)
         if emit_end <= self._emitted_length:
             return
-        self._emit(self._text[self._emitted_length:emit_end])
+        self._emit(self._text[self._emitted_length : emit_end])
         self._emitted_length = emit_end
 
     def finish(self, final_dialogue: str) -> str:
@@ -166,7 +166,7 @@ class DialogueSafetyStream:
         # 流式累积文案与最终文案不一致时，也不能静默丢弃尾部。
         # 对尚未 emit 的剩余内容做一次安全检查后再输出。
         if len(final_dialogue) > self._emitted_length:
-            remaining = final_dialogue[self._emitted_length:]
+            remaining = final_dialogue[self._emitted_length :]
             checked_remaining = safety_check(remaining, fallback="")
             if checked_remaining:
                 self._emit(checked_remaining)

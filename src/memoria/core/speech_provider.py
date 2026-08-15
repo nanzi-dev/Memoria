@@ -299,10 +299,7 @@ class MiniMaxSpeechProvider:
                     if not audio_hex:
                         continue
                     data = chunk.get("data")
-                    is_final = (
-                        isinstance(data, dict)
-                        and str(data.get("status")) == "2"
-                    )
+                    is_final = isinstance(data, dict) and str(data.get("status")) == "2"
                     # MiniMax may repeat the complete MP3 in the final event
                     # after already sending its incremental audio chunks.
                     if is_final and yielded_audio:
@@ -415,7 +412,9 @@ class MiniMaxSpeechProvider:
                 **kwargs,
             )
         except httpx.TimeoutException as exc:
-            raise SpeechProviderError("timeout", "MiniMax request timed out", 504) from exc
+            raise SpeechProviderError(
+                "timeout", "MiniMax request timed out", 504
+            ) from exc
         except httpx.HTTPError as exc:
             raise SpeechProviderError(
                 "provider_failure",
@@ -546,9 +545,13 @@ def _raise_minimax_response_error(payload: dict[str, Any]) -> None:
         message,
     )
     if str(status_code) in {"2049"}:
-        raise SpeechProviderError("provider_failure", "MiniMax rejected the API key", 502)
+        raise SpeechProviderError(
+            "provider_failure", "MiniMax rejected the API key", 502
+        )
     if str(status_code) in {"2038"}:
-        raise SpeechProviderError("unavailable", "MiniMax voice cloning is unavailable", 503)
+        raise SpeechProviderError(
+            "unavailable", "MiniMax voice cloning is unavailable", 503
+        )
     if (
         str(status_code) in {"2037", "2039", "2042", "2048", "20132"}
         or "invalid param" in message.lower()
@@ -609,7 +612,9 @@ def stt_provider_settings(settings: Configs = configs) -> ProviderSettings:
         legacy = _legacy_tts_settings(settings)
         if legacy is not None:
             return ProviderSettings(
-                provider=legacy.provider if legacy.provider != "minimax" else "openai_compatible",
+                provider=legacy.provider
+                if legacy.provider != "minimax"
+                else "openai_compatible",
                 api_key=legacy.api_key,
                 base_url=legacy.base_url,
                 model=settings.speech_stt_model,
@@ -680,7 +685,9 @@ def speech_provider_configuration(settings: Configs = configs) -> dict[str, Any]
         default_voice = voices[0] if voices else "female-shaonv"
     return {
         "provider": connection.provider,
-        "provider_label": "MiniMax" if connection.provider == "minimax" else "OpenAI-compatible",
+        "provider_label": "MiniMax"
+        if connection.provider == "minimax"
+        else "OpenAI-compatible",
         "builtin_voices": voices,
         "default_builtin_voice": default_voice,
         "custom_voice_supported": connection.provider == "minimax",
