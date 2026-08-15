@@ -160,3 +160,12 @@
 | ✅ | 已完成，可用 |
 | 🔄 | 进行中 |
 | [ ] | 计划中，尚未开始 |
+
+## v1.0 已接受的技术债（非阻塞，v2.0 处理）
+
+为了保持 v1.0 发布范围最小、不引入大规模行为变更，以下审查项作为已知技术债明确记录，不在 v1.0 内强制重构：
+
+- 巨型组件/模块拆分：`EventEditor.jsx`、`RelationshipGraph.jsx`、`repository/events.py`、`event_runtime.py` 等仍偏大，后续通过增量提取纯函数/子模块处理。
+- 前端 ESLint/完整 TypeScript 迁移：当前以 `npm test` + 构建 + 依赖审计作为前端质量门禁；ESLint 和类型化作为 v2.0 工程化任务。
+- 主测试套件全面启用外键：当前 SQLite/PG 主套件为兼容历史测试仍关闭外键，已用独立 `tests/test_foreign_key_integrity.py` 验证核心外键；后续再逐步迁移主套件。
+- `react-three-rapier` 体积：已通过 `manualChunks` 隔离并懒加载，仍存在单 chunk 超阈值告警，但不影响首屏；后续可评估按需引入或替换方案。
