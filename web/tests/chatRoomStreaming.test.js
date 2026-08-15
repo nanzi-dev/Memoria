@@ -12,7 +12,7 @@ const {
   applyDialogueStreamEvent,
   removeDialogueStreamPlaceholders,
   shouldFallbackFromDialogueStream,
-} = await vite.ssrLoadModule('/src/pages/ChatRoom.jsx');
+} = await vite.ssrLoadModule('/src/utils/chatRoom.js');
 
 after(async () => {
   await vite.close();
