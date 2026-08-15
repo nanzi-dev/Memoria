@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Optional
 
 from memoria.core.config import configs
 from memoria.core.knowledge_documents import build_chunk_index_text
@@ -147,7 +146,7 @@ class KnowledgeVectorStore:
             self.collection.delete(ids=chunk_ids)
 
 
-_knowledge_vector_store: Optional[KnowledgeVectorStore] = None
+_knowledge_vector_store: KnowledgeVectorStore | None = None
 _knowledge_vector_store_lock = threading.Lock()
 
 

@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import hmac
+import logging
 import secrets
-from typing import Iterable
+from collections.abc import Iterable
+from urllib.parse import urlsplit
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 
 from memoria.core.config import configs
+
+logger = logging.getLogger(__name__)
 
 CSRF_COOKIE_NAME = "memoria-csrf"
 CSRF_HEADER_NAME = "X-CSRF-Token"
@@ -77,6 +81,46 @@ def _normalized_path(path: str) -> str:
     return path
 
 
+def _same_origin(url_value: str, host_header: str) -> bool:
+    """Compare an Origin/Referer URL authority against the request Host header."""
+    if not url_value or not host_header:
+        return True
+    try:
+        parsed = urlsplit(url_value)
+    except ValueError:
+        return False
+    if not parsed.netloc:
+        return True
+    return parsed.netloc == host_header
+
+
+def _exempt_path_origin_allowed(request: Request) -> bool:
+    """Login/register are CSRF-exempt by design; still block cross-origin browsers.
+
+    Missing Origin/Referer is allowed to stay compatible with non-browser clients.
+    """
+    host_header = request.headers.get("host", "")
+    origin = request.headers.get("origin", "")
+    if origin and not _same_origin(origin, host_header):
+        logger.warning(
+            "CSRF 豁免端点收到跨源请求: path=%s origin=%s host=%s",
+            request.url.path,
+            origin,
+            host_header,
+        )
+        return False
+    referer = request.headers.get("referer", "")
+    if referer and not _same_origin(referer, host_header):
+        logger.warning(
+            "CSRF 豁免端点收到跨源 Referer: path=%s referer=%s host=%s",
+            request.url.path,
+            referer,
+            host_header,
+        )
+        return False
+    return True
+
+
 def is_csrf_exempt(path: str, method: str) -> bool:
     if method.upper() in _SAFE_METHODS:
         return True
@@ -96,6 +140,11 @@ def uses_bearer_auth(request: Request) -> bool:
 def validate_csrf(request: Request) -> JSONResponse | None:
     """Return a 403 response when cookie-session write lacks a valid CSRF pair."""
     if is_csrf_exempt(request.url.path, request.method):
+        if not _exempt_path_origin_allowed(request):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "请求来源不被允许"},
+            )
         return None
     if not is_protected_path(request.url.path):
         return None

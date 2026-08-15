@@ -31,18 +31,30 @@ def is_player_node_id(node_id: str) -> bool:
 
 
 def _ensure_user_character_card(session, *, user_id: str, display_name: str, gender: str, now: str) -> None:
-    """确保 user_character_card 存在（INSERT ... ON CONFLICT DO NOTHING）。"""
-    exists = session.execute(
-        select(UserCharacterCard).where(UserCharacterCard.user_id == user_id)
-    ).scalar_one_or_none()
-    if not exists:
-        session.add(UserCharacterCard(
-            user_id=user_id,
-            display_name=display_name,
-            gender=gender or "unknown",
-            created_at=now,
-            updated_at=now,
-        ))
+    """确保 user_character_card 存在（真正的 INSERT ... ON CONFLICT DO NOTHING）。
+
+    不先做 SELECT 判断，而使用数据库原生的 ``ON CONFLICT DO NOTHING``，
+    避免并发注册时因重复插入 user_character_card 抛出 IntegrityError。
+    """
+    values = {
+        "user_id": user_id,
+        "display_name": display_name,
+        "gender": gender or "unknown",
+        "created_at": now,
+        "updated_at": now,
+    }
+    dialect = session.get_bind().dialect.name
+    if dialect == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+        stmt = sqlite_insert(UserCharacterCard).values(**values).on_conflict_do_nothing(
+            index_elements=["user_id"]
+        )
+    else:
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        stmt = pg_insert(UserCharacterCard).values(**values).on_conflict_do_nothing(
+            index_elements=["user_id"]
+        )
+    session.execute(stmt)
 
 
 def create_user(
@@ -249,7 +261,7 @@ def get_user_id_for_auth_token(token: str) -> str | None:
             select(AuthToken)
             .where(AuthToken.token.in_([storage_key, token]))
             .where(AuthToken.expires_at > now)
-            .order_by(AuthToken.token == storage_key)  # prefer storage_key
+            .order_by((AuthToken.token == storage_key).desc())  # prefer storage_key digest
         ).scalar_one_or_none()
         if row:
             if row.token == token:

@@ -4,7 +4,6 @@ from pydantic import BaseModel
 from memoria.api.user import require_current_user_id
 from memoria.db import repository
 
-
 router = APIRouter(prefix="/stories", tags=["stories"])
 
 

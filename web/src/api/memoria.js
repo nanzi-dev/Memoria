@@ -27,16 +27,46 @@ function withCsrfHeaders(headers = {}) {
   return next;
 }
 
-function withCsrfQuery(url) {
-  const csrf = readCookie(CSRF_COOKIE_NAME);
-  if (!csrf) return url;
-  const separator = url.includes('?') ? '&' : '?';
-  return `${url}${separator}csrf_token=${encodeURIComponent(csrf)}`;
-}
-
-
 function pathSegment(value) {
   return encodeURIComponent(String(value));
+}
+
+function supportsFetchKeepalive() {
+  if (typeof Request === 'undefined' || typeof fetch !== 'function') return false;
+  try {
+    return 'keepalive' in new Request('about:blank');
+  } catch {
+    return false;
+  }
+}
+
+/** 页面卸载时结束会话：优先携带 CSRF 头的 fetch keepalive，退化到无头 sendBeacon。 */
+function endSessionOnUnloadWithPath(sessionId, path) {
+  if (!sessionId) return;
+  const url = `${API_BASE}${path}`;
+  const body = JSON.stringify({ session_id: sessionId });
+
+  if (supportsFetchKeepalive()) {
+    fetch(url, {
+      method: 'POST',
+      body,
+      credentials: 'include',
+      keepalive: true,
+      headers: withCsrfHeaders({ 'Content-Type': 'application/json' }),
+    }).catch(() => {});
+    return;
+  }
+
+  if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+    // sendBeacon 无法携带自定义头；仅这两个后端白名单路径允许从 query
+    // 读取 csrf_token 完成双提交校验。主路径不使用 query token，避免进日志。
+    const csrfToken = readCookie(CSRF_COOKIE_NAME);
+    const beaconUrl = csrfToken
+      ? `${url}${url.includes('?') ? '&' : '?'}csrf_token=${encodeURIComponent(csrfToken)}`
+      : url;
+    const blob = new Blob([body], { type: 'application/json' });
+    navigator.sendBeacon(beaconUrl, blob);
+  }
 }
 
 function formatApiError(errorBody, status) {
@@ -101,10 +131,14 @@ function parseSseFrame(frame) {
   });
 
   if (!dataLines.length) return null;
-  return {
-    type,
-    data: JSON.parse(dataLines.join('\n')),
-  };
+  try {
+    return {
+      type,
+      data: JSON.parse(dataLines.join('\n')),
+    };
+  } catch {
+    return { type: 'error', data: { error: 'malformed sse frame' } };
+  }
 }
 
 function streamEventError(data) {
@@ -155,10 +189,13 @@ async function requestStream(url, options = {}, onEvent = undefined) {
   const drainFrames = () => {
     while (true) {
       const separator = /\r\n\r\n|\n\n|\r\r/.exec(buffer);
-      if (!separator) return;
+      if (!separator) return null;
       const frame = buffer.slice(0, separator.index);
       buffer = buffer.slice(separator.index + separator[0].length);
       dispatchFrame(frame);
+      // 一旦后端抛出 error 事件，立即停止解析并中止本轮读取，
+      // 避免把后面的增量帧继续转发给 UI。
+      if (streamError != null) return streamError;
     }
   };
 
@@ -167,11 +204,13 @@ async function requestStream(url, options = {}, onEvent = undefined) {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      drainFrames();
+      if (drainFrames() != null) break;
     }
-    buffer += decoder.decode();
-    drainFrames();
-    if (buffer.trim()) dispatchFrame(buffer);
+    if (streamError == null) {
+      buffer += decoder.decode();
+      drainFrames();
+      if (buffer.trim()) dispatchFrame(buffer);
+    }
     if (streamError != null) throw streamError;
   } catch (error) {
     await reader.cancel().catch(() => {});
@@ -624,21 +663,7 @@ export const dialogue = {
     });
   },
   endSessionOnUnload(sessionId) {
-    if (!sessionId) return;
-    const body = JSON.stringify({ session_id: sessionId });
-    const url = withCsrfQuery(`${API_BASE}/dialogue/session/end`);
-    if (navigator.sendBeacon) {
-      const blob = new Blob([body], { type: 'application/json' });
-      navigator.sendBeacon(url, blob);
-      return;
-    }
-    fetch(url, {
-      method: 'POST',
-      body,
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      keepalive: true,
-    }).catch(() => {});
+    endSessionOnUnloadWithPath(sessionId, '/dialogue/session/end');
   },
   /** 获取会话历史 */
   getHistory(characterId, playerId, offset = 0, limit = 20, excludeSessionId = null) {
@@ -722,21 +747,7 @@ export const multiDialogue = {
     return request(`/multi-dialogue/session/${pathSegment(sessionId)}/continue`, { method: 'POST' });
   },
   endSessionOnUnload(sessionId) {
-    if (!sessionId) return;
-    const body = JSON.stringify({ session_id: sessionId });
-    const url = withCsrfQuery(`${API_BASE}/multi-dialogue/session/end`);
-    if (navigator.sendBeacon) {
-      const blob = new Blob([body], { type: 'application/json' });
-      navigator.sendBeacon(url, blob);
-      return;
-    }
-    fetch(url, {
-      method: 'POST',
-      body,
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      keepalive: true,
-    }).catch(() => {});
+    endSessionOnUnloadWithPath(sessionId, '/multi-dialogue/session/end');
   },
   /** 获取多角色会话信息 */
   getSessionInfo(sessionId) {

@@ -8,7 +8,8 @@
 """
 
 from enum import Enum
-from typing import Any, Literal, Optional
+from typing import Any, Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -41,49 +42,49 @@ class TriggerCondition(BaseModel):
     trigger_type: TriggerType
     
     # 通用参数
-    threshold: Optional[float] = None              # 阈值（用于好感度、信任度等）
-    comparison: Optional[str] = "gte"              # 比较运算符：gte(>=), lte(<=), eq(==), gt(>), lt(<)
+    threshold: float | None = None              # 阈值（用于好感度、信任度等）
+    comparison: str | None = "gte"              # 比较运算符：gte(>=), lte(<=), eq(==), gt(>), lt(<)
     
     # 关键词匹配
-    keywords: Optional[list[str]] = None           # 关键词列表
-    match_mode: Optional[str] = "any"              # any（任一匹配）或 all（全部匹配）
+    keywords: list[str] | None = None           # 关键词列表
+    match_mode: str | None = "any"              # any（任一匹配）或 all（全部匹配）
     crossing: bool = False                          # 仅在本轮跨过阈值时触发
 
     # 跨角色聚合
     aggregation: Literal["any", "all", "count"] = "any"
-    min_characters: Optional[int] = None           # count 聚合需要的最少满足角色数
-    character_ids: Optional[list[str]] = None      # 参与聚合的角色；空列表表示当前参与角色
+    min_characters: int | None = None           # count 聚合需要的最少满足角色数
+    character_ids: list[str] | None = None      # 参与聚合的角色；空列表表示当前参与角色
     
     # 计数条件
-    count: Optional[int] = None                    # 目标计数
+    count: int | None = None                    # 目标计数
     
     # 时间条件
-    duration_minutes: Optional[int] = None         # 会话时长（分钟）
-    schedule: Optional[str] = None                 # cron 式调度表达式（简化为 5 字段 cron）
+    duration_minutes: int | None = None         # 会话时长（分钟）
+    schedule: str | None = None                 # cron 式调度表达式（简化为 5 字段 cron）
     catch_up_replay_limit: int = Field(default=1, ge=1, le=100)
     
     # 情绪条件
-    mood: Optional[str] = None                     # 目标情绪
+    mood: str | None = None                     # 目标情绪
 
     # 状态变化量 / 事件历史 / 世界时间窗口
-    state_field: Optional[str] = None              # affinity / trust / relationship_type
-    event_id: Optional[str] = None                 # 依赖的历史事件 ID
-    event_status: Optional[str] = "succeeded"      # 依赖事件状态
-    min_occurrences: Optional[int] = 1             # 最少历史执行次数
-    time_window_start: Optional[str] = None         # HH:MM
-    time_window_end: Optional[str] = None           # HH:MM
-    weekdays: Optional[list[int]] = None            # 0=Monday ... 6=Sunday
+    state_field: str | None = None              # affinity / trust / relationship_type
+    event_id: str | None = None                 # 依赖的历史事件 ID
+    event_status: str | None = "succeeded"      # 依赖事件状态
+    min_occurrences: int | None = 1             # 最少历史执行次数
+    time_window_start: str | None = None         # HH:MM
+    time_window_end: str | None = None           # HH:MM
+    weekdays: list[int] | None = None            # 0=Monday ... 6=Sunday
 
     # 关系变化条件
-    target_character_id: Optional[str] = None      # 关系变化条件的另一端角色（可为 @player）
-    relationship_type: Optional[str] = None        # 需要匹配的关系类型（可选）
+    target_character_id: str | None = None      # 关系变化条件的另一端角色（可为 @player）
+    relationship_type: str | None = None        # 需要匹配的关系类型（可选）
     
     # 复合条件
-    sub_conditions: Optional[list["TriggerCondition"]] = None  # 子条件列表
-    logic_operator: Optional[str] = "and"          # and（全部满足）或 or（任一满足）
+    sub_conditions: list["TriggerCondition"] | None = None  # 子条件列表
+    logic_operator: str | None = "and"          # and（全部满足）或 or（任一满足）
     
     # 冷却时间
-    cooldown_hours: Optional[int] = 0              # 触发后冷却时间（小时），0 表示只触发一次
+    cooldown_hours: int | None = 0              # 触发后冷却时间（小时），0 表示只触发一次
 
 
 # =========================
@@ -114,47 +115,47 @@ class EventEffect(BaseModel):
     effect_type: EffectType
     
     # 状态修改
-    state_changes: Optional[dict[str, Any]] = None  # 例如 {"affection_level": 5, "trust_level": 3}
+    state_changes: dict[str, Any] | None = None  # 例如 {"affection_level": 5, "trust_level": 3}
     
     # 解锁内容
-    unlock_keys: Optional[list[str]] = None        # 解锁的内容标识
+    unlock_keys: list[str] | None = None        # 解锁的内容标识
     
     # 触发对话
-    dialogue_text: Optional[str] = None            # 特定对话内容
-    dialogue_action: Optional[str] = None          # 对应的动作
+    dialogue_text: str | None = None            # 特定对话内容
+    dialogue_action: str | None = None          # 对应的动作
     
     # 添加记忆
-    memory_text: Optional[str] = None              # 要添加的记忆内容
-    memory_importance: Optional[int] = 5           # 记忆重要性
+    memory_text: str | None = None              # 要添加的记忆内容
+    memory_importance: int | None = 5           # 记忆重要性
     
     # 改变情绪
-    target_mood: Optional[str] = None              # 目标情绪
+    target_mood: str | None = None              # 目标情绪
     
     # 通知玩家
-    notification_message: Optional[str] = None     # 通知消息
-    notification_type: Optional[str] = "info"      # info, success, warning, error
+    notification_message: str | None = None     # 通知消息
+    notification_type: str | None = "info"      # info, success, warning, error
     
     # 物品和任务（枚举保留，暂不开放执行）
-    item_id: Optional[str] = None
-    quest_id: Optional[str] = None
+    item_id: str | None = None
+    quest_id: str | None = None
     
     # 关系修改
-    target_character_id: Optional[str] = None      # 目标角色 ID
-    relationship_change: Optional[dict[str, Any]] = None  # 关系变化
+    target_character_id: str | None = None      # 目标角色 ID
+    relationship_change: dict[str, Any] | None = None  # 关系变化
 
     # 事件链 / 分支
-    next_event_id: Optional[str] = None            # 后续事件 ID
-    branch_conditions: Optional[list[dict[str, Any]]] = None  # [{"condition": TriggerCondition, "event_id": "..."}]
+    next_event_id: str | None = None            # 后续事件 ID
+    branch_conditions: list[dict[str, Any]] | None = None  # [{"condition": TriggerCondition, "event_id": "..."}]
 
     # NPC 主动对话
-    target_session_id: Optional[str] = None        # 目标多角色会话；为空时使用当前 session
-    proactive_character_id: Optional[str] = None   # 指定主动发言 NPC；为空时自动选择
-    proactive_prompt: Optional[str] = None         # 发言提示，默认由多角色编排器生成
+    target_session_id: str | None = None        # 目标多角色会话；为空时使用当前 session
+    proactive_character_id: str | None = None   # 指定主动发言 NPC；为空时自动选择
+    proactive_prompt: str | None = None         # 发言提示，默认由多角色编排器生成
 
     # 多阶段事件进度
-    progress: Optional[float] = None               # 直接设置进度（0.0 ~ 1.0）
-    progress_delta: Optional[float] = None         # 在当前进度上增减
-    event_status: Optional[str] = None             # pending / active / completed / failed
+    progress: float | None = None               # 直接设置进度（0.0 ~ 1.0）
+    progress_delta: float | None = None         # 在当前进度上增减
+    event_status: str | None = None             # pending / active / completed / failed
 
 
 # =========================
@@ -164,11 +165,11 @@ class EventDefinition(BaseModel):
     """完整的事件定义"""
     event_id: str = Field(..., description="事件唯一标识")
     event_name: str = Field(..., description="事件名称")
-    description: Optional[str] = None
+    description: str | None = None
     
     # 作用域
-    character_id: Optional[str] = None             # 角色专属事件（None 表示全局事件）
-    story_id: Optional[str] = None                 # 所属剧情聚合（None 表示不更新剧情状态）
+    character_id: str | None = None             # 角色专属事件（None 表示全局事件）
+    story_id: str | None = None                 # 所属剧情聚合（None 表示不更新剧情状态）
     
     # 触发条件
     trigger_condition: TriggerCondition
@@ -178,7 +179,7 @@ class EventDefinition(BaseModel):
     
     # 优先级
     priority: int = Field(default=0, description="优先级，数字越大越优先")
-    exclusive_group: Optional[str] = None          # 同一轮同组只执行最高优先级事件
+    exclusive_group: str | None = None          # 同一轮同组只执行最高优先级事件
     exclusive_scope: Literal["turn", "player"] = "turn"
     max_triggers_per_turn: int = Field(default=3, ge=1, le=20)
     stop_processing: bool = False                  # 触发后停止处理后续普通事件
@@ -187,16 +188,16 @@ class EventDefinition(BaseModel):
     is_active: bool = Field(default=True, description="是否启用")
     
     # 元数据
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    created_at: str | None = None
+    updated_at: str | None = None
     
     # 触发统计
     trigger_count: int = Field(default=0, description="已触发次数")
-    last_triggered_at: Optional[str] = None
+    last_triggered_at: str | None = None
 
     # 深度集成元数据
-    schedule: Optional[str] = None                 # 时间驱动事件的 cron 式调度
-    template_id: Optional[str] = None              # 来源模板 ID
+    schedule: str | None = None                 # 时间驱动事件的 cron 式调度
+    template_id: str | None = None              # 来源模板 ID
 
 
 # =========================
@@ -206,24 +207,24 @@ class EventTriggerResult(BaseModel):
     """事件触发结果"""
     event_id: str
     event_name: str
-    character_id: Optional[str] = None
-    response_index: Optional[int] = None
+    character_id: str | None = None
+    response_index: int | None = None
     triggered: bool = Field(default=False, description="是否成功触发")
     effects_applied: list[str] = Field(default_factory=list, description="已应用的效果列表")
-    notification: Optional[str] = None             # 需要显示给玩家的通知
-    dialogue_override: Optional[str] = None        # 覆盖的对话内容
+    notification: str | None = None             # 需要显示给玩家的通知
+    dialogue_override: str | None = None        # 覆盖的对话内容
     state_changes: dict[str, Any] = Field(default_factory=dict)  # 状态变化
     chained_events: list[str] = Field(default_factory=list)      # 被链式触发的事件 ID
     proactive_dialogues: list[dict[str, Any]] = Field(default_factory=list)  # NPC 主动发言结果
 
     # 新执行契约；上面的字段保留一个兼容周期。
-    execution_id: Optional[str] = None
-    execution_key: Optional[str] = None
+    execution_id: str | None = None
+    execution_key: str | None = None
     status: str = "succeeded"                     # succeeded / partial / failed / skipped
     effects: list["EffectExecutionDetail"] = Field(default_factory=list)
     notifications: list["EventNotification"] = Field(default_factory=list)
     dialogue_overrides: list[str] = Field(default_factory=list)
-    error: Optional[str] = None
+    error: str | None = None
     deduplicated: bool = False
     duration_ms: float = 0.0
     condition_trace: list[dict[str, Any]] = Field(default_factory=list)
@@ -235,8 +236,8 @@ class EffectExecutionDetail(BaseModel):
     index: int
     effect_type: str
     status: str = "succeeded"                     # succeeded / failed / skipped / planned
-    message: Optional[str] = None
-    error: Optional[str] = None
+    message: str | None = None
+    error: str | None = None
     data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -246,7 +247,7 @@ class EventNotification(BaseModel):
     event_id: str
     message: str
     notification_type: str = "info"
-    title: Optional[str] = None
+    title: str | None = None
 
 
 # =========================
@@ -262,12 +263,12 @@ class EventContext(BaseModel):
     current_affinity: float
     current_trust: float
     current_mood: str
-    previous_affinity: Optional[float] = None
-    previous_trust: Optional[float] = None
+    previous_affinity: float | None = None
+    previous_trust: float | None = None
     
     # 当前对话
     player_message: str
-    npc_response: Optional[str] = None
+    npc_response: str | None = None
     
     # 统计信息
     dialogue_count: int                            # 本次会话对话轮数
@@ -285,13 +286,13 @@ class EventContext(BaseModel):
     # 持久化上下文 / 调度信息
     event_data: dict[str, Any] = Field(default_factory=dict)
     event_history: list[dict[str, Any]] = Field(default_factory=list)
-    world_time: Optional[str] = None
-    world_timezone: Optional[str] = None
-    last_event_id: Optional[str] = None
-    active_multi_session_id: Optional[str] = None
-    execution_key: Optional[str] = None
+    world_time: str | None = None
+    world_timezone: str | None = None
+    last_event_id: str | None = None
+    active_multi_session_id: str | None = None
+    execution_key: str | None = None
     trigger_source: str = "dialogue"
-    response_index: Optional[int] = None
+    response_index: int | None = None
 
 
 # 更新前向引用

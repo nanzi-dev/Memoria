@@ -1,12 +1,15 @@
 """
 编排器工具函数单元测试
 """
-import pytest, sys, uuid
 import json
+import sys
+import uuid
 from pathlib import Path
+
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from unittest.mock import Mock, MagicMock, patch
 
 class TestClipping:
     def test_clip(self):
@@ -26,8 +29,7 @@ class TestClipping:
 
 class TestHistoryFormatting:
     def test_format_single_role(self):
-        from memoria.core.multi_character_orchestrator import MultiCharacterOrchestrator
-        orch = type('obj',(object,),{'player_name':'Player','session_id':'s','player_id':'p'})()
+        _ = type('obj',(object,),{'player_name':'Player','session_id':'s','player_id':'p'})()
 
     def test_format_with_character_names(self):
         from memoria.core.multi_character_orchestrator import MultiCharacterOrchestrator
@@ -48,6 +50,7 @@ class TestHistoryFormatting:
 
     def test_format_history_filters_relationship_claims_that_conflict_with_graph(self):
         from types import SimpleNamespace
+
         from memoria.core import multi_character_orchestrator
 
         orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
@@ -105,6 +108,7 @@ class TestHistoryFormatting:
 
     def test_format_history_filters_deleted_graph_edge_relationship_claims(self):
         from types import SimpleNamespace
+
         from memoria.core import multi_character_orchestrator
 
         orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
@@ -170,6 +174,7 @@ class TestCharacterInteraction:
 
     def test_decide_group_response_count_uses_discussion_pressure(self, monkeypatch):
         from types import SimpleNamespace
+
         from memoria.core import multi_character_orchestrator
 
         orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
@@ -193,6 +198,7 @@ class TestCharacterInteraction:
 
     def test_decide_group_response_count_single_mention(self):
         from types import SimpleNamespace
+
         from memoria.core import multi_character_orchestrator
 
         orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
@@ -212,6 +218,7 @@ class TestCharacterInteraction:
         monkeypatch,
     ):
         from types import SimpleNamespace
+
         from memoria.core import multi_character_orchestrator
 
         orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
@@ -227,7 +234,7 @@ class TestCharacterInteraction:
             "b": SimpleNamespace(meta=SimpleNamespace(name="乙", display_name="乙", aliases=[])),
             "c": SimpleNamespace(meta=SimpleNamespace(name="丙", display_name="丙", aliases=[])),
         }
-        orch._load_all_relationships = lambda: {}
+        orch._load_all_relationships = dict
         monkeypatch.setattr(
             multi_character_orchestrator.random,
             "uniform",
@@ -243,6 +250,7 @@ class TestCharacterInteraction:
 
     def test_decide_group_response_count_short_ack_still_single(self, monkeypatch):
         from types import SimpleNamespace
+
         from memoria.core import multi_character_orchestrator
 
         orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
@@ -270,6 +278,7 @@ class TestCharacterInteraction:
 class TestMultiCharacterGroupMemory:
     def test_load_memory_context_includes_group_memories(self, monkeypatch):
         from types import SimpleNamespace
+
         from memoria.core import multi_character_orchestrator
 
         orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
@@ -303,6 +312,7 @@ class TestMultiCharacterGroupMemory:
 
     def test_load_memory_context_filters_relationship_memories_conflicting_with_graph(self, monkeypatch):
         from types import SimpleNamespace
+
         from memoria.core import multi_character_orchestrator
 
         orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
@@ -341,6 +351,7 @@ class TestMultiCharacterGroupMemory:
 
     def test_load_runtime_state_filters_conflicting_relation_facts_only(self, monkeypatch):
         from types import SimpleNamespace
+
         from memoria.core import multi_character_orchestrator
 
         orch = multi_character_orchestrator.MultiCharacterOrchestrator.__new__(
@@ -609,6 +620,7 @@ class TestSessionLifecycle:
     @pytest.fixture(autouse=True)
     def setup(self):
         import uuid
+
         from memoria.db import repository
         self.sid = str(uuid.uuid4())
         repository.create_session(self.sid, "lcC", "lcP", "Tester")
@@ -617,6 +629,7 @@ class TestSessionLifecycle:
     def test_run_dialogue_turn_raises_on_ended(self):
         """已结束的 session 调用 run_dialogue_turn 应抛出 ValueError"""
         import pytest
+
         from memoria.core.orchestrator import run_dialogue_turn
         with pytest.raises(ValueError, match="会话已经结束"):
             run_dialogue_turn(self.sid, "你好")
@@ -626,6 +639,7 @@ class TestDialogueTurn:
     def test_event_system_failure_keeps_message_ids_defined(self, monkeypatch):
         """事件系统失败时不应因 message_id 未赋值导致二次崩溃"""
         from types import SimpleNamespace
+
         from memoria.core import orchestrator
 
         saved_state = {}
@@ -755,6 +769,7 @@ class TestDialogueTurn:
     def test_single_dialogue_prompt_uses_graph_and_cross_mode_memories(self, monkeypatch):
         """单聊 prompt 应读取当前关系图谱，并共享同角色的群聊/共享记忆。"""
         from types import SimpleNamespace
+
         from memoria.core import orchestrator
 
         captured = {}
@@ -926,6 +941,7 @@ class TestDialogueTurn:
     def test_event_state_changes_are_included_in_relationship_delta(self, monkeypatch):
         """事件改变信任/好感时，返回和保存的 delta 应反映最终总变化。"""
         from types import SimpleNamespace
+
         from memoria.core import orchestrator
 
         saved_messages = []
@@ -1007,6 +1023,7 @@ class TestDialogueTurn:
     def test_persistence_failure_raises(self, monkeypatch):
         """核心对话持久化失败时不应返回成功响应"""
         from types import SimpleNamespace
+
         from memoria.core import orchestrator
 
         card = SimpleNamespace(
@@ -1077,6 +1094,7 @@ class TestDialogueTurn:
         runtime_state、后台任务全部未持久化。
         """
         from types import SimpleNamespace
+
         from memoria.core import orchestrator
 
         card = SimpleNamespace(
@@ -1159,6 +1177,7 @@ class TestDialogueTurn:
     def test_lease_cleanup_failure_does_not_mask_original_error(self, monkeypatch):
         """fail_dialogue_turn 自身失败时，调用方仍须看到原始异常。"""
         from types import SimpleNamespace
+
         from memoria.core import orchestrator
 
         card = SimpleNamespace(
@@ -1228,6 +1247,7 @@ class TestDialogueTurn:
 
 def test_group_dialogue_saves_one_logical_thread_player_memory(monkeypatch):
     from types import SimpleNamespace
+
     from memoria.core import multi_character_orchestrator as module
 
     orchestrator = module.MultiCharacterOrchestrator.__new__(
@@ -1324,6 +1344,7 @@ def test_group_dialogue_saves_one_logical_thread_player_memory(monkeypatch):
 
 def test_group_dialogue_single_response_saves_one_logical_thread_claim(monkeypatch):
     from types import SimpleNamespace
+
     from memoria.core import multi_character_orchestrator as module
 
     orchestrator = module.MultiCharacterOrchestrator.__new__(
@@ -1587,7 +1608,8 @@ def test_single_dialogue_turn_emits_stream_events(monkeypatch):
 
 
 def test_multi_character_turn_propagates_event_sink(monkeypatch):
-    from memoria.core import multi_character_orchestrator as module, performance
+    from memoria.core import multi_character_orchestrator as module
+    from memoria.core import performance
 
     events = []
 
@@ -1687,8 +1709,8 @@ def test_unpersisted_group_pulse_loads_base_history_once(monkeypatch):
     )
     monkeypatch.setattr(orchestrator, "_decide_dialogue_action", decide)
     monkeypatch.setattr(orchestrator, "_generate_character_response", generate)
-    monkeypatch.setattr(orchestrator, "_refresh_player_character", lambda: {})
-    monkeypatch.setattr(orchestrator, "_load_all_relationships", lambda: {})
+    monkeypatch.setattr(orchestrator, "_refresh_player_character", dict)
+    monkeypatch.setattr(orchestrator, "_load_all_relationships", dict)
     monkeypatch.setattr(
         module.repository,
         "get_group_thread_id",
@@ -1887,8 +1909,8 @@ def test_single_group_turn_reuses_context_across_selection_generation_and_commit
         "get_authorized_knowledge_base_ids",
         lambda *args, **kwargs: ["kb-1"],
     )
-    monkeypatch.setattr(orchestrator, "_refresh_player_character", lambda: {})
-    monkeypatch.setattr(orchestrator, "_load_all_relationships", lambda: {})
+    monkeypatch.setattr(orchestrator, "_refresh_player_character", dict)
+    monkeypatch.setattr(orchestrator, "_load_all_relationships", dict)
     monkeypatch.setattr(
         orchestrator,
         "_decide_next_speaker",

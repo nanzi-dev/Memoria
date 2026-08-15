@@ -119,7 +119,7 @@ def _weekday_field_matches(weekday: int, field: str) -> bool:
                 allowed.update(range(max(0, start), min(6, end) + 1))
             else:
                 allowed.update(range(start, 7))
-                allowed.update(range(0, end + 1))
+                allowed.update(range(end + 1))
         else:
             value = int(part)
             allowed.add(0 if value == 7 else value)

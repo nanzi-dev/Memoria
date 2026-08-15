@@ -436,6 +436,9 @@ export default function UserSettingsModal({ onClose }) {
                       <img
                         src={user.role_summary.avatar_url}
                         alt={`${user.role_summary.display_name}的扮演头像`}
+                        loading="lazy"
+                        decoding="async"
+                        referrerpolicy="no-referrer"
                         className="h-full w-full object-cover"
                       />
                     ) : (
@@ -464,7 +467,7 @@ export default function UserSettingsModal({ onClose }) {
               <div className="mt-1 flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center">
                 <div className="group relative h-20 w-20 shrink-0 overflow-hidden rounded-md border border-border bg-muted">
                   {user?.avatar_url ? (
-                    <img src={user.avatar_url} alt="" className="h-full w-full object-cover" />
+                    <img src={user.avatar_url} alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" className="h-full w-full object-cover" />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-muted-foreground">
                       <User className="h-7 w-7" aria-hidden="true" />

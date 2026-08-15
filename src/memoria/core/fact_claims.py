@@ -9,10 +9,8 @@ from memoria.core.fact_claim_policy import (
     clean_source_ids,
     derive_fact_claim_identity,
     evaluate_verification,
-    normalize_fact_text,
 )
 from memoria.db import repository
-
 
 logger = logging.getLogger(__name__)
 

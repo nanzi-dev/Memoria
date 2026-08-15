@@ -175,6 +175,7 @@ export default function ChatRoom() {
   const pendingHistoryScrollRef = useRef(null);
 
   const latestGroupMessageIdRef = useRef(0);
+  const latestSingleMessageIdRef = useRef(0);
 
   const loadedGroupMessageIdsRef = useRef(new Set());
 
@@ -495,21 +496,39 @@ export default function ChatRoom() {
       const items = [];
       const seenSingleChars = new Set();
 
-      for (const s of sortedSessions) {
-        if (!isCurrentRequest()) return;
+      // 并发拉取所有群聊详情，避免串行 await 拖慢会话列表。
+      const groupSessions = sortedSessions.filter(s => s.is_multi_character);
+      const groupInfoById = new Map();
+      await Promise.all(groupSessions.map(async s => {
+        const infoKey = s.session_id;
+        if (groupInfoById.has(infoKey)) return;
+        try {
+          const info = await multiDialogue.getSessionInfo(s.session_id);
+          if (isCurrentRequest()) groupInfoById.set(infoKey, info);
+        } catch (err) {
+          if (isCurrentRequest()) {
+            // 详情失败不能静默退化：后续仍会使用列表接口返回的
+            // s.group_name / s.participants 作为回退。
+            console.warn(`[loadSessions] 群聊 ${s.session_id} 详情加载失败：`, err);
+          }
+        }
+      }));
+      if (!isCurrentRequest()) return;
 
+      for (const s of sortedSessions) {
         if (s.is_multi_character) {
 
-          // Fetch group chat participants for proper display
-          let groupParticipants = [];
-          let info = null;
-          try {
-            info = await multiDialogue.getSessionInfo(s.session_id);
-            if (!isCurrentRequest()) return;
-            groupParticipants = (info.participants || []).map(p => normalizeParticipant(p, chars));
-          } catch {}
+          const info = groupInfoById.get(s.session_id);
+          const fallbackParticipants = Array.isArray(s.participants)
+            ? s.participants.map(p => normalizeParticipant(p, chars))
+            : [];
+          const groupParticipants = info?.participants?.length
+            ? info.participants.map(p => normalizeParticipant(p, chars))
+            : fallbackParticipants;
 
-          const resolvedGroupName = (s.group_name || info?.group_name || '').trim() || '未命名群聊';
+          const resolvedGroupName = (s.group_name || '').trim()
+            || (info?.group_name || '').trim()
+            || '未命名群聊';
           const groupItem = {
             type: 'group',
             session_id: s.session_id,
@@ -648,6 +667,7 @@ export default function ChatRoom() {
     setMultiSessionStatus('active');
 
     setHistoryOffset(0); setHasMoreHistory(true); setLoadingHistory(false);
+    latestSingleMessageIdRef.current = 0;
 
     scheduleIdleSessionEnd(sessionToIdle);
 
@@ -668,6 +688,7 @@ export default function ChatRoom() {
 
     const generation = nextSingleRequestGeneration();
     activeSingleCharacterIdRef.current = char.character_id;
+    latestSingleMessageIdRef.current = 0;
     resetGroupSyncState();
 
     cancelRecording();
@@ -712,8 +733,12 @@ export default function ChatRoom() {
         const hist = await dialogue.getHistory(char.character_id, PLAYER_ID, 0, 20);
         if (generation !== singleRequestGenerationRef.current) return;
         if (hist?.messages?.length) {
-          setMessages(sortMessagesChronologically(hist.messages.map(normalizeDialogueMessage)));
+          const normalized = hist.messages.map(normalizeDialogueMessage);
+          setMessages(sortMessagesChronologically(normalized));
           setIsRecovered(true);
+          latestSingleMessageIdRef.current = normalized.reduce((maxId, message) => (
+            Math.max(maxId, Number(message?.message_id) || 0)
+          ), 0);
           setHistoryOffset(hist.messages.length);
           setHasMoreHistory(hist.has_more);
         } else {
@@ -747,13 +772,21 @@ export default function ChatRoom() {
       const hist = await dialogue.getHistory(char.character_id, PLAYER_ID, 0, 20);
       if (generation !== singleRequestGenerationRef.current) return;
       if (hist?.messages?.length) {
-        setMessages(sortMessagesChronologically(hist.messages.map(normalizeDialogueMessage)));
+        const normalized = hist.messages.map(normalizeDialogueMessage);
+        setMessages(sortMessagesChronologically(normalized));
         setIsRecovered(session.recovered || hist.messages.length > 0);
+        latestSingleMessageIdRef.current = normalized.reduce((maxId, message) => (
+          Math.max(maxId, Number(message?.message_id) || 0)
+        ), 0);
         nextHistoryOffset = hist.messages.length;
         nextHasMoreHistory = hist.has_more;
       } else if (session.recovered && session.messages?.length) {
-        setMessages(sortMessagesChronologically(session.messages.map(normalizeDialogueMessage)));
+        const normalized = session.messages.map(normalizeDialogueMessage);
+        setMessages(sortMessagesChronologically(normalized));
         setIsRecovered(true);
+        latestSingleMessageIdRef.current = normalized.reduce((maxId, message) => (
+          Math.max(maxId, Number(message?.message_id) || 0)
+        ), 0);
         nextHistoryOffset = session.messages.length;
       } else if (session.opening_line) {
         setMessages([{
@@ -763,6 +796,7 @@ export default function ChatRoom() {
           world_created_at: session.world_created_at,
           message_id: session.assistant_message_id,
         }]);
+        latestSingleMessageIdRef.current = Number(session.assistant_message_id) || 0;
       }
 
       setAffinity(session.current_affinity || 0);
@@ -801,6 +835,27 @@ export default function ChatRoom() {
     }
     enterSingleChat(char);
   }, [chatItems, enterSingleChat]);
+
+  const handleOfflineContact = useCallback((char) => {
+    if (!char) {
+      setError('角色已离线，不能新建聊天');
+      return;
+    }
+    // 联系人列表中的角色卡不一定带 session_id，先从会话目录里补回历史会话。
+    const existingSession = chatItems.find(item => (
+      item.type === 'single'
+      && item.character_id === char.character_id
+      && item.session_id
+    ));
+    if (char.session_id || existingSession?.session_id) {
+      requestSingleChat({
+        ...char,
+        session_id: char.session_id || existingSession?.session_id,
+      });
+      return;
+    }
+    setError('角色已离线，不能新建聊天');
+  }, [chatItems, requestSingleChat]);
 
   // ── Direct single chat from URL param ──
 
@@ -904,7 +959,6 @@ export default function ChatRoom() {
       sessionKindRef.current.set(currentSessionId, 'group');
       setMessages(mergeGroupMessages([], normalizedMessages));
       registerLoadedGroupMessages(normalizedMessages);
-      setHistoryOffset(normalizedMessages.length);
       setHasMoreHistory(Boolean(hist?.has_more));
       latestGroupMessageIdRef.current = Math.max(
         Number(hist?.latest_message_id || 0),
@@ -942,9 +996,9 @@ export default function ChatRoom() {
         if (normalizedMessages.length > 0) {
           const nextCursor = maxGroupMessageId(normalizedMessages, cursor);
           if (nextCursor <= cursor) break;
-          const addedMessages = registerLoadedGroupMessages(normalizedMessages);
+          registerLoadedGroupMessages(normalizedMessages);
           setMessages(prev => mergeGroupMessages(prev, normalizedMessages));
-          if (addedMessages > 0) setHistoryOffset(prev => prev + addedMessages);
+          // 群聊 offset 一律由已加载消息集合大小推导，避免多路径相对累加竞态。
           cursor = nextCursor;
           latestGroupMessageIdRef.current = cursor;
           caughtUpWithNewMessages = true;
@@ -1068,7 +1122,9 @@ export default function ChatRoom() {
       try {
 
         const sessionId = activeGroupSessionIdRef.current || multiSessionId;
-        const hist = await multiDialogue.getHistory(sessionId, historyOffset, HISTORY_PAGE_SIZE);
+        // 单一来源：offset 来自已加载消息集合大小，而不是靠各路径自行相对累加。
+        const offset = loadedGroupMessageIdsRef.current.size;
+        const hist = await multiDialogue.getHistory(sessionId, offset, HISTORY_PAGE_SIZE);
         if (generation !== groupRequestGenerationRef.current) return;
 
         if (hist?.messages && hist.messages.length > 0) {
@@ -1085,10 +1141,9 @@ export default function ChatRoom() {
           const normalizedMessages = hist.messages.map(message => (
             normalizeGroupMessage(message, [...participants, ...allChars])
           ));
-          const addedMessages = registerLoadedGroupMessages(normalizedMessages);
+          registerLoadedGroupMessages(normalizedMessages);
           setMessages(prev => mergeGroupMessages(prev, normalizedMessages, { prepend: true }));
 
-          if (addedMessages > 0) setHistoryOffset(prev => prev + addedMessages);
           setHasMoreHistory(hist.has_more);
 
         } else {
@@ -1183,7 +1238,6 @@ export default function ChatRoom() {
       registerLoadedGroupMessages(openingMessages);
       latestGroupMessageIdRef.current = maxGroupMessageId(openingMessages);
 
-      setHistoryOffset(openingMessages.length);
       setHasMoreHistory(false);
       setGroupHistoryReady(true);
       pendingInitialGroupScrollRef.current = true;
@@ -1330,7 +1384,25 @@ export default function ChatRoom() {
           enqueueAutoplay(res.assistant_message_id, singleSessionAtSend, 'single');
         }
 
-        setHistoryOffset(prev => prev + 2);
+        // 历史 offset 不再固定 +2，而是用响应返回的消息 ID 与当前已知
+        // 最大消息 ID 计算净增量，避免流回退/重试等路径重复叠加。
+        const knownMaxMessageId = latestSingleMessageIdRef.current;
+        const turnMessageIds = [res.user_message_id, res.assistant_message_id]
+          .map(id => Number(id))
+          .filter(id => Number.isFinite(id));
+        if (turnMessageIds.length > 0) {
+          const newIdsAboveKnown = new Set(turnMessageIds.filter(id => id > knownMaxMessageId));
+          const historyDelta = newIdsAboveKnown.size;
+          setHistoryOffset(prev => prev + historyDelta);
+          latestSingleMessageIdRef.current = Math.max(
+            knownMaxMessageId,
+            ...turnMessageIds,
+          );
+        } else {
+          // 响应缺少 user_message_id/assistant_message_id 时维持旧逻辑：
+          // 一次单聊回合约新增用户 + 助手两条消息。
+          setHistoryOffset(prev => prev + 2);
+        }
 
         setAffinity(res.current_affinity ?? affinity);
         setTrust(res.current_trust ?? trust);
@@ -1554,7 +1626,7 @@ export default function ChatRoom() {
         onEnterGroupSetup={enterGroupSetup}
         onRequestSingleChat={requestSingleChat}
         onEnterGroupChat={enterGroupChat}
-        onOfflineContact={() => setError('角色已离线，不能新建聊天')}
+        onOfflineContact={handleOfflineContact}
       />
     );
   }
@@ -1596,7 +1668,7 @@ export default function ChatRoom() {
         onEnterGroupSetup={enterGroupSetup}
         onRequestSingleChat={requestSingleChat}
         onEnterGroupChat={enterGroupChat}
-        onOfflineContact={() => setError('角色已离线，不能新建聊天')}
+        onOfflineContact={handleOfflineContact}
         character={character}
         participants={participants}
         groupName={groupName}

@@ -288,21 +288,199 @@ def delete_character_card_from_db(owner_user_id: str, character_id: str, soft_de
                     {"now": _now(), "owner": owner_user_id, "cid": character_id},
                 )
             else:
-                # 硬删除：关系、记忆曲线和角色卡必须在同一事务内删除。
+                # 硬删除：关系、记忆曲线、事件运行时状态、会话与角色卡必须在
+                # 同一事务内删除，保持 SQLite / PostgreSQL 双兼容（全部参数绑定）。
+                now = _now()
+                scope = (character_id or "").strip()
+                owner = owner_user_id
+                cid = character_id
+
+                # 该 owner 下所有属于该角色的事件定义 ID（用于联动清理）。
+                event_id_subquery = (
+                    "SELECT event_id FROM event_definition "
+                    "WHERE owner_user_id = :owner AND character_id = :cid"
+                )
+
+                # 1) 记忆曲线（先删 reinforcement 以满足其指向 state 的外键）。
                 session.execute(
                     text("""
                         DELETE FROM memory_curve_reinforcement
                         WHERE owner_user_id = :owner AND character_id = :cid
                     """),
-                    {"owner": owner_user_id, "cid": character_id},
+                    {"owner": owner, "cid": cid},
                 )
                 session.execute(
                     text("""
                         DELETE FROM memory_curve_state
                         WHERE owner_user_id = :owner AND character_id = :cid
                     """),
-                    {"owner": owner_user_id, "cid": character_id},
+                    {"owner": owner, "cid": cid},
                 )
+
+                # 2) 事件运行时状态（用 event_ids / character_scope 定位）。
+                session.execute(
+                    text(f"""
+                        DELETE FROM event_trigger_log
+                        WHERE player_id = :owner
+                          AND (character_id = :cid OR event_id IN ({event_id_subquery}))
+                    """),
+                    {"owner": owner, "cid": cid},
+                )
+                session.execute(
+                    text(f"""
+                        DELETE FROM event_trigger_guard
+                        WHERE player_id = :owner
+                          AND (event_id IN ({event_id_subquery}) OR character_scope = :scope)
+                    """),
+                    {"owner": owner, "cid": cid, "scope": scope},
+                )
+                session.execute(
+                    text(f"""
+                        DELETE FROM event_exclusive_group_guard
+                        WHERE player_id = :owner
+                          AND selected_event_id IN ({event_id_subquery})
+                    """),
+                    {"owner": owner, "cid": cid},
+                )
+                session.execute(
+                    text(f"""
+                        DELETE FROM event_unlock
+                        WHERE player_id = :owner
+                          AND (character_id = :cid OR event_id IN ({event_id_subquery}))
+                    """),
+                    {"owner": owner, "cid": cid},
+                )
+                session.execute(
+                    text(f"""
+                        DELETE FROM event_context_state
+                        WHERE player_id = :owner
+                          AND (character_id = :cid OR event_id IN ({event_id_subquery}))
+                    """),
+                    {"owner": owner, "cid": cid},
+                )
+                session.execute(
+                    text(f"""
+                        DELETE FROM event_schedule_state
+                        WHERE player_id = :owner
+                          AND (character_id = :scope OR event_id IN ({event_id_subquery}))
+                    """),
+                    {"owner": owner, "cid": cid, "scope": scope},
+                )
+                session.execute(
+                    text(f"""
+                        DELETE FROM event_execution
+                        WHERE owner_user_id = :owner
+                          AND (character_id = :cid OR event_id IN ({event_id_subquery}))
+                    """),
+                    {"owner": owner, "cid": cid},
+                )
+                # event_execution_batch 关键值可被 results_data/审计日志引用，保留批记录。
+
+                # 2b) 删除角色自有事件定义（此时相关运行时行已清理完毕）。
+                session.execute(
+                    text("""
+                        DELETE FROM event_definition
+                        WHERE owner_user_id = :owner AND character_id = :cid
+                    """),
+                    {"owner": owner, "cid": cid},
+                )
+
+                # 3) 收件箱、事实声明与关系/长时记忆。
+                session.execute(
+                    text("""
+                        DELETE FROM player_event_inbox
+                        WHERE player_id = :owner AND character_id = :cid
+                    """),
+                    {"owner": owner, "cid": cid},
+                )
+                session.execute(
+                    text("""
+                        DELETE FROM fact_claim
+                        WHERE owner_user_id = :owner AND scope_type = 'character' AND scope_id = :cid
+                    """),
+                    {"owner": owner, "cid": cid},
+                )
+                session.execute(
+                    text("""
+                        DELETE FROM relationship_state
+                        WHERE player_id = :owner AND character_id = :cid
+                    """),
+                    {"owner": owner, "cid": cid},
+                )
+                session.execute(
+                    text("""
+                        DELETE FROM long_term_fact
+                        WHERE player_id = :owner AND character_id = :cid
+                    """),
+                    {"owner": owner, "cid": cid},
+                )
+                session.execute(
+                    text("""
+                        DELETE FROM shared_memory
+                        WHERE owner_user_id = :owner
+                          AND (observer_character_id = :cid OR target_character_id = :cid)
+                    """),
+                    {"owner": owner, "cid": cid},
+                )
+
+                # 4) 多角色会话：只删除该角色的消息与参与者，不删整个会话。
+                session.execute(
+                    text("""
+                        DELETE FROM short_term_message
+                        WHERE character_id = :cid
+                          AND session_id IN (
+                            SELECT session_id FROM session WHERE player_id = :owner
+                          )
+                    """),
+                    {"owner": owner, "cid": cid},
+                )
+                session.execute(
+                    text("""
+                        DELETE FROM multi_session_participant
+                        WHERE character_id = :cid
+                          AND session_id IN (
+                            SELECT session_id FROM session WHERE player_id = :owner
+                          )
+                    """),
+                    {"owner": owner, "cid": cid},
+                )
+
+                # 5) 单聊会话：删除摘要、对话轮次与剩余消息后删除整个会话。
+                single_session_subquery = (
+                    "SELECT session_id FROM session "
+                    "WHERE player_id = :owner AND character_id = :cid "
+                    "AND COALESCE(is_multi_character, 0) = 0"
+                )
+                session.execute(
+                    text(f"""
+                        DELETE FROM session_summary
+                        WHERE session_id IN ({single_session_subquery})
+                    """),
+                    {"owner": owner, "cid": cid},
+                )
+                session.execute(
+                    text(f"""
+                        DELETE FROM dialogue_turn
+                        WHERE session_id IN ({single_session_subquery})
+                    """),
+                    {"owner": owner, "cid": cid},
+                )
+                session.execute(
+                    text(f"""
+                        DELETE FROM short_term_message
+                        WHERE session_id IN ({single_session_subquery})
+                    """),
+                    {"owner": owner, "cid": cid},
+                )
+                session.execute(
+                    text(f"""
+                        DELETE FROM session
+                        WHERE session_id IN ({single_session_subquery})
+                    """),
+                    {"owner": owner, "cid": cid},
+                )
+
+                # 6) 关系清理（保留 revision 记录以供“已删除关系”查询）。
                 rows = session.execute(
                     text("""
                         SELECT character_id_a, character_id_b
@@ -310,9 +488,8 @@ def delete_character_card_from_db(owner_user_id: str, character_id: str, soft_de
                         WHERE owner_user_id = :owner
                           AND (character_id_a = :cid OR character_id_b = :cid)
                     """),
-                    {"owner": owner_user_id, "cid": character_id},
+                    {"owner": owner, "cid": cid},
                 ).mappings().all()
-                now = _now()
                 for row in rows:
                     # Inline _touch_character_relationship_revision logic
                     ca, cb = (row["character_id_b"], row["character_id_a"]) if row["character_id_a"] > row["character_id_b"] else (row["character_id_a"], row["character_id_b"])
@@ -324,7 +501,7 @@ def delete_character_card_from_db(owner_user_id: str, character_id: str, soft_de
                             ON CONFLICT(owner_user_id, character_id_a, character_id_b)
                             DO UPDATE SET updated_at=excluded.updated_at
                         """),
-                        {"owner": owner_user_id, "ca": ca, "cb": cb, "now": now},
+                        {"owner": owner, "ca": ca, "cb": cb, "now": now},
                     )
                 session.execute(
                     text("""
@@ -332,11 +509,13 @@ def delete_character_card_from_db(owner_user_id: str, character_id: str, soft_de
                         WHERE owner_user_id = :owner
                           AND (character_id_a = :cid OR character_id_b = :cid)
                     """),
-                    {"owner": owner_user_id, "cid": character_id},
+                    {"owner": owner, "cid": cid},
                 )
+
+                # 7) 最后删除角色卡本体。
                 session.execute(
                     text("DELETE FROM character_card WHERE owner_user_id = :owner AND character_id = :cid"),
-                    {"owner": owner_user_id, "cid": character_id},
+                    {"owner": owner, "cid": cid},
                 )
         logger.info(f"角色卡已{'禁用' if soft_delete else '删除'}: owner={owner_user_id}, character_id={character_id}")
         return True

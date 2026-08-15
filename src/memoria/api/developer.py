@@ -2,11 +2,11 @@
 开发者体验 API。
 """
 
-from datetime import datetime, timezone
 import json
+from datetime import datetime, timezone
 
-from pydantic import BaseModel
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from memoria.api.user import require_admin_user_id, require_current_user_id
 from memoria.core import (
@@ -21,14 +21,20 @@ from memoria.core import (
 )
 from memoria.db import repository
 
-
 router = APIRouter(prefix="/developer", dependencies=[Depends(require_current_user_id)])
+
+
+MAX_QUALITY_SCORE_MESSAGES = 50
+MAX_QUALITY_SCORE_INPUT_CHARS = 20_000
 
 
 class QualityScoreRequest(BaseModel):
     session_id: str | None = None
     character_id: str | None = None
-    messages: list[dict] | None = None
+    messages: list[dict] | None = Field(
+        default=None,
+        max_length=MAX_QUALITY_SCORE_MESSAGES,
+    )
     use_llm: bool = False
 
 
@@ -235,17 +241,43 @@ def quality_score(
     req: QualityScoreRequest,
     current_user_id: str = Depends(require_current_user_id),
 ):
-    """对 session 或直接传入的消息进行质量评分。"""
+    """对 session 或直接传入的消息进行质量评分。
+
+    LLM 评分会产生外部模型费用，仅允许管理员调用；普通登录用户仍可使用
+    本地启发式评分。管理员调用 LLM 时也限制消息数与总字符数，避免误放大成本。
+    """
     messages = req.messages
     character_id = req.character_id
+
+    if req.use_llm:
+        admin = repository.get_user_by_id(current_user_id)
+        if not admin or not bool(admin.get("is_admin")):
+            raise HTTPException(status_code=403, detail="需要管理员权限才能使用 LLM 评分")
 
     if req.session_id:
         session = _owned_session(req.session_id, current_user_id)
         messages = repository.get_session_messages(req.session_id, limit=1000)
         character_id = character_id or session.get("character_id")
+        if req.use_llm:
+            messages = messages[-MAX_QUALITY_SCORE_MESSAGES:]
 
     if not messages:
         raise HTTPException(status_code=400, detail="需要提供 session_id 或 messages")
+
+    if req.use_llm:
+        total_chars = sum(
+            len(str(message.get("content") or ""))
+            for message in messages
+            if isinstance(message, dict)
+        )
+        if total_chars > MAX_QUALITY_SCORE_INPUT_CHARS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "LLM 评分输入超过 "
+                    f"{MAX_QUALITY_SCORE_INPUT_CHARS} 字符上限，请缩短对话"
+                ),
+            )
 
     return quality_scorer.score_dialogue(
         messages=messages,

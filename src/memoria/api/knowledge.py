@@ -66,7 +66,10 @@ class KnowledgeBindingsUpdate(BaseModel):
 
 class PastedDocumentCreate(BaseModel):
     title: str = Field(default="粘贴文本", min_length=1, max_length=180)
-    text: str = Field(min_length=1)
+    # Pydantic Field default 不能使用动态 configs；这里固定 10 MiB 作为
+    # knowledge_upload_max_bytes（默认 10 MiB）附近的上限，超限由
+    # validate_document_size 二次兜底。
+    text: str = Field(min_length=1, max_length=10_485_760)
 
 
 class KnowledgePreviewRequest(BaseModel):
@@ -356,6 +359,8 @@ def delete_knowledge_document(
     current_user_id: str = Depends(require_current_user_id),
 ):
     document = _require_document(current_user_id, document_id)
+    if document.get("status") in {"queued", "processing"}:
+        raise HTTPException(status_code=409, detail="文档正在处理中，请稍后再删除")
     try:
         deleted = repository.delete_knowledge_document(
             current_user_id,

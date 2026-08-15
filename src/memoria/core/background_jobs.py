@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import logging
 import math
 import uuid
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import datetime
+from typing import Any
 
 from memoria.core.memory_extractor import (
     extract_player_memory,
@@ -152,18 +153,26 @@ def _process_checkpoint_memory(payload: dict[str, Any]) -> None:
     source_ids = [f"session:{session_id}"]
     if payload.get("evidence_id"):
         source_ids.append(str(payload["evidence_id"]))
-    record_generated_memory_claim(
-        owner_user_id=payload["owner_user_id"],
-        scope_type=payload["scope_type"],
-        scope_id=payload["scope_id"],
-        fact_text=fact_text,
-        source_ids=source_ids,
-        provenance={
-            "memory_kind": "player_fact",
-            "session_id": session_id,
-        },
-        **curve_fields,
-    )
+    try:
+        record_generated_memory_claim(
+            owner_user_id=payload["owner_user_id"],
+            scope_type=payload["scope_type"],
+            scope_id=payload["scope_id"],
+            fact_text=fact_text,
+            source_ids=source_ids,
+            provenance={
+                "memory_kind": "player_fact",
+                "session_id": session_id,
+            },
+            **curve_fields,
+        )
+    except getattr(repository, "FactClaimTerminalError", ValueError):
+        # 事实声明已进入 retracted/superseded 终态：跳过而非让后台任务失败。
+        logger.info(
+            "跳过终态事实声明的重复证据写入: scope=%s/%s",
+            payload.get("scope_type"),
+            payload.get("scope_id"),
+        )
 
 
 def register_checkpoint_memory_handlers(worker: BackgroundJobWorker) -> None:

@@ -10,14 +10,14 @@
 import logging
 import re
 from datetime import datetime, time, timedelta, timezone
-from typing import Any, List
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from memoria.core.event_schema import (
-    EventDefinition,
     EventContext,
-    TriggerType,
+    EventDefinition,
     TriggerCondition,
+    TriggerType,
 )
 from memoria.db import repository
 
@@ -33,8 +33,8 @@ class EventDetector:
     def check_events(
         self,
         context: EventContext,
-        event_definitions: List[EventDefinition]
-    ) -> List[EventDefinition]:
+        event_definitions: list[EventDefinition]
+    ) -> list[EventDefinition]:
         """
         检测哪些事件被触发
         
@@ -294,9 +294,7 @@ class EventDetector:
         ``relationship_type`` (compares against ``relationship_type``).
         """
         target_id = str(condition.target_character_id or "").strip()
-        if target_id == "@player":
-            target_id = repository.player_node_id(context.player_id)
-        elif not target_id:
+        if target_id == "@player" or not target_id:
             target_id = repository.player_node_id(context.player_id)
         elif repository.is_player_node_id(target_id):
             if target_id != repository.player_node_id(context.player_id):
@@ -357,7 +355,7 @@ class EventDetector:
     def _check_keyword_match(
         self,
         text: str,
-        keywords: List[str],
+        keywords: list[str],
         match_mode: str = "any"
     ) -> bool:
         """检查关键词匹配"""
@@ -384,7 +382,21 @@ class EventDetector:
                 for kw in cleaned_keywords
             )
         elif match_mode == "regex":
-            return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in cleaned_keywords)
+            # 玩家文本不可直接驱动无界正则；限制长度并捕获运行时错误，
+            # 避免病态合法 pattern 触发 ReDoS 或旧数据非法 pattern 中断整轮检测。
+            match_text = text[:4000]
+            for pattern in cleaned_keywords:
+                try:
+                    if re.search(pattern, match_text, flags=re.IGNORECASE):
+                        return True
+                except re.error as exc:
+                    logger.warning(
+                        "事件正则配置无效，已跳过该 pattern: %r（%s）",
+                        pattern[:200],
+                        exc,
+                    )
+                    continue
+            return False
         else:
             logger.warning(f"未知的匹配模式: {match_mode}")
             return False

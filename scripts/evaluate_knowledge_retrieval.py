@@ -9,7 +9,6 @@ import os
 import sys
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
@@ -19,7 +18,6 @@ os.chdir(PROJECT_ROOT)
 from memoria.core.knowledge_retriever import _content_similarity, retrieve_knowledge
 from memoria.core.knowledge_vector_store import get_knowledge_vector_store
 from memoria.db import repository
-
 
 DEFAULT_DATASET = PROJECT_ROOT / "tests/fixtures/knowledge_retrieval_zh.json"
 

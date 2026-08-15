@@ -15,6 +15,11 @@ import sys
 import tempfile
 from pathlib import Path
 
+# 旧测试套件大量使用随机/硬编码 user_id 而不先创建 users 行。
+# 应用生产连接默认开启 SQLite 外键；测试沿用历史约定关闭，
+# 外键行为由 PostgreSQL 集成测试另行验证。
+os.environ.setdefault("MEMORIA_SQLITE_FOREIGN_KEYS", "0")
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from memoria.core.config import configs
@@ -24,8 +29,8 @@ from memoria.db import repository
 def _precreate_shared_test_users() -> None:
     """PG 强制外键：预建测试套件中硬编码使用的用户 ID。
 
-    SQLite 不强制外键所以测试从不创建这些用户；PG 下必须先存在。
-    与仓库层无关——纯测试基建。
+    SQLite 测试通过 MEMORIA_SQLITE_FOREIGN_KEYS=0 沿用历史约定关闭外键；
+    PG 下必须先创建这些用户。与仓库层无关——纯测试基建。
     """
     from memoria.db.repository import _common
 
@@ -60,6 +65,7 @@ def pytest_sessionstart(session):
         # 真实 PG 上从干净 schema 开始：drop 全部表再 init_db
         from sqlalchemy import create_engine, event, text
         from sqlalchemy.engine import Engine
+
         from memoria.db.models import Base
 
         @event.listens_for(Engine, "connect")

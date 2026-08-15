@@ -18,9 +18,8 @@ from memoria.core import (
 )
 from memoria.core.config import configs
 from memoria.core.memory_extractor import is_memory_worthy_candidate
-from memoria.db import repository
-
 from memoria.core.multi_character_context import GroupTurnContext
+from memoria.db import repository
 
 logger = logging.getLogger(__name__)
 

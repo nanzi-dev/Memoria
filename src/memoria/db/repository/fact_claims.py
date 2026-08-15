@@ -2,20 +2,13 @@
 from __future__ import annotations
 
 # Standard/third-party imports used across repository domains.
-from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
-import hashlib
 import json
 import logging
-import sqlite3
-import uuid
-from typing import Any, Callable
-from urllib.parse import urlsplit
 import re
-from difflib import SequenceMatcher
+import uuid
+from collections.abc import Callable
+from typing import Any
 
-from memoria.core.config import configs
-from memoria.core import performance, tracing
 from memoria.core.domain_events import NewDomainEvent, StoredDomainEvent
 from memoria.core.fact_claim_policy import (
     ADMIN_VERIFICATION_SOURCE_KIND,
@@ -24,7 +17,6 @@ from memoria.core.fact_claim_policy import (
     derive_fact_claim_identity,
     evaluate_verification,
     normalize_evidence_entry,
-    normalize_fact_text,
 )
 
 try:
@@ -36,25 +28,33 @@ except ImportError:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
-# Import shared helpers / connection / schema. Private names included.
 from sqlalchemy import text
 
-from memoria.db.repository._common import *  # noqa: F403
-from memoria.db.repository import _common as _common_mod
-from memoria.db.repository._common import _lock_sqlite_write, db_session
+from memoria.db.repository._common import (
+    _is_postgres_enabled,
+    _lock_sqlite_write,
+    _now,
+    db_session,
+)
+from memoria.db.repository.domain_events import (
+    FACT_CLAIM_PROJECTOR,
+    STORY_STATE_PROJECTOR,
+    UnsupportedDomainEventVersionError,
+    _domain_event_from_row,
+    append_domain_event,
+)
+from memoria.db.repository.story import _project_story_event_in_transaction
 
-# Ensure private helpers from _common are visible as bare names.
-for _name, _value in vars(_common_mod).items():
-    if _name.startswith('__'):
-        continue
-    globals().setdefault(_name, _value)
-del _name, _value, _common_mod
 
 # =========================
 # fact claim projection
 # =========================
 class FactClaimConcurrencyError(RuntimeError):
     """Fact claim projection version or status changed concurrently."""
+
+
+class FactClaimTerminalError(ValueError):
+    """终态（retracted/superseded）声明被再次写入证据时抛出的领域异常。"""
 
 
 def _decode_fact_claim_row(row) -> dict | None:
@@ -825,7 +825,12 @@ def _record_fact_claim_in_transaction(
         existing is not None
         and existing["status"] in {"retracted", "superseded"}
     ):
-        raise ValueError("terminal fact claim cannot accept evidence")
+        logger.warning(
+            "拒绝向终态 fact_claim 重录证据: claim_id=%s status=%s",
+            claim_id,
+            existing["status"],
+        )
+        raise FactClaimTerminalError("terminal fact claim cannot accept evidence")
 
     identity = existing or {
         "owner_user_id": owner_user_id,

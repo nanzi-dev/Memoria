@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
 import time
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -126,7 +126,7 @@ def clarity_for(retention_value: float) -> str:
 # ──────────────────────────────────────────────────────────────
 def stable_sample(recall_key: str, memory_id: str) -> float:
     digest = hashlib.sha256(
-        f"{recall_key}\0{memory_id}".encode("utf-8")
+        f"{recall_key}\0{memory_id}".encode()
     ).digest()
     return int.from_bytes(digest[:8], "big") / float(1 << 64)
 
@@ -139,7 +139,7 @@ def volatile_sample(recall_key: str, memory_id: str, turn_salt: str) -> float:
     fragment memories genuine cross-turn variation.
     """
     digest = hashlib.sha256(
-        f"{recall_key}\0{memory_id}\0{turn_salt}".encode("utf-8")
+        f"{recall_key}\0{memory_id}\0{turn_salt}".encode()
     ).digest()
     return int.from_bytes(digest[:8], "big") / float(1 << 64)
 
@@ -210,7 +210,7 @@ def memory_identity(record: dict, memory_type: str) -> str:
         if value is not None and str(value).strip():
             return str(value)
     text = str(record.get("fact_text") or record.get("memory_text") or "")
-    return hashlib.sha256(f"{memory_type}\0{text}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{memory_type}\0{text}".encode()).hexdigest()
 
 
 def candidate_source(record: dict, memory_type: str) -> str:

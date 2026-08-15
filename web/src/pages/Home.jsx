@@ -128,7 +128,7 @@ export default function Home() {
               title={user ? `${user.username}的设置` : '登录 / 注册'}
             >
               {user?.avatar_url ? (
-                <img src={user.avatar_url} alt="" className="w-full h-full object-cover" />
+                <img src={user.avatar_url} alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" className="w-full h-full object-cover" />
               ) : user ? (
                 <span className="text-cyber-green/60 text-[10px] font-bold">{user.username?.charAt(0)?.toUpperCase() || 'U'}</span>
               ) : (

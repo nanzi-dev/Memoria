@@ -13,28 +13,21 @@ import json
 import logging
 import random
 import uuid
-from dataclasses import dataclass
-from typing import Callable, Literal
-
-from pydantic import BaseModel, ConfigDict, field_validator
+from collections.abc import Callable
 
 from memoria.core import (
-    character_loader,
     event_runtime,
     llm_client,
-    multi_character_memory,
+    multi_character_memory,  # noqa: F401  # 测试与 mixin 兼容入口
     performance,
-    prompt_builder,
-    relationship_context,
+    prompt_builder,  # noqa: F401  # 测试 monkeypatch 兼容入口
     world_clock,
 )
 from memoria.core.config import configs
 from memoria.core.event_schema import EventTriggerResult
 from memoria.core.knowledge_retriever import retrieve_knowledge
 from memoria.core.locale import DEFAULT_LOCALE, Locale
-from memoria.core.memory_extractor import is_memory_worthy_candidate
-from memoria.core.output_safety import DialogueSafetyStream, safety_check
-from memoria.core.relationship_delta_policy import resolve_relationship_delta
+from memoria.core.output_safety import safety_check
 from memoria.core.speaking_strategy import HybridStrategy
 from memoria.db import repository
 
@@ -42,69 +35,25 @@ logger = logging.getLogger(__name__)
 EventSink = Callable[[str, dict], None]
 
 
-DialogueIntent = Literal[
-    "answer",
-    "ask",
-    "agree",
-    "challenge",
-    "reveal",
-    "invite",
-    "interrupt",
-    "topic_shift",
-]
-
-
-class DialogueDecision(BaseModel):
-    """单步群聊动作。模型输出先经过该结构验证，再允许生成正文。"""
-
-    model_config = ConfigDict(extra="forbid")
-
-    action: Literal["speak", "wait"]
-    speaker_id: str | None = None
-    reply_to_message_id: int | None = None
-    reply_to_character_id: str | None = None
-    intent: DialogueIntent | None = None
-    topic: str | None = None
-    preferred_next_character_id: str | None = None
-    follow_up_expected: bool = False
-    wait_for_player: bool = False
-    stop_reason: str | None = None
-
-    @field_validator("reply_to_message_id")
-    @classmethod
-    def validate_reply_to_message_id(cls, value: int | None) -> int | None:
-        if value == 0:
-            raise ValueError("reply_to_message_id must be non-zero")
-        return value
-
-
-@dataclass(frozen=True)
-class GroupTurnContext:
-    player_character: dict
-    character_relationships: dict
-    group_thread_id: str | None
-    authorized_knowledge_base_ids: dict[str, list[str]]
-
-
 # -- 辅助函数已拆分至 multi_character_helpers，以下为向后兼容的导入 --
-from memoria.core.multi_character_helpers import (  # noqa: E402
-    _history_after_cutoff,
-    _clip,
-    _safe_float,
-    _clock_snapshot_for_player,
-    _load_character_card,
-    _build_multi_character_system_prompt,
-)
 # -- 方法已拆分至以下 Mixin，编排器通过继承复用，避免重复维护 --
-from memoria.core.multi_character_context import (  # noqa: E402
+from memoria.core.multi_character_context import (
     DialogueDecision,
     GroupTurnContext,
     MultiCharacterContextMixin,
 )
-from memoria.core.multi_character_memory_ops import (  # noqa: E402
+from memoria.core.multi_character_helpers import (
+    _build_multi_character_system_prompt,
+    _clip,  # noqa: F401  # 向后兼容导出
+    _clock_snapshot_for_player,
+    _history_after_cutoff,  # noqa: F401  # 向后兼容导出
+    _load_character_card,
+    _safe_float,  # noqa: F401  # 向后兼容导出
+)
+from memoria.core.multi_character_memory_ops import (
     MultiCharacterMemoryOpsMixin,
 )
-from memoria.core.multi_character_turn import (  # noqa: E402
+from memoria.core.multi_character_turn import (
     MultiCharacterTurnMixin,
 )
 
@@ -164,10 +113,27 @@ class MultiCharacterOrchestrator(
         # 初始化发言策略
         self.speaking_strategy = HybridStrategy()
         
-        # 缓存最后发言者
+        # 缓存最后发言者（跨请求还原“避免连续发言”约束）
         self.last_speaker_id = None
+        try:
+            group_thread_id = repository.get_group_thread_id(session_id)
+            if group_thread_id:
+                group_state = repository.get_group_dialogue_state(group_thread_id)
+                if group_state:
+                    self.last_speaker_id = group_state.get("last_speaker_id")
+        except Exception:
+            logger.warning(
+                "还原群聊最后发言者失败: session=%s",
+                session_id,
+                exc_info=True,
+            )
         self._checkpoint_memory_fact = None
         self._checkpoint_memory_ready = False
+        # 实例级缓存（随编排器生命周期，不做跨请求长期缓存）
+        self._relationship_cutoff_cache: dict[
+            tuple, str | None
+        ] = {}
+        self._memory_context_cache: dict[tuple, list[str]] = {}
         
         logger.info(f"多角色编排器已初始化: session={session_id}, 参与角色={self.character_ids}")
 
@@ -316,24 +282,6 @@ class MultiCharacterOrchestrator(
                 )
                 result["message_id"] = -2
                 result["stream_id"] = f"{request_id}:0"
-                # 单响应路径不经过脉冲循环，_generate_character_response 以
-                # persist=False 生成；立即把好感/信任/情绪增量写入状态表，
-                # 避免后续事件系统无事件命中时（state_changes 为空）关系图静默失更。
-                if all(
-                    key in result
-                    for key in (
-                        "current_affinity",
-                        "current_trust",
-                        "current_mood",
-                    )
-                ):
-                    repository.save_runtime_state(
-                        speaker_id,
-                        self.player_id,
-                        result["current_affinity"],
-                        result["current_trust"],
-                        result["current_mood"],
-                    )
                 if event_sink:
                     event_sink(
                         "character_completed",
@@ -458,25 +406,67 @@ class MultiCharacterOrchestrator(
         if trigger_character_id is None:
             trigger_character_id = self._select_character_for_interaction()
 
-        clock_snapshot = world_clock.get_clock_snapshot(self.player_id)
-        responses = self.run_dialogue_pulse(
-            trigger_source="goal",
-            trigger_text=prompt or "主动延续当前剧情或未解决的话题",
-            initial_speaker_id=trigger_character_id,
-            max_messages=1,
-            clock_snapshot=clock_snapshot,
-            persist_state=persist,
-            persist_messages=persist,
-            extract_memory=persist,
+        request_id = uuid.uuid4().hex
+        claim = repository.claim_dialogue_turn(
+            session_id=self.session_id,
+            request_id=request_id,
+            player_id=self.player_id,
+            turn_kind="multi",
         )
-        if not responses:
-            return {
-                "character_id": trigger_character_id,
-                "character_name": self.character_cards[trigger_character_id].meta.display_name,
-                "dialogue": "",
-                "action": "wait",
-            }
-        return responses[0]
+        if claim["completed"]:
+            stored = claim["response"]
+            if isinstance(stored, list) and stored:
+                return stored[0]
+            return stored
+        lease_owner = claim["lease_owner"]
+
+        clock_snapshot = world_clock.get_clock_snapshot(self.player_id)
+        try:
+            responses = self.run_dialogue_pulse(
+                trigger_source="goal",
+                trigger_text=prompt or "主动延续当前剧情或未解决的话题",
+                initial_speaker_id=trigger_character_id,
+                max_messages=1,
+                clock_snapshot=clock_snapshot,
+                persist_state=persist,
+                persist_messages=persist,
+                extract_memory=persist,
+            )
+            complete_dialogue_turn_record = getattr(
+                repository,
+                "complete_dialogue_turn_record",
+                None,
+            )
+            if callable(complete_dialogue_turn_record):
+                complete_dialogue_turn_record(
+                    self.session_id,
+                    request_id,
+                    lease_owner,
+                    responses,
+                )
+            if not responses:
+                return {
+                    "character_id": trigger_character_id,
+                    "character_name": self.character_cards[trigger_character_id].meta.display_name,
+                    "dialogue": "",
+                    "action": "wait",
+                }
+            return responses[0]
+        except Exception as exc:
+            try:
+                repository.fail_dialogue_turn(
+                    self.session_id,
+                    request_id,
+                    lease_owner,
+                    str(exc),
+                )
+            except Exception:
+                logger.exception(
+                    "标记群聊主动对白轮次失败时出错，租约将等待过期: session=%s request_id=%s",
+                    self.session_id,
+                    request_id,
+                )
+            raise
     
     
     def _decide_next_speaker(
@@ -583,9 +573,7 @@ class MultiCharacterOrchestrator(
         card = self.character_cards[character_id]
         clock_snapshot = clock_snapshot or world_clock.get_clock_snapshot(self.player_id)
         character_relationships = self._load_all_relationships()
-        relationship_history_cutoff = multi_character_memory.get_relationship_history_cutoff(
-            self.player_id,
-            self.character_ids,
+        relationship_history_cutoff = self._cached_relationship_history_cutoff(
             character_relationships
         )
         runtime_state = self._load_runtime_state_for_prompt(
@@ -711,9 +699,7 @@ class MultiCharacterOrchestrator(
         card = self.character_cards[trigger_character_id]
         clock_snapshot = clock_snapshot or world_clock.get_clock_snapshot(self.player_id)
         character_relationships = self._load_all_relationships()
-        relationship_history_cutoff = multi_character_memory.get_relationship_history_cutoff(
-            self.player_id,
-            self.character_ids,
+        relationship_history_cutoff = self._cached_relationship_history_cutoff(
             character_relationships
         )
         runtime_state = self._load_runtime_state_for_prompt(
@@ -888,8 +874,8 @@ def start_multi_character_session(
     if not success:
         raise ValueError("创建多角色会话失败")
 
-    # 初始化编排器
-    orchestrator = MultiCharacterOrchestrator(session_id)
+    # 初始化编排器，校验会话/参与者配置合法性
+    MultiCharacterOrchestrator(session_id)
 
     return {
         "session_id": session_id,

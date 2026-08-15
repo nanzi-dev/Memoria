@@ -1115,6 +1115,36 @@ def test_development_keeps_auth_cookie_secure_default_false(monkeypatch):
         config_module.get_config.cache_clear()
 
 
+def test_auth_cookie_is_secure_on_https_request_even_in_development(monkeypatch):
+    from memoria.api import user
+
+    monkeypatch.setattr(user.configs, "auth_cookie_secure", False)
+
+    https_request = SimpleNamespace(
+        url=SimpleNamespace(scheme="https"),
+        headers={"x-forwarded-proto": "https"},
+    )
+    response = Response()
+    user._set_auth_cookie(response, "token", request=https_request)
+
+    assert "Secure" in response.headers["set-cookie"]
+
+
+def test_auth_cookie_secure_via_forwarded_proto(monkeypatch):
+    from memoria.api import user
+
+    monkeypatch.setattr(user.configs, "auth_cookie_secure", False)
+
+    proxied_https = SimpleNamespace(
+        url=SimpleNamespace(scheme="http"),
+        headers={"x-forwarded-proto": "https"},
+    )
+    response = Response()
+    user._set_auth_cookie(response, "token", request=proxied_https)
+
+    assert "Secure" in response.headers["set-cookie"]
+
+
 # =========================
 # 角色卡导入的路径穿越防护
 # =========================
@@ -1244,13 +1274,55 @@ def test_successful_login_clears_failure_counter(monkeypatch):
     user._login_failures.clear()
 
 
+def test_login_throttle_is_scoped_by_username_and_client_ip(monkeypatch):
+    """单个 IP 上的失败不应锁死其它 IP 的同一用户名。"""
+    from memoria.api import user
+
+    user._login_failures.clear()
+    monkeypatch.setattr(user, "_burn_password_hash_time", lambda password: None)
+    monkeypatch.setattr(user.repository, "get_user_by_username", lambda username: None)
+
+    request_a = SimpleNamespace(client=SimpleNamespace(host="203.0.113.7"))
+    request_b = SimpleNamespace(client=SimpleNamespace(host="203.0.113.8"))
+
+    for _ in range(user.LOGIN_FAILURE_MAX_ATTEMPTS):
+        with pytest.raises(HTTPException) as exc_info:
+            user.login(
+                user.LoginRequest(username="victim", password="wrong-pass1"),
+                Response(),
+                request_a,
+            )
+        assert exc_info.value.status_code == 401
+
+    with pytest.raises(HTTPException) as exc_info:
+        user.login(
+            user.LoginRequest(username="victim", password="wrong-pass1"),
+            Response(),
+            request_a,
+        )
+    assert exc_info.value.status_code == 429
+
+    # 另一来源 IP 不受影响，仍能进入正常校验流程（此处为 401 而非 429）。
+    with pytest.raises(HTTPException) as exc_info:
+        user.login(
+            user.LoginRequest(username="victim", password="wrong-pass1"),
+            Response(),
+            request_b,
+        )
+    assert exc_info.value.status_code == 401
+    user._login_failures.clear()
+
+
 # =========================
 # 输入边界
 # =========================
 def test_group_session_start_rejects_oversized_roster():
     from pydantic import ValidationError
 
-    from memoria.api.multi_dialogue import MAX_GROUP_CHARACTERS, StartMultiSessionRequest
+    from memoria.api.multi_dialogue import (
+        MAX_GROUP_CHARACTERS,
+        StartMultiSessionRequest,
+    )
 
     roster = [f"npc_{i}" for i in range(MAX_GROUP_CHARACTERS + 1)]
     with pytest.raises(ValidationError):

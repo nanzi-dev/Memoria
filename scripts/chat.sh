@@ -11,10 +11,10 @@ if [ -d ".venv" ]; then
     source .venv/bin/activate
 fi
 
-if command -v python >/dev/null 2>&1; then
-    PYTHON_BIN=python
-else
+if command -v python3 >/dev/null 2>&1; then
     PYTHON_BIN=python3
+else
+    PYTHON_BIN=python
 fi
 
 PYTHONPATH=src "$PYTHON_BIN" scripts/cli_chat.py "$@"

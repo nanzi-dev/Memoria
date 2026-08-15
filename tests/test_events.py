@@ -1,15 +1,20 @@
 """
 事件执行器与检测器深入测试
 """
-from copy import deepcopy
-
-import pytest, sys, json, uuid
+import json
+import sys
+import uuid
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from pathlib import Path
 from threading import Barrier
+
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock
+
 
 class TestEventExecutorEffects:
     def _make_context(self, **kw):
@@ -22,14 +27,20 @@ class TestEventExecutorEffects:
         return EventContext(**d)
 
     def _make_event(self, eid, tc, effects):
-        from memoria.core.event_schema import EventDefinition, TriggerCondition, TriggerType
+        from memoria.core.event_schema import (
+            EventDefinition,
+        )
         return EventDefinition(event_id=eid,event_name="T",trigger_condition=tc,
                                effects=effects,priority=1,is_active=True)
 
     def test_execute_modify_state(self):
         from memoria.core.event_executor import get_event_executor
-        from memoria.core.event_schema import (TriggerCondition,TriggerType,
-            EventEffect,EffectType)
+        from memoria.core.event_schema import (
+            EffectType,
+            EventEffect,
+            TriggerCondition,
+            TriggerType,
+        )
         exe = get_event_executor()
         tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=0)
         eff = EventEffect(effect_type=EffectType.MODIFY_STATE,
@@ -41,8 +52,12 @@ class TestEventExecutorEffects:
 
     def test_execute_notify_player(self):
         from memoria.core.event_executor import get_event_executor
-        from memoria.core.event_schema import (TriggerCondition,TriggerType,
-            EventEffect,EffectType)
+        from memoria.core.event_schema import (
+            EffectType,
+            EventEffect,
+            TriggerCondition,
+            TriggerType,
+        )
         exe = get_event_executor()
         tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=0)
         eff = EventEffect(effect_type=EffectType.NOTIFY_PLAYER,
@@ -53,8 +68,12 @@ class TestEventExecutorEffects:
 
     def test_execute_change_mood(self):
         from memoria.core.event_executor import get_event_executor
-        from memoria.core.event_schema import (TriggerCondition,TriggerType,
-            EventEffect,EffectType)
+        from memoria.core.event_schema import (
+            EffectType,
+            EventEffect,
+            TriggerCondition,
+            TriggerType,
+        )
         exe = get_event_executor()
         tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=0)
         eff = EventEffect(effect_type=EffectType.CHANGE_MOOD,target_mood="sad")
@@ -64,8 +83,12 @@ class TestEventExecutorEffects:
 
     def test_execute_trigger_dialogue(self):
         from memoria.core.event_executor import get_event_executor
-        from memoria.core.event_schema import (TriggerCondition,TriggerType,
-            EventEffect,EffectType)
+        from memoria.core.event_schema import (
+            EffectType,
+            EventEffect,
+            TriggerCondition,
+            TriggerType,
+        )
         exe = get_event_executor()
         tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=0)
         eff = EventEffect(effect_type=EffectType.TRIGGER_DIALOGUE,
@@ -76,8 +99,12 @@ class TestEventExecutorEffects:
 
     def test_execute_unlock_content(self):
         from memoria.core.event_executor import get_event_executor
-        from memoria.core.event_schema import (TriggerCondition,TriggerType,
-            EventEffect,EffectType)
+        from memoria.core.event_schema import (
+            EffectType,
+            EventEffect,
+            TriggerCondition,
+            TriggerType,
+        )
         exe = get_event_executor()
         tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=0)
         eff = EventEffect(effect_type=EffectType.UNLOCK_CONTENT,
@@ -88,8 +115,12 @@ class TestEventExecutorEffects:
 
     def test_execute_add_memory(self):
         from memoria.core.event_executor import get_event_executor
-        from memoria.core.event_schema import (TriggerCondition,TriggerType,
-            EventEffect,EffectType)
+        from memoria.core.event_schema import (
+            EffectType,
+            EventEffect,
+            TriggerCondition,
+            TriggerType,
+        )
         exe = get_event_executor()
         tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=0)
         eff = EventEffect(effect_type=EffectType.ADD_MEMORY,
@@ -100,8 +131,12 @@ class TestEventExecutorEffects:
 
     def test_multiple_effects(self):
         from memoria.core.event_executor import get_event_executor
-        from memoria.core.event_schema import (TriggerCondition,TriggerType,
-            EventEffect,EffectType)
+        from memoria.core.event_schema import (
+            EffectType,
+            EventEffect,
+            TriggerCondition,
+            TriggerType,
+        )
         exe = get_event_executor()
         tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=0)
         effects = [
@@ -120,9 +155,12 @@ class TestEventExecutorEffects:
 
     def test_inactive_event_not_executed(self):
         from memoria.core.event_executor import get_event_executor
-        from memoria.core.event_schema import (EventDefinition,TriggerCondition,
-            TriggerType,EventEffect,EffectType)
-        exe = get_event_executor()
+        from memoria.core.event_schema import (
+            EventDefinition,
+            TriggerCondition,
+            TriggerType,
+        )
+        get_event_executor()
         tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,threshold=0)
         event = EventDefinition(event_id="inactive",event_name="T",
                                 trigger_condition=tc,effects=[],is_active=False)
@@ -328,8 +366,11 @@ def test_event_commit_rejects_proactive_message_for_foreign_session():
 class TestEventDetectorMore:
     def test_keyword_case_insensitive(self):
         from memoria.core.event_detector import EventDetector
-        from memoria.core.event_schema import (EventDefinition,TriggerCondition,
-            TriggerType)
+        from memoria.core.event_schema import (
+            EventDefinition,
+            TriggerCondition,
+            TriggerType,
+        )
         det = EventDetector()
         tc = TriggerCondition(trigger_type=TriggerType.KEYWORD_MATCH,
                               keywords=["HELLO"],match_mode="any")
@@ -345,8 +386,11 @@ class TestEventDetectorMore:
 
     def test_affinity_eq_comparison(self):
         from memoria.core.event_detector import EventDetector
-        from memoria.core.event_schema import (EventDefinition,TriggerCondition,
-            TriggerType)
+        from memoria.core.event_schema import (
+            EventDefinition,
+            TriggerCondition,
+            TriggerType,
+        )
         det = EventDetector()
         tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD,
                               threshold=50,comparison="eq")
@@ -362,8 +406,12 @@ class TestEventDetectorMore:
 
     def test_gt_lt_comparisons(self):
         from memoria.core.event_detector import EventDetector
-        from memoria.core.event_schema import (EventDefinition,TriggerCondition,
-            TriggerType,EventContext)
+        from memoria.core.event_schema import (
+            EventContext,
+            EventDefinition,
+            TriggerCondition,
+            TriggerType,
+        )
         det = EventDetector()
         ctx = EventContext(character_id="c",player_id="p",session_id="s",
                            current_affinity=50,current_trust=0,current_mood="neutral",
@@ -513,6 +561,7 @@ class TestEventDeepIntegration:
 
     def test_execute_event_chain_persists_context(self):
         import uuid
+
         from memoria.core import event_runtime
         from memoria.core.event_schema import (
             EffectType,
@@ -555,7 +604,7 @@ class TestEventDeepIntegration:
 
     def test_branch_event_selects_matching_branch(self):
         from memoria.core.event_executor import EventExecutor
-        from memoria.core.event_schema import EventEffect, EffectType, TriggerType
+        from memoria.core.event_schema import EffectType, EventEffect
 
         effect = EventEffect(
             effect_type=EffectType.BRANCH_EVENT,
@@ -571,7 +620,11 @@ class TestEventDeepIntegration:
 
     def test_branch_event_uses_default_when_no_condition_matches(self):
         from memoria.core.event_executor import EventExecutor
-        from memoria.core.event_schema import EventEffect, EffectType, EventTriggerResult
+        from memoria.core.event_schema import (
+            EffectType,
+            EventEffect,
+            EventTriggerResult,
+        )
 
         effect = EventEffect(
             effect_type=EffectType.BRANCH_EVENT,
@@ -595,6 +648,7 @@ class TestEventDeepIntegration:
 
     def test_cron_helpers(self):
         from datetime import datetime, timezone
+
         from memoria.core.cron_schedule import cron_matches, next_cron_run
 
         now = datetime(2026, 7, 10, 14, 30, tzinfo=timezone.utc)
@@ -707,6 +761,7 @@ class TestEventDeepIntegration:
     def test_toggle_event_preserves_registered_schedule(self):
         """regression: 注册的 cron 调度不应被定义更新/切换静默删除。"""
         import uuid
+
         from memoria.core import event_runtime
         from memoria.db import repository
 
@@ -768,7 +823,11 @@ class TestEventReliability:
         )
 
     def _event(self, event_id, effects, **updates):
-        from memoria.core.event_schema import EventDefinition, TriggerCondition, TriggerType
+        from memoria.core.event_schema import (
+            EventDefinition,
+            TriggerCondition,
+            TriggerType,
+        )
 
         return EventDefinition(
             event_id=event_id,
@@ -1263,7 +1322,11 @@ class TestEventReliability:
 
     def test_new_condition_sources_and_conflict_rules(self):
         from memoria.core.event_detector import EventDetector
-        from memoria.core.event_schema import EventDefinition, TriggerCondition, TriggerType
+        from memoria.core.event_schema import (
+            EventDefinition,
+            TriggerCondition,
+            TriggerType,
+        )
 
         context = self._context().model_copy(update={
             "previous_affinity": 49,

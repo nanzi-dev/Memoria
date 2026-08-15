@@ -17,10 +17,10 @@ SQLAlchemy engine / session 生命周期管理。
 from __future__ import annotations
 
 import logging
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Generator
 
-from sqlalchemy import create_engine, event, Engine
+from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from memoria.core.config import configs
@@ -59,17 +59,25 @@ _wal_configured_engines: set[int] = set()
 
 
 @event.listens_for(Engine, "connect")
-def _set_sqlite_pragma(dbapi_conn, connection_record) -> None:  # noqa: ANN001
-    """对每个新的 SQLite 连接启用 WAL 日志模式。
+def _set_sqlite_pragma(dbapi_conn, connection_record) -> None:
+    """对每个新的 SQLite 连接启用 WAL 与（默认）外键约束。
 
     WAL 是数据库文件级别的持久属性，但每次新连接都需要声明；
     通过 SET 指令幂等执行，不会造成额外开销。
+
+    外键约束默认开启；测试等旧场景可通过环境变量
+    ``MEMORIA_SQLITE_FOREIGN_KEYS=0`` 关闭。
     """
     # 获取底层 sqlite3 连接（DBAPI 层）
+    import os
     import sqlite3
     if isinstance(dbapi_conn, sqlite3.Connection):
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
+        if os.environ.get("MEMORIA_SQLITE_FOREIGN_KEYS") != "0":
+            cursor.execute("PRAGMA foreign_keys=ON")
+        else:
+            cursor.execute("PRAGMA foreign_keys=OFF")
         cursor.close()
 
 
@@ -93,6 +101,7 @@ def _build_engine(url: str | None = None) -> Engine:
             url,
             connect_args={
                 "check_same_thread": False,  # 允许多线程访问（FastAPI 场景必需）
+                "timeout": 30,  # SQLite 写锁等待上限（秒）
             },
             echo=False,
             poolclass=NullPool,
@@ -146,7 +155,6 @@ def get_engine() -> Engine:
     如果配置发生了变化（例如测试中 monkeypatch 更换了 database_path），
     会自动重建引擎。
     """
-    global _engine
     expected_url = _build_url()
     if _engine is None or str(_engine.url) != expected_url:
         configure_engine()

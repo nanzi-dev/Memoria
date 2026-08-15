@@ -13,12 +13,13 @@ from fastapi import FastAPI
 from memoria.api import dialogue as dialogue_api
 from memoria.api import event_admin as event_admin_api
 from memoria.api import multi_dialogue as multi_dialogue_api
-from memoria.core import character_loader
-from memoria.core import multi_character_orchestrator
-from memoria.core import orchestrator
-from memoria.core import vector_memory
+from memoria.core import (
+    character_loader,
+    multi_character_orchestrator,
+    orchestrator,
+    vector_memory,
+)
 from memoria.db import repository
-
 
 UTC = timezone.utc
 

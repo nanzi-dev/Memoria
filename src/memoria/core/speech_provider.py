@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import time
 import warnings
 from collections.abc import AsyncIterator
@@ -15,7 +14,6 @@ from typing import Any, Protocol
 import httpx
 
 from memoria.core.config import Configs, configs
-
 
 logger = logging.getLogger(__name__)
 _legacy_warning_emitted = False

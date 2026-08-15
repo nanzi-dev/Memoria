@@ -4,22 +4,22 @@
 提供多角色群聊功能的 RESTful 接口
 """
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
-from typing import Optional
 import logging
 import uuid
 
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+
+from memoria.api.knowledge_models import KnowledgeSource
+from memoria.api.streaming import create_sse_response
+from memoria.api.user import require_current_user_id
 from memoria.core import multi_character_memory, performance
 from memoria.core.locale import DEFAULT_LOCALE, Locale
 from memoria.core.multi_character_orchestrator import (
-    start_multi_character_session,
+    MultiCharacterOrchestrator,
     process_multi_character_turn,
-    MultiCharacterOrchestrator
+    start_multi_character_session,
 )
-from memoria.api.user import require_current_user_id
-from memoria.api.knowledge_models import KnowledgeSource
-from memoria.api.streaming import create_sse_response
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ class StartMultiSessionRequest(BaseModel):
     """开始多角色会话请求"""
     player_id: str = Field(..., max_length=64, description="玩家ID")
     player_name: str = Field(..., max_length=50, description="玩家名称")
-    group_name: Optional[str] = Field(None, max_length=80, description="群聊名称")
+    group_name: str | None = Field(None, max_length=80, description="群聊名称")
     character_ids: list[str] = Field(
         ...,
         min_length=2,
@@ -53,9 +53,9 @@ class StartMultiSessionRequest(BaseModel):
 class StartMultiSessionResponse(BaseModel):
     """开始多角色会话响应"""
     session_id: str
-    group_name: Optional[str] = None
-    group_thread_id: Optional[str] = None
-    opening: Optional[dict] = Field(default=None, description="开场白信息（已停用，恒为 None）")
+    group_name: str | None = None
+    group_thread_id: str | None = None
+    opening: dict | None = Field(default=None, description="开场白信息（已停用，恒为 None）")
     locale: Locale = DEFAULT_LOCALE
 
 
@@ -67,39 +67,39 @@ class MultiDialogueTurnRequest(BaseModel):
         True,
         description="是否启用群聊接话，普通群聊默认启用"
     )
-    max_responses: Optional[int] = Field(
+    max_responses: int | None = Field(
         None,
         ge=1,
         le=5,
         description="群聊接话人数上限；不传时按语境动态决定"
     )
-    request_id: Optional[str] = Field(None, description="客户端生成的事件执行幂等 ID")
+    request_id: str | None = Field(None, description="客户端生成的事件执行幂等 ID")
 
 
 class MultiDialogueTurnResponse(BaseModel):
     """多角色对话轮次响应"""
-    message_id: Optional[int] = None
-    stream_id: Optional[str] = None
+    message_id: int | None = None
+    stream_id: str | None = None
     character_id: str
     character_name: str
     dialogue: str
     action: str
-    affinity_delta: Optional[float] = None
-    trust_delta: Optional[float] = None
-    current_affinity: Optional[float] = None
-    current_trust: Optional[float] = None
-    current_mood: Optional[str] = None
+    affinity_delta: float | None = None
+    trust_delta: float | None = None
+    current_affinity: float | None = None
+    current_trust: float | None = None
+    current_mood: str | None = None
     triggered_events: list[dict] = Field(default_factory=list)
     event_executions: list[dict] = Field(default_factory=list)
     event_notifications: list[dict] = Field(default_factory=list)
-    event_notification: Optional[str] = None
-    world_created_at: Optional[str] = None
+    event_notification: str | None = None
+    world_created_at: str | None = None
     knowledge_sources: list[KnowledgeSource] = Field(default_factory=list)
-    reply_to_message_id: Optional[int] = None
-    reply_to_character_id: Optional[str] = None
-    intent: Optional[str] = None
-    topic: Optional[str] = None
-    trigger_source: Optional[str] = None
+    reply_to_message_id: int | None = None
+    reply_to_character_id: str | None = None
+    intent: str | None = None
+    topic: str | None = None
+    trigger_source: str | None = None
 
 
 class MultiDialogueGroupResponse(BaseModel):
@@ -114,13 +114,13 @@ class MultiDialogueGroupResponse(BaseModel):
 class TriggerInteractionRequest(BaseModel):
     """触发角色互动请求"""
     session_id: str
-    trigger_character_id: Optional[str] = Field(
+    trigger_character_id: str | None = Field(
         None,
         max_length=64,
         description="触发角色ID，留空则自动选择"
     )
     # 该字段原样进入 LLM prompt，必须与 player_message 一样有长度上限。
-    prompt: Optional[str] = Field(None, max_length=2000, description="主动发言提示")
+    prompt: str | None = Field(None, max_length=2000, description="主动发言提示")
 
 
 class EndMultiSessionRequest(BaseModel):
@@ -132,13 +132,13 @@ class SessionParticipant(BaseModel):
     """会话参与者信息"""
     character_id: str
     name: str
-    display_name: Optional[str] = None
-    avatar_url: Optional[str] = None
+    display_name: str | None = None
+    avatar_url: str | None = None
     join_order: int
     speak_frequency: float
     is_active: bool
     message_count: int
-    last_spoke_at: Optional[str] = None
+    last_spoke_at: str | None = None
 
 
 class MultiSessionInfo(BaseModel):
@@ -146,8 +146,8 @@ class MultiSessionInfo(BaseModel):
     session_id: str
     player_id: str
     player_name: str
-    group_name: Optional[str] = None
-    group_thread_id: Optional[str] = None
+    group_name: str | None = None
+    group_thread_id: str | None = None
     created_at: str
     status: str
     participants: list[SessionParticipant]
@@ -157,7 +157,7 @@ class MultiSessionInfo(BaseModel):
 class ContinueMultiSessionResponse(BaseModel):
     """继续群聊会话响应"""
     session_id: str
-    group_name: Optional[str] = None
+    group_name: str | None = None
     group_thread_id: str
     status: str
     participants: list[SessionParticipant]
@@ -182,6 +182,25 @@ def _chunk_messages(messages: list[dict], chunk_size: int = SUMMARY_CHUNK_MESSAG
     if chunk_size <= 0:
         return [messages]
     return [messages[i:i + chunk_size] for i in range(0, len(messages), chunk_size)]
+
+
+def _normalized_group_name(group_name: str | None) -> str:
+    return (group_name or "").strip().casefold()
+
+
+def _count_player_groups_with_name(player_id: str, group_name: str) -> int:
+    """统计玩家拥有同名逻辑群聊线程的数量（按线程去重）。"""
+    normalized = _normalized_group_name(group_name)
+    if not normalized:
+        return 0
+    thread_ids = set()
+    for session in repository.get_all_player_sessions(player_id):
+        if not session.get("is_multi_character"):
+            continue
+        if _normalized_group_name(session.get("group_name")) != normalized:
+            continue
+        thread_ids.add(session.get("group_thread_id") or session.get("session_id"))
+    return len(thread_ids)
 
 
 def _require_player_access(player_id: str, current_user_id: str) -> None:
@@ -428,8 +447,13 @@ def start_multi_session(
             )
 
         clean_group_name = (request.group_name or "").strip()
-        if clean_group_name and repository.player_group_name_exists(request.player_id, clean_group_name):
-            raise HTTPException(status_code=400, detail="群聊名称已存在，请换一个名称")
+        if clean_group_name:
+            # 仓储层按 LOWER(TRIM(...)) 比较；这里再把 casefold 结果传一次，确保
+            # 任何大小写/空白变体都能命中“同名”检查。
+            if repository.player_group_name_exists(
+                request.player_id, clean_group_name.casefold()
+            ):
+                raise HTTPException(status_code=400, detail="群聊名称已存在，请换一个名称")
         
         try:
             player_character = repository.get_or_create_user_character_card(
@@ -447,10 +471,17 @@ def start_multi_session(
             player_id=request.player_id,
             player_name=player_name,
             character_ids=request.character_ids,
-            group_name=clean_group_name or request.group_name,
+            group_name=clean_group_name or None,
             locale=request.locale,
         )
-        
+
+        # 并发唯一性兜底：前序检查通过后仍可能被其他请求插入同名群聊，
+        # 插入后再数一次逻辑群聊线程；若出现重复则返回 400。
+        if clean_group_name and _count_player_groups_with_name(
+            request.player_id, clean_group_name
+        ) > 1:
+            raise HTTPException(status_code=400, detail="群聊名称已存在，请换一个名称")
+
         return StartMultiSessionResponse(
             session_id=result["session_id"],
             group_name=result.get("group_name"),
@@ -681,9 +712,12 @@ def trigger_interaction(
     except ValueError as e:
         # 异常消息可能包含角色 ID 等内部信息，不直接回传。
         raise HTTPException(status_code=400, detail="触发角色互动失败") from e
+
+    except repository.DialogueTurnConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     
     except Exception as e:
-        logger.error(f"触发角色互动异常: {e}", exc_info=True)
+        logger.error("触发角色互动异常: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="服务器内部错误")
 
 
@@ -808,7 +842,7 @@ def get_multi_dialogue_history(
     session_id: str,
     offset: int = Query(0, ge=0, description="已加载消息数量"),
     limit: int = Query(50, ge=1, le=200, description="消息数量限制"),
-    after_message_id: Optional[int] = Query(
+    after_message_id: int | None = Query(
         None,
         ge=0,
         description="仅返回该稳定消息 ID 之后的新消息",
@@ -843,8 +877,12 @@ def get_multi_dialogue_history(
                 offset=offset,
                 limit=limit,
             )
-            latest_message_id = max(
-                [int(message.get("message_id") or 0) for message in messages] or [0]
+            # latest_message_id 必须是线程真实最新 ID，而不是本页返回消息中的 max；
+            # 单独查询一次（只拉 1 条用于聚合最新值）。
+            _, _, latest_message_id = repository.get_multi_character_thread_history_after(
+                session_id,
+                after_message_id=0,
+                limit=1,
             )
         
         # 获取参与者信息

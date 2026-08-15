@@ -2,30 +2,12 @@
 from __future__ import annotations
 
 # Standard/third-party imports used across repository domains.
-from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
-import hashlib
-import json
 import logging
-import sqlite3
-import uuid
-from typing import Any, Callable
-from urllib.parse import urlsplit
-import re
-from difflib import SequenceMatcher
 
 from sqlalchemy import text
 
-from memoria.core.config import configs
 from memoria.core import performance, tracing
-from memoria.core.domain_events import NewDomainEvent, StoredDomainEvent
 from memoria.core.fact_claim_policy import (
-    ADMIN_VERIFICATION_SOURCE_KIND,
-    CLAIM_SOURCE_KINDS,
-    clean_source_ids,
-    derive_fact_claim_identity,
-    evaluate_verification,
-    normalize_evidence_entry,
     normalize_fact_text,
 )
 
@@ -38,17 +20,19 @@ except ImportError:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
-# Import shared helpers / connection / schema. Private names included.
-from memoria.db.repository._common import *  # noqa: F403
-from memoria.db.repository import _common as _common_mod
-from memoria.db.repository._common import _lock_sqlite_write, db_session
+from memoria.db.repository._common import (
+    _dedup_check,
+    _is_postgres_enabled,
+    _lock_sqlite_write,
+    _now,
+    db_session,
+)
+from memoria.db.repository.fact_claims import (
+    LONG_TERM_FACT_BACKFILL_MIGRATION,
+    has_data_migration,
+    list_verified_fact_claims,
+)
 
-# Ensure private helpers from _common are visible as bare names.
-for _name, _value in vars(_common_mod).items():
-    if _name.startswith('__'):
-        continue
-    globals().setdefault(_name, _value)
-del _name, _value, _common_mod
 
 # =========================
 # runtime_state（角色状态）
@@ -155,6 +139,7 @@ def save_runtime_state(character_id: str, player_id: str, affection_level: float
     """更新角色状态"""
     now = _now()
     with db_session() as session:
+        from memoria.db.repository.events import _save_runtime_state_in_transaction
         _save_runtime_state_in_transaction(
             session,
             character_id=character_id,
@@ -313,11 +298,13 @@ def _prompt_memory_claim_scopes(
     if not session_id:
         return scopes
 
+    from memoria.db.repository.sessions_and_messages import get_session
     session = get_session(session_id)
     if not session or session.get("player_id") != player_id:
         return scopes
 
     if session.get("is_multi_character"):
+        from memoria.db.repository.multi_session import get_group_thread_id
         group_thread_id = get_group_thread_id(session_id)
         if group_thread_id:
             scopes.append(("group_thread", group_thread_id))
@@ -552,6 +539,9 @@ def save_long_term_fact_if_checkpoint(
 ) -> int | None:
     """仅在指定玩家回合间隔保存有效长期记忆。"""
     fact_text = normalize_long_term_fact_text(fact_text)
+    from memoria.db.repository.sessions_and_messages import (
+        is_long_term_memory_checkpoint,
+    )
     if not fact_text or not is_long_term_memory_checkpoint(session_id, interval_turns):
         return None
     return save_long_term_fact(character_id, player_id, fact_text, importance)

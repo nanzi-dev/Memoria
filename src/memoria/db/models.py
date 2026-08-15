@@ -10,9 +10,6 @@ SQLAlchemy ≥ 2.0 required.
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Optional
-
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
@@ -21,14 +18,11 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
-    PrimaryKeyConstraint,
-    String,
     Text,
-    text,
     UniqueConstraint,
+    text,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # ---------------------------------------------------------------------------
 # Base
@@ -36,7 +30,6 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 class Base(DeclarativeBase):
     """Shared declarative base for every Memoria ORM model."""
-    pass
 
 
 # ===========================================================================
@@ -50,12 +43,12 @@ class User(Base):
     username: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     is_admin: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
-    gender: Mapped[Optional[str]] = mapped_column(Text, default="unknown", server_default=text("'unknown'"))
-    avatar_url: Mapped[Optional[str]] = mapped_column(Text)
+    gender: Mapped[str | None] = mapped_column(Text, default="unknown", server_default=text("'unknown'"))
+    avatar_url: Mapped[str | None] = mapped_column(Text)
     tts_auto_play: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     stt_auto_send: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
-    created_at: Mapped[Optional[str]] = mapped_column(Text)
-    updated_at: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[str | None] = mapped_column(Text)
 
 
 class UserCharacterCard(Base):
@@ -63,16 +56,16 @@ class UserCharacterCard(Base):
 
     user_id: Mapped[str] = mapped_column(Text, ForeignKey("users.user_id"), primary_key=True)
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
-    avatar_url: Mapped[Optional[str]] = mapped_column(Text)
-    gender: Mapped[Optional[str]] = mapped_column(Text, default="unknown", server_default=text("'unknown'"))
-    pronouns: Mapped[Optional[str]] = mapped_column(Text, default="", server_default=text("''"))
-    age: Mapped[Optional[int]] = mapped_column(Integer)
-    species: Mapped[Optional[str]] = mapped_column(Text, default="", server_default=text("''"))
-    occupation: Mapped[Optional[str]] = mapped_column(Text, default="", server_default=text("''"))
-    appearance: Mapped[Optional[str]] = mapped_column(Text, default="", server_default=text("''"))
-    personality: Mapped[Optional[str]] = mapped_column(Text, default="", server_default=text("''"))
-    background: Mapped[Optional[str]] = mapped_column(Text, default="", server_default=text("''"))
-    goals: Mapped[Optional[str]] = mapped_column(Text, default="", server_default=text("''"))
+    avatar_url: Mapped[str | None] = mapped_column(Text)
+    gender: Mapped[str | None] = mapped_column(Text, default="unknown", server_default=text("'unknown'"))
+    pronouns: Mapped[str | None] = mapped_column(Text, default="", server_default=text("''"))
+    age: Mapped[int | None] = mapped_column(Integer)
+    species: Mapped[str | None] = mapped_column(Text, default="", server_default=text("''"))
+    occupation: Mapped[str | None] = mapped_column(Text, default="", server_default=text("''"))
+    appearance: Mapped[str | None] = mapped_column(Text, default="", server_default=text("''"))
+    personality: Mapped[str | None] = mapped_column(Text, default="", server_default=text("''"))
+    background: Mapped[str | None] = mapped_column(Text, default="", server_default=text("''"))
+    goals: Mapped[str | None] = mapped_column(Text, default="", server_default=text("''"))
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -125,15 +118,15 @@ class CharacterCard(Base):
     owner_user_id: Mapped[str] = mapped_column(Text, ForeignKey("users.user_id"), primary_key=True)
     character_id: Mapped[str] = mapped_column(Text, primary_key=True)
     card_data: Mapped[str] = mapped_column(Text, nullable=False)
-    version: Mapped[Optional[str]] = mapped_column(Text, default="1.0.0", server_default=text("'1.0.0'"))
-    name: Mapped[Optional[str]] = mapped_column(Text)
-    display_name: Mapped[Optional[str]] = mapped_column(Text)
-    avatar_url: Mapped[Optional[str]] = mapped_column(Text)
-    avatar_revision: Mapped[Optional[str]] = mapped_column(Text)
-    created_at: Mapped[Optional[str]] = mapped_column(Text)
-    updated_at: Mapped[Optional[str]] = mapped_column(Text)
-    is_active: Mapped[Optional[int]] = mapped_column(Integer, default=1, server_default=text("1"))
-    source: Mapped[Optional[str]] = mapped_column(Text, default="db", server_default=text("'db'"))
+    version: Mapped[str | None] = mapped_column(Text, default="1.0.0", server_default=text("'1.0.0'"))
+    name: Mapped[str | None] = mapped_column(Text)
+    display_name: Mapped[str | None] = mapped_column(Text)
+    avatar_url: Mapped[str | None] = mapped_column(Text)
+    avatar_revision: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[int | None] = mapped_column(Integer, default=1, server_default=text("1"))
+    source: Mapped[str | None] = mapped_column(Text, default="db", server_default=text("'db'"))
 
     __table_args__ = (
         Index("idx_character_active", "owner_user_id", "is_active", "created_at"),
@@ -150,23 +143,23 @@ class EventDefinition(Base):
     owner_user_id: Mapped[str] = mapped_column(Text, ForeignKey("users.user_id"), primary_key=True)
     event_id: Mapped[str] = mapped_column(Text, primary_key=True)
     event_name: Mapped[str] = mapped_column(Text, nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text)
-    character_id: Mapped[Optional[str]] = mapped_column(Text)
-    story_id: Mapped[Optional[str]] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
+    character_id: Mapped[str | None] = mapped_column(Text)
+    story_id: Mapped[str | None] = mapped_column(Text)
     trigger_config: Mapped[str] = mapped_column(Text, nullable=False)
     effects_config: Mapped[str] = mapped_column(Text, nullable=False)
-    schedule: Mapped[Optional[str]] = mapped_column(Text)
-    template_id: Mapped[Optional[str]] = mapped_column(Text)
-    priority: Mapped[Optional[int]] = mapped_column(Integer, default=0, server_default=text("0"))
-    exclusive_group: Mapped[Optional[str]] = mapped_column(Text)
+    schedule: Mapped[str | None] = mapped_column(Text)
+    template_id: Mapped[str | None] = mapped_column(Text)
+    priority: Mapped[int | None] = mapped_column(Integer, default=0, server_default=text("0"))
+    exclusive_group: Mapped[str | None] = mapped_column(Text)
     exclusive_scope: Mapped[str] = mapped_column(Text, nullable=False, default="turn", server_default=text("'turn'"))
-    max_triggers_per_turn: Mapped[Optional[int]] = mapped_column(Integer, default=3, server_default=text("3"))
-    stop_processing: Mapped[Optional[int]] = mapped_column(Integer, default=0, server_default=text("0"))
-    is_active: Mapped[Optional[int]] = mapped_column(Integer, default=1, server_default=text("1"))
-    created_at: Mapped[Optional[str]] = mapped_column(Text)
-    updated_at: Mapped[Optional[str]] = mapped_column(Text)
-    trigger_count: Mapped[Optional[int]] = mapped_column(Integer, default=0, server_default=text("0"))
-    last_triggered_at: Mapped[Optional[str]] = mapped_column(Text)
+    max_triggers_per_turn: Mapped[int | None] = mapped_column(Integer, default=3, server_default=text("3"))
+    stop_processing: Mapped[int | None] = mapped_column(Integer, default=0, server_default=text("0"))
+    is_active: Mapped[int | None] = mapped_column(Integer, default=1, server_default=text("1"))
+    created_at: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[str | None] = mapped_column(Text)
+    trigger_count: Mapped[int | None] = mapped_column(Integer, default=0, server_default=text("0"))
+    last_triggered_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         Index("idx_event_character", "owner_user_id", "character_id", "is_active"),
@@ -181,11 +174,11 @@ class EventTriggerLog(Base):
     character_id: Mapped[str] = mapped_column(Text, nullable=False)
     player_id: Mapped[str] = mapped_column(Text, nullable=False)
     session_id: Mapped[str] = mapped_column(Text, nullable=False)
-    triggered_at: Mapped[Optional[str]] = mapped_column(Text)
-    context_snapshot: Mapped[Optional[str]] = mapped_column(Text)
-    effects_applied: Mapped[Optional[str]] = mapped_column(Text)
-    execution_id: Mapped[Optional[str]] = mapped_column(Text)
-    status: Mapped[Optional[str]] = mapped_column(Text, default="succeeded", server_default=text("'succeeded'"))
+    triggered_at: Mapped[str | None] = mapped_column(Text)
+    context_snapshot: Mapped[str | None] = mapped_column(Text)
+    effects_applied: Mapped[str | None] = mapped_column(Text)
+    execution_id: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str | None] = mapped_column(Text, default="succeeded", server_default=text("'succeeded'"))
 
     __table_args__ = (
         ForeignKeyConstraint(
@@ -202,9 +195,9 @@ class EventTriggerGuard(Base):
     player_id: Mapped[str] = mapped_column(Text, primary_key=True)
     event_id: Mapped[str] = mapped_column(Text, primary_key=True)
     character_scope: Mapped[str] = mapped_column(Text, primary_key=True)
-    last_triggered_at: Mapped[Optional[str]] = mapped_column(Text)
-    claim_token: Mapped[Optional[str]] = mapped_column(Text)
-    claim_expires_at: Mapped[Optional[str]] = mapped_column(Text)
+    last_triggered_at: Mapped[str | None] = mapped_column(Text)
+    claim_token: Mapped[str | None] = mapped_column(Text)
+    claim_expires_at: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
@@ -213,9 +206,9 @@ class EventExclusiveGroupGuard(Base):
 
     player_id: Mapped[str] = mapped_column(Text, primary_key=True)
     exclusive_group: Mapped[str] = mapped_column(Text, primary_key=True)
-    selected_event_id: Mapped[Optional[str]] = mapped_column(Text)
-    claim_token: Mapped[Optional[str]] = mapped_column(Text)
-    claim_expires_at: Mapped[Optional[str]] = mapped_column(Text)
+    selected_event_id: Mapped[str | None] = mapped_column(Text)
+    claim_token: Mapped[str | None] = mapped_column(Text)
+    claim_expires_at: Mapped[str | None] = mapped_column(Text)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
 
@@ -227,9 +220,9 @@ class EventExecutionBatch(Base):
     trigger_source: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
     results_data: Mapped[str] = mapped_column(Text, nullable=False)
-    deduplicated_count: Mapped[Optional[int]] = mapped_column(Integer, default=0, server_default=text("0"))
+    deduplicated_count: Mapped[int | None] = mapped_column(Integer, default=0, server_default=text("0"))
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
-    completed_at: Mapped[Optional[str]] = mapped_column(Text)
+    completed_at: Mapped[str | None] = mapped_column(Text)
 
 
 class EventExecution(Base):
@@ -245,10 +238,10 @@ class EventExecution(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False)
     effects_data: Mapped[str] = mapped_column(Text, nullable=False)
     result_data: Mapped[str] = mapped_column(Text, nullable=False)
-    error: Mapped[Optional[str]] = mapped_column(Text)
-    duration_ms: Mapped[Optional[float]] = mapped_column(Float, default=0.0, server_default=text("0.0"))
+    error: Mapped[str | None] = mapped_column(Text)
+    duration_ms: Mapped[float | None] = mapped_column(Float, default=0.0, server_default=text("0.0"))
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
-    completed_at: Mapped[Optional[str]] = mapped_column(Text)
+    completed_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         UniqueConstraint("owner_user_id", "event_id", "execution_key"),
@@ -278,11 +271,11 @@ class EventContextState(Base):
     character_id: Mapped[str] = mapped_column(Text, nullable=False)
     player_id: Mapped[str] = mapped_column(Text, nullable=False)
     context_data: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[Optional[str]] = mapped_column(Text, default="active", server_default=text("'active'"))
-    progress: Mapped[Optional[float]] = mapped_column(Float, default=0.0, server_default=text("0.0"))
-    last_session_id: Mapped[Optional[str]] = mapped_column(Text)
-    created_at: Mapped[Optional[str]] = mapped_column(Text)
-    updated_at: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str | None] = mapped_column(Text, default="active", server_default=text("'active'"))
+    progress: Mapped[float | None] = mapped_column(Float, default=0.0, server_default=text("0.0"))
+    last_session_id: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         UniqueConstraint("event_id", "character_id", "player_id"),
@@ -297,18 +290,18 @@ class EventScheduleState(Base):
     character_id: Mapped[str] = mapped_column(Text, primary_key=True)
     player_id: Mapped[str] = mapped_column(Text, primary_key=True)
     schedule: Mapped[str] = mapped_column(Text, nullable=False)
-    last_checked_at: Mapped[Optional[str]] = mapped_column(Text)
-    last_run_at: Mapped[Optional[str]] = mapped_column(Text)
-    next_run_at: Mapped[Optional[str]] = mapped_column(Text)
-    next_due_real_at: Mapped[Optional[str]] = mapped_column(Text)
+    last_checked_at: Mapped[str | None] = mapped_column(Text)
+    last_run_at: Mapped[str | None] = mapped_column(Text)
+    next_run_at: Mapped[str | None] = mapped_column(Text)
+    next_due_real_at: Mapped[str | None] = mapped_column(Text)
     missed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
-    status: Mapped[Optional[str]] = mapped_column(Text, default="active", server_default=text("'active'"))
-    lease_owner: Mapped[Optional[str]] = mapped_column(Text)
-    lease_expires_at: Mapped[Optional[str]] = mapped_column(Text)
-    last_error: Mapped[Optional[str]] = mapped_column(Text)
-    last_failed_at: Mapped[Optional[str]] = mapped_column(Text)
-    created_at: Mapped[Optional[str]] = mapped_column(Text)
-    updated_at: Mapped[Optional[str]] = mapped_column(Text)
+    status: Mapped[str | None] = mapped_column(Text, default="active", server_default=text("'active'"))
+    lease_owner: Mapped[str | None] = mapped_column(Text)
+    lease_expires_at: Mapped[str | None] = mapped_column(Text)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    last_failed_at: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         Index("idx_event_schedule_due", "status", "next_run_at"),
@@ -322,13 +315,13 @@ class EventTemplate(Base):
 
     template_id: Mapped[str] = mapped_column(Text, primary_key=True)
     template_name: Mapped[str] = mapped_column(Text, nullable=False)
-    category: Mapped[Optional[str]] = mapped_column(Text)
-    description: Mapped[Optional[str]] = mapped_column(Text)
+    category: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
     trigger_config: Mapped[str] = mapped_column(Text, nullable=False)
     effects_config: Mapped[str] = mapped_column(Text, nullable=False)
-    template_metadata: Mapped[Optional[str]] = mapped_column("metadata", Text)
-    created_at: Mapped[Optional[str]] = mapped_column(Text)
-    updated_at: Mapped[Optional[str]] = mapped_column(Text)
+    template_metadata: Mapped[str | None] = mapped_column("metadata", Text)
+    created_at: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[str | None] = mapped_column(Text)
 
 
 # ===========================================================================
@@ -342,11 +335,11 @@ class CharacterRelationship(Base):
     owner_user_id: Mapped[str] = mapped_column(Text, ForeignKey("users.user_id"), nullable=False)
     character_id_a: Mapped[str] = mapped_column(Text, nullable=False)
     character_id_b: Mapped[str] = mapped_column(Text, nullable=False)
-    relationship_type: Mapped[Optional[str]] = mapped_column(Text)
-    affinity: Mapped[Optional[float]] = mapped_column(Float, default=0.0, server_default=text("0.0"))
-    description: Mapped[Optional[str]] = mapped_column(Text)
-    created_at: Mapped[Optional[str]] = mapped_column(Text)
-    updated_at: Mapped[Optional[str]] = mapped_column(Text)
+    relationship_type: Mapped[str | None] = mapped_column(Text)
+    affinity: Mapped[float | None] = mapped_column(Float, default=0.0, server_default=text("0.0"))
+    description: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         UniqueConstraint("owner_user_id", "character_id_a", "character_id_b"),
@@ -372,10 +365,10 @@ class RelationshipState(Base):
 
     character_id: Mapped[str] = mapped_column(Text, primary_key=True)
     player_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    affection_level: Mapped[Optional[float]] = mapped_column(Float, default=0.0, server_default=text("0.0"))
-    trust_level: Mapped[Optional[float]] = mapped_column(Float, default=0.0, server_default=text("0.0"))
-    current_mood: Mapped[Optional[str]] = mapped_column(Text, default="neutral", server_default=text("'neutral'"))
-    updated_at: Mapped[Optional[str]] = mapped_column(Text)
+    affection_level: Mapped[float | None] = mapped_column(Float, default=0.0, server_default=text("0.0"))
+    trust_level: Mapped[float | None] = mapped_column(Float, default=0.0, server_default=text("0.0"))
+    current_mood: Mapped[str | None] = mapped_column(Text, default="neutral", server_default=text("'neutral'"))
+    updated_at: Mapped[str | None] = mapped_column(Text)
 
 
 # ===========================================================================
@@ -389,9 +382,9 @@ class LongTermFact(Base):
     character_id: Mapped[str] = mapped_column(Text, nullable=False)
     player_id: Mapped[str] = mapped_column(Text, nullable=False)
     fact_text: Mapped[str] = mapped_column(Text, nullable=False)
-    importance: Mapped[Optional[int]] = mapped_column(Integer, default=5, server_default=text("5"))
-    created_at: Mapped[Optional[str]] = mapped_column(Text)
-    last_referenced: Mapped[Optional[str]] = mapped_column(Text)
+    importance: Mapped[int | None] = mapped_column(Integer, default=5, server_default=text("5"))
+    created_at: Mapped[str | None] = mapped_column(Text)
+    last_referenced: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         Index("idx_fact_lookup", "character_id", "player_id", "importance", "last_referenced"),
@@ -411,14 +404,14 @@ class DialogueSession(Base):
     character_id: Mapped[str] = mapped_column(Text, nullable=False)
     player_id: Mapped[str] = mapped_column(Text, nullable=False)
     player_name: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[Optional[str]] = mapped_column(Text)
-    ended_at: Mapped[Optional[str]] = mapped_column(Text)
-    status: Mapped[Optional[str]] = mapped_column(Text, default="active", server_default=text("'active'"))
-    group_name: Mapped[Optional[str]] = mapped_column(Text)
-    group_thread_id: Mapped[Optional[str]] = mapped_column(Text)
-    story_id: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[str | None] = mapped_column(Text)
+    ended_at: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str | None] = mapped_column(Text, default="active", server_default=text("'active'"))
+    group_name: Mapped[str | None] = mapped_column(Text)
+    group_thread_id: Mapped[str | None] = mapped_column(Text)
+    story_id: Mapped[str | None] = mapped_column(Text)
     locale: Mapped[str] = mapped_column(Text, nullable=False, default="zh-CN", server_default=text("'zh-CN'"))
-    is_multi_character: Mapped[Optional[int]] = mapped_column(Integer, default=0, server_default=text("0"))
+    is_multi_character: Mapped[int | None] = mapped_column(Integer, default=0, server_default=text("0"))
 
     __table_args__ = (
         Index("idx_session_lookup", "character_id", "player_id", "created_at"),
@@ -433,12 +426,12 @@ class MultiSessionParticipant(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(Text, ForeignKey("session.session_id"), nullable=False)
     character_id: Mapped[str] = mapped_column(Text, nullable=False)
-    join_order: Mapped[Optional[int]] = mapped_column(Integer, default=0, server_default=text("0"))
-    speak_frequency: Mapped[Optional[float]] = mapped_column(Float, default=1.0, server_default=text("1.0"))
-    is_active: Mapped[Optional[int]] = mapped_column(Integer, default=1, server_default=text("1"))
-    message_count: Mapped[Optional[int]] = mapped_column(Integer, default=0, server_default=text("0"))
-    created_at: Mapped[Optional[str]] = mapped_column(Text)
-    last_spoke_at: Mapped[Optional[str]] = mapped_column(Text)
+    join_order: Mapped[int | None] = mapped_column(Integer, default=0, server_default=text("0"))
+    speak_frequency: Mapped[float | None] = mapped_column(Float, default=1.0, server_default=text("1.0"))
+    is_active: Mapped[int | None] = mapped_column(Integer, default=1, server_default=text("1"))
+    message_count: Mapped[int | None] = mapped_column(Integer, default=0, server_default=text("0"))
+    created_at: Mapped[str | None] = mapped_column(Text)
+    last_spoke_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         UniqueConstraint("session_id", "character_id"),
@@ -453,23 +446,23 @@ class ShortTermMessage(Base):
     session_id: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(Text, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    character_id: Mapped[Optional[str]] = mapped_column(Text)
-    character_name: Mapped[Optional[str]] = mapped_column(Text)
-    action: Mapped[Optional[str]] = mapped_column(Text)
-    affinity_delta: Mapped[Optional[float]] = mapped_column(Float)
-    trust_delta: Mapped[Optional[float]] = mapped_column(Float)
-    current_affinity: Mapped[Optional[float]] = mapped_column(Float)
-    current_trust: Mapped[Optional[float]] = mapped_column(Float)
-    current_mood: Mapped[Optional[str]] = mapped_column(Text)
-    event_notification: Mapped[Optional[str]] = mapped_column(Text)
-    knowledge_sources: Mapped[Optional[str]] = mapped_column(Text)
-    reply_to_message_id: Mapped[Optional[int]] = mapped_column(Integer)
-    reply_to_character_id: Mapped[Optional[str]] = mapped_column(Text)
-    intent: Mapped[Optional[str]] = mapped_column(Text)
-    topic: Mapped[Optional[str]] = mapped_column(Text)
-    trigger_source: Mapped[Optional[str]] = mapped_column(Text)
-    created_at: Mapped[Optional[str]] = mapped_column(Text)
-    world_created_at: Mapped[Optional[str]] = mapped_column(Text)
+    character_id: Mapped[str | None] = mapped_column(Text)
+    character_name: Mapped[str | None] = mapped_column(Text)
+    action: Mapped[str | None] = mapped_column(Text)
+    affinity_delta: Mapped[float | None] = mapped_column(Float)
+    trust_delta: Mapped[float | None] = mapped_column(Float)
+    current_affinity: Mapped[float | None] = mapped_column(Float)
+    current_trust: Mapped[float | None] = mapped_column(Float)
+    current_mood: Mapped[str | None] = mapped_column(Text)
+    event_notification: Mapped[str | None] = mapped_column(Text)
+    knowledge_sources: Mapped[str | None] = mapped_column(Text)
+    reply_to_message_id: Mapped[int | None] = mapped_column(Integer)
+    reply_to_character_id: Mapped[str | None] = mapped_column(Text)
+    intent: Mapped[str | None] = mapped_column(Text)
+    topic: Mapped[str | None] = mapped_column(Text)
+    trigger_source: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str | None] = mapped_column(Text)
+    world_created_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         Index("idx_message_session", "session_id", "id"),
@@ -485,13 +478,13 @@ class DialogueTurn(Base):
     player_id: Mapped[str] = mapped_column(Text, ForeignKey("users.user_id"), nullable=False)
     turn_kind: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
-    lease_owner: Mapped[Optional[str]] = mapped_column(Text)
-    lease_expires_at: Mapped[Optional[str]] = mapped_column(Text)
-    response_data: Mapped[Optional[str]] = mapped_column(Text)
-    error: Mapped[Optional[str]] = mapped_column(Text)
+    lease_owner: Mapped[str | None] = mapped_column(Text)
+    lease_expires_at: Mapped[str | None] = mapped_column(Text)
+    response_data: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
-    completed_at: Mapped[Optional[str]] = mapped_column(Text)
+    completed_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         Index("idx_dialogue_turn_session_lease", "session_id", "status", "lease_expires_at"),
@@ -512,12 +505,12 @@ class BackgroundJob(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending", server_default=text("'pending'"))
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     available_at: Mapped[str] = mapped_column(Text, nullable=False)
-    lease_owner: Mapped[Optional[str]] = mapped_column(Text)
-    lease_expires_at: Mapped[Optional[str]] = mapped_column(Text)
-    last_error: Mapped[Optional[str]] = mapped_column(Text)
+    lease_owner: Mapped[str | None] = mapped_column(Text)
+    lease_expires_at: Mapped[str | None] = mapped_column(Text)
+    last_error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
-    completed_at: Mapped[Optional[str]] = mapped_column(Text)
+    completed_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         Index("idx_background_job_claim", "status", "available_at", "lease_expires_at", "created_at"),
@@ -534,7 +527,7 @@ class KnowledgeBase(Base):
     knowledge_base_id: Mapped[str] = mapped_column(Text, primary_key=True)
     owner_user_id: Mapped[str] = mapped_column(Text, ForeignKey("users.user_id"), nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
     is_enabled: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
@@ -569,13 +562,13 @@ class KnowledgeDocument(Base):
     original_name: Mapped[str] = mapped_column(Text, nullable=False)
     media_type: Mapped[str] = mapped_column(Text, nullable=False)
     source_type: Mapped[str] = mapped_column(Text, nullable=False)
-    storage_path: Mapped[Optional[str]] = mapped_column(Text)
+    storage_path: Mapped[str | None] = mapped_column(Text)
     checksum: Mapped[str] = mapped_column(Text, nullable=False)
     byte_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     status: Mapped[str] = mapped_column(Text, nullable=False, default="queued", server_default=text("'queued'"))
-    error_message: Mapped[Optional[str]] = mapped_column(Text)
+    error_message: Mapped[str | None] = mapped_column(Text)
     extracted_chars: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
-    page_count: Mapped[Optional[int]] = mapped_column(Integer)
+    page_count: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -594,7 +587,7 @@ class KnowledgeChunk(Base):
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     char_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    source_metadata: Mapped[Optional[str]] = mapped_column(Text)
+    source_metadata: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
 
     __table_args__ = (
@@ -611,7 +604,7 @@ class KnowledgeVectorCleanup(Base):
     scope_type: Mapped[str] = mapped_column(Text, nullable=False)
     scope_id: Mapped[str] = mapped_column(Text, nullable=False)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
-    last_error: Mapped[Optional[str]] = mapped_column(Text)
+    last_error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -630,18 +623,18 @@ class PlayerEventInbox(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     player_id: Mapped[str] = mapped_column(Text, ForeignKey("users.user_id"), nullable=False)
-    event_id: Mapped[Optional[str]] = mapped_column(Text)
-    character_id: Mapped[Optional[str]] = mapped_column(Text)
-    session_id: Mapped[Optional[str]] = mapped_column(Text)
+    event_id: Mapped[str | None] = mapped_column(Text)
+    character_id: Mapped[str | None] = mapped_column(Text)
+    session_id: Mapped[str | None] = mapped_column(Text)
     event_type: Mapped[str] = mapped_column(Text, nullable=False, default="event", server_default=text("'event'"))
-    group_thread_id: Mapped[Optional[str]] = mapped_column(Text)
+    group_thread_id: Mapped[str | None] = mapped_column(Text)
     unread_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
-    title: Mapped[Optional[str]] = mapped_column(Text)
+    title: Mapped[str | None] = mapped_column(Text)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    payload: Mapped[Optional[str]] = mapped_column(Text)
-    world_created_at: Mapped[Optional[str]] = mapped_column(Text)
+    payload: Mapped[str | None] = mapped_column(Text)
+    world_created_at: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
-    read_at: Mapped[Optional[str]] = mapped_column(Text)
+    read_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         Index("idx_player_event_inbox_unread", "player_id", "read_at", "id"),
@@ -667,19 +660,19 @@ class GroupDialogueState(Base):
 
     group_thread_id: Mapped[str] = mapped_column(Text, primary_key=True)
     player_id: Mapped[str] = mapped_column(Text, ForeignKey("users.user_id"), nullable=False)
-    current_topic: Mapped[Optional[str]] = mapped_column(Text)
-    topic_source: Mapped[Optional[str]] = mapped_column(Text)
-    last_reply_to_message_id: Mapped[Optional[int]] = mapped_column(Integer)
-    last_reply_to_character_id: Mapped[Optional[str]] = mapped_column(Text)
-    last_speaker_id: Mapped[Optional[str]] = mapped_column(Text)
+    current_topic: Mapped[str | None] = mapped_column(Text)
+    topic_source: Mapped[str | None] = mapped_column(Text)
+    last_reply_to_message_id: Mapped[int | None] = mapped_column(Integer)
+    last_reply_to_character_id: Mapped[str | None] = mapped_column(Text)
+    last_speaker_id: Mapped[str | None] = mapped_column(Text)
     waiting_for_player: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     unresolved_hooks: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default=text("'[]'"))
-    last_autonomous_pulse_at: Mapped[Optional[str]] = mapped_column(Text)
-    last_autonomous_world_at: Mapped[Optional[str]] = mapped_column(Text)
-    daily_message_date: Mapped[Optional[str]] = mapped_column(Text)
+    last_autonomous_pulse_at: Mapped[str | None] = mapped_column(Text)
+    last_autonomous_world_at: Mapped[str | None] = mapped_column(Text)
+    daily_message_date: Mapped[str | None] = mapped_column(Text)
     daily_message_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
-    lease_owner: Mapped[Optional[str]] = mapped_column(Text)
-    lease_expires_at: Mapped[Optional[str]] = mapped_column(Text)
+    lease_owner: Mapped[str | None] = mapped_column(Text)
+    lease_expires_at: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -700,9 +693,9 @@ class SessionSummary(Base):
     character_id: Mapped[str] = mapped_column(Text, nullable=False)
     player_id: Mapped[str] = mapped_column(Text, nullable=False)
     summary_text: Mapped[str] = mapped_column(Text, nullable=False)
-    message_count: Mapped[Optional[int]] = mapped_column(Integer)
-    summary_status: Mapped[Optional[str]] = mapped_column(Text, default="completed", server_default=text("'completed'"))
-    created_at: Mapped[Optional[str]] = mapped_column(Text)
+    message_count: Mapped[int | None] = mapped_column(Integer)
+    summary_status: Mapped[str | None] = mapped_column(Text, default="completed", server_default=text("'completed'"))
+    created_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         Index("idx_summary_lookup", "session_id", "created_at"),
@@ -740,15 +733,15 @@ class DomainEvent(Base):
     event_type: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[str] = mapped_column(Text, nullable=False)
     meta_data: Mapped[str] = mapped_column("metadata", Text, nullable=False)
-    correlation_id: Mapped[Optional[str]] = mapped_column(Text)
-    causation_id: Mapped[Optional[str]] = mapped_column(Text)
-    session_id: Mapped[Optional[str]] = mapped_column(Text)
-    group_thread_id: Mapped[Optional[str]] = mapped_column(Text)
-    source_turn_id: Mapped[Optional[str]] = mapped_column(Text)
-    source_message_id: Mapped[Optional[int]] = mapped_column(
+    correlation_id: Mapped[str | None] = mapped_column(Text)
+    causation_id: Mapped[str | None] = mapped_column(Text)
+    session_id: Mapped[str | None] = mapped_column(Text)
+    group_thread_id: Mapped[str | None] = mapped_column(Text)
+    source_turn_id: Mapped[str | None] = mapped_column(Text)
+    source_message_id: Mapped[int | None] = mapped_column(
         BigInteger().with_variant(Integer, "sqlite")
     )
-    world_occurred_at: Mapped[Optional[str]] = mapped_column(Text)
+    world_occurred_at: Mapped[str | None] = mapped_column(Text)
     recorded_at: Mapped[str] = mapped_column(Text, nullable=False)
 
     __table_args__ = (
@@ -801,15 +794,15 @@ class FactClaim(Base):
     source_kind: Mapped[str] = mapped_column(Text, nullable=False)
     provenance: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default=text("'{}'"))
     source_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default=text("'[]'"))
-    supersedes_claim_id: Mapped[Optional[str]] = mapped_column(Text, ForeignKey("fact_claim.claim_id"))
-    superseded_by_claim_id: Mapped[Optional[str]] = mapped_column(Text, ForeignKey("fact_claim.claim_id"))
+    supersedes_claim_id: Mapped[str | None] = mapped_column(Text, ForeignKey("fact_claim.claim_id"))
+    superseded_by_claim_id: Mapped[str | None] = mapped_column(Text, ForeignKey("fact_claim.claim_id"))
     ledger_version: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer, "sqlite"), nullable=False
     )
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
-    verified_at: Mapped[Optional[str]] = mapped_column(Text)
-    retracted_at: Mapped[Optional[str]] = mapped_column(Text)
+    verified_at: Mapped[str | None] = mapped_column(Text)
+    retracted_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         CheckConstraint("scope_type IN ('character', 'group_thread', 'story')"),
@@ -830,14 +823,14 @@ class StoryState(Base):
     story_id: Mapped[str] = mapped_column(Text, primary_key=True)
     status: Mapped[str] = mapped_column(Text, nullable=False)
     progress: Mapped[float] = mapped_column(Float, nullable=False, default=0, server_default=text("0"))
-    terminal_reason: Mapped[Optional[str]] = mapped_column(Text)
+    terminal_reason: Mapped[str | None] = mapped_column(Text)
     ledger_version: Mapped[int] = mapped_column(
         BigInteger().with_variant(Integer, "sqlite"), nullable=False
     )
     started_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
-    completed_at: Mapped[Optional[str]] = mapped_column(Text)
-    failed_at: Mapped[Optional[str]] = mapped_column(Text)
+    completed_at: Mapped[str | None] = mapped_column(Text)
+    failed_at: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
         CheckConstraint("status IN ('active', 'completed', 'failed')"),
@@ -856,15 +849,15 @@ class SharedMemory(Base):
     owner_user_id: Mapped[str] = mapped_column(Text, nullable=False)
     character_a_id: Mapped[str] = mapped_column(Text, nullable=False)
     character_b_id: Mapped[str] = mapped_column(Text, nullable=False)
-    observer_character_id: Mapped[Optional[str]] = mapped_column(Text)
-    target_character_id: Mapped[Optional[str]] = mapped_column(Text)
+    observer_character_id: Mapped[str | None] = mapped_column(Text)
+    target_character_id: Mapped[str | None] = mapped_column(Text)
     memory_kind: Mapped[str] = mapped_column(Text, nullable=False, default="legacy_archived", server_default=text("'legacy_archived'"))
     memory_text: Mapped[str] = mapped_column(Text, nullable=False)
-    context: Mapped[Optional[str]] = mapped_column(Text)
-    importance: Mapped[Optional[float]] = mapped_column(Float, default=0.5, server_default=text("0.5"))
-    created_at: Mapped[Optional[str]] = mapped_column(Text)
-    last_referenced: Mapped[Optional[str]] = mapped_column(Text)
-    reference_count: Mapped[Optional[int]] = mapped_column(Integer, default=0, server_default=text("0"))
+    context: Mapped[str | None] = mapped_column(Text)
+    importance: Mapped[float | None] = mapped_column(Float, default=0.5, server_default=text("0.5"))
+    created_at: Mapped[str | None] = mapped_column(Text)
+    last_referenced: Mapped[str | None] = mapped_column(Text)
+    reference_count: Mapped[int | None] = mapped_column(Integer, default=0, server_default=text("0"))
 
     __table_args__ = (
         Index("idx_shared_memory_owner_pair", "owner_user_id", "character_a_id", "character_b_id", "importance"),
@@ -884,12 +877,12 @@ class GroupMemory(Base):
     id: Mapped[str] = mapped_column(Text, primary_key=True)
     session_id: Mapped[str] = mapped_column(Text, nullable=False)
     memory_text: Mapped[str] = mapped_column(Text, nullable=False)
-    participants: Mapped[Optional[str]] = mapped_column(Text)
-    context: Mapped[Optional[str]] = mapped_column(Text)
-    importance: Mapped[Optional[float]] = mapped_column(Float, default=0.5, server_default=text("0.5"))
-    created_at: Mapped[Optional[str]] = mapped_column(Text)
-    last_referenced: Mapped[Optional[str]] = mapped_column(Text)
-    reference_count: Mapped[Optional[int]] = mapped_column(Integer, default=0, server_default=text("0"))
+    participants: Mapped[str | None] = mapped_column(Text)
+    context: Mapped[str | None] = mapped_column(Text)
+    importance: Mapped[float | None] = mapped_column(Float, default=0.5, server_default=text("0.5"))
+    created_at: Mapped[str | None] = mapped_column(Text)
+    last_referenced: Mapped[str | None] = mapped_column(Text)
+    reference_count: Mapped[int | None] = mapped_column(Integer, default=0, server_default=text("0"))
 
 
 # ===========================================================================

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from pathlib import Path
 import uuid
+from pathlib import Path
 
 from memoria.core.config import configs
 from memoria.core.knowledge_documents import chunk_document, extract_document

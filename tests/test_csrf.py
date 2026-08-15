@@ -33,7 +33,7 @@ def test_login_sets_csrf_cookie_readable():
 
 
 def test_validate_csrf_rejects_cookie_write_without_header():
-    from memoria.core.csrf import CSRF_COOKIE_NAME, validate_csrf
+    from memoria.core.csrf import validate_csrf
 
     scope = {
         "type": "http",
@@ -57,7 +57,7 @@ def test_validate_csrf_rejects_cookie_write_without_header():
 
 
 def test_validate_csrf_accepts_matching_double_submit():
-    from memoria.core.csrf import CSRF_COOKIE_NAME, CSRF_HEADER_NAME, validate_csrf
+    from memoria.core.csrf import validate_csrf
 
     scope = {
         "type": "http",

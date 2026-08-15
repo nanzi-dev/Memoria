@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -15,7 +15,6 @@ from memoria.core.event_schema import EventDefinition
 from memoria.core.knowledge_documents import chunk_document, extract_document
 from memoria.db import repository
 from scripts.seed_story_module import load_story_module, seed_story_module
-
 
 MODULE_ROOT = Path(__file__).resolve().parents[1] / "examples" / "echo_archive"
 

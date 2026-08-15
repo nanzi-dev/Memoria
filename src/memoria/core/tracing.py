@@ -9,7 +9,6 @@ from __future__ import annotations
 from contextlib import contextmanager, nullcontext
 from typing import Any
 
-
 try:
     from opentelemetry import trace
 

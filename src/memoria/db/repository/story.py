@@ -2,32 +2,13 @@
 from __future__ import annotations
 
 # Standard/third-party imports used across repository domains.
-from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
-import hashlib
-import json
 import logging
-import sqlite3
 import uuid
-from typing import Any, Callable
-from urllib.parse import urlsplit
-import re
-from difflib import SequenceMatcher
+from typing import Any
 
 from sqlalchemy import text
 
-from memoria.core.config import configs
-from memoria.core import performance, tracing
 from memoria.core.domain_events import NewDomainEvent, StoredDomainEvent
-from memoria.core.fact_claim_policy import (
-    ADMIN_VERIFICATION_SOURCE_KIND,
-    CLAIM_SOURCE_KINDS,
-    clean_source_ids,
-    derive_fact_claim_identity,
-    evaluate_verification,
-    normalize_evidence_entry,
-    normalize_fact_text,
-)
 
 try:
     import psycopg
@@ -38,17 +19,14 @@ except ImportError:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
-# Import shared helpers / connection / schema. Private names included.
-from memoria.db.repository._common import *  # noqa: F403
-from memoria.db.repository import _common as _common_mod
-from memoria.db.repository._common import db_session
+from memoria.db.repository._common import (
+    db_session,
+)
+from memoria.db.repository.domain_events import (
+    DomainEventConcurrencyError,
+    append_domain_event,
+)
 
-# Ensure private helpers from _common are visible as bare names.
-for _name, _value in vars(_common_mod).items():
-    if _name.startswith('__'):
-        continue
-    globals().setdefault(_name, _value)
-del _name, _value, _common_mod
 
 # =========================
 # story state projection
@@ -70,8 +48,15 @@ def _decode_story_state_row(row) -> dict | None:
     if row is None:
         return None
     state = dict(row)
-    state["progress"] = float(state["progress"])
-    state["ledger_version"] = int(state["ledger_version"])
+    try:
+        state["progress"] = float(state["progress"])
+        state["ledger_version"] = int(state["ledger_version"])
+    except (TypeError, ValueError):
+        logger.warning(
+            "story_state 数值字段损坏，返回 None（story_id=%s）",
+            state.get("story_id"),
+        )
+        return None
     return state
 
 

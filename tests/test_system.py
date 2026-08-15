@@ -4,10 +4,11 @@ Phase 5 系统级测试：健康检查、配置校验、速率限制、懒加载
 import asyncio
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor
-from types import SimpleNamespace
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 
@@ -69,11 +70,19 @@ class TestLogLevel:
 
 
 class TestConfigValidation:
-    def test_validate_missing_key(self):
+    def test_validate_missing_key(self, monkeypatch):
+        from pydantic import SecretStr
+
+        from memoria.core.config import configs
         from memoria.main import _validate_config
+
+        monkeypatch.setattr(configs, "llm_api_key", SecretStr(""))
+        monkeypatch.setattr(configs, "llm_base_url", "")
         # Config validation reports missing key as warning only
         errors = _validate_config()
         assert isinstance(errors, list)
+        assert any("LLM_API_KEY" in str(error) for error in errors)
+        assert any("LLM_BASE_URL" in str(error) for error in errors)
 
 
 class TestKnowledgeRecovery:
@@ -134,16 +143,18 @@ class TestKnowledgeRecovery:
 
 class TestRateLimiting:
     def test_rate_limit_allows_first_requests(self):
-        from memoria.main import _check_rate_limit
         import uuid
+
+        from memoria.main import _check_rate_limit
         pid = f"rl_test_{uuid.uuid4().hex[:6]}"
         # First requests should pass
         for _ in range(10):
             assert _check_rate_limit(pid), "First 10 requests should pass"
 
     def test_rate_limit_blocks_excessive(self):
-        from memoria.main import _check_rate_limit
         import uuid
+
+        from memoria.main import _check_rate_limit
         pid = f"rl_max_{uuid.uuid4().hex[:6]}"
         # Fill to limit
         for _ in range(60):
@@ -152,8 +163,9 @@ class TestRateLimiting:
         assert not _check_rate_limit(pid), "61st request should be blocked"
 
     def test_rate_limit_respects_player_id(self):
-        from memoria.main import _check_rate_limit
         import uuid
+
+        from memoria.main import _check_rate_limit
         p1 = f"p1_{uuid.uuid4().hex[:6]}"
         p2 = f"p2_{uuid.uuid4().hex[:6]}"
         for _ in range(60):
@@ -161,8 +173,9 @@ class TestRateLimiting:
         assert _check_rate_limit(p2), "Different player should not be limited"
 
     def test_rate_limit_is_thread_safe(self):
-        from memoria.main import _check_rate_limit
         import uuid
+
+        from memoria.main import _check_rate_limit
 
         pid = f"rl_concurrent_{uuid.uuid4().hex[:6]}"
         with ThreadPoolExecutor(max_workers=16) as executor:

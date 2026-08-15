@@ -78,8 +78,12 @@ def install_static_routes(app, dist: Path) -> None:
     async def spa_fallback(full_path: str):
         if not full_path:
             return FileResponse(dist / "index.html")
-        # 路径参数不含前导 "/"，补回后再做前缀判断
-        if ("/" + full_path).startswith(_API_PREFIXES):
+        # 路径参数不含前导 "/"，补回后再做精确段匹配，避免 /adminfoo、/apiv2 误判。
+        request_path = "/" + full_path
+        if any(
+            request_path == prefix or request_path.startswith(prefix + "/")
+            for prefix in _API_PREFIXES
+        ):
             return JSONResponse(
                 status_code=404,
                 content={"detail": "Not Found"},

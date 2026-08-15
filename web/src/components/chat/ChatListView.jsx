@@ -165,7 +165,7 @@ export function ChatSessionDirectory({
                   key={char.character_id}
                   onClick={() => active
                     ? onRequestSingleChat(char)
-                    : onOfflineContact()}
+                    : onOfflineContact(char)}
                   className="flex min-h-14 w-full items-center gap-3 rounded-md border border-transparent px-2 py-2 text-left transition-colors hover:border-border hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   style={{ animationDelay: `${Math.min(index, 12) * 20}ms` }}
                 >

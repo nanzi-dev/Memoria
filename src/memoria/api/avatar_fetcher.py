@@ -16,7 +16,6 @@ import requests
 from fastapi import HTTPException
 from requests.adapters import HTTPAdapter
 
-
 ALLOWED_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 MAX_REMOTE_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_REDIRECTS = 3

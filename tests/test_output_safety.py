@@ -1,5 +1,5 @@
 def test_dialogue_safety_stream_withholds_split_risk_phrase():
-    from memoria.core.output_safety import DialogueSafetyStream, FALLBACK_LINE
+    from memoria.core.output_safety import FALLBACK_LINE, DialogueSafetyStream
 
     emitted = []
     stream = DialogueSafetyStream(emitted.append)
@@ -44,7 +44,7 @@ def test_safety_check_allows_normal_roleplay():
 
 
 def test_dialogue_safety_stream_blocks_split_english_phrase():
-    from memoria.core.output_safety import DialogueSafetyStream, FALLBACK_LINE
+    from memoria.core.output_safety import FALLBACK_LINE, DialogueSafetyStream
 
     emitted = []
     stream = DialogueSafetyStream(emitted.append)

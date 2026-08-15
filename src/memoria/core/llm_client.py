@@ -9,13 +9,13 @@ LLM 调用适配层
 4. 永不因模型输出格式问题导致系统崩溃
 """
 
-import json
 import inspect
+import json
 import logging
 import re
 import threading
+from collections.abc import Callable
 from time import perf_counter
-from typing import Callable, Optional
 from urllib.parse import urlsplit
 from urllib.request import getproxies, proxy_bypass
 
@@ -222,9 +222,7 @@ class _DialogueJsonStream:
 
             if char in "{[":
                 self._stack.append(char)
-            elif char == "}" and self._stack and self._stack[-1] == "{":
-                self._stack.pop()
-            elif char == "]" and self._stack and self._stack[-1] == "[":
+            elif char == "}" and self._stack and self._stack[-1] == "{" or char == "]" and self._stack and self._stack[-1] == "[":
                 self._stack.pop()
 
             if not char.isspace():
@@ -273,6 +271,13 @@ def _consume_role_stream(
         stream_error = exc
         performance.increment("llm.stream.interrupted")
         logger.warning("LLM 流式响应中断，使用已接收的部分输出: %s", exc)
+    finally:
+        close = getattr(response, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception as close_exc:
+                logger.debug("关闭流式响应失败: %s", close_exc)
     _record_provider_usage(usage, task_name="role_turn")
     return (
         "".join(raw_parts),
@@ -451,7 +456,7 @@ class LLMOutputParseError(Exception):
 # =========================
 # JSON 提取器（宽松模式）
 # =========================
-def _extract_json(raw_text: str) -> Optional[dict]:
+def _extract_json(raw_text: str) -> dict | None:
     """
     从模型输出中尽可能提取 JSON
 
@@ -475,7 +480,7 @@ def _extract_json(raw_text: str) -> Optional[dict]:
     # -------------------------
     # 情况2：```json 或 ``` 包裹
     # -------------------------
-    code_block = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.S)
+    code_block = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
     if code_block:
         try:
             return json.loads(code_block.group(1).strip())
@@ -513,13 +518,13 @@ def _extract_json(raw_text: str) -> Optional[dict]:
 
 def _strip_markdown_code_fence(raw_text: str) -> str:
     text = (raw_text or "").strip()
-    code_block = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.S)
+    code_block = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
     if code_block:
         return code_block.group(1).strip()
     return text
 
 
-def _extract_balanced_json_object(raw_text: str) -> Optional[str]:
+def _extract_balanced_json_object(raw_text: str) -> str | None:
     """
     从混杂文本中按括号配平提取第一个 JSON 对象。
 
@@ -571,7 +576,7 @@ def _json_loads_string(value: str) -> str:
         return value.replace('\\"', '"').replace("\\n", "\n").strip()
 
 
-def _extract_jsonish_string_field(text: str, field: str) -> Optional[str]:
+def _extract_jsonish_string_field(text: str, field: str) -> str | None:
     """
     从整体 JSON 已经损坏的文本里提取字符串字段。
 
@@ -595,7 +600,7 @@ def _extract_jsonish_string_field(text: str, field: str) -> Optional[str]:
     bare_match = re.search(
         rf'"{re.escape(field)}"\s*:\s*(null|[^,\n\r}}]+)',
         text,
-        re.I,
+        re.IGNORECASE,
     )
     if not bare_match:
         return None
@@ -629,7 +634,12 @@ def _looks_like_provider_rejection(raw_text: str) -> bool:
     )
 
 
-def _local_role_turn_fallback(raw_text: str, default_action: str = "neutral") -> Optional[dict]:
+def looks_like_provider_rejection(raw_text: str) -> bool:
+    """供 output_safety 等模块判断服务商拒答/风控文本的公开包装函数。"""
+    return _looks_like_provider_rejection(raw_text)
+
+
+def _local_role_turn_fallback(raw_text: str, default_action: str = "neutral") -> dict | None:
     """
     修复模型也失败时，在本地从 JSON-ish 输出里保底提取角色回合字段。
     """
@@ -921,6 +931,25 @@ def call_role_turn(
                     performance.increment("llm.calls.failed")
     
     if on_dialogue_delta is None:
+        if not getattr(response, "choices", None):
+            logger.warning(
+                "LLM 非流式响应缺少 choices，返回本地兜底: model=%s",
+                model,
+            )
+            performance.increment("llm.calls.failed")
+            return _finalize_role_turn_result(
+                {
+                    "dialogue": "……",
+                    "action": "neutral",
+                    "affinity_delta": 0,
+                    "trust_delta": 0,
+                    "mood_after": None,
+                    "memory_worth_keeping": None,
+                    "_fallback_mode": True,
+                    "_fallback_parser": "empty_choices",
+                },
+                None,
+            )
         raw_text = response.choices[0].message.content or ""
         _record_provider_usage(getattr(response, "usage", None), task_name=task_name)
     performance.observe("llm.output_chars", len(raw_text))
@@ -986,21 +1015,20 @@ def call_light_task(
         with tracing.start_span(
             "llm.light_task",
             **{"llm.model": model, "llm.task": task_name},
-        ):
-            with performance.measure("llm.light_task"):
-                _record_llm_call(kind="light", task_name=task_name, model=model)
-                try:
-                    response = _retry_call(
-                        _get_light_client().chat.completions.create,
-                        max_attempts=max_attempts,
-                        model=model,
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=output_limit,
-                        temperature=0.3,
-                    )
-                except Exception:
-                    performance.increment("llm.calls.failed")
-                    raise
+        ), performance.measure("llm.light_task"):
+            _record_llm_call(kind="light", task_name=task_name, model=model)
+            try:
+                response = _retry_call(
+                    _get_light_client().chat.completions.create,
+                    max_attempts=max_attempts,
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=output_limit,
+                    temperature=0.3,
+                )
+            except Exception:
+                performance.increment("llm.calls.failed")
+                raise
         performance.increment("llm.calls.succeeded")
         _record_provider_usage(getattr(response, "usage", None), task_name=task_name)
         

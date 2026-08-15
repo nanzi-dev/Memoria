@@ -33,12 +33,7 @@ numpy<2.0,>=1.22.5
 pypdf==5.1.0
 python-docx==1.1.2
 
-# 测试依赖
-pytest==7.4.3
-pytest-asyncio==0.21.1
-pytest-cov==4.1.0
-
-# 开发工具（可选）
-# pytest==8.3.3
+# 测试/开发依赖请使用: pip install -e ".[dev]"
+# 生产发布包不安装 pytest；开发工具可选:
 # black==24.10.0
-# ruff==0.7.4
+# ruff>=0.7.4

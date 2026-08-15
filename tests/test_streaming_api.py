@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 
@@ -298,6 +297,42 @@ async def test_sse_bridge_uses_a_bounded_event_queue(monkeypatch):
 
     assert queue_sizes == [streaming.STREAM_EVENT_QUEUE_SIZE]
     assert queue_sizes[0] > 0
+
+
+
+@pytest.mark.asyncio
+async def test_sse_bridge_aborts_worker_when_consumer_is_too_slow(monkeypatch):
+    from memoria.api import streaming
+
+    monkeypatch.setattr(streaming, "STREAM_EVENT_QUEUE_SIZE", 2)
+    monkeypatch.setattr(
+        streaming,
+        "STREAM_BACKPRESSURE_TIMEOUT_SECONDS",
+        0.05,
+    )
+    worker_done = threading.Event()
+
+    def slow_consumer_worker(event_sink):
+        try:
+            for index in range(1000):
+                event_sink("stage", {"index": index})
+            return {"dialogue": "done"}
+        finally:
+            worker_done.set()
+
+    response = streaming.create_sse_response(
+        slow_consumer_worker,
+        started_data={"request_id": "req-backpressure"},
+    )
+    iterator = response.body_iterator.__aiter__()
+
+    try:
+        # 只消费第一条事件，之后不再读取，模拟慢消费者。
+        first = await asyncio.wait_for(iterator.__anext__(), timeout=1)
+        assert first.startswith("event: turn_started\n")
+        assert await asyncio.to_thread(worker_done.wait, 1)
+    finally:
+        await iterator.aclose()
 
 
 @pytest.mark.asyncio

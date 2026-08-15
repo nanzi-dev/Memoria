@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from memoria.core.locale import Locale
 
+
 # =========================
 # 基础元信息
 # =========================

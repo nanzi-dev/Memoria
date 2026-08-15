@@ -43,6 +43,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { eventAdmin } from '@/api/memoria';
 import { useDialog } from '@/context/DialogContext';
 import { useUser } from '@/context/UserContext';
+import useAutoDismissNotice from '@/hooks/useAutoDismissNotice';
 import { eventEditorPath } from '@/utils/navigationState';
 import {
   describeEventTrigger,
@@ -160,7 +161,7 @@ export default function EventList() {
   const [sort, setSort] = useState('priority_desc');
   const [search, setSearch] = useState('');
   const [busyEventId, setBusyEventId] = useState(null);
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useAutoDismissNotice(1800);
   const loadRequestRef = useRef(0);
   const [selectedEventId, setSelectedEventId] = useState(null);
   const [selectedEvent, setSelectedEvent] = useState(null);
@@ -257,7 +258,6 @@ export default function EventList() {
         prev?.event_id === evt.event_id ? { ...prev, is_active: !evt.is_active } : prev
       ));
       setNotice(!evt.is_active ? '事件已启用' : '事件已禁用');
-      window.setTimeout(() => setNotice(''), 1800);
     } catch (e) {
       const message = e.message || '切换事件状态失败';
       setError(message);
@@ -282,7 +282,6 @@ export default function EventList() {
       await eventAdmin.delete(evt.event_id);
       setEvents(prev => prev.filter(e => e.event_id !== evt.event_id));
       setNotice('事件已删除');
-      window.setTimeout(() => setNotice(''), 1800);
     } catch (e) {
       const message = e.message || '删除事件失败';
       setError(message);

@@ -1,11 +1,15 @@
 """
 API 请求/响应模型验证
 """
-import pytest, sys, uuid
+import sys
 from pathlib import Path
+
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from pydantic import ValidationError
+
 
 class TestDialogueAPI:
     def test_session_start_request(self):
@@ -35,12 +39,16 @@ class TestDialogueAPI:
 
 class TestCharacterAdminAPI:
     def test_create_request(self):
-        from memoria.api.character_admin import CharacterCardCreateRequest as CreateCharacterRequest
+        from memoria.api.character_admin import (
+            CharacterCardCreateRequest as CreateCharacterRequest,
+        )
         r = CreateCharacterRequest(character_data={"character_id":"x","meta":{"name":"X","display_name":"X"}})
         assert r.character_data["character_id"] == "x"
 
     def test_import_request(self):
-        from memoria.api.character_admin import ImportFromFileRequest as ImportCharacterRequest
+        from memoria.api.character_admin import (
+            ImportFromFileRequest as ImportCharacterRequest,
+        )
         r = ImportCharacterRequest(character_id="x")
         assert r.character_id == "x"
 
@@ -110,13 +118,17 @@ class TestEventAdminAPI:
 
 class TestRelationshipAPI:
     def test_create_relationship(self):
-        from memoria.api.relationship import RelationshipCreateRequest as CreateRelationshipRequest
+        from memoria.api.relationship import (
+            RelationshipCreateRequest as CreateRelationshipRequest,
+        )
         r = CreateRelationshipRequest(character_id_a="a",character_id_b="b",
                                        relationship_type="friend",affinity=50.0)
         assert r.relationship_type == "friend"
 
     def test_update_relationship(self):
-        from memoria.api.relationship import RelationshipUpdateRequest as UpdateRelationshipRequest
+        from memoria.api.relationship import (
+            RelationshipUpdateRequest as UpdateRelationshipRequest,
+        )
         r = UpdateRelationshipRequest(relationship_type="enemy",affinity=-30.0)
         assert r.relationship_type == "enemy"
 
@@ -128,12 +140,16 @@ class TestMultiDialogueAPI:
         assert len(r.character_ids) == 2
 
     def test_turn_request(self):
-        from memoria.api.multi_dialogue import MultiDialogueTurnRequest as MultiTurnRequest
+        from memoria.api.multi_dialogue import (
+            MultiDialogueTurnRequest as MultiTurnRequest,
+        )
         r = MultiTurnRequest(session_id="s",player_message="Hi")
         assert r.player_message == "Hi"
 
     def test_multi_turn_request_rejects_overlong_message(self):
-        from memoria.api.multi_dialogue import MultiDialogueTurnRequest as MultiTurnRequest
+        from memoria.api.multi_dialogue import (
+            MultiDialogueTurnRequest as MultiTurnRequest,
+        )
         with pytest.raises(ValidationError):
             MultiTurnRequest(session_id="s", player_message="x" * 8001)
 
@@ -203,6 +219,7 @@ class TestCodeReviewFixesAPI:
         import io
 
         from PIL import Image
+
         from memoria.api.user import _resize_image
 
         source = io.BytesIO()
@@ -255,7 +272,7 @@ class TestCodeReviewFixesAPI:
         assert m.session_id == "session-42"
 
     def test_session_recovery_response(self):
-        from memoria.api.dialogue import SessionRecoveryResponse, HistoryMessage
+        from memoria.api.dialogue import HistoryMessage, SessionRecoveryResponse
         r = SessionRecoveryResponse(
             found=True,
             session_id="sid-1",

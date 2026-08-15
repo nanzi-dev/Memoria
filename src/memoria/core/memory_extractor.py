@@ -103,14 +103,22 @@ def clean_summary_text(raw_text: str | None) -> str | None:
     if not text:
         return None
 
-    text = re.sub(r"^```(?:text|markdown)?\s*|\s*```$", "", text, flags=re.I).strip()
+    text = re.sub(r"^```(?:text|markdown)?\s*|\s*```$", "", text, flags=re.IGNORECASE).strip()
     text = re.sub(r"^(?:摘要|最终摘要|最终答案|答案|总结)\s*[:：]\s*", "", text).strip()
     text = text.strip(" \t\r\n\"'")
 
     if text.lower() in EMPTY_SUMMARY_VALUES:
         return None
 
-    if any(marker in text for marker in SUMMARY_META_MARKERS):
+    # 提示词复读通常把元标记散布在前几行；只检查开头块，
+    # 避免误伤正文里包含这些词的有效摘要。
+    first_lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip()
+    ][:3]
+    opening = "\n".join(first_lines)
+    if any(marker in opening for marker in SUMMARY_META_MARKERS):
         return None
 
     return text
@@ -156,6 +164,11 @@ def extract_player_memory(
         if raise_on_error:
             raise
         logger.warning("玩家长期记忆提取失败: %s", exc)
+        return None
+    if not result or not str(result).strip():
+        logger.warning(
+            "玩家长期记忆提取返回空结果（light_task 失败或空输出）"
+        )
         return None
     return clean_summary_text(result)
 
@@ -215,7 +228,9 @@ def summarize_session(history: list[dict]) -> str | None:
         return None
     
     transcript = "\n".join(
-        f"{'玩家' if m['role'] == 'user' else 'NPC'}：{m['content']}" for m in history
+        f"{'玩家' if m['role'] == 'user' else 'NPC'}：{m['content']}"
+        for m in history
+        if m.get("role") in {"user", "assistant"}
     )
     
     prompt = SUMMARY_PROMPT_TEMPLATE.format(transcript=transcript)

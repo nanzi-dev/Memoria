@@ -6,37 +6,40 @@
 """
 
 import asyncio
-import os
 import logging
+import os
 import threading
 import time
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
-from memoria.api.dialogue import router as dialogue_router
 from memoria.api.character_admin import router as character_admin_router
-from memoria.api.event_admin import router as event_admin_router
-from memoria.api.relationship import router as relationship_router
 from memoria.api.developer import router as developer_router
-from memoria.api.multi_dialogue import router as multi_dialogue_router
+from memoria.api.dialogue import router as dialogue_router
+from memoria.api.event_admin import router as event_admin_router
 from memoria.api.knowledge import router as knowledge_router
+from memoria.api.multi_dialogue import router as multi_dialogue_router
+from memoria.api.relationship import router as relationship_router
 from memoria.api.speech import router as speech_router
 from memoria.api.story import router as story_router
 from memoria.api.user import (
     AUTH_COOKIE_NAME,
     get_current_user_id,
     require_admin_user_id,
+)
+from memoria.api.user import (
     router as user_router,
 )
-from memoria.core.config import configs
-from memoria.core.csrf import is_protected_path, validate_csrf
 from memoria.core.background_jobs import (
     BackgroundJobWorker,
     checkpoint_memory_lease_seconds,
     register_checkpoint_memory_handlers,
 )
+from memoria.core.config import configs
+from memoria.core.csrf import is_protected_path, validate_csrf
 from memoria.core.event_runtime import (
     ensure_default_event_templates,
     reconcile_event_schedule_due_times,
@@ -59,7 +62,13 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("memoria")
-APP_VERSION = "0.5.0"
+
+try:
+    from importlib.metadata import PackageNotFoundError, version
+
+    APP_VERSION = version("memoria")
+except PackageNotFoundError:  # 源码直跑且未安装包时回退
+    APP_VERSION = "0.5.0"
 
 # =========================
 # 配置校验
@@ -71,6 +80,11 @@ def _validate_config():
         errors.append("LLM_API_KEY 未配置（角色对话功能将不可用）")
     if not configs.llm_base_url:
         errors.append("LLM_BASE_URL 未配置")
+    if configs.memoria_env != "production" and not configs.auth_cookie_secure:
+        errors.append(
+            "MEMORIA_ENV 非 production 且 AUTH_COOKIE_SECURE=false，"
+            "认证 Cookie 将不具备 Secure 标记；公网部署请设置 MEMORIA_ENV=production"
+        )
     return errors
 
 
@@ -81,8 +95,6 @@ _request_counts: dict[str, list[float]] = {}
 _request_counts_lock = threading.Lock()
 _last_rate_limit_cleanup = 0.0
 # 进程内限流：多 worker/多实例各自独立；生产建议在网关层叠加分布式限流。
-_RATE_LIMIT_WINDOW = float(configs.rate_limit_window_seconds)
-_RATE_LIMIT_MAX = int(configs.rate_limit_max_requests)
 
 def _check_rate_limit(player_id: str) -> bool:
     """检查指定限流 key 是否允许请求。"""
@@ -252,6 +264,16 @@ app = FastAPI(
 # =========================
 # 健康检查端点
 # =========================
+def _check_database_ready() -> None:
+    """同步化执行 DB 就绪探测，供 /ready 放入线程池，避免阻塞事件循环。"""
+    from sqlalchemy import text
+
+    from memoria.db.repository import db_session
+
+    with db_session() as session:
+        session.execute(text("SELECT 1"))
+
+
 @app.get("/health", tags=["system"])
 async def health():
     """存活检查：服务是否在运行"""
@@ -262,10 +284,7 @@ async def health():
 async def ready():
     """就绪检查：数据库等依赖是否可用"""
     try:
-        from sqlalchemy import text
-        from memoria.db.repository import db_session
-        with db_session() as session:
-            session.execute(text("SELECT 1"))
+        await run_in_threadpool(_check_database_ready)
         return {"status": "ready", "database": "ok"}
     except Exception:
         logger.exception("数据库就绪检查失败")
@@ -331,6 +350,12 @@ async def body_size_limit_middleware(request: Request, call_next):
 
     各上传接口自身的 `read_upload_limited` / `validate_document_size` 都是读完
     才校验，在此之前 multipart 已由 Starlette 缓冲落盘、JSON 已整体读入内存。
+
+    限制范围：仅声明了 Content-Length 的请求会在 Event Loop 中被拦截。
+    ``transfer-encoding: chunked`` 请求无法在此处零成本预知体积，也不在这里引入
+    全局 body 缓冲；当配置允许 chunked 时保持现状，依赖业务层
+    ``read_upload_limited`` 的 max+1 读取兜底，超大 chunked 上传仍应由网关
+    （如 nginx/ingress 的 client_max_body_size）在前置层层兜底。
     """
     declared_length = request.headers.get("content-length")
     if declared_length:

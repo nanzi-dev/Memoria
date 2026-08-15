@@ -23,7 +23,6 @@ from memoria.core.event_schema import (
 )
 from memoria.db import repository
 
-
 UTC = timezone.utc
 
 
@@ -423,7 +422,7 @@ def test_catch_up_runs_once_and_advances_beyond_world_now(monkeypatch):
     monkeypatch.setattr(
         event_runtime,
         "_plan_event_chain",
-        lambda *args: ([result], [{
+        lambda *args, **kwargs: ([result], [{
             "execution_id": result.execution_id,
             "status": "succeeded",
             "inbox_items": [],
@@ -517,7 +516,7 @@ def test_catch_up_replay_limit_executes_bounded_runs_and_counts_misses(monkeypat
     monkeypatch.setattr(
         event_runtime,
         "_plan_event_chain",
-        lambda *args: ([result], [{
+        lambda *args, **kwargs: ([result], [{
             "execution_id": result.execution_id,
             "status": "succeeded",
             "inbox_items": [],
@@ -713,11 +712,11 @@ def test_concurrent_schedulers_execute_due_event_once(monkeypatch):
 
     original_plan_event_chain = event_runtime._plan_event_chain
 
-    def execute_once(*args):
+    def execute_once(*args, **kwargs):
         nonlocal execution_count
         with execution_lock:
             execution_count += 1
-        return original_plan_event_chain(*args)
+        return original_plan_event_chain(*args, **kwargs)
 
     monkeypatch.setattr(
         event_runtime.repository,
@@ -1207,7 +1206,7 @@ def test_group_orchestrator_paths_share_clock_snapshot_with_prompt_and_messages(
     orchestrator.character_cards = {character_id: card}
     orchestrator._checkpoint_memory_ready = True
     orchestrator._checkpoint_memory_fact = None
-    orchestrator._load_all_relationships = lambda: {}
+    orchestrator._load_all_relationships = dict
     orchestrator._load_runtime_state_for_prompt = lambda *args, **kwargs: {
         "affection_level": 10,
         "trust_level": 20,

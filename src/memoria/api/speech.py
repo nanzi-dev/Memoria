@@ -15,7 +15,6 @@ from memoria.core.speech_service import (
     speech_service,
 )
 
-
 router = APIRouter(dependencies=[Depends(require_current_user_id)])
 
 SPEECH_MEDIA_TYPES = {

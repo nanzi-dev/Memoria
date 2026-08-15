@@ -1,12 +1,13 @@
 """Domain repository functions (split from monolith)."""
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from sqlalchemy import select, text
 
-from memoria.db.models import EventScheduleState, PlayerWorldClock
+from memoria.db.models import PlayerWorldClock
 from memoria.db.repository._common import _row_to_dict, db_session
+
 
 # =========================
 # player world clock

@@ -24,9 +24,10 @@ def test_qmark_placeholder_conversion_skips_string_literals():
 
 def test_postgres_schema_uses_bigserial():
     """Verify ORM models define BIGSERIAL-compatible primary keys for PostgreSQL."""
-    from memoria.db.models import Base
-    from sqlalchemy import BigInteger, Integer
+    from sqlalchemy import BigInteger
     from sqlalchemy.dialects.postgresql import dialect as pg_dialect
+
+    from memoria.db.models import Base
 
     # Check domain_event uses BigInteger-compatible column
     de_table = Base.metadata.tables["domain_event"]
@@ -42,8 +43,9 @@ def test_postgres_schema_uses_bigserial():
 
 def test_postgres_domain_event_sequence_references_use_bigint():
     """Verify domain_event columns that need BIGINT in PostgreSQL."""
-    from memoria.db.models import Base
     from sqlalchemy import BigInteger
+
+    from memoria.db.models import Base
 
     de_table = Base.metadata.tables["domain_event"]
     # These columns need BIGINT in PostgreSQL for large datasets

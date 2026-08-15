@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import re
+import stat
+import zipfile
 from dataclasses import dataclass
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
-import re
-import stat
-import zipfile
 
 from memoria.core.config import configs
 

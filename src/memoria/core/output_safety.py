@@ -6,6 +6,8 @@ import logging
 import re
 from collections.abc import Callable
 
+from memoria.core.llm_client import looks_like_provider_rejection
+
 logger = logging.getLogger(__name__)
 
 # Immersion-breaking / prompt-leak / jailbreak markers.
@@ -28,6 +30,18 @@ RISK_PATTERNS = [
     r"as\s+an?\s+ai\s+language\s+model",
     r"developer\s+mode\s+enabled",
     r"dan\s+mode",
+    # 服务商拒答 / 风控标记（中英文）
+    r"the\s+request\s+was\s+rejected",
+    r"considered\s+high\s+risk",
+    r"content\s+policy",
+    r"safety\s+policy",
+    r"risk\s+control",
+    r"请求(已)?被拒绝",
+    r"被判定为高风险",
+    r"存在(较高)?风险",
+    r"内容政策",
+    r"安全政策",
+    r"风控",
 ]
 _RISK_RE = re.compile("|".join(RISK_PATTERNS), re.IGNORECASE)
 
@@ -61,6 +75,18 @@ _EXACT_RISK_TEXTS = (
     "you are chatgpt",
     "developer mode enabled",
     "dan mode",
+    # 服务商拒答 / 风控标记（中英文）
+    "the request was rejected",
+    "considered high risk",
+    "content policy",
+    "safety policy",
+    "risk control",
+    "请求被拒绝",
+    "请求已被拒绝",
+    "被判定为高风险",
+    "内容政策",
+    "安全政策",
+    "风控",
 )
 _WILDCARD_RISK_TEXTS = (
     ("我是", ("AI", "ai", "人工智能", "语言模型", "机器人")),
@@ -104,7 +130,7 @@ def safety_check(dialogue: str, fallback: str = FALLBACK_LINE) -> str:
     """Replace empty or immersion-breaking model output."""
     if not dialogue:
         return fallback
-    if _RISK_RE.search(dialogue):
+    if _RISK_RE.search(dialogue) or looks_like_provider_rejection(dialogue):
         logger.warning("检测到高风险输出，已替换: %s", dialogue[:200])
         return fallback
     return dialogue
@@ -137,9 +163,12 @@ class DialogueSafetyStream:
         safe_dialogue = safety_check(final_dialogue)
         if self._blocked or safe_dialogue != final_dialogue:
             return safe_dialogue
-        if final_dialogue.startswith(self._text):
+        # 流式累积文案与最终文案不一致时，也不能静默丢弃尾部。
+        # 对尚未 emit 的剩余内容做一次安全检查后再输出。
+        if len(final_dialogue) > self._emitted_length:
             remaining = final_dialogue[self._emitted_length:]
-            if remaining:
-                self._emit(remaining)
+            checked_remaining = safety_check(remaining, fallback="")
+            if checked_remaining:
+                self._emit(checked_remaining)
             self._emitted_length = len(final_dialogue)
         return safe_dialogue

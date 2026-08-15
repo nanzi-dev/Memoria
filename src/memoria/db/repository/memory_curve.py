@@ -7,15 +7,12 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import text
 
 from memoria.core import memory_curve as curve
-from memoria.db.repository._common import *  # noqa: F403
-from memoria.db.repository import _common as _common_mod
-from memoria.db.repository._common import _lock_sqlite_write, db_session
-
-
-for _name, _value in vars(_common_mod).items():
-    if not _name.startswith("__"):
-        globals().setdefault(_name, _value)
-del _name, _value, _common_mod
+from memoria.db.repository._common import (
+    _is_postgres_enabled,
+    _lock_sqlite_write,
+    _now,
+    db_session,
+)
 
 
 def _memory_curve_key(

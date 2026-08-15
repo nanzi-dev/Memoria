@@ -46,6 +46,7 @@ export function UserProvider({ children }) {
   const clockRefreshPromiseRef = useRef(null);
   const lastClockSyncPerformanceRef = useRef(null);
   const timezoneReportedForRef = useRef(null);
+  const readEventIdsRef = useRef(new Set());
   const activeUserIdRef = useRef(null);
   const authEpochRef = useRef(null);
   const authMutationQueueRef = useRef(null);
@@ -67,6 +68,7 @@ export function UserProvider({ children }) {
     clockRefreshPromiseRef.current = null;
     lastClockSyncPerformanceRef.current = null;
     timezoneReportedForRef.current = null;
+    readEventIdsRef.current = new Set();
   }, []);
 
   const applyClock = useCallback((clock, timing = {}, requestScope = null) => {
@@ -322,7 +324,14 @@ export function UserProvider({ children }) {
     const refreshInbox = () => {
       userApi.getEventInbox(true, 50)
         .then(items => {
-          if (!cancelled && isRequestCurrent(requestScope)) setEventInbox(items);
+          if (cancelled || !isRequestCurrent(requestScope)) return;
+          // 过滤掉已在本会话标记为已读的条目，避免过期的
+          // 未读快照把已读条目重新覆盖回 UI。
+          const readEventIds = readEventIdsRef.current;
+          const nextItems = readEventIds.size
+            ? items.filter(item => !readEventIds.has(item.id))
+            : items;
+          setEventInbox(nextItems);
         })
         .catch(() => {});
     };
@@ -451,16 +460,30 @@ export function UserProvider({ children }) {
     const requestScope = authEpochRef.current.capture(activeUserIdRef.current);
     if (!requestScope.ownerId) return [];
     const items = await userApi.getEventInbox(true, 50);
-    if (isRequestCurrent(requestScope)) setEventInbox(items);
+    if (isRequestCurrent(requestScope)) {
+      const readEventIds = readEventIdsRef.current;
+      const nextItems = readEventIds.size
+        ? items.filter(item => !readEventIds.has(item.id))
+        : items;
+      setEventInbox(nextItems);
+    }
     return items;
   }, [isRequestCurrent]);
 
   const markEventRead = useCallback(async (inboxId) => {
     const requestScope = authEpochRef.current.capture(activeUserIdRef.current);
     if (!requestScope.ownerId) return;
-    await userApi.markEventRead(inboxId);
-    if (isRequestCurrent(requestScope)) {
-      setEventInbox(items => items.filter(item => item.id !== inboxId));
+    // 在请求发出前就登记已读 ID，使并发的 inbox 刷新在落地时
+    // 同样过滤掉该条目，避免旧快照把它覆盖回来。
+    readEventIdsRef.current.add(inboxId);
+    try {
+      await userApi.markEventRead(inboxId);
+      if (isRequestCurrent(requestScope)) {
+        setEventInbox(items => items.filter(item => item.id !== inboxId));
+      }
+    } catch (error) {
+      readEventIdsRef.current.delete(inboxId);
+      throw error;
     }
   }, [isRequestCurrent]);
 

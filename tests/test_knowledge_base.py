@@ -1,16 +1,17 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
-from io import BytesIO
 import json
-from pathlib import Path
 import threading
 import time
 import uuid
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
+from io import BytesIO
+from pathlib import Path
 
 import pytest
 
+from memoria.core import knowledge_retriever, knowledge_service, knowledge_vector_store
 from memoria.core.config import Configs, configs
 from memoria.core.knowledge_documents import (
     ExtractedDocument,
@@ -22,10 +23,7 @@ from memoria.core.knowledge_documents import (
     validate_document_filename,
 )
 from memoria.core.knowledge_service import process_knowledge_document
-from memoria.core import knowledge_service
 from memoria.core.knowledge_vector_store import KnowledgeVectorStore
-from memoria.core import knowledge_vector_store
-from memoria.core import knowledge_retriever
 from memoria.db import repository
 
 

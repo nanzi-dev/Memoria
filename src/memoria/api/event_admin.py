@@ -11,20 +11,20 @@ import json
 import logging
 import re
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 
-from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from memoria.api.user import require_admin_user_id, require_current_user_id
+from memoria.core import event_runtime
 from memoria.core.cron_schedule import next_cron_run, validate_cron_schedule
 from memoria.core.event_schema import (
-    TriggerCondition,
-    EventEffect,
-    TriggerType,
     EffectType,
+    EventEffect,
+    TriggerCondition,
+    TriggerType,
 )
-from memoria.core import event_runtime
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
@@ -38,31 +38,31 @@ router = APIRouter(dependencies=[Depends(require_current_user_id)])
 class TriggerConditionDTO(BaseModel):
     """触发条件 DTO（与 event_schema.TriggerCondition 对齐）"""
     trigger_type: str
-    threshold: Optional[float] = None
-    comparison: Optional[str] = "gte"
-    keywords: Optional[list[str]] = None
-    match_mode: Optional[str] = "any"
+    threshold: float | None = None
+    comparison: str | None = "gte"
+    keywords: list[str] | None = None
+    match_mode: str | None = "any"
     crossing: bool = False
     aggregation: Literal["any", "all", "count"] = "any"
-    min_characters: Optional[int] = None
-    character_ids: Optional[list[str]] = None
-    count: Optional[int] = None
-    duration_minutes: Optional[int] = None
-    schedule: Optional[str] = None
+    min_characters: int | None = None
+    character_ids: list[str] | None = None
+    count: int | None = None
+    duration_minutes: int | None = None
+    schedule: str | None = None
     catch_up_replay_limit: int = Field(default=1, ge=1, le=100)
-    mood: Optional[str] = None
-    state_field: Optional[str] = None
-    event_id: Optional[str] = None
-    event_status: Optional[str] = "succeeded"
-    min_occurrences: Optional[int] = 1
-    time_window_start: Optional[str] = None
-    time_window_end: Optional[str] = None
-    weekdays: Optional[list[int]] = None
-    target_character_id: Optional[str] = None
-    relationship_type: Optional[str] = None
-    sub_conditions: Optional[list["TriggerConditionDTO"]] = None
-    logic_operator: Optional[str] = "and"
-    cooldown_hours: Optional[int] = 0
+    mood: str | None = None
+    state_field: str | None = None
+    event_id: str | None = None
+    event_status: str | None = "succeeded"
+    min_occurrences: int | None = 1
+    time_window_start: str | None = None
+    time_window_end: str | None = None
+    weekdays: list[int] | None = None
+    target_character_id: str | None = None
+    relationship_type: str | None = None
+    sub_conditions: list["TriggerConditionDTO"] | None = None
+    logic_operator: str | None = "and"
+    cooldown_hours: int | None = 0
 
 
 TriggerConditionDTO.model_rebuild()
@@ -71,86 +71,86 @@ TriggerConditionDTO.model_rebuild()
 class EventEffectDTO(BaseModel):
     """事件效果 DTO"""
     effect_type: str
-    state_changes: Optional[dict] = None
-    unlock_keys: Optional[list[str]] = None
-    dialogue_text: Optional[str] = None
-    dialogue_action: Optional[str] = None
-    memory_text: Optional[str] = None
-    memory_importance: Optional[int] = 5
-    target_mood: Optional[str] = None
-    notification_message: Optional[str] = None
-    notification_type: Optional[str] = "info"
-    item_id: Optional[str] = None
-    quest_id: Optional[str] = None
-    target_character_id: Optional[str] = None
-    relationship_change: Optional[dict] = None
-    next_event_id: Optional[str] = None
-    branch_conditions: Optional[list[dict]] = None
-    target_session_id: Optional[str] = None
-    proactive_character_id: Optional[str] = None
-    proactive_prompt: Optional[str] = None
-    progress: Optional[float] = None
-    progress_delta: Optional[float] = None
-    event_status: Optional[str] = None
+    state_changes: dict | None = None
+    unlock_keys: list[str] | None = None
+    dialogue_text: str | None = None
+    dialogue_action: str | None = None
+    memory_text: str | None = None
+    memory_importance: int | None = 5
+    target_mood: str | None = None
+    notification_message: str | None = None
+    notification_type: str | None = "info"
+    item_id: str | None = None
+    quest_id: str | None = None
+    target_character_id: str | None = None
+    relationship_change: dict | None = None
+    next_event_id: str | None = None
+    branch_conditions: list[dict] | None = None
+    target_session_id: str | None = None
+    proactive_character_id: str | None = None
+    proactive_prompt: str | None = None
+    progress: float | None = None
+    progress_delta: float | None = None
+    event_status: str | None = None
 
 
 class EventCreateRequest(BaseModel):
     event_id: str = Field(..., description="事件唯一 ID，建议格式: evt_{character}_{name}")
     event_name: str
-    description: Optional[str] = None
-    character_id: Optional[str] = None          # None 表示全局事件
-    story_id: Optional[str] = None
+    description: str | None = None
+    character_id: str | None = None          # None 表示全局事件
+    story_id: str | None = None
     trigger_condition: TriggerConditionDTO
     effects: list[EventEffectDTO] = Field(default_factory=list)
     priority: int = 0
-    exclusive_group: Optional[str] = None
+    exclusive_group: str | None = None
     exclusive_scope: Literal["turn", "player"] = "turn"
     max_triggers_per_turn: int = Field(3, ge=1, le=20)
     stop_processing: bool = False
     is_active: bool = True
-    schedule: Optional[str] = None
-    template_id: Optional[str] = None
+    schedule: str | None = None
+    template_id: str | None = None
 
 
 class EventUpdateRequest(BaseModel):
-    event_name: Optional[str] = None
-    description: Optional[str] = None
-    character_id: Optional[str] = None
-    story_id: Optional[str] = None
-    trigger_condition: Optional[TriggerConditionDTO] = None
-    effects: Optional[list[EventEffectDTO]] = None
-    priority: Optional[int] = None
-    exclusive_group: Optional[str] = None
-    exclusive_scope: Optional[Literal["turn", "player"]] = None
-    max_triggers_per_turn: Optional[int] = Field(None, ge=1, le=20)
-    stop_processing: Optional[bool] = None
-    is_active: Optional[bool] = None
-    schedule: Optional[str] = None
-    template_id: Optional[str] = None
+    event_name: str | None = None
+    description: str | None = None
+    character_id: str | None = None
+    story_id: str | None = None
+    trigger_condition: TriggerConditionDTO | None = None
+    effects: list[EventEffectDTO] | None = None
+    priority: int | None = None
+    exclusive_group: str | None = None
+    exclusive_scope: Literal["turn", "player"] | None = None
+    max_triggers_per_turn: int | None = Field(None, ge=1, le=20)
+    stop_processing: bool | None = None
+    is_active: bool | None = None
+    schedule: str | None = None
+    template_id: str | None = None
 
 
 class EventListItem(BaseModel):
     event_id: str
     event_name: str
-    description: Optional[str] = None
-    character_id: Optional[str] = None
-    story_id: Optional[str] = None
+    description: str | None = None
+    character_id: str | None = None
+    story_id: str | None = None
     priority: int
-    exclusive_group: Optional[str] = None
+    exclusive_group: str | None = None
     exclusive_scope: Literal["turn", "player"] = "turn"
     max_triggers_per_turn: int = 3
     stop_processing: bool = False
     is_active: bool
     trigger_count: int
-    last_triggered_at: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    last_triggered_at: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
     # 触发类型摘要，方便前端展示
-    trigger_type: Optional[str] = None
-    schedule: Optional[str] = None
-    template_id: Optional[str] = None
-    next_run_at: Optional[str] = None
-    next_due_real_at: Optional[str] = None
+    trigger_type: str | None = None
+    schedule: str | None = None
+    template_id: str | None = None
+    next_run_at: str | None = None
+    next_due_real_at: str | None = None
     missed_count: int = 0
 
 
@@ -165,37 +165,37 @@ class TriggerLogItem(BaseModel):
     character_id: str
     player_id: str
     session_id: str
-    triggered_at: Optional[str] = None
-    effects_applied: Optional[str] = None
-    execution_id: Optional[str] = None
-    status: Optional[str] = None
+    triggered_at: str | None = None
+    effects_applied: str | None = None
+    execution_id: str | None = None
+    status: str | None = None
 
 
 class OperationResponse(BaseModel):
     success: bool
     message: str
-    event_id: Optional[str] = None
-    template_id: Optional[str] = None
+    event_id: str | None = None
+    template_id: str | None = None
 
 
 class EventTemplateItem(BaseModel):
     template_id: str
     template_name: str
-    category: Optional[str] = None
-    description: Optional[str] = None
+    category: str | None = None
+    description: str | None = None
     trigger_config: dict
     effects_config: list[dict]
-    metadata: Optional[dict] = None
+    metadata: dict | None = None
 
 
 class EventTemplateCreateRequest(BaseModel):
     template_id: str
     template_name: str
-    category: Optional[str] = None
-    description: Optional[str] = None
+    category: str | None = None
+    description: str | None = None
     trigger_config: TriggerConditionDTO
     effects_config: list[EventEffectDTO] = Field(default_factory=list)
-    metadata: Optional[dict] = None
+    metadata: dict | None = None
 
 
 class ScheduleRegisterRequest(BaseModel):
@@ -212,24 +212,24 @@ class ScheduleRunResponse(BaseModel):
 
 
 class EventSimulationRequest(BaseModel):
-    character_id: Optional[str] = None
-    session_id: Optional[str] = None
+    character_id: str | None = None
+    session_id: str | None = None
     player_message: str = Field(default="", max_length=8000)
-    npc_response: Optional[str] = None
-    current_affinity: Optional[float] = None
-    current_trust: Optional[float] = None
-    current_mood: Optional[str] = None
-    previous_affinity: Optional[float] = None
-    previous_trust: Optional[float] = None
-    affinity_delta: Optional[float] = None
-    trust_delta: Optional[float] = None
-    dialogue_count: Optional[int] = None
-    total_dialogue_count: Optional[int] = None
-    session_duration_minutes: Optional[float] = None
-    unlocked_content: Optional[list[str]] = None
-    character_relationships: Optional[dict[str, dict]] = None
-    event_history: Optional[list[dict]] = None
-    world_time: Optional[str] = None
+    npc_response: str | None = None
+    current_affinity: float | None = None
+    current_trust: float | None = None
+    current_mood: str | None = None
+    previous_affinity: float | None = None
+    previous_trust: float | None = None
+    affinity_delta: float | None = None
+    trust_delta: float | None = None
+    dialogue_count: int | None = None
+    total_dialogue_count: int | None = None
+    session_duration_minutes: float | None = None
+    unlocked_content: list[str] | None = None
+    character_relationships: dict[str, dict] | None = None
+    event_history: list[dict] | None = None
+    world_time: str | None = None
     event_data: dict = Field(default_factory=dict)
 
 
@@ -237,7 +237,7 @@ class EventSimulationResponse(BaseModel):
     matched: bool
     evaluation: dict
     context: dict
-    planned_result: Optional[dict] = None
+    planned_result: dict | None = None
 
 
 class EventScheduleItem(BaseModel):
@@ -245,16 +245,16 @@ class EventScheduleItem(BaseModel):
     character_id: str
     player_id: str
     schedule: str
-    last_checked_at: Optional[str] = None
-    last_run_at: Optional[str] = None
-    next_run_at: Optional[str] = None
+    last_checked_at: str | None = None
+    last_run_at: str | None = None
+    next_run_at: str | None = None
     status: str
-    lease_owner: Optional[str] = None
-    lease_expires_at: Optional[str] = None
-    last_error: Optional[str] = None
-    last_failed_at: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    lease_owner: str | None = None
+    lease_expires_at: str | None = None
+    last_error: str | None = None
+    last_failed_at: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class EventMetricsResponse(BaseModel):
@@ -265,8 +265,8 @@ class EventMetricsResponse(BaseModel):
     skipped_count: int
     deduplicated_count: int
     average_duration_ms: float
-    last_execution_at: Optional[str] = None
-    last_error: Optional[str] = None
+    last_execution_at: str | None = None
+    last_error: str | None = None
 
 
 class EventContextStateItem(BaseModel):
@@ -276,14 +276,14 @@ class EventContextStateItem(BaseModel):
     context_data: dict
     status: str
     progress: float
-    last_session_id: Optional[str] = None
-    updated_at: Optional[str] = None
+    last_session_id: str | None = None
+    updated_at: str | None = None
 
 
 def _require_owned_character(
     current_user_id: str,
-    character_id: Optional[str],
-) -> Optional[str]:
+    character_id: str | None,
+) -> str | None:
     """Validate an optional event character and return its normalized ID."""
     normalized_id = str(character_id or "").strip()
     if not normalized_id:
@@ -328,6 +328,8 @@ def _validate_condition_semantics(
     *,
     event_character_id: str | None = None,
 ) -> None:
+    if condition.min_occurrences is not None and condition.min_occurrences < 1:
+        raise HTTPException(status_code=400, detail="min_occurrences 必须大于等于 1")
     if condition.trigger_type in UNIMPLEMENTED_TRIGGERS:
         raise HTTPException(
             status_code=400,
@@ -655,7 +657,7 @@ def _build_definition_schedule_state(
 
 @router.get("/admin/events", response_model=list[EventListItem])
 def list_events(
-    character_id: Optional[str] = None,
+    character_id: str | None = None,
     only_active: bool = False,
     current_user_id: str = Depends(require_current_user_id),
 ):
@@ -722,8 +724,8 @@ def list_events(
                 ),
             ))
         return result
-    except Exception as e:
-        logger.error(f"列出事件失败: {e}", exc_info=True)
+    except Exception:
+        logger.error("列出事件失败", exc_info=True)
         # 内部异常信息（SQL 片段/文件路径等）不直接回传客户端
         raise HTTPException(status_code=500, detail="列出事件失败")
 
@@ -746,7 +748,7 @@ def get_event(
         trigger_cfg = json.loads(row["trigger_config"])
         effects_cfg = json.loads(row["effects_config"])
         trigger_type = trigger_cfg.get("trigger_type")
-    except Exception as e:
+    except Exception:
         logger.exception("解析事件配置失败")
         raise HTTPException(status_code=500, detail="解析事件配置失败")
 
@@ -1068,12 +1070,14 @@ def toggle_event(
 @router.get("/admin/events/{event_id}/history", response_model=list[TriggerLogItem])
 def get_trigger_history(
     event_id: str,
-    character_id: Optional[str] = None,
-    player_id: Optional[str] = None,
+    character_id: str | None = None,
+    player_id: str | None = None,
     limit: int = Query(default=50, ge=1, le=200),
     current_user_id: str = Depends(require_current_user_id),
 ):
     """查询指定事件的触发历史记录"""
+    if not repository.get_event_definition(current_user_id, event_id):
+        raise HTTPException(status_code=404, detail=f"事件 '{event_id}' 不存在")
     if player_id and player_id != current_user_id:
         raise HTTPException(status_code=403, detail="无权访问该玩家的事件历史")
     rows = repository.get_event_trigger_history(
@@ -1087,15 +1091,19 @@ def get_trigger_history(
 
 @router.get("/admin/events/history/all", response_model=list[TriggerLogItem])
 def get_all_trigger_history(
-    character_id: Optional[str] = None,
-    player_id: Optional[str] = None,
+    character_id: str | None = None,
+    player_id: str | None = None,
+    event_id: str | None = None,
     limit: int = Query(default=100, ge=1, le=500),
     current_user_id: str = Depends(require_current_user_id),
 ):
-    """查询所有事件的触发历史（可按角色/玩家过滤）"""
+    """查询所有事件的触发历史（可按角色/玩家/事件过滤）"""
+    if event_id and not repository.get_event_definition(current_user_id, event_id):
+        raise HTTPException(status_code=404, detail=f"事件 '{event_id}' 不存在")
     if player_id and player_id != current_user_id:
         raise HTTPException(status_code=403, detail="无权访问该玩家的事件历史")
     rows = repository.get_event_trigger_history(
+        event_id=event_id,
         character_id=character_id,
         player_id=current_user_id,
         limit=limit,
@@ -1120,6 +1128,8 @@ def reset_trigger_history(
     用途：开发调试时重置一次性事件的触发状态，使其可以再次触发。
     生产环境慎用。
     """
+    if not repository.get_event_definition(current_user_id, event_id):
+        raise HTTPException(status_code=404, detail=f"事件 '{event_id}' 不存在")
     if player_id != current_user_id:
         raise HTTPException(status_code=403, detail="无权访问该玩家的事件历史")
     count = repository.delete_trigger_history(event_id, character_id, player_id)
@@ -1136,7 +1146,7 @@ def reset_trigger_history(
 
 @router.get("/admin/event-templates", response_model=list[EventTemplateItem])
 def list_event_templates(
-    category: Optional[str] = None,
+    category: str | None = None,
     current_user_id: str = Depends(require_current_user_id),
 ):
     """列出内置和已保存的事件模板。"""
@@ -1148,7 +1158,7 @@ def list_event_templates(
             trigger_config = json.loads(row["trigger_config"])
             effects_config = json.loads(row["effects_config"])
             metadata = json.loads(row["metadata"]) if row.get("metadata") else None
-        except Exception as e:
+        except Exception:
             logger.exception("解析事件模板失败")
             raise HTTPException(status_code=500, detail="解析事件模板失败")
         result.append(EventTemplateItem(
@@ -1261,8 +1271,8 @@ def register_event_schedule(
 
 @router.get("/admin/event-schedules", response_model=list[EventScheduleItem])
 def list_event_schedules(
-    event_id: Optional[str] = None,
-    status: Optional[str] = None,
+    event_id: str | None = None,
+    status: str | None = None,
     limit: int = Query(default=200, ge=1, le=500),
     current_user_id: str = Depends(require_current_user_id),
 ):
@@ -1338,7 +1348,7 @@ def resume_event_schedule(
 
 @router.get("/admin/event-metrics", response_model=EventMetricsResponse)
 def get_event_metrics(
-    event_id: Optional[str] = None,
+    event_id: str | None = None,
     current_user_id: str = Depends(require_current_user_id),
 ):
     if event_id and not repository.get_event_definition(current_user_id, event_id):
@@ -1477,9 +1487,9 @@ def run_due_event_schedules(
 
 @router.get("/admin/event-context", response_model=list[EventContextStateItem])
 def list_event_context_states(
-    character_id: Optional[str] = None,
-    player_id: Optional[str] = None,
-    status: Optional[str] = None,
+    character_id: str | None = None,
+    player_id: str | None = None,
+    status: str | None = None,
     limit: int = Query(default=100, ge=1, le=500),
     current_user_id: str = Depends(require_current_user_id),
 ):

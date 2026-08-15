@@ -11,9 +11,7 @@
 .codex/
 .claude/
 .agents/
-.github/
 .codegraph
-AGENTS.md
 
 # =========================
 # Python cache
@@ -52,4 +50,11 @@ test_*.log
 # OS
 # =========================
 .DS_Store
-.claude/
+
+# GitHub Actions (local workflow, not version-controlled for this repo)
+.github/
+
+# Tool caches (also self-ignored via their CACHEDIR.TAG)
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/

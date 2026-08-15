@@ -473,27 +473,25 @@ bash scripts/run_tests.sh
 # PG 专属行为（BIGSERIAL、部分索引、UPDATE 中的标量钳制等）。
 
 # 按模块运行
-PYTHONPATH=src pytest tests/test_core.py -v               # 核心模块 (73)
-PYTHONPATH=src pytest tests/test_repository.py -v          # 数据库层 (87)
-PYTHONPATH=src pytest tests/test_events.py -v              # 事件系统 (63)
-PYTHONPATH=src pytest tests/test_event_e2e.py -v           # 事件端到端 (4)
-PYTHONPATH=src pytest tests/test_relationship_delta_policy.py -v  # 关系增量兜底 (7)
-PYTHONPATH=src pytest tests/test_relationships.py -v       # 关系 API 与策略 (2)
-PYTHONPATH=src pytest tests/test_memory_extractor.py -v    # 记忆萃取 (49)
-PYTHONPATH=src pytest tests/test_multi_dialogue_api.py -v  # 多角色 API (23)
-PYTHONPATH=src pytest tests/test_csrf.py -v                # Cookie CSRF (11)
-PYTHONPATH=src pytest tests/test_output_safety.py -v       # 输出安全 (5)
-PYTHONPATH=src pytest tests/test_system.py -v              # 系统端点与限流 (15)
-PYTHONPATH=src pytest tests/test_world_clock.py -v         # 世界时钟 (31)
-PYTHONPATH=src pytest tests/test_knowledge_base.py -v      # 知识库 RAG (34)
-PYTHONPATH=src pytest tests/test_fact_claims.py -v         # 事实声明与图谱 (71)
-PYTHONPATH=src pytest tests/test_security_fixes.py -v      # 安全修复 (61)
-PYTHONPATH=src pytest tests/test_domain_events.py -v       # 领域事件 (47)
-PYTHONPATH=src pytest tests/test_memory_curve.py -v        # 记忆曲线 (35)
-PYTHONPATH=src pytest tests/test_speech.py -v              # 语音模块 (20)
+PYTHONPATH=src pytest tests/test_core.py -v               # 核心模块
+PYTHONPATH=src pytest tests/test_repository.py -v          # 数据库层
+PYTHONPATH=src pytest tests/test_events.py -v              # 事件系统
+PYTHONPATH=src pytest tests/test_event_e2e.py -v           # 事件端到端
+PYTHONPATH=src pytest tests/test_relationship_delta_policy.py -v  # 关系增量兜底
+PYTHONPATH=src pytest tests/test_memory_extractor.py -v    # 记忆萃取
+PYTHONPATH=src pytest tests/test_multi_dialogue_api.py -v  # 多角色 API
+PYTHONPATH=src pytest tests/test_csrf.py -v                # Cookie CSRF
+PYTHONPATH=src pytest tests/test_output_safety.py -v       # 输出安全
+PYTHONPATH=src pytest tests/test_world_clock.py -v         # 世界时钟
+PYTHONPATH=src pytest tests/test_knowledge_base.py -v      # 知识库 RAG
+PYTHONPATH=src pytest tests/test_fact_claims.py -v         # 事实声明与图谱
+PYTHONPATH=src pytest tests/test_security_fixes.py -v      # 安全修复
+PYTHONPATH=src pytest tests/test_domain_events.py -v       # 领域事件
+PYTHONPATH=src pytest tests/test_memory_curve.py -v        # 记忆曲线
+PYTHONPATH=src pytest tests/test_speech.py -v              # 语音模块
 ```
 
-当前测试集合共 **863 用例**（以 `pytest --collect-only -q` 为准），覆盖核心编排、关系增量兜底、跨角色事件聚合、`db/repository` 包、事件、单聊/群聊 API、CSRF、输出安全、知识库、语音、向量存储、世界时钟、事实声明、安全修复、记忆曲线和系统端点。前端测试由 `npm test` 收集。
+当前测试集合最近一次全量运行为 **879 passed, 3 skipped**（以 `pytest --collect-only -q` 为准），覆盖核心编排、关系增量兜底、跨角色事件聚合、`db/repository` 包、事件、单聊/群聊 API、CSRF、输出安全、知识库、语音、向量存储、世界时钟、事实声明、安全修复、记忆曲线和系统端点。前端测试由 `npm test` 收集。
 
 ---
 

@@ -337,7 +337,7 @@ export default function PersonaEditor() {
       <div className="mt-5 flex flex-col items-center">
         <div className="relative h-28 w-28 overflow-hidden rounded-md border border-border bg-muted/35">
           {card.avatar_url ? (
-            <img src={card.avatar_url} alt={`${card.display_name || '角色'}的扮演头像`} className="h-full w-full object-cover" />
+            <img src={card.avatar_url} alt={`${card.display_name || '角色'}的扮演头像`} loading="lazy" decoding="async" referrerpolicy="no-referrer" className="h-full w-full object-cover" />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-muted-foreground">
               <Contact className="h-11 w-11" aria-hidden="true" />
@@ -404,7 +404,7 @@ export default function PersonaEditor() {
         <div className="mt-3 flex items-center gap-3">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted/35">
             {user?.avatar_url ? (
-              <img src={user.avatar_url} alt={`${user.username}的账户头像`} className="h-full w-full object-cover" />
+              <img src={user.avatar_url} alt={`${user.username}的账户头像`} loading="lazy" decoding="async" referrerpolicy="no-referrer" className="h-full w-full object-cover" />
             ) : (
               <User className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
             )}
@@ -513,7 +513,7 @@ export default function PersonaEditor() {
         <div className="mt-3 flex items-end gap-2">
           <div className="h-8 w-8 shrink-0 overflow-hidden rounded-md border border-border bg-background">
             {card.avatar_url ? (
-              <img src={card.avatar_url} alt="" className="h-full w-full object-cover" />
+              <img src={card.avatar_url} alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" className="h-full w-full object-cover" />
             ) : (
               <User className="m-1.5 h-5 w-5 text-muted-foreground" aria-hidden="true" />
             )}

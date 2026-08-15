@@ -158,6 +158,58 @@ def test_developer_quality_score_from_session(monkeypatch):
     assert result["overall"] > 0
 
 
+def test_developer_quality_score_use_llm_requires_admin(monkeypatch):
+    from memoria.api import developer
+
+    monkeypatch.setattr(
+        developer.repository,
+        "get_user_by_id",
+        lambda user_id: {
+            "user_id": user_id,
+            "is_admin": 0,
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        developer.quality_score(
+            developer.QualityScoreRequest(
+                messages=[{"role": "user", "content": "你好"}],
+                use_llm=True,
+            ),
+            current_user_id="owner",
+        )
+
+    assert exc.value.status_code == 403
+
+
+def test_developer_quality_score_use_llm_enforces_input_budget(monkeypatch):
+    from memoria.api import developer
+
+    monkeypatch.setattr(
+        developer.repository,
+        "get_user_by_id",
+        lambda user_id: {
+            "user_id": user_id,
+            "is_admin": 1,
+        },
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        developer.quality_score(
+            developer.QualityScoreRequest(
+                messages=[
+                    {"role": "user", "content": "长" * 10_001},
+                    {"role": "assistant", "content": "回" * 10_001},
+                ],
+                use_llm=True,
+            ),
+            current_user_id="owner",
+        )
+
+    assert exc.value.status_code == 400
+
+
+
 def test_request_body_size_limit_rejects_oversized_content_length():
     """超大请求体应在读入内存/落盘前被 413 拦下。"""
     from fastapi.testclient import TestClient

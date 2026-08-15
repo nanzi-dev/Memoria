@@ -5,28 +5,43 @@
 import base64
 import hashlib
 import hmac
-import secrets
+import logging
 import re
+import secrets
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Header, Request, Response, Cookie, Depends, Query
+import sqlalchemy.exc
+from fastapi import (
+    APIRouter,
+    Cookie,
+    Depends,
+    File,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from pydantic import BaseModel, Field, StrictInt
 from starlette.concurrency import run_in_threadpool
 
 from memoria.api.avatar_fetcher import download_remote_image
 from memoria.api.avatar_image import avatar_data_url, normalize_avatar_image
 from memoria.api.upload_utils import read_upload_limited
+from memoria.core import world_clock
 from memoria.core.config import configs
 from memoria.core.csrf import (
     clear_csrf_cookie,
     ensure_csrf_cookie,
     set_csrf_cookie,
 )
-from memoria.core import world_clock
 from memoria.db import repository
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -46,14 +61,31 @@ _login_failures: dict[str, list[float]] = {}
 _login_failures_lock = threading.Lock()
 
 
-def _login_throttle_key(username: str) -> str:
-    return username.strip().casefold()
+def _login_client_ip(request: Request | None) -> str:
+    if request is None or request.client is None:
+        return ""
+    return request.client.host or ""
 
 
-def _login_attempt_allowed(username: str) -> bool:
-    """同一用户名短时间内连续失败过多时拒绝继续尝试。"""
+def _login_throttle_key(username: str, client_ip: str | None = None) -> str:
+    """失败计数按 (用户名, 来源 IP) 隔离，避免单 IP 攻击者锁定目标账号。
+
+    直接调用（测试/内部）不传 IP 时退回用户名维度，保持既有语义。
+    """
+    normalized = username.strip().casefold()
+    ip = (client_ip or "").strip()
+    if not ip:
+        return normalized
+    return f"user:{normalized}|ip:{ip}"
+
+
+def _login_attempt_allowed(
+    username: str,
+    client_ip: str | None = None,
+) -> bool:
+    """同一 (用户名, IP) 短时间内连续失败过多时拒绝继续尝试。"""
     cutoff = time.monotonic() - LOGIN_FAILURE_WINDOW_SECONDS
-    key = _login_throttle_key(username)
+    key = _login_throttle_key(username, client_ip)
     with _login_failures_lock:
         for existing_key, timestamps in list(_login_failures.items()):
             timestamps[:] = [t for t in timestamps if t > cutoff]
@@ -62,15 +94,21 @@ def _login_attempt_allowed(username: str) -> bool:
         return len(_login_failures.get(key, ())) < LOGIN_FAILURE_MAX_ATTEMPTS
 
 
-def _record_login_failure(username: str) -> None:
-    key = _login_throttle_key(username)
+def _record_login_failure(
+    username: str,
+    client_ip: str | None = None,
+) -> None:
+    key = _login_throttle_key(username, client_ip)
     with _login_failures_lock:
         _login_failures.setdefault(key, []).append(time.monotonic())
 
 
-def _clear_login_failures(username: str) -> None:
+def _clear_login_failures(
+    username: str,
+    client_ip: str | None = None,
+) -> None:
     with _login_failures_lock:
-        _login_failures.pop(_login_throttle_key(username), None)
+        _login_failures.pop(_login_throttle_key(username, client_ip), None)
 
 
 def _hash_password(password: str) -> str:
@@ -125,15 +163,35 @@ def _gen_user_id() -> str:
     return "usr_" + secrets.token_hex(4)
 
 
-def _set_auth_cookie(response: Response, token: str) -> None:
-    """写入登录态 Cookie。"""
+def _request_uses_https(request: Request | None) -> bool:
+    """识别真实 HTTPS 请求，兼容常见反向代理的 X-Forwarded-Proto。"""
+    if request is None:
+        return False
+    if request.url.scheme == "https":
+        return True
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    first_proto = forwarded_proto.split(",", 1)[0].strip().lower()
+    return first_proto == "https"
+
+
+def _set_auth_cookie(
+    response: Response,
+    token: str,
+    *,
+    request: Request | None = None,
+) -> None:
+    """写入登录态 Cookie。
+
+    显式配置为 Secure 时始终 Secure；否则只要本次登录发生在 HTTPS 上
+    （含反向代理转发头），也自动加 Secure，避免公网 HTTPS 漏配配置。
+    """
     response.set_cookie(
         key=AUTH_COOKIE_NAME,
         value=token,
         max_age=AUTH_COOKIE_MAX_AGE,
         httponly=True,
         samesite="lax",
-        secure=configs.auth_cookie_secure,
+        secure=configs.auth_cookie_secure or _request_uses_https(request),
         path="/",
     )
 
@@ -180,8 +238,9 @@ def _resize_image(data: bytes, max_dim: int = 512) -> bytes | None:
         if normalized.content_type == "image/jpeg":
             return normalized.data
 
-        from PIL import Image
         import io
+
+        from PIL import Image
 
         with Image.open(io.BytesIO(data)) as image:
             image.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
@@ -201,7 +260,7 @@ def get_current_user_id(token: str) -> str | None:
         if uid:
             return uid
     except Exception:
-        pass
+        logger.warning("查询登录态失败，回退进程内 token", exc_info=True)
     # 进程内 dict 仅兼容旧测试/开发；生产必须走持久化 auth token。
     if configs.memoria_env == "production":
         return None
@@ -441,7 +500,11 @@ def _raise_clock_http_error(exc: ValueError) -> None:
 # 注册
 # =========================
 @router.post("/user/register", response_model=AuthResponse)
-def register(req: RegisterRequest, response: Response):
+def register(
+    req: RegisterRequest,
+    response: Response,
+    request: Request = None,  # type: ignore[assignment]  # FastAPI 不支持 Optional[Request] 联合类型
+):
     _validate_username(req.username)
     _validate_password(req.password)
 
@@ -472,9 +535,15 @@ def register(req: RegisterRequest, response: Response):
         )
     except repository.AdminBootstrapUnavailable as exc:
         raise HTTPException(409, "管理员已完成初始化") from exc
+    except sqlalchemy.exc.IntegrityError as exc:
+        # TOCTOU 兜底：预检查后仍有并发插入触发唯一约束，不能冒泡成 500。
+        logger.warning("注册并发冲突: username=%s", req.username, exc_info=True)
+        if repository.get_user_by_username(req.username):
+            raise HTTPException(409, "用户名已存在") from exc
+        raise HTTPException(400, "管理员初始化凭据冲突，请重试") from exc
     token = _gen_token()
     _store_auth_token(token, uid)
-    _set_auth_cookie(response, token)
+    _set_auth_cookie(response, token, request=request)
     set_csrf_cookie(response)
     user = repository.get_user_by_id(uid)
     return AuthResponse(user=_build_user_response(user))
@@ -484,27 +553,37 @@ def register(req: RegisterRequest, response: Response):
 # 登录
 # =========================
 @router.post("/user/login", response_model=AuthResponse)
-def login(req: LoginRequest, response: Response):
-    if not _login_attempt_allowed(req.username):
+def login(
+    req: LoginRequest,
+    response: Response,
+    request: Request = None,  # type: ignore[assignment]  # FastAPI 不支持 Optional[Request] 联合类型
+):
+    client_ip = _login_client_ip(request)
+    if not _login_attempt_allowed(req.username, client_ip):
         raise HTTPException(429, "登录失败次数过多，请稍后再试")
 
     user = repository.get_user_by_username(req.username)
     if not user:
         # 恒定开销路径：不做提前返回，避免响应时间暴露用户名是否存在。
         _burn_password_hash_time(req.password)
-        _record_login_failure(req.username)
+        _record_login_failure(req.username, client_ip)
         raise HTTPException(401, "用户名或密码错误")
     if not _verify_password(req.password, user["password_hash"]):
-        _record_login_failure(req.username)
+        _record_login_failure(req.username, client_ip)
         raise HTTPException(401, "用户名或密码错误")
 
-    _clear_login_failures(req.username)
+    _clear_login_failures(req.username, client_ip)
     if _needs_password_rehash(user["password_hash"]):
         repository.update_user_password_hash(user["user_id"], _hash_password(req.password))
 
     token = _gen_token()
-    _store_auth_token(token, user["user_id"])
-    _set_auth_cookie(response, token)
+    try:
+        _store_auth_token(token, user["user_id"])
+    except sqlalchemy.exc.IntegrityError as exc:
+        # 随机 token 唯一键撞车等并发写冲突不应冒泡成 500。
+        logger.warning("登录态写入冲突: user_id=%s", user["user_id"], exc_info=True)
+        raise HTTPException(409, "登录状态冲突，请稍后重试") from exc
+    _set_auth_cookie(response, token, request=request)
     set_csrf_cookie(response)
     return AuthResponse(user=_build_user_response(user))
 

@@ -3,20 +3,21 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
 import json
 import logging
 import os
-from pathlib import Path
 import re
 import secrets
 import time
 import wave
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from io import BytesIO
-from typing import Any, AsyncIterator, Literal
+from pathlib import Path
+from typing import Any, Literal
 
 from memoria.core import character_loader
 from memoria.core.character_schema import CharacterCard
@@ -24,8 +25,8 @@ from memoria.core.config import Configs, configs
 from memoria.core.locale import Locale
 from memoria.core.speech_provider import (
     CONSENT_PHRASES,
-    SpeechSynthesisProvider,
     SpeechProviderError,
+    SpeechSynthesisProvider,
     TranscriptionProvider,
     create_stt_provider,
     create_tts_provider,
@@ -33,7 +34,6 @@ from memoria.core.speech_provider import (
     tts_provider_settings,
 )
 from memoria.db import repository
-
 
 logger = logging.getLogger(__name__)
 
@@ -695,7 +695,7 @@ class SpeechService:
         character_loader.load_character_card.cache_clear()
 
     def _workflow_dir(self, owner_user_id: str, character_id: str) -> Path:
-        digest = hashlib.sha256(f"{owner_user_id}\0{character_id}".encode("utf-8")).hexdigest()
+        digest = hashlib.sha256(f"{owner_user_id}\0{character_id}".encode()).hexdigest()
         return Path(self.settings.speech_storage_path) / "workflows" / digest
 
     def _read_workflow(self, owner_user_id: str, character_id: str) -> dict:

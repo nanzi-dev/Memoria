@@ -8,9 +8,9 @@ from sqlalchemy import select, text
 from memoria.db.models import (
     CharacterRelationship,
     CharacterRelationshipRevision,
-    RelationshipState,
 )
 from memoria.db.repository._common import _now, _row_to_dict, db_session
+from memoria.db.repository.users import is_player_node_id, player_node_id
 
 logger = logging.getLogger(__name__)
 

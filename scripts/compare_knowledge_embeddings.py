@@ -11,7 +11,6 @@ from pathlib import Path
 
 import numpy as np
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
@@ -24,7 +23,6 @@ from memoria.core.knowledge_retriever import (
     retrieve_knowledge,
 )
 from memoria.db import repository
-
 
 DEFAULT_DATASET = PROJECT_ROOT / "tests/fixtures/knowledge_retrieval_zh.json"
 

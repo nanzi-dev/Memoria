@@ -11,9 +11,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -24,7 +26,7 @@ from memoria.core import (
     relationship_context,
     world_clock,
 )
-from memoria.core.locale import DEFAULT_LOCALE, Locale
+from memoria.core.locale import Locale
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
@@ -182,6 +184,36 @@ def _build_multi_character_system_prompt(*, locale: Locale, **kwargs) -> str:
 class MultiCharacterContextMixin:
     """Mixin：为 MultiCharacterOrchestrator 提供上下文加载与格式化能力。"""
 
+    def _cached_relationship_history_cutoff(
+        self,
+        character_relationships: dict | None,
+    ) -> str | None:
+        """带实例级缓存的角色关系图谱历史截止时间。
+
+        缓存仅存在于编排器实例生命周期内，不跨请求长期保存。
+        """
+        cache = getattr(self, "_relationship_cutoff_cache", None)
+        if cache is None:
+            cache = {}
+            self._relationship_cutoff_cache = cache
+        key = (
+            self.player_id,
+            tuple(self.character_ids),
+            json.dumps(
+                character_relationships,
+                sort_keys=True,
+                ensure_ascii=False,
+                default=str,
+            ),
+        )
+        if key not in cache:
+            cache[key] = multi_character_memory.get_relationship_history_cutoff(
+                self.player_id,
+                self.character_ids,
+                character_relationships,
+            )
+        return cache[key]
+
     def _load_all_relationships(self) -> dict:
         """
         加载所有参与角色之间的关系
@@ -241,9 +273,27 @@ class MultiCharacterContextMixin:
         relationship_aliases: list[str] | None = None,
         world_now: str | None = None,
         recall_key: str | None = None,
+        player_memories_override: list[str] | None = None,
     ) -> list[str]:
         """加载多角色记忆上下文，供 prompt 的历史记录区使用。"""
         other_character_ids = [cid for cid in self.character_ids if cid != character_id]
+        cache_key = None
+        if player_memories_override is None:
+            cache = getattr(self, "_memory_context_cache", None)
+            if cache is not None:
+                cache_key = (
+                    character_id,
+                    json.dumps(
+                        character_relationships,
+                        sort_keys=True,
+                        ensure_ascii=False,
+                        default=str,
+                    ),
+                    world_now,
+                    recall_key,
+                )
+                if cache_key in cache:
+                    return list(cache[cache_key])
 
         try:
             context = multi_character_memory.integrate_multi_character_context(
@@ -256,6 +306,7 @@ class MultiCharacterContextMixin:
                 relationship_aliases=relationship_aliases or self._memory_aliases_for_characters(self.character_ids),
                 world_now=world_now,
                 recall_key=recall_key,
+                player_memories_override=player_memories_override,
             )
         except Exception as e:
             logger.warning(f"加载多角色记忆上下文失败: {e}")
@@ -285,6 +336,10 @@ class MultiCharacterContextMixin:
                     continue
                 memory_lines.append(f"对{other_name}的印象：{memory}")
 
+        if cache_key is not None:
+            cache = getattr(self, "_memory_context_cache", None)
+            if cache is not None:
+                cache[cache_key] = list(memory_lines)
         return memory_lines
 
 

@@ -3,15 +3,14 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-import httpx
-import pytest
 import fastapi.dependencies.utils
 import fastapi.routing
+import httpx
+import pytest
 from fastapi import FastAPI
 
 from memoria.api import user as user_api
 from memoria.db import repository
-
 
 UTC = timezone.utc
 

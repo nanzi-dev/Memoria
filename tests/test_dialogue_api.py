@@ -7,8 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from fastapi import BackgroundTasks
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 

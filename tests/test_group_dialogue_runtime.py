@@ -1,8 +1,6 @@
 """离线自主群聊运行时测试。"""
 
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
-
 
 UTC = timezone.utc
 

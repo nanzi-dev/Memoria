@@ -10,8 +10,9 @@
 import json
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field, ValidationError
+
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from memoria.api.avatar_fetcher import download_remote_image
@@ -112,7 +113,7 @@ def list_characters_admin(
     try:
         cards = repository.list_character_cards_from_db(current_user_id, only_active=only_active)
         return [CharacterCardListItem(**card) for card in cards]
-    except Exception as e:
+    except Exception:
         logger.exception("获取角色卡列表失败")
         raise HTTPException(status_code=500, detail="获取角色卡列表失败")
 
@@ -155,7 +156,7 @@ def get_character_detail(
     
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("获取角色卡详情失败")
         raise HTTPException(status_code=500, detail="获取角色卡详情失败")
 
@@ -362,7 +363,7 @@ def delete_character(
     
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("删除角色卡失败")
         raise HTTPException(status_code=500, detail="删除角色卡失败")
 
@@ -398,7 +399,7 @@ def activate_character(
     
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("激活角色卡失败")
         raise HTTPException(status_code=500, detail="激活角色卡失败")
 
@@ -435,8 +436,26 @@ def import_character_from_file(
         raw_text = file_path.read_text(encoding="utf-8")
         raw_data = character_loader.normalize_character_data(json.loads(raw_text))
         card = CharacterCard.model_validate(raw_data)
-        
-        # 保存到数据库
+
+        # 文件内 character_id 必须与请求指定的 ID 一致，避免张冠李戴。
+        if card.character_id != req.character_id:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"文件中的角色 ID '{card.character_id}' 与请求中的 "
+                    f"'{req.character_id}' 不一致"
+                ),
+            )
+
+        # 导入前先检查数据库，避免覆盖已有角色卡。
+        if repository.get_character_card_from_db(
+            current_user_id,
+            card.character_id,
+            include_inactive=True,
+        ):
+            raise HTTPException(status_code=409, detail=f"角色卡 '{card.character_id}' 已存在")
+
+        # 保存到数据库；显式写入文件中的 avatar_url，防止覆盖已有头像。
         card_json = json.dumps(raw_data, ensure_ascii=False, indent=2)
         success = repository.save_character_card_to_db(
             owner_user_id=current_user_id,
@@ -445,7 +464,8 @@ def import_character_from_file(
             version=card.version,
             name=card.meta.name,
             display_name=card.meta.display_name,
-            source="file"  # 标记为从文件导入
+            source="file",  # 标记为从文件导入
+            avatar_url=card.avatar_url,
         )
         
         if not success:
@@ -551,7 +571,7 @@ def get_character_avatar(
     
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("获取头像失败")
         raise HTTPException(status_code=500, detail="获取头像失败")
 
@@ -595,7 +615,7 @@ async def upload_character_avatar(
     
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("头像上传失败")
         raise HTTPException(status_code=500, detail="头像上传失败")
 
@@ -637,6 +657,6 @@ def set_character_avatar_url(
     
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("设置头像 URL 失败")
         raise HTTPException(status_code=500, detail="设置头像 URL 失败")

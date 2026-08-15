@@ -16,9 +16,36 @@ export function useWorldNow() {
   const [worldNow, setWorldNow] = useState(() => getWorldNow());
 
   useEffect(() => {
-    setWorldNow(getWorldNow());
-    const timer = setInterval(() => setWorldNow(getWorldNow()), 1000);
-    return () => clearInterval(timer);
+    let timer = null;
+    const refreshNow = () => setWorldNow(getWorldNow());
+    const stopTicker = () => {
+      if (timer != null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+    const startTicker = () => {
+      stopTicker();
+      // 恢复可见时立即刷新一次，避免隐藏期间累积的误差留到下一个 tick。
+      refreshNow();
+      if (document.visibilityState === 'visible') {
+        timer = setInterval(() => setWorldNow(getWorldNow()), 1000);
+      }
+    };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        startTicker();
+      } else {
+        stopTicker();
+      }
+    };
+
+    startTicker();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      stopTicker();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [getWorldNow, worldClock?.clock_revision]);
 
   return { clock: worldClock, worldNow };

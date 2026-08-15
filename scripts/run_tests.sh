@@ -21,7 +21,13 @@ echo "========================================"
 echo ""
 
 # 运行所有测试
-PYTHONPATH=src python -m pytest tests/ -v --tb=short "$@"
+if command -v python3 >/dev/null 2>&1; then
+    PY=python3
+else
+    PY=python
+fi
+
+PYTHONPATH=src "$PY" -m pytest tests/ -v --tb=short "$@"
 
 echo ""
 echo "测试完成"

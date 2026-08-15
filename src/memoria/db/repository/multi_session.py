@@ -2,30 +2,10 @@
 from __future__ import annotations
 
 # Standard/third-party imports used across repository domains.
-from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
-import hashlib
 import json
 import logging
-import sqlite3
 import uuid
-from typing import Any, Callable
-from urllib.parse import urlsplit
-import re
-from difflib import SequenceMatcher
 
-from memoria.core.config import configs
-from memoria.core import performance, tracing
-from memoria.core.domain_events import NewDomainEvent, StoredDomainEvent
-from memoria.core.fact_claim_policy import (
-    ADMIN_VERIFICATION_SOURCE_KIND,
-    CLAIM_SOURCE_KINDS,
-    clean_source_ids,
-    derive_fact_claim_identity,
-    evaluate_verification,
-    normalize_evidence_entry,
-    normalize_fact_text,
-)
 from sqlalchemy import text
 
 try:
@@ -37,16 +17,24 @@ except ImportError:  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
-# Import shared helpers / connection / schema. Private names included.
-from memoria.db.repository._common import *  # noqa: F403
-from memoria.db.repository import _common as _common_mod
-
-# Ensure private helpers from _common are visible as bare names.
-for _name, _value in vars(_common_mod).items():
-    if _name.startswith('__'):
-        continue
-    globals().setdefault(_name, _value)
-del _name, _value, _common_mod
+from memoria.db.repository._common import (
+    _decode_message_row,
+    _encode_knowledge_sources,
+    _is_postgres_enabled,
+    _lock_sqlite_write,
+    _now,
+    _row_to_dict,
+    db_session,
+    dialogue_texts_redundant,
+)
+from memoria.db.repository.events import (
+    _save_runtime_state_in_transaction,
+    _upsert_group_message_notification_in_transaction,
+)
+from memoria.db.repository.sessions_and_messages import (
+    _lock_session_creation,
+    get_session,
+)
 
 # =========================
 # 多角色会话管理
@@ -875,6 +863,8 @@ def claim_group_dialogue_state(
 ) -> bool:
     """使用现实 UTC 租约原子领取一个逻辑群聊脉冲。"""
     with db_session() as conn:
+        if not _is_postgres_enabled():
+            _lock_sqlite_write(conn)
         cursor = conn.execute(
             text("""
             UPDATE group_dialogue_state

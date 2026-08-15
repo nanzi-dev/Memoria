@@ -37,7 +37,7 @@ _SRC_DIR = _ROOT / "src"
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-from memoria.main import app  # noqa: E402
-from memoria.static_serving import install_static_routes, resolve_web_dist  # noqa: E402
+from memoria.main import app
+from memoria.static_serving import install_static_routes, resolve_web_dist
 
 install_static_routes(app, resolve_web_dist())

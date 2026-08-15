@@ -12,7 +12,6 @@ from fastapi import FastAPI
 
 from memoria.db import repository
 
-
 UTC = timezone.utc
 
 

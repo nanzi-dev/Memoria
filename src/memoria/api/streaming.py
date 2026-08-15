@@ -8,13 +8,13 @@ import logging
 import os
 import queue
 import threading
+import time
 from collections.abc import Callable
 from typing import Any
 
 from fastapi.responses import StreamingResponse
 
 from memoria.db.repository import DialogueTurnConflictError
-
 
 EventSink = Callable[[str, dict[str, Any]], None]
 SyncWorker = Callable[[EventSink], Any]
@@ -28,17 +28,30 @@ def _positive_int_env(name: str, default: int) -> int:
         return default
 
 
+def _positive_float_env(name: str, default: float) -> float:
+    try:
+        return max(0.1, float(os.getenv(name, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+
 STREAM_MAX_WORKERS = _positive_int_env("MEMORIA_STREAM_MAX_WORKERS", 16)
 STREAM_EVENT_QUEUE_SIZE = _positive_int_env(
     "MEMORIA_STREAM_EVENT_QUEUE_SIZE",
     256,
 )
 STREAM_HEARTBEAT_SECONDS = 10
+# 慢消费者保护：队列持续满超过该时长后主动终止 worker 并释放槽位，
+# 避免少量只连不读的客户端占满全部流式对话 worker。
+STREAM_BACKPRESSURE_TIMEOUT_SECONDS = _positive_float_env(
+    "MEMORIA_STREAM_BACKPRESSURE_TIMEOUT_SECONDS",
+    30.0,
+)
 _stream_slots = threading.BoundedSemaphore(STREAM_MAX_WORKERS)
 
 
 class StreamDisconnected(RuntimeError):
-    """Raised inside a worker when its response consumer has disconnected."""
+    """Raised inside a worker when its consumer is gone or too slow to drain."""
 
 
 def _encode_sse(event_type: str, payload: dict[str, Any]) -> str:
@@ -75,6 +88,7 @@ def create_sse_response(
         os.set_blocking(write_fd, False)
 
         def enqueue(item: tuple[str, dict[str, Any]] | None) -> None:
+            wait_started = time.monotonic()
             while True:
                 if disconnected.is_set():
                     raise StreamDisconnected()
@@ -82,6 +96,16 @@ def create_sse_response(
                     event_queue.put(item, timeout=0.1)
                     break
                 except queue.Full:
+                    if (
+                        time.monotonic() - wait_started
+                        >= STREAM_BACKPRESSURE_TIMEOUT_SECONDS
+                    ):
+                        logger.warning(
+                            "流式响应消费过慢，终止 worker 并释放槽位 "
+                            "(timeout=%.1fs)",
+                            STREAM_BACKPRESSURE_TIMEOUT_SECONDS,
+                        )
+                        raise StreamDisconnected()
                     continue
             try:
                 os.write(write_fd, b"\0")
@@ -122,6 +146,10 @@ def create_sse_response(
         def run_worker() -> None:
             try:
                 sink("turn_started", started_data)
+                # 进入可能长时间阻塞的同步 provider 前再检查一次断连；
+                # 客户端可能已在 turn_started 之后离开。
+                if disconnected.is_set():
+                    raise StreamDisconnected()
                 result = worker(sink)
                 if completion_mapper is not None:
                     result = completion_mapper(result)
@@ -154,6 +182,9 @@ def create_sse_response(
                 try:
                     if not disconnected.is_set():
                         enqueue(None)
+                except StreamDisconnected:
+                    # 消费者在检查与入队之间断开；正常清理即可。
+                    pass
                 finally:
                     try:
                         os.close(write_fd)

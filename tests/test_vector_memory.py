@@ -1,8 +1,8 @@
-from concurrent.futures import ThreadPoolExecutor
 import sys
 import threading
 import time
 import types
+from concurrent.futures import ThreadPoolExecutor
 
 from memoria.core.vector_memory import VectorMemoryStore
 

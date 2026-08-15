@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from fastapi import HTTPException
 from PIL import Image, UnidentifiedImageError
 
-
 MAX_AVATAR_SIZE = 2 * 1024 * 1024
 MAX_AVATAR_DIMENSION = 512
 MAX_AVATAR_PIXELS = 16_000_000

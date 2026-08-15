@@ -11,6 +11,7 @@
 import hashlib
 import json
 import logging
+import re
 
 from memoria.core import (
     llm_client,
@@ -242,54 +243,100 @@ def _extract_character_specific_memories(
         return []
 
 
+def _extract_balanced_json_text(
+    raw_text: str,
+    open_char: str,
+    close_char: str,
+) -> str | None:
+    """按括号配平从混杂文本中提取第一个 JSON 片段（支持字符串转义）。"""
+    start = raw_text.find(open_char)
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(raw_text)):
+        char = raw_text[index]
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char == open_char:
+            depth += 1
+        elif char == close_char:
+            depth -= 1
+            if depth == 0:
+                return raw_text[start:index + 1]
+    return None
+
+
+def _clean_jsonish_text(raw_text: str) -> str:
+    text = (raw_text or "").strip()
+    code_block = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
+    if code_block:
+        text = code_block.group(1).strip()
+    text = text.replace("“", '"').replace("”", '"')
+    text = text.replace("‘", "'").replace("’", "'")
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+    return text
+
+
+def _load_jsonish_payload(response: str):
+    """宽松解析轻量模型输出，失败时计数并抛出，供调用层降级为空。"""
+    if not response:
+        raise ValueError("empty light task response")
+    text = _clean_jsonish_text(response)
+    candidates = [text]
+    if text:
+        try:
+            parsed = json.loads(text)
+            return parsed
+        except json.JSONDecodeError:
+            pass
+    balanced = _extract_balanced_json_text(text, "{", "}")
+    if balanced:
+        candidates.append(balanced)
+    balanced = _extract_balanced_json_text(text, "[", "]")
+    if balanced:
+        candidates.append(balanced)
+
+    last_error: Exception | None = None
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            last_error = exc
+    performance.increment("llm.parse_failures.light_task")
+    logger.warning(
+        "轻量模型 JSON 解析失败，已降级为空: %r（%s）",
+        text[:200],
+        last_error,
+    )
+    raise ValueError("light task JSON parse failed")
+
+
 def _parse_json_array_response(response: str) -> list:
     """从轻量模型响应中提取 JSON 数组。"""
-    if not response:
-        return []
-    text = response.strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
-
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("[")
-        end = text.rfind("]")
-        if start < 0 or end <= start:
-            return []
-        try:
-            data = json.loads(text[start:end + 1])
-        except json.JSONDecodeError:
-            return []
-
+        data = _load_jsonish_payload(response)
+    except ValueError:
+        return []
     return data if isinstance(data, list) else []
 
 
 def _parse_json_object_response(response: str) -> dict:
     """从轻量模型响应中提取 JSON 对象。"""
-    if not response:
-        return {}
-    text = response.strip()
-    if text.startswith("```"):
-        lines = text.splitlines()[1:]
-        if lines and lines[-1].startswith("```"):
-            lines.pop()
-        text = "\n".join(lines).strip()
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        start, end = text.find("{"), text.rfind("}")
-        if start < 0 or end <= start:
-            return {}
-        try:
-            data = json.loads(text[start:end + 1])
-        except json.JSONDecodeError:
-            return {}
+        data = _load_jsonish_payload(response)
+    except ValueError:
+        return {}
     return data if isinstance(data, dict) else {}
 
 
@@ -617,7 +664,7 @@ def save_character_impression(
     evidence_id = evidence_id or (
         f"impression:{session_id}:"
         + hashlib.sha256(
-            f"{observer_id}\0{target_id}\0{impression}".encode("utf-8")
+            f"{observer_id}\0{target_id}\0{impression}".encode()
         ).hexdigest()
     )
     memory_id = repository.save_character_impression(
@@ -1034,6 +1081,7 @@ def integrate_multi_character_context(
     relationship_aliases: list[str] | None = None,
     world_now: str | None = None,
     recall_key: str | None = None,
+    player_memories_override: list[str] | None = None,
 ) -> dict:
     """
     整合多角色场景的完整上下文
@@ -1068,18 +1116,21 @@ def integrate_multi_character_context(
     )
     
     # 1. 对玩家的记忆：只过滤图谱修订前的关系事实，保留普通长期记忆
-    player_memories = load_player_memories_for_relationship_graph(
-        character_id=character_id,
-        player_id=player_id,
-        session_id=session_id,
-        other_character_ids=other_character_ids,
-        relationship_history_cutoff=relationship_context_updated_at,
-        query_context=query_context,
-        relationship_aliases=relationship_aliases,
-        limit=10,
-        world_now=world_now,
-        recall_key=recall_key,
-    )
+    if player_memories_override is not None:
+        player_memories = list(player_memories_override)
+    else:
+        player_memories = load_player_memories_for_relationship_graph(
+            character_id=character_id,
+            player_id=player_id,
+            session_id=session_id,
+            other_character_ids=other_character_ids,
+            relationship_history_cutoff=relationship_context_updated_at,
+            query_context=query_context,
+            relationship_aliases=relationship_aliases,
+            limit=10,
+            world_now=world_now,
+            recall_key=recall_key,
+        )
     context["player_memories"] = player_memories
     
     # 2. 对其他角色的印象（从 shared_memory 表查询）

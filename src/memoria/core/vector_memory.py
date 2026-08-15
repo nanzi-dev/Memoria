@@ -10,11 +10,10 @@
 import logging
 import os
 import threading
-from typing import List, Optional
+
 # import chromadb  # lazy
 # from chromadb.config import Settings  # lazy
 # from sentence_transformers import SentenceTransformer  # lazy
-
 from memoria.core.config import configs
 
 # 设置 HuggingFace 镜像以加速模型下载
@@ -194,8 +193,8 @@ class VectorMemoryStore:
         character_id: str,
         player_id: str,
         query_text: str,
-        top_k: Optional[int] = None
-    ) -> List[dict]:
+        top_k: int | None = None
+    ) -> list[dict]:
         """
         基于语义相似度搜索相关记忆
         
@@ -236,11 +235,18 @@ class VectorMemoryStore:
             if results and results['ids'] and len(results['ids'][0]) > 0:
                 for i, vector_id in enumerate(results['ids'][0]):
                     metadata = results['metadatas'][0][i]
-                    distance = results['distances'][0][i] if 'distances' in results else 0.0
-                    
-                    # 距离转相似度（cosine distance → similarity），夹取到非负
-                    similarity = max(0.0, 1.0 - distance)
-                    
+                    if (
+                        'distances' in results
+                        and results['distances']
+                        and len(results['distances'][0]) > i
+                    ):
+                        distance = results['distances'][0][i]
+                        # 距离转相似度（cosine distance → similarity），夹取到非负
+                        similarity = max(0.0, 1.0 - distance)
+                    else:
+                        # 缺失距离字段时不能臆断为完全相似
+                        similarity = 0.0
+
                     memories.append({
                         "fact_id": metadata["fact_id"],
                         "fact_text": results['documents'][0][i],
@@ -303,13 +309,44 @@ class VectorMemoryStore:
         Returns:
             bool: 是否更新成功
         """
-        self.delete_memory(character_id, player_id, fact_id)
-        return self.add_memory(fact_id, character_id, player_id, fact_text, importance)
+        vector_id = self._generate_id(character_id, player_id, fact_id)
+        try:
+            if hasattr(self.collection, "upsert") and not self.embedding_disabled:
+                embedding = self._encode_text(fact_text)
+                metadata = {
+                    "fact_id": str(fact_id),
+                    "character_id": character_id,
+                    "player_id": player_id,
+                    "importance": int(importance),
+                }
+                self.collection.upsert(
+                    ids=[vector_id],
+                    embeddings=[embedding],
+                    documents=[fact_text],
+                    metadatas=[metadata],
+                )
+                return True
+        except Exception as upsert_exc:
+            logger.warning(
+                "向量 upsert 失败，回退到 delete+add: fact_id=%s error=%s",
+                fact_id,
+                upsert_exc,
+            )
+        try:
+            self.delete_memory(character_id, player_id, fact_id)
+            return self.add_memory(fact_id, character_id, player_id, fact_text, importance)
+        except Exception:
+            logger.exception(
+                "向量记忆更新失败: fact_id=%s character_id=%s",
+                fact_id,
+                character_id,
+            )
+            return False
     
     def get_memory_count(
         self,
-        character_id: Optional[str] = None,
-        player_id: Optional[str] = None
+        character_id: str | None = None,
+        player_id: str | None = None
     ) -> int:
         """
         获取记忆数量
@@ -343,7 +380,7 @@ class VectorMemoryStore:
 # =========================
 # 全局单例
 # =========================
-_vector_store_instance: Optional[VectorMemoryStore] = None
+_vector_store_instance: VectorMemoryStore | None = None
 _vector_store_lock = threading.Lock()
 
 def get_vector_store() -> VectorMemoryStore:

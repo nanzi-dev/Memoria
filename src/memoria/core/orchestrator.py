@@ -12,24 +12,27 @@
 import json
 import logging
 import uuid
-from typing import Callable
+from collections.abc import Callable
 
 from memoria.core import (
     character_loader,
+    event_runtime,
     llm_client,
     memory_curve,
     multi_character_memory,
     performance,
     prompt_builder,
+    relationship_context,
     world_clock,
 )
 from memoria.core.config import configs
-from memoria.core import event_runtime, relationship_context
 from memoria.core.knowledge_retriever import retrieve_knowledge
 from memoria.core.locale import DEFAULT_LOCALE, Locale
 from memoria.core.memory_extractor import is_memory_worthy_candidate
 from memoria.core.output_safety import (
     DialogueSafetyStream,
+)
+from memoria.core.output_safety import (
     safety_check as _safety_check,
 )
 from memoria.core.relationship_delta_policy import resolve_relationship_delta

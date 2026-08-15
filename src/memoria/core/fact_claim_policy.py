@@ -4,7 +4,6 @@ import re
 import unicodedata
 from typing import Any
 
-
 CLAIM_SOURCE_KINDS = frozenset({
     "player_message",
     "knowledge_chunk",

@@ -386,7 +386,7 @@ export default function useBrowserSpeech({ sessionId, mode, onTranscription } = 
         const actualMime = recorder.mimeType || mimeType || chunks[0]?.type || 'audio/webm';
         const blob = new Blob(chunks, { type: actualMime });
         if (!blob.size) {
-          setSpeechStatus('error');
+          setSpeechStatus('idle');
           setSpeechError('未录到有效音频，请重试');
           return;
         }
@@ -446,8 +446,14 @@ export default function useBrowserSpeech({ sessionId, mode, onTranscription } = 
 
   const stopRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;
-    if (recorder?.state && recorder.state !== 'inactive') recorder.stop();
-  }, []);
+    // recorder 已经 inactive 时说明没有正在进行的录音，
+    // 直接复位状态，避免按钮一直停留在“录音中”。
+    if (!recorder || recorder.state === 'inactive') {
+      cancelRecording();
+      return;
+    }
+    recorder.stop();
+  }, [cancelRecording]);
 
   const clearSpeechError = useCallback(() => {
     setSpeechError(null);

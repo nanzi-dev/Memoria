@@ -46,7 +46,7 @@ def validate_timezone(timezone_name: str) -> str:
     return name
 
 
-def validate_time_scale(time_scale: float | int) -> int:
+def validate_time_scale(time_scale: float) -> int:
     if isinstance(time_scale, bool) or time_scale not in ALLOWED_TIME_SCALES:
         raise ValueError(f"time_scale must be one of {sorted(ALLOWED_TIME_SCALES)}")
     return int(time_scale)
@@ -64,7 +64,7 @@ def validate_timezone_mode(timezone_mode: str) -> str:
 def calculate_world_now(
     anchor_real_utc: datetime | str,
     anchor_world_utc: datetime | str,
-    time_scale: float | int,
+    time_scale: float,
     real_now: datetime | str,
 ) -> datetime:
     real_anchor = as_utc(anchor_real_utc)

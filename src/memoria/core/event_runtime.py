@@ -10,8 +10,9 @@ import asyncio
 import json
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable
+from typing import Any
 
 from memoria.core import character_loader, world_clock
 from memoria.core.config import configs
@@ -1337,6 +1338,7 @@ def run_due_time_events(
                     [event],
                     context,
                     definitions_by_id,
+                    enforce_cooldown=True,
                 )
                 failed_executions = [
                     execution
@@ -1459,7 +1461,9 @@ async def run_world_clock_scheduler() -> None:
     while True:
         try:
             await asyncio.to_thread(run_due_time_events)
-            from memoria.core.group_dialogue_runtime import run_autonomous_group_dialogues
+            from memoria.core.group_dialogue_runtime import (
+                run_autonomous_group_dialogues,
+            )
 
             await asyncio.to_thread(run_autonomous_group_dialogues)
         except asyncio.CancelledError:

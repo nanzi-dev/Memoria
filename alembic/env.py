@@ -8,7 +8,8 @@ Alembic 迁移环境配置。
 
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import pool
+
 from alembic import context
 
 # ── Alembic Config ──────────────────────────────────────────────────────────
@@ -20,11 +21,12 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # ── ORM Model MetaData（autogenerate 的数据源）─────────────────────────────
-from memoria.db.models import Base  # noqa: E402
+from memoria.db.models import Base
+
 target_metadata = Base.metadata
 
 # ── 数据库 URL（从应用配置获取）─────────────────────────────────────────────
-from memoria.core.config import configs  # noqa: E402
+from memoria.core.config import configs
 
 
 def _get_url() -> str:

@@ -84,12 +84,21 @@ def test_unknown_api_returns_json_404(tmp_path):
     assert "html" not in resp.text.lower()
 
 
+def test_prefix_like_spa_route_is_not_mistaken_for_api(tmp_path):
+    client = TestClient(_make_app(_make_dist(tmp_path)))
+    resp = client.get("/adminfoo")
+    assert resp.status_code == 200
+    assert resp.text == "<html>memoria</html>"
+
+
 def test_path_traversal_blocked(tmp_path):
     client = TestClient(_make_app(_make_dist(tmp_path)))
-    resp = client.get("/../outside.txt")
-    # 无论是否被客户端/服务端归一化，都不得泄露 dist 外的文件内容
-    assert resp.status_code != 500
-    assert "outside" not in resp.text
+    # TestClient 会把裸 ../ 归一化掉，因此使用编码后的穿越路径锁定服务端防护。
+    for path in ("/%2e%2e/outside.txt", "/..%2Foutside.txt"):
+        resp = client.get(path)
+        assert resp.status_code == 404
+        assert resp.headers.get("content-type", "").startswith("application/json")
+        assert "outside" not in resp.text
 
 
 def test_install_is_idempotent(tmp_path):

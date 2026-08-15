@@ -502,8 +502,9 @@ def test_create_openai_client_uses_configured_timeout_and_single_retry_layer(
 
 
 def test_get_light_client_uses_light_timeout(monkeypatch):
-    from memoria.core import llm_client
     from pydantic import SecretStr
+
+    from memoria.core import llm_client
 
     created = {}
 

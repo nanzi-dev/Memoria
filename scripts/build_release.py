@@ -24,6 +24,7 @@
 """
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -97,6 +98,23 @@ def build_frontend(skip: bool) -> None:
     log("前端构建完成")
 
 
+def _normalize_package_permissions(staging: Path) -> None:
+    """发布包跨用户解压后必须可读；脚本统一 755，文档/数据统一 644。"""
+    for rel, mode in (
+        ("start.py", 0o755),
+        ("start.sh", 0o755),
+        ("start.bat", 0o755),
+        ("run.py", 0o644),
+        ("RELEASE.md", 0o644),
+    ):
+        target = staging / rel
+        if target.exists():
+            os.chmod(target, mode)
+    for path in (staging / "scripts").rglob("*"):
+        if path.is_file():
+            os.chmod(path, 0o755 if path.suffix in {".sh", ".py"} else 0o644)
+
+
 def assemble_staging(version: str, with_model: bool) -> Path:
     name = f"memoria-{version}"
     staging = OUT_DIR / name
@@ -110,7 +128,11 @@ def assemble_staging(version: str, with_model: bool) -> Path:
         if not src.exists():
             fail(f"缺少打包条目: {src_rel}")
         if src.is_dir():
-            shutil.copytree(src, dst)
+            shutil.copytree(
+                src,
+                dst,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+            )
         else:
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
@@ -120,8 +142,31 @@ def assemble_staging(version: str, with_model: bool) -> Path:
         src = ROOT / MODEL_REL
         if not src.is_dir():
             fail(f"缺少嵌入模型: {MODEL_REL}（可用 --no-model 跳过）")
-        shutil.copytree(src, staging / MODEL_REL)
+        shutil.copytree(
+            src,
+            staging / MODEL_REL,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
         log(f"已复制嵌入模型: {MODEL_REL}")
+
+    _normalize_package_permissions(staging)
+
+    if not with_model:
+        release_md = staging / "RELEASE.md"
+        original = release_md.read_text(encoding="utf-8")
+        release_md.write_text(
+            "> **注意**：本发布包使用 `--no-model` 构建，**未内置嵌入模型**。\n"
+            "> 向量记忆与知识库需要联网从 HuggingFace 下载 "
+            "`sentence-transformers/all-MiniLM-L6-v2`，或将模型放入 "
+            "`models/sentence-transformers/all-MiniLM-L6-v2/` 后重启。\n\n"
+            + original.replace(
+                "本包已内置嵌入模型（`models/sentence-transformers/all-MiniLM-L6-v2`），"
+                "向量记忆与知识库可离线使用。",
+                "本包未内置嵌入模型，向量记忆与知识库首次使用需要联网下载模型。",
+            ),
+            encoding="utf-8",
+        )
+        log("已生成 --no-model 发布说明")
 
     for sub in DATA_SUBDIRS:
         dir_path = staging / "data" / sub
@@ -146,6 +191,14 @@ def validate_package(staging: Path, *, with_model: bool = True) -> None:
         problems.append("web/dist/assets 缺失")
     if not (staging / "start.py").is_file() or not (staging / "run.py").is_file():
         problems.append("一键启动器/入口缺失（release/ 下文件未正确映射到包根）")
+    packaged_pyc = [
+        item.relative_to(staging)
+        for item in staging.rglob("*.pyc")
+    ]
+    if packaged_pyc:
+        problems.append(f"包内不应包含 .pyc: {len(packaged_pyc)} 个")
+    if any((staging / rel).stat().st_mode & 0o444 == 0 for rel in ("start.py", "start.sh", "run.py")):
+        problems.append("启动脚本/入口不可读（跨用户解压后无法执行）")
     if with_model and not (staging / MODEL_REL / "model.safetensors").is_file():
         problems.append(f"嵌入模型文件缺失: {MODEL_REL}/model.safetensors")
     if problems:

@@ -13,12 +13,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
-from typing import Any
 
 from memoria.core.config import configs
 
@@ -177,9 +177,9 @@ def _dedup_check(conn, table, text_col, text, where_clause, params, threshold=0.
 
 def _lock_sqlite_write(conn) -> None:
     """在 SQLite 上以可被 SQLAlchemy 管理的方式启动写事务。"""
+    from sqlalchemy import text as _text
     from sqlalchemy.engine import Connection
     from sqlalchemy.orm import Session
-    from sqlalchemy import text as _text
 
     if isinstance(conn, Session):
         raw = conn.connection().connection.dbapi_connection
@@ -261,6 +261,10 @@ def get_conn():
         if configs.database_path not in _wal_configured_paths:
             conn.execute("PRAGMA journal_mode=WAL;")
             _wal_configured_paths.add(configs.database_path)
+        if os.environ.get("MEMORIA_SQLITE_FOREIGN_KEYS") != "0":
+            conn.execute("PRAGMA foreign_keys=ON")
+        else:
+            conn.execute("PRAGMA foreign_keys=OFF")
         try:
             yield conn
             conn.commit()
@@ -364,44 +368,31 @@ def init_db():
         conn.commit()
 
     # ── 去重索引 ──
+    # 破坏性的去重 DELETE 已迁移至新的 Alembic 数据迁移
+    # （幂等，且写入 data_migration 表）。此处仅保留索引创建，
+    # 异常时记录而非静默吞掉。
     with engine.connect() as conn:
-        conn.execute(_text(
-            "DELETE FROM session_summary WHERE id NOT IN ("
-            "  SELECT MAX(id) FROM session_summary"
-            "  GROUP BY session_id, character_id, player_id"
-            ")"
-        ))
         try:
             conn.execute(_text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_summary_unique "
                 "ON session_summary(session_id, character_id, player_id)"
             ))
         except Exception:
-            pass
-        conn.execute(_text(
-            "DELETE FROM player_event_inbox"
-            " WHERE event_type = 'group_message' AND read_at IS NULL"
-            "  AND id NOT IN ("
-            "    SELECT MAX(id) FROM player_event_inbox"
-            "    WHERE event_type = 'group_message' AND read_at IS NULL"
-            "    GROUP BY player_id, group_thread_id"
-            "  )"
-        ))
+            logger.warning(
+                "创建唯一索引 idx_summary_unique 失败，跳过（旧库可能存在重复行）",
+                exc_info=True,
+            )
         try:
-            if is_pg:
-                conn.execute(_text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_group_unread "
-                    "ON player_event_inbox(player_id, group_thread_id) "
-                    "WHERE event_type = 'group_message' AND read_at IS NULL"
-                ))
-            else:
-                conn.execute(_text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_group_unread "
-                    "ON player_event_inbox(player_id, group_thread_id) "
-                    "WHERE event_type = 'group_message' AND read_at IS NULL"
-                ))
+            conn.execute(_text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_inbox_group_unread "
+                "ON player_event_inbox(player_id, group_thread_id) "
+                "WHERE event_type = 'group_message' AND read_at IS NULL"
+            ))
         except Exception:
-            pass
+            logger.warning(
+                "创建部分唯一索引 idx_inbox_group_unread 失败，跳过",
+                exc_info=True,
+            )
         conn.commit()
 
 

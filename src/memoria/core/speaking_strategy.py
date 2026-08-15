@@ -208,7 +208,7 @@ def _stable_jitter(context: dict, character_id: str) -> float:
         )
     )
     digest = hashlib.blake2b(
-        f"{seed}:{character_id}".encode("utf-8"),
+        f"{seed}:{character_id}".encode(),
         digest_size=4,
     ).digest()
     return int.from_bytes(digest, "big") / 0xFFFFFFFF * 2.0
@@ -250,7 +250,6 @@ class SpeakingStrategy(ABC):
         Returns:
             str: 选中的角色 ID
         """
-        pass
 
 
 # =========================

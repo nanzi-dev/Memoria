@@ -1,8 +1,8 @@
 """群聊逐消息决策脉冲与长期记忆分发测试。"""
 
 import json
-from types import SimpleNamespace
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -120,7 +120,7 @@ def test_zero_speaker_turn_still_triggers_player_event_and_commits_message(
         ).model_dump_json(),
         "[]",
     )
-    monkeypatch.setattr(orchestrator, "_load_all_relationships", lambda: {})
+    monkeypatch.setattr(orchestrator, "_load_all_relationships", dict)
 
     results = _apply_event_turn(
         orchestrator,
@@ -167,7 +167,7 @@ def test_character_player_event_triggers_when_another_character_responds(
         "[]",
         character_id="c2",
     )
-    monkeypatch.setattr(orchestrator, "_load_all_relationships", lambda: {})
+    monkeypatch.setattr(orchestrator, "_load_all_relationships", dict)
 
     results = _apply_event_turn(
         orchestrator,
@@ -202,7 +202,7 @@ def test_silent_participant_commit_does_not_overwrite_newer_runtime_state(
         5,
         "calm",
     )
-    monkeypatch.setattr(orchestrator, "_load_all_relationships", lambda: {})
+    monkeypatch.setattr(orchestrator, "_load_all_relationships", dict)
     original_detect = event_runtime.detect_and_execute_event_contexts
 
     def update_silent_state_before_commit(contexts, **kwargs):
@@ -281,7 +281,7 @@ def test_silent_participant_event_delta_applies_to_newer_runtime_state(
         json.dumps([effect.model_dump(mode="json")], ensure_ascii=False),
         character_id="c2",
     )
-    monkeypatch.setattr(orchestrator, "_load_all_relationships", lambda: {})
+    monkeypatch.setattr(orchestrator, "_load_all_relationships", dict)
     original_detect = event_runtime.detect_and_execute_event_contexts
 
     def update_silent_state_before_commit(contexts, **kwargs):
@@ -343,7 +343,7 @@ def test_npc_keyword_event_does_not_use_another_characters_response(monkeypatch)
         "[]",
         character_id="c2",
     )
-    monkeypatch.setattr(orchestrator, "_load_all_relationships", lambda: {})
+    monkeypatch.setattr(orchestrator, "_load_all_relationships", dict)
 
     results = _apply_event_turn(
         orchestrator,
@@ -385,7 +385,7 @@ def test_repeated_speaker_event_checks_each_response_in_order(monkeypatch):
         "[]",
         character_id="c1",
     )
-    monkeypatch.setattr(orchestrator, "_load_all_relationships", lambda: {})
+    monkeypatch.setattr(orchestrator, "_load_all_relationships", dict)
 
     results = _apply_event_turn(
         orchestrator,
@@ -452,7 +452,7 @@ def test_repeated_speaker_event_effects_apply_only_to_matching_response(
         ),
         character_id="c1",
     )
-    monkeypatch.setattr(orchestrator, "_load_all_relationships", lambda: {})
+    monkeypatch.setattr(orchestrator, "_load_all_relationships", dict)
     responses = [
         _complete_response("c1", "首轮暗号已经确认。"),
         _complete_response("c2", "我没有补充。"),
@@ -610,7 +610,7 @@ def test_repeated_speaker_persists_final_response_state(monkeypatch):
         "Player",
         orchestrator.character_ids,
     )
-    monkeypatch.setattr(orchestrator, "_load_all_relationships", lambda: {})
+    monkeypatch.setattr(orchestrator, "_load_all_relationships", dict)
     first_response = _complete_response("c1", "我先提出方案。")
     first_response["current_affinity"] = 11
     first_response["current_trust"] = 21

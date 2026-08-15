@@ -75,10 +75,10 @@ LLM_MODEL=deepseek-chat
 
 - **端口被占用**：换端口 `python start.py --port 9000`。
 - **首次启动很慢**：`pip install` 需下载数 GB 依赖（torch 等），属正常现象，只需一次。
-- **提示需要模型但无网络**：本包已内置嵌入模型（`models/sentence-transformers/all-MiniLM-L6-v2`），向量记忆与知识库可离线使用。
+- **提示需要模型但无网络**：若本包使用默认参数构建，已内置嵌入模型（`models/sentence-transformers/all-MiniLM-L6-v2`），向量记忆与知识库可离线使用；若使用 `--no-model` 构建，包内不含模型，首次使用需联网下载。
 - **不要用多 worker 启动**（如 `uvicorn run:app --workers 2`）：世界时钟调度器、长期记忆后台任务与进程内限流均为单进程设计。
 - **想用 CLI 聊天**：在包根目录执行 `./scripts/chat.sh` 或 `.venv/bin/python scripts/cli_chat.py`（Windows：`.venv\Scripts\python.exe scripts\cli_chat.py`）。
-- **升级**：备份 `data/` 与 `.env` → 下载新版本发布包 → 把备份放回新包根目录 → 启动。数据库结构变更会自动迁移（`create_all` + 迁移钩子）。
+- **升级**：备份 `data/` 与 `.env` → 下载新版本发布包 → 把备份放回新包根目录 → 启动。数据库结构变更会自动迁移（`create_all` + 迁移钩子；源码仓库开发使用 Alembic）。
 
 ## 目录结构
 

@@ -7,10 +7,9 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 from typing import Any
-
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
@@ -32,7 +31,6 @@ from memoria.core.knowledge_service import (
 )
 from memoria.core.knowledge_vector_store import get_knowledge_vector_store
 from memoria.db import repository
-
 
 DEMO_USERNAME = "nanzi"
 

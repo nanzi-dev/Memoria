@@ -1,11 +1,11 @@
 import copy
 import json
 import pickle
-import pytest
 import threading
 import warnings
-from uuid import UUID
-from uuid import uuid4
+from uuid import UUID, uuid4
+
+import pytest
 
 from memoria.db import repository
 
@@ -87,6 +87,7 @@ def test_user():
 
 def test_new_domain_event_rejects_blank_identity():
     from pydantic import ValidationError
+
     from memoria.core.domain_events import NewDomainEvent
 
     with pytest.raises(ValidationError):
@@ -135,7 +136,7 @@ def test_new_domain_event_normalizes_identity_and_defaults_event_id():
 
 def test_domain_event_models_are_frozen():
     from pydantic import ValidationError
-    from memoria.core.domain_events import StoredDomainEvent
+
 
     new_event = _event()
     stored_event = _stored_event()

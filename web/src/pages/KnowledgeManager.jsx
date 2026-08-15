@@ -57,6 +57,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { knowledgeApi } from '@/api/memoria';
 import { useDialog } from '@/context/DialogContext';
 import { useUser } from '@/context/UserContext';
+import useAutoDismissNotice from '@/hooks/useAutoDismissNotice';
 import { getKnowledgeSourceMatch } from './knowledgePreviewScore';
 
 const AUTH_ERROR_PATTERN = /认证|未登录|401|token/i;
@@ -131,7 +132,7 @@ export default function KnowledgeManager() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useAutoDismissNotice(1800);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [busyBaseId, setBusyBaseId] = useState(null);
@@ -272,7 +273,6 @@ export default function KnowledgeManager() {
           : b
       )));
       setNotice(!base.is_enabled ? '知识库已启用' : '知识库已禁用');
-      setTimeout(() => setNotice(''), 1800);
       if (selectedBaseId === base.knowledge_base_id) {
         loadBaseDetail(base.knowledge_base_id);
       }
@@ -299,7 +299,6 @@ export default function KnowledgeManager() {
       await knowledgeApi.deleteBase(base.knowledge_base_id);
       setBases(prev => prev.filter(b => b.knowledge_base_id !== base.knowledge_base_id));
       setNotice('知识库已删除');
-      setTimeout(() => setNotice(''), 1800);
       if (selectedBaseId === base.knowledge_base_id) {
         setSelectedBaseId(null);
         setSelectedBase(null);
@@ -446,7 +445,6 @@ export default function KnowledgeManager() {
           setSelectedBaseId(createdBase.knowledge_base_id);
           setShowCreateModal(false);
           setNotice('知识库创建成功');
-          setTimeout(() => setNotice(''), 1800);
         }}
       />
 
@@ -463,7 +461,6 @@ export default function KnowledgeManager() {
           setSelectedBase(updated);
           setShowEditModal(false);
           setNotice('知识库已更新');
-          setTimeout(() => setNotice(''), 1800);
         }}
       />
 
@@ -475,7 +472,6 @@ export default function KnowledgeManager() {
           setShowBindingModal(false);
           await loadBaseDetail(selectedBaseId);
           setNotice('绑定配置已更新');
-          setTimeout(() => setNotice(''), 1800);
         }}
       />
 
@@ -487,7 +483,6 @@ export default function KnowledgeManager() {
           setShowUploadModal(false);
           await loadBaseDetail(selectedBaseId);
           setNotice('文档已加入处理队列');
-          setTimeout(() => setNotice(''), 1800);
         }}
       />
 
@@ -499,7 +494,6 @@ export default function KnowledgeManager() {
           setShowPasteModal(false);
           await loadBaseDetail(selectedBaseId);
           setNotice('文本已加入处理队列');
-          setTimeout(() => setNotice(''), 1800);
         }}
       />
 
@@ -1396,6 +1390,29 @@ function UploadDocumentModal({ show, base, onClose, onSuccess }) {
     }
     if (!/\.(txt|md|pdf|docx)$/i.test(file.name)) {
       setError('仅支持 TXT、Markdown、PDF 和 DOCX 文件');
+      return;
+    }
+    // 前端体验预检：大小与 MIME 类型；命中时提前提示，后端仍会兜底校验。
+    const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+    if (!Number.isFinite(file.size) || file.size <= 0) {
+      setError('文件为空，无法上传');
+      return;
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setError('文件超过 10 MB 上限，请压缩或拆分后再试');
+      return;
+    }
+    const allowedMimeTypes = [
+      'text/plain',
+      'text/markdown',
+      'text/x-markdown',
+      'text/md',
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ];
+    if (file.type && !allowedMimeTypes.some(mime => file.type.toLowerCase() === mime)) {
+      setError(`不支持的文件类型：${file.type || '未知类型'}`);
       return;
     }
     setSubmitting(true);

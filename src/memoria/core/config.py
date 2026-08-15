@@ -9,6 +9,7 @@ from typing import Literal
 from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Configs(BaseSettings):
     """
     全局配置类，包含所有应用需要的配置项。
@@ -224,7 +225,23 @@ class Configs(BaseSettings):
     def _apply_production_security_defaults(self) -> "Configs":
         """生产环境默认启用 Secure Cookie，避免明文 HTTP 下误配。"""
         if self.memoria_env == "production" and not self.auth_cookie_secure:
-            object.__setattr__(self, "auth_cookie_secure", True)
+            self.auth_cookie_secure = True
+        return self
+
+    @model_validator(mode="after")
+    def _validate_request_body_limits(self) -> "Configs":
+        """请求体总上限必须能容纳任一单文件上传上限，否则会在业务校验前被中间件误拒。"""
+        largest_upload = max(
+            self.knowledge_upload_max_bytes,
+            self.speech_stt_upload_max_bytes,
+            self.speech_custom_voice_upload_max_bytes,
+        )
+        if self.max_request_body_bytes < largest_upload:
+            raise ValueError(
+                "配置错误：max_request_body_bytes 必须 >= "
+                "max(knowledge_upload_max_bytes, speech_stt_upload_max_bytes, "
+                "speech_custom_voice_upload_max_bytes)"
+            )
         return self
 
     @property

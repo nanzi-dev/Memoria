@@ -12,7 +12,6 @@ from threading import Lock
 from time import perf_counter
 from typing import Any
 
-
 _MAX_SAMPLES = 200
 _duration_samples: dict[str, deque[float]] = defaultdict(
     lambda: deque(maxlen=_MAX_SAMPLES)

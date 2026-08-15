@@ -51,11 +51,11 @@ def pg_conn():
 @pytest.fixture()
 def pg_repo_env(pg_conn, monkeypatch):
     """Point the repository layer at the live PostgreSQL and reset its schema."""
-    from memoria.db import engine as db_engine
-    from memoria.db.models import Base
-
     # DROP 所有表再 create_all（PostgreSQL 按外键依赖倒序）
     from sqlalchemy import text
+
+    from memoria.db import engine as db_engine
+    from memoria.db.models import Base
 
     with pg_conn.begin() as conn:
         for table in reversed(Base.metadata.sorted_tables):

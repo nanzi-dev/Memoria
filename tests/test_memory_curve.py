@@ -1,12 +1,11 @@
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-import uuid
 
 import pytest
 
 from memoria.core import memory_curve
 from memoria.db import repository
-
 
 UTC = timezone.utc
 
@@ -501,6 +500,7 @@ def test_feature_disabled_and_curve_failure_preserve_existing_recall(monkeypatch
 
 def test_single_context_curve_failure_restores_all_raw_records(monkeypatch):
     from types import SimpleNamespace
+
     from memoria.core import orchestrator
 
     character_id = "curve-fallback-character"
@@ -687,6 +687,7 @@ def test_multi_context_overfetches_before_curve_ranking(monkeypatch):
 
 def test_feature_disabled_preserves_multi_opening_prompt(monkeypatch):
     from types import SimpleNamespace
+
     from memoria.core import multi_character_orchestrator as module
 
     character_id = "opening-character"
@@ -705,7 +706,7 @@ def test_feature_disabled_preserves_multi_opening_prompt(monkeypatch):
     orchestrator.character_cards = {character_id: card}
     orchestrator.locale = "zh-CN"
     monkeypatch.setattr(orchestrator, "_refresh_player_character", lambda: None)
-    monkeypatch.setattr(orchestrator, "_load_all_relationships", lambda: {})
+    monkeypatch.setattr(orchestrator, "_load_all_relationships", dict)
     monkeypatch.setattr(
         orchestrator,
         "_load_runtime_state_for_prompt",
@@ -806,6 +807,7 @@ def test_developer_diagnostics_does_not_advance_curve(monkeypatch):
 
 def test_developer_diagnostics_marks_stale_relationship_memory(monkeypatch):
     from types import SimpleNamespace
+
     from memoria.api import developer
 
     monkeypatch.setattr(

@@ -9,14 +9,14 @@
 - 支持热重载（编剧后台更新角色卡）
 """
 
-from functools import lru_cache
 import json
 import logging
+from functools import lru_cache
 from pathlib import Path
 
-from memoria.db import repository
 from memoria.core.character_schema import CharacterCard
 from memoria.core.locale import Locale
+from memoria.db import repository
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ def load_character_card(
         
     except Exception as e:
         raise RuntimeError(
-            f"加载角色卡 '{character_id}' 时发生错误: {str(e)}"
+            f"加载角色卡 '{character_id}' 时发生错误: {e!s}"
         ) from e
         
 # =========================

@@ -8,18 +8,18 @@ API 路由层
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
 import uuid
+from datetime import datetime, timedelta, timezone
 
-from pydantic import BaseModel, Field
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
-from memoria.core import character_loader, orchestrator, performance, world_clock
-from memoria.core.memory_extractor import summarize_session
-from memoria.core.locale import DEFAULT_LOCALE, Locale
-from memoria.api.user import require_current_user_id
 from memoria.api.knowledge_models import KnowledgeSource
 from memoria.api.streaming import create_sse_response
+from memoria.api.user import require_current_user_id
+from memoria.core import character_loader, orchestrator, performance, world_clock
+from memoria.core.locale import DEFAULT_LOCALE, Locale
+from memoria.core.memory_extractor import summarize_session
 from memoria.db import repository
 
 logger = logging.getLogger(__name__)
@@ -210,8 +210,8 @@ def _current_character_state(
         current_affinity = runtime_state.get("affection_level", 0)
         current_trust = runtime_state.get("trust_level", 0)
         current_mood = runtime_state.get("current_mood", "neutral")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("读取角色状态失败: character=%s player=%s err=%s", character_id, player_id, exc)
     return current_affinity, current_trust, current_mood
 
 
@@ -469,9 +469,12 @@ def dialogue_turn(
     req: DialogueTurnRequest,
     current_user_id: str = Depends(require_current_user_id),
 ):
+    # 先区分“会话不存在”(404) 与“会话已结束”(400)，再进入编排器。
+    session = _get_owned_session(req.session_id, current_user_id)
+    if session.get("status") == "ended":
+        raise HTTPException(status_code=400, detail="会话已结束")
+    _ensure_character_can_chat(session["character_id"], session["player_id"])
     try:
-        session = _get_owned_session(req.session_id, current_user_id)
-        _ensure_character_can_chat(session["character_id"], session["player_id"])
         result = orchestrator.run_dialogue_turn(
             req.session_id,
             req.player_message,

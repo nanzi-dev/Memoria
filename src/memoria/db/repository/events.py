@@ -1,52 +1,40 @@
 """Domain repository functions (split from monolith)."""
 from __future__ import annotations
 
-# Standard/third-party imports used across repository domains.
-from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
-import hashlib
 import json
 import logging
-import sqlite3
 import uuid
-from typing import Any, Callable
-from urllib.parse import urlsplit
-import re
-from difflib import SequenceMatcher
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from sqlalchemy import text
 
 from memoria.core.config import configs
-from memoria.core import performance, tracing
-from memoria.core.domain_events import NewDomainEvent, StoredDomainEvent
 from memoria.core.fact_claim_policy import (
-    ADMIN_VERIFICATION_SOURCE_KIND,
-    CLAIM_SOURCE_KINDS,
     clean_source_ids,
     derive_fact_claim_identity,
     evaluate_verification,
-    normalize_evidence_entry,
-    normalize_fact_text,
 )
-from sqlalchemy import text
 
-try:
-    import psycopg
-    from psycopg.rows import dict_row
-except ImportError:  # pragma: no cover
-    psycopg = None
-    dict_row = None
+# 共享辅助与连接管理；显式导入以消除 star-import 造成的 F405。
+from memoria.db.repository._common import (
+    _dedup_check,
+    _encode_knowledge_sources,
+    _is_postgres_enabled,
+    _lock_sqlite_write,
+    _now,
+    _row_to_dict,
+    db_session,
+)
+from memoria.db.repository.background_jobs import _enqueue_background_job_in_transaction
+from memoria.db.repository.fact_claims import _record_fact_claim_in_transaction
+from memoria.db.repository.memory_curve import record_memory_curve_evidence
+from memoria.db.repository.relationships import _normalize_relationship_pair
+from memoria.db.repository.state_and_memory import normalize_long_term_fact_text
+from memoria.db.repository.story import _apply_story_update_in_transaction
+from memoria.db.repository.users import player_node_id
 
 logger = logging.getLogger(__name__)
-
-# Import shared helpers / connection / schema. Private names included.
-from memoria.db.repository._common import *  # noqa: F403
-from memoria.db.repository import _common as _common_mod
-
-# Ensure private helpers from _common are visible as bare names.
-for _name, _value in vars(_common_mod).items():
-    if _name.startswith('__'):
-        continue
-    globals().setdefault(_name, _value)
-del _name, _value, _common_mod
 
 # =========================
 # 事件系统 - 事件定义
@@ -635,7 +623,7 @@ def _complete_event_schedule_in_transaction(
             last_error = NULL, last_failed_at = NULL, updated_at = :p5
         WHERE event_id = :p6 AND character_id = :p7 AND player_id = :p8
           AND lease_owner = :p9
-        """), {"p0": schedule_completion["last_checked_at"], "p1": schedule_completion["last_run_at"], "p2": schedule_completion["next_run_at"], "p3": schedule_completion.get("next_due_real_at"), "p4": int(schedule_completion.get("missed_count") or 0), "p5": now, "p6": schedule_completion["event_id"], "p7": schedule_completion["character_id"], "p8": player_id, "p9": schedule_completion["lease_owner"]})
+        """), {"p0": schedule_completion["last_checked_at"], "p1": schedule_completion["last_run_at"], "p2": schedule_completion["next_run_at"], "p3": schedule_completion.get("next_due_real_at"), "p4": int(schedule_completion.get("missed_count") or 0), "p5": now, "p6": schedule_completion["event_id"], "p7": _schedule_character_scope(schedule_completion["character_id"]), "p8": player_id, "p9": schedule_completion["lease_owner"]})
     if completed.rowcount != 1:
         raise RuntimeError("schedule lease was lost before atomic completion")
 
@@ -668,9 +656,22 @@ def claim_dialogue_turn(
             WHERE session_id = :p0 AND request_id = :p1
             """), {"p0": session_id, "p1": request_id}).mappings().fetchone()
         if existing and existing["status"] == "completed":
+            if existing["player_id"] != player_id or existing["turn_kind"] != turn_kind:
+                raise DialogueTurnConflictError("request_id 已用于其他对话请求")
+            try:
+                response = json.loads(existing["response_data"])
+            except (TypeError, ValueError) as exc:
+                logger.warning(
+                    "对话轮次 %s/%s 的 response_data 损坏，视为冲突",
+                    session_id,
+                    request_id,
+                )
+                raise DialogueTurnConflictError(
+                    "completed dialogue turn response is corrupted"
+                ) from exc
             return {
                 "completed": True,
-                "response": json.loads(existing["response_data"]),
+                "response": response,
             }
         if existing and (
             existing["player_id"] != player_id
@@ -732,6 +733,46 @@ def fail_dialogue_turn(
             WHERE session_id = :p2 AND request_id = :p3
               AND status = 'processing' AND lease_owner = :p4
             """), {"p0": error[:1000], "p1": _now(), "p2": session_id, "p3": request_id, "p4": lease_owner})
+
+
+def complete_dialogue_turn_record(
+    session_id: str,
+    request_id: str,
+    lease_owner: str,
+    response,
+) -> None:
+    """将处理中的对话轮次标记为完成并写入序列化响应。
+
+    仅当记录处于 ``processing`` 且租约仍归当前 worker 持有时才允许完成；
+    条件更新影响行数不为 1 时抛出领域冲突异常。
+    """
+    completed = _now()
+    with db_session() as conn:
+        cursor = conn.execute(text("""
+            UPDATE dialogue_turn
+            SET status = 'completed',
+                response_data = :response_data,
+                error = NULL,
+                lease_owner = NULL,
+                lease_expires_at = NULL,
+                completed_at = :completed_at,
+                updated_at = :updated_at
+            WHERE session_id = :session_id
+              AND request_id = :request_id
+              AND status = 'processing'
+              AND lease_owner = :lease_owner
+            """), {
+            "response_data": json.dumps(response, ensure_ascii=False),
+            "completed_at": completed,
+            "updated_at": completed,
+            "session_id": session_id,
+            "request_id": request_id,
+            "lease_owner": lease_owner,
+        })
+    if cursor.rowcount != 1:
+        raise DialogueTurnConflictError(
+            "dialogue turn record cannot be completed by this lease owner"
+        )
 
 
 def _save_runtime_states_in_transaction(
@@ -1663,6 +1704,48 @@ def list_event_context_states(
     return [dict(r) for r in rows]
 
 
+def _schedule_character_scope(character_id: str | None) -> str:
+    """返回 event_schedule_state.character_id 的统一哨兵值。
+
+    全局事件使用空字符串 ``''`` 而非 NULL，避免 SQLite / PostgreSQL
+    在 NULL 排序与主键索引上的差异。
+    """
+    return (character_id or "").strip()
+
+
+def _normalize_legacy_schedule_scope(conn, *, event_id: str, player_id: str) -> None:
+    """将遗留的 NULL 全局调度行安全归一化为 ``''``。
+
+    SQLite 允许主键列出现多个 NULL，直接 UPDATE 会撞唯一索引；
+    因此先保留 MIN(rowid) 删除其余 NULL 行，再做更新。PostgreSQL
+    主键列本身 NOT NULL，无需处理。
+    """
+    if _is_postgres_enabled():
+        return
+    conn.execute(
+        text("""
+        DELETE FROM event_schedule_state
+        WHERE event_id = :event_id AND player_id = :player_id
+          AND character_id IS NULL
+          AND rowid NOT IN (
+              SELECT MIN(rowid) FROM event_schedule_state
+              WHERE event_id = :event_id AND player_id = :player_id
+                AND character_id IS NULL
+          )
+        """),
+        {"event_id": event_id, "player_id": player_id},
+    )
+    conn.execute(
+        text("""
+        UPDATE event_schedule_state
+        SET character_id = ''
+        WHERE event_id = :event_id AND player_id = :player_id
+          AND character_id IS NULL
+        """),
+        {"event_id": event_id, "player_id": player_id},
+    )
+
+
 def _save_event_schedule_state_in_transaction(
     conn,
     *,
@@ -1678,6 +1761,12 @@ def _save_event_schedule_state_in_transaction(
     missed_count: int = 0,
 ) -> None:
     now = _now()
+    scope = _schedule_character_scope(character_id)
+    _normalize_legacy_schedule_scope(
+        conn,
+        event_id=event_id,
+        player_id=player_id,
+    )
     conn.execute(text("""
         INSERT INTO event_schedule_state
         (event_id, character_id, player_id, schedule, last_checked_at,
@@ -1694,7 +1783,7 @@ def _save_event_schedule_state_in_transaction(
             missed_count=excluded.missed_count,
             status=excluded.status,
             updated_at=excluded.updated_at
-        """), {"p0": event_id, "p1": character_id, "p2": player_id, "p3": schedule, "p4": last_checked_at, "p5": last_run_at, "p6": next_run_at, "p7": next_due_real_at, "p8": missed_count, "p9": status, "p10": now, "p11": now})
+        """), {"p0": event_id, "p1": scope, "p2": player_id, "p3": schedule, "p4": last_checked_at, "p5": last_run_at, "p6": next_run_at, "p7": next_due_real_at, "p8": missed_count, "p9": status, "p10": now, "p11": now})
 
 
 def _preserve_schedule_history(
@@ -1725,6 +1814,11 @@ def _preserve_schedule_history(
         existing = rows.fetchall()
     if not existing:
         return
+    _normalize_legacy_schedule_scope(
+        conn,
+        event_id=event_id,
+        player_id=owner_user_id,
+    )
     if len(existing) > 1:
         logger.warning(
             "事件 %s 存在多条调度记录，定义保存仅保留一条",
@@ -1733,8 +1827,8 @@ def _preserve_schedule_history(
         conn.execute(text("""
             DELETE FROM event_schedule_state
             WHERE event_id = :p0 AND player_id = :p1
-              AND rowid NOT IN (
-                SELECT MIN(rowid) FROM event_schedule_state
+              AND character_id <> (
+                SELECT MIN(character_id) FROM event_schedule_state
                 WHERE event_id = :p0 AND player_id = :p1
               )
             """), {"p0": event_id, "p1": owner_user_id})
@@ -1922,7 +2016,7 @@ def get_event_schedule(
         row = conn.execute(text("""
             SELECT * FROM event_schedule_state
             WHERE event_id = :p0 AND character_id = :p1 AND player_id = :p2
-            """), {"p0": event_id, "p1": character_id, "p2": player_id}).mappings().fetchone()
+            """), {"p0": event_id, "p1": _schedule_character_scope(character_id), "p2": player_id}).mappings().fetchone()
     return _row_to_dict(row)
 
 
@@ -1936,6 +2030,7 @@ def set_event_schedule_status(
 ) -> bool:
     if status not in {"active", "paused"}:
         raise ValueError("schedule status must be active or paused")
+    scope = _schedule_character_scope(character_id)
     with db_session() as conn:
         if next_run_at is None:
             cursor = conn.execute(text("""
@@ -1943,14 +2038,14 @@ def set_event_schedule_status(
                 SET status = :p0, lease_owner = NULL, lease_expires_at = NULL,
                     updated_at = :p1
                 WHERE event_id = :p2 AND character_id = :p3 AND player_id = :p4
-                """), {"p0": status, "p1": _now(), "p2": event_id, "p3": character_id, "p4": player_id})
+                """), {"p0": status, "p1": _now(), "p2": event_id, "p3": scope, "p4": player_id})
         else:
             cursor = conn.execute(text("""
                 UPDATE event_schedule_state
                 SET status = :p0, next_run_at = :p1, lease_owner = NULL,
                     lease_expires_at = NULL, updated_at = :p2
                 WHERE event_id = :p3 AND character_id = :p4 AND player_id = :p5
-                """), {"p0": status, "p1": next_run_at, "p2": _now(), "p3": event_id, "p4": character_id, "p5": player_id})
+                """), {"p0": status, "p1": next_run_at, "p2": _now(), "p3": event_id, "p4": scope, "p5": player_id})
     return cursor.rowcount == 1
 
 
@@ -1967,7 +2062,7 @@ def delete_event_schedules(
             cursor = conn.execute(text("""
                 DELETE FROM event_schedule_state
                 WHERE event_id = :p0 AND character_id = :p1 AND player_id = :p2
-                """), {"p0": event_id, "p1": character_id, "p2": player_id})
+                """), {"p0": event_id, "p1": _schedule_character_scope(character_id), "p2": player_id})
     return cursor.rowcount
 
 
@@ -1990,7 +2085,10 @@ def claim_event_schedule(
     backoff_cutoff = (
         datetime.now(timezone.utc) - timedelta(seconds=60)
     ).isoformat()
+    scope = _schedule_character_scope(character_id)
     with db_session() as conn:
+        if not _is_postgres_enabled():
+            _lock_sqlite_write(conn)
         cursor = conn.execute(text("""
             UPDATE event_schedule_state
             SET lease_owner = :p0, lease_expires_at = :p1, updated_at = :p2
@@ -2006,7 +2104,7 @@ def claim_event_schedule(
                 last_failed_at IS NULL
                 OR last_failed_at <= :p10
               )
-            """), {"p0": lease_owner, "p1": lease_expires_at, "p2": real_now_iso, "p3": event_id, "p4": character_id, "p5": player_id, "p6": expected_next_run_at, "p7": expected_next_due_real_at, "p8": expected_next_due_real_at, "p9": real_now_iso, "p10": backoff_cutoff})
+            """), {"p0": lease_owner, "p1": lease_expires_at, "p2": real_now_iso, "p3": event_id, "p4": scope, "p5": player_id, "p6": expected_next_run_at, "p7": expected_next_due_real_at, "p8": expected_next_due_real_at, "p9": real_now_iso, "p10": backoff_cutoff})
     return cursor.rowcount == 1
 
 
@@ -2031,7 +2129,7 @@ def complete_event_schedule(
                 last_error = NULL, last_failed_at = NULL, updated_at = :p5
             WHERE event_id = :p6 AND character_id = :p7 AND player_id = :p8
               AND lease_owner = :p9
-            """), {"p0": last_checked_at, "p1": last_run_at, "p2": next_run_at, "p3": next_due_real_at, "p4": missed_count, "p5": _now(), "p6": event_id, "p7": character_id, "p8": player_id, "p9": lease_owner})
+            """), {"p0": last_checked_at, "p1": last_run_at, "p2": next_run_at, "p3": next_due_real_at, "p4": missed_count, "p5": _now(), "p6": event_id, "p7": _schedule_character_scope(character_id), "p8": player_id, "p9": lease_owner})
     return cursor.rowcount == 1
 
 
@@ -2101,7 +2199,7 @@ def set_event_schedule_due_projection(
               AND status = 'active'
               AND next_run_at = :p5
               AND next_due_real_at IS NULL
-            """), {"p0": next_due_real_at, "p1": _now(), "p2": event_id, "p3": character_id, "p4": player_id, "p5": expected_next_run_at})
+            """), {"p0": next_due_real_at, "p1": _now(), "p2": event_id, "p3": _schedule_character_scope(character_id), "p4": player_id, "p5": expected_next_run_at})
     return cursor.rowcount == 1
 
 
@@ -2122,7 +2220,7 @@ def fail_event_schedule(
                 lease_expires_at = NULL, updated_at = :p2
             WHERE event_id = :p3 AND character_id = :p4 AND player_id = :p5
               AND lease_owner = :p6
-            """), {"p0": error[:2000], "p1": failed_at, "p2": _now(), "p3": event_id, "p4": character_id, "p5": player_id, "p6": lease_owner})
+            """), {"p0": error[:2000], "p1": failed_at, "p2": _now(), "p3": event_id, "p4": _schedule_character_scope(character_id), "p5": player_id, "p6": lease_owner})
     return cursor.rowcount == 1
 
 
@@ -2139,7 +2237,7 @@ def release_event_schedule(
             SET lease_owner = NULL, lease_expires_at = NULL, updated_at = :p0
             WHERE event_id = :p1 AND character_id = :p2 AND player_id = :p3
               AND lease_owner = :p4
-            """), {"p0": _now(), "p1": event_id, "p2": character_id, "p3": player_id, "p4": lease_owner})
+            """), {"p0": _now(), "p1": event_id, "p2": _schedule_character_scope(character_id), "p3": player_id, "p4": lease_owner})
     return cursor.rowcount == 1
 
 

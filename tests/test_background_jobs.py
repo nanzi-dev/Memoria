@@ -1,6 +1,6 @@
+import uuid
 from datetime import datetime, timedelta, timezone
 from threading import Event
-import uuid
 
 import pytest
 

@@ -10,8 +10,8 @@
 import logging
 from typing import Literal
 
-from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 
 from memoria.api.user import require_current_user_id
 from memoria.db import repository
@@ -155,7 +155,7 @@ def create_relationship(
     
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("创建关系失败")
         raise HTTPException(status_code=500, detail="创建关系失败")
 
@@ -236,7 +236,7 @@ def update_relationship(
     
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("更新关系失败")
         raise HTTPException(status_code=500, detail="更新关系失败")
 
@@ -284,7 +284,7 @@ def delete_relationship(
     
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("删除关系失败")
         raise HTTPException(status_code=500, detail="删除关系失败")
 
@@ -411,7 +411,7 @@ def get_relationship_network(
     
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception:
         logger.exception("获取关系网络失败")
         raise HTTPException(status_code=500, detail="获取关系网络失败")
 
@@ -469,6 +469,6 @@ def batch_create_relationships(
             message=f"批量创建完成: 成功 {success_count} 条，失败 {failed_count} 条"
         )
     
-    except Exception as e:
+    except Exception:
         logger.exception("批量创建失败")
         raise HTTPException(status_code=500, detail="批量创建失败")

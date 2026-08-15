@@ -195,6 +195,12 @@ def test_paste_upload_retry_and_delete_document(knowledge_owner, monkeypatch):
     assert retried["status"] == "queued"
     assert len(queued) == 3
 
+    repository.update_knowledge_document_status(
+        owner_user_id,
+        pasted_document["document_id"],
+        "failed",
+        error_message="processing finished",
+    )
     deleted = knowledge_api.delete_knowledge_document(
         pasted_document["document_id"],
         current_user_id=owner_user_id,
@@ -233,6 +239,12 @@ def test_delete_document_vector_failure_stays_queued_until_retry(
         knowledge_api,
         "get_knowledge_vector_store",
         lambda: FailingVectorStore(),
+    )
+    repository.update_knowledge_document_status(
+        owner_user_id,
+        document["document_id"],
+        "failed",
+        error_message="processing finished",
     )
     response = knowledge_api.delete_knowledge_document(
         document["document_id"],

@@ -12,7 +12,6 @@ from typing import Any
 
 from memoria.core.config import configs
 
-
 _SHARED_POSITIVE_CUES = (
     "谢谢",
     "感谢",
@@ -89,19 +88,23 @@ _NEGATIVE_CUES = (
     "不想理",
     "离我远点",
     "恨",
-    "拒绝",
-    "不用了",
-    "不需要",
     "不同意",
-    "不行",
-    "没兴趣",
-    "不想说",
     "少来",
     "烦",
     "失望",
     "背叛",
     "欺骗",
     "说谎",
+)
+
+# 普通拒绝/婉拒词不能单独判负；只有伴随明确敌意才计入。
+_NEUTRAL_REJECTION_CUES = (
+    "拒绝",
+    "不用了",
+    "不需要",
+    "不行",
+    "没兴趣",
+    "不想说",
 )
 
 _NEGATIVE_ACTIONS = (
@@ -137,6 +140,10 @@ def _fallback_delta(
         _NEGATIVE_ACTIONS,
     ):
         return -1.0
+    if _contains_any(combined, _NEUTRAL_REJECTION_CUES):
+        # “不用了/不需要/不行/没兴趣”等属于普通拒绝，不应机械扣好感；
+        # 只有在同时出现明确负面词时才会走上面的强负面分支。
+        return 0.0
 
     positive_cues = (
         _SHARED_POSITIVE_CUES

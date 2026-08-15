@@ -12,13 +12,13 @@
 8. Memory extractor（记忆萃取）
 """
 
-import pytest
-import sys
 import json
+import sys
 import uuid
 from pathlib import Path
-from datetime import datetime, timezone
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
@@ -34,9 +34,15 @@ class TestCharacterSchema:
     def test_minimal_character_card(self):
         """测试最小有效角色卡"""
         from memoria.core.character_schema import (
-            CharacterCard, Meta, Identity, Personality,
-            speechStyle, Background, GoalsAndMotivations,
-            InteractionRules, ActionVocabulary
+            ActionVocabulary,
+            Background,
+            CharacterCard,
+            GoalsAndMotivations,
+            Identity,
+            InteractionRules,
+            Meta,
+            Personality,
+            speechStyle,
         )
         card = CharacterCard(
             character_id="test_min",
@@ -99,7 +105,10 @@ class TestCharacterSchema:
             CharacterCard.model_validate(protected_field)
 
     def test_character_i18n_deep_merge_replaces_lists_and_falls_back(self):
-        from memoria.core.character_loader import _localized_character_card, normalize_character_data
+        from memoria.core.character_loader import (
+            _localized_character_card,
+            normalize_character_data,
+        )
 
         raw = normalize_character_data(
             json.loads(
@@ -190,7 +199,10 @@ class TestCharacterSchema:
     def test_background_with_nested_models(self):
         """测试 Background 及其嵌套模型"""
         from memoria.core.character_schema import (
-            Background, KeyEvent, Relationship, Secret
+            Background,
+            KeyEvent,
+            Relationship,
+            Secret,
         )
         bg = Background(
             story_bio="出身平凡但心怀梦想",
@@ -225,7 +237,9 @@ class TestCharacterSchema:
     def test_runtime_state_schema(self):
         """测试运行时状态模型"""
         from memoria.core.character_schema import (
-            RuntmeStateSchema, RelationshipState, MoodSchema
+            MoodSchema,
+            RelationshipState,
+            RuntmeStateSchema,
         )
         rs = RuntmeStateSchema(
             relationships=[
@@ -303,7 +317,7 @@ class TestEventSchema:
 
     def test_event_effect_state_change(self):
         """测试状态修改效果"""
-        from memoria.core.event_schema import EventEffect, EffectType
+        from memoria.core.event_schema import EffectType, EventEffect
         effect = EventEffect(
             effect_type=EffectType.MODIFY_STATE,
             state_changes={"affection_level": 5, "trust_level": 3}
@@ -313,7 +327,7 @@ class TestEventSchema:
 
     def test_event_effect_add_memory(self):
         """测试添加记忆效果"""
-        from memoria.core.event_schema import EventEffect, EffectType
+        from memoria.core.event_schema import EffectType, EventEffect
         effect = EventEffect(
             effect_type=EffectType.ADD_MEMORY,
             memory_text="玩家喜欢猫",
@@ -324,7 +338,7 @@ class TestEventSchema:
 
     def test_event_effect_dialogue(self):
         """测试触发对话效果"""
-        from memoria.core.event_schema import EventEffect, EffectType
+        from memoria.core.event_schema import EffectType, EventEffect
         effect = EventEffect(
             effect_type=EffectType.TRIGGER_DIALOGUE,
             dialogue_text="啊，我记起来了！",
@@ -336,8 +350,11 @@ class TestEventSchema:
     def test_event_definition_complete(self):
         """测试完整事件定义"""
         from memoria.core.event_schema import (
-            EventDefinition, TriggerCondition, EventEffect,
-            TriggerType, EffectType
+            EffectType,
+            EventDefinition,
+            EventEffect,
+            TriggerCondition,
+            TriggerType,
         )
         event = EventDefinition(
             event_id="evt_test_001",
@@ -674,8 +691,8 @@ class TestEventDetector:
 
     def test_affinity_threshold_gte(self):
         """测试好感度 >= 阈值触发"""
-        from memoria.core.event_schema import TriggerCondition, TriggerType
         from memoria.core.event_detector import EventDetector
+        from memoria.core.event_schema import TriggerCondition, TriggerType
         
         detector = EventDetector()
         tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=40.0, comparison="gte")
@@ -688,8 +705,8 @@ class TestEventDetector:
 
     def test_affinity_threshold_not_met(self):
         """测试好感度未达阈值不触发"""
-        from memoria.core.event_schema import TriggerCondition, TriggerType
         from memoria.core.event_detector import EventDetector
+        from memoria.core.event_schema import TriggerCondition, TriggerType
         
         detector = EventDetector()
         tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=60.0, comparison="gte")
@@ -701,8 +718,8 @@ class TestEventDetector:
 
     def test_trust_threshold_lte(self):
         """测试信任度 <= 阈值触发"""
-        from memoria.core.event_schema import TriggerCondition, TriggerType
         from memoria.core.event_detector import EventDetector
+        from memoria.core.event_schema import TriggerCondition, TriggerType
         
         detector = EventDetector()
         tc = TriggerCondition(trigger_type=TriggerType.TRUST_THRESHOLD, threshold=40.0, comparison="lte")
@@ -714,8 +731,8 @@ class TestEventDetector:
 
     def test_keyword_match_any(self):
         """测试关键词任一匹配"""
-        from memoria.core.event_schema import TriggerCondition, TriggerType
         from memoria.core.event_detector import EventDetector
+        from memoria.core.event_schema import TriggerCondition, TriggerType
         
         detector = EventDetector()
         tc = TriggerCondition(
@@ -731,8 +748,8 @@ class TestEventDetector:
 
     def test_keyword_match_all(self):
         """测试关键词全部匹配"""
-        from memoria.core.event_schema import TriggerCondition, TriggerType
         from memoria.core.event_detector import EventDetector
+        from memoria.core.event_schema import TriggerCondition, TriggerType
         
         detector = EventDetector()
         tc = TriggerCondition(
@@ -748,8 +765,8 @@ class TestEventDetector:
 
     def test_keyword_match_partial_fail(self):
         """测试关键词部分匹配失败"""
-        from memoria.core.event_schema import TriggerCondition, TriggerType
         from memoria.core.event_detector import EventDetector
+        from memoria.core.event_schema import TriggerCondition, TriggerType
         
         detector = EventDetector()
         tc = TriggerCondition(
@@ -765,8 +782,8 @@ class TestEventDetector:
 
     def test_dialogue_count(self):
         """测试对话次数触发"""
-        from memoria.core.event_schema import TriggerCondition, TriggerType
         from memoria.core.event_detector import EventDetector
+        from memoria.core.event_schema import TriggerCondition, TriggerType
         
         detector = EventDetector()
         tc = TriggerCondition(trigger_type=TriggerType.DIALOGUE_COUNT, count=20, comparison="gte")
@@ -778,8 +795,8 @@ class TestEventDetector:
 
     def test_mood_match(self):
         """测试情绪匹配"""
-        from memoria.core.event_schema import TriggerCondition, TriggerType
         from memoria.core.event_detector import EventDetector
+        from memoria.core.event_schema import TriggerCondition, TriggerType
         
         detector = EventDetector()
         tc = TriggerCondition(trigger_type=TriggerType.MOOD_MATCH, mood="开心")
@@ -791,8 +808,8 @@ class TestEventDetector:
 
     def test_mood_no_match(self):
         """测试情绪不匹配"""
-        from memoria.core.event_schema import TriggerCondition, TriggerType
         from memoria.core.event_detector import EventDetector
+        from memoria.core.event_schema import TriggerCondition, TriggerType
         
         detector = EventDetector()
         tc = TriggerCondition(trigger_type=TriggerType.MOOD_MATCH, mood="愤怒")
@@ -804,8 +821,8 @@ class TestEventDetector:
 
     def test_composite_and(self):
         """测试复合 AND 条件"""
-        from memoria.core.event_schema import TriggerCondition, TriggerType
         from memoria.core.event_detector import EventDetector
+        from memoria.core.event_schema import TriggerCondition, TriggerType
         
         detector = EventDetector()
         tc = TriggerCondition(
@@ -824,8 +841,8 @@ class TestEventDetector:
 
     def test_composite_or(self):
         """测试复合 OR 条件"""
-        from memoria.core.event_schema import TriggerCondition, TriggerType
         from memoria.core.event_detector import EventDetector
+        from memoria.core.event_schema import TriggerCondition, TriggerType
         
         detector = EventDetector()
         tc = TriggerCondition(
@@ -844,8 +861,12 @@ class TestEventDetector:
 
     def test_inactive_event(self):
         """测试禁用事件不触发"""
-        from memoria.core.event_schema import TriggerCondition, TriggerType, EventDefinition
         from memoria.core.event_detector import EventDetector
+        from memoria.core.event_schema import (
+            EventDefinition,
+            TriggerCondition,
+            TriggerType,
+        )
         
         detector = EventDetector()
         tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=0.0)
@@ -860,8 +881,8 @@ class TestEventDetector:
 
     def test_priority_sorting(self):
         """测试事件按优先级排序"""
-        from memoria.core.event_schema import TriggerCondition, TriggerType
         from memoria.core.event_detector import EventDetector
+        from memoria.core.event_schema import TriggerCondition, TriggerType
         
         detector = EventDetector()
         tc = TriggerCondition(trigger_type=TriggerType.AFFINITY_THRESHOLD, threshold=0.0)
@@ -877,8 +898,8 @@ class TestEventDetector:
 
     def test_time_based(self):
         """测试基于时间的触发"""
-        from memoria.core.event_schema import TriggerCondition, TriggerType
         from memoria.core.event_detector import EventDetector
+        from memoria.core.event_schema import TriggerCondition, TriggerType
         
         detector = EventDetector()
         tc = TriggerCondition(
@@ -894,8 +915,8 @@ class TestEventDetector:
 
     def test_threshold_comparisons(self):
         """测试各种比较运算符"""
-        from memoria.core.event_schema import TriggerCondition, TriggerType
         from memoria.core.event_detector import EventDetector
+        from memoria.core.event_schema import TriggerCondition, TriggerType
         
         detector = EventDetector()
         
@@ -1258,7 +1279,8 @@ class TestMultiCharacterMemory:
     def test_character_impression_high_level(self):
         """测试高层印象记忆函数"""
         from memoria.core.multi_character_memory import (
-            save_character_impression, get_character_impressions
+            get_character_impressions,
+            save_character_impression,
         )
         
         save_character_impression(
@@ -1468,7 +1490,8 @@ class TestMultiCharacterMemory:
     def test_group_event_high_level(self):
         """测试高层群体事件函数"""
         from memoria.core.multi_character_memory import (
-            save_group_event_memory, get_group_memories
+            get_group_memories,
+            save_group_event_memory,
         )
         
         save_group_event_memory(
@@ -1507,8 +1530,8 @@ class TestEdgeCases:
 
     def test_character_loader_cache(self):
         """测试角色卡加载器缓存"""
+
         from memoria.core import character_loader
-        from pathlib import Path
         
         # 加载两次，验证缓存
         card1 = character_loader.load_character_card("npc_luo_xiaohei")

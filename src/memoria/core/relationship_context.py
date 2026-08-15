@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import re
 
-
 RELATIONSHIP_CONTEXT_MARKERS = (
     "关系", "之间", "互相", "彼此", "对方", "你们", "他们", "她们",
     "二人", "两人", "称呼", "叫", "承诺", "身份", "定位", "已经是",
