@@ -179,6 +179,11 @@ def create_character(
         # 先做体积上限检查，再使用 Pydantic 验证数据格式
         _require_character_data_within_limit(req.character_data)
         card = CharacterCard.model_validate(req.character_data)
+        if card.character_id.startswith("player:"):
+            raise HTTPException(
+                status_code=400,
+                detail="角色 ID 不能使用 player: 前缀（该前缀保留给玩家节点）",
+            )
 
         # 检查角色 ID 是否已存在
         existing = repository.get_character_card_from_db(current_user_id, card.character_id)
@@ -251,6 +256,11 @@ def update_character(
         # 先做体积上限检查，再验证数据格式
         _require_character_data_within_limit(req.character_data)
         card = CharacterCard.model_validate(req.character_data)
+        if card.character_id.startswith("player:"):
+            raise HTTPException(
+                status_code=400,
+                detail="角色 ID 不能使用 player: 前缀（该前缀保留给玩家节点）",
+            )
         
         # 检查角色 ID 是否匹配
         if card.character_id != character_id:

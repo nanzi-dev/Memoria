@@ -7,30 +7,41 @@ const source = await readFile(
   'utf8',
 );
 
+const workbenchSource = await readFile(
+  new URL('../src/components/chat/ChatWorkbench.jsx', import.meta.url),
+  'utf8',
+);
+
+const messageListSource = await readFile(
+  new URL('../src/components/chat/ChatMessageList.jsx', import.meta.url),
+  'utf8',
+);
+
 const legacyVisualPattern =
   /ChatBackdrop|SideRays|cyber-green|zinc-|memoria-(?:page|glass|card-hover|avatar-ring)|#[0-9a-fA-F]{3,8}|rounded-(?:xl|2xl)/;
 
 test('ChatRoom uses the ArchiveShell-native three-column narrative workbench', () => {
   assert.match(source, /useArchiveShell/);
   assert.match(source, /setPrimaryAction/);
-  assert.match(source, /data-archive-chat-workbench/);
+  assert.match(source, /<ChatWorkbench/);
+  assert.match(workbenchSource, /data-archive-chat-workbench/);
   assert.match(
-    source,
+    workbenchSource,
     /grid-cols-\[minmax\(220px,280px\)_minmax\(0,1fr\)_minmax\(240px,320px\)\]/,
   );
-  assert.match(source, /h-\[calc\(100dvh-4rem\)\]/);
-  assert.doesNotMatch(source, /<main\b|<header\b/);
-  assert.doesNotMatch(source, legacyVisualPattern);
+  assert.match(workbenchSource, /h-\[calc\(100dvh-4rem\)\]/);
+  assert.doesNotMatch(workbenchSource, /<main\b|<header\b/);
+  assert.doesNotMatch(workbenchSource, legacyVisualPattern);
 });
 
 test('assistant messages use script typography while player messages remain compact chat messages', () => {
-  assert.match(source, /data-message-layout=\{isUser \? 'chat' : 'script'\}/);
-  assert.match(source, /data-archive-script-message/);
-  assert.match(source, /data-scene-speaker/);
-  assert.match(source, /data-stage-direction/);
-  assert.match(source, /font-archive-serif/);
-  assert.match(source, /font-archive-mono/);
-  assert.match(source, /tabular-nums/);
+  assert.match(messageListSource, /data-message-layout=\{isUser \? 'chat' : 'script'\}/);
+  assert.match(messageListSource, /data-archive-script-message/);
+  assert.match(messageListSource, /data-scene-speaker/);
+  assert.match(messageListSource, /data-stage-direction/);
+  assert.match(messageListSource, /font-archive-serif/);
+  assert.match(messageListSource, /font-archive-mono/);
+  assert.match(messageListSource, /tabular-nums/);
 });
 
 test('ChatRoom keeps request ownership, polling, history compensation, and optimistic message contracts', () => {

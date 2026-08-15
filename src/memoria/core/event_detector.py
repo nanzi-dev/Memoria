@@ -256,12 +256,19 @@ class EventDetector:
 
         if trigger_type == TriggerType.WORLD_TIME_WINDOW:
             return self._check_world_time_window(condition, context)
-        
-        # 关系变化（扩展功能）
-        if trigger_type == TriggerType.RELATIONSHIP_CHANGE:
-            # 需要检查与其他角色的关系
-            # 暂时返回 False，后续实现
+
+        if trigger_type == TriggerType.ITEM_ACQUIRED:
+            logger.warning("不支持的触发类型: %s", trigger_type)
             return False
+
+        if trigger_type == TriggerType.QUEST_COMPLETED:
+            logger.warning("不支持的触发类型: %s", trigger_type)
+            return False
+
+        # 关系变化：检查当前关系图谱中两个节点之间
+        # 的关系类型 / affinity 是否满足配置。
+        if trigger_type == TriggerType.RELATIONSHIP_CHANGE:
+            return self._check_relationship_change(condition, context)
         
         # 复合条件
         if trigger_type == TriggerType.COMPOSITE:
@@ -275,6 +282,54 @@ class EventDetector:
         logger.warning(f"不支持的触发类型: {trigger_type}")
         return False
     
+    def _check_relationship_change(
+        self,
+        condition: TriggerCondition,
+        context: EventContext,
+    ) -> bool:
+        """Evaluate the relationship graph edge for the current character.
+
+        The other endpoint defaults to the player node. ``state_field`` may be
+        ``affinity`` (default, compares against ``threshold``) or
+        ``relationship_type`` (compares against ``relationship_type``).
+        """
+        target_id = str(condition.target_character_id or "").strip()
+        if target_id == "@player":
+            target_id = repository.player_node_id(context.player_id)
+        elif not target_id:
+            target_id = repository.player_node_id(context.player_id)
+        elif repository.is_player_node_id(target_id):
+            if target_id != repository.player_node_id(context.player_id):
+                return False
+            target_id = repository.player_node_id(context.player_id)
+        relationship = repository.get_character_relationship(
+            context.player_id,
+            context.character_id,
+            target_id,
+        )
+        if not relationship:
+            return False
+
+        state_field = str(condition.state_field or "affinity").strip().lower()
+        if state_field == "relationship_type":
+            expected_type = str(condition.relationship_type or "").strip()
+            return bool(expected_type) and (
+                str(relationship.get("relationship_type") or "").strip()
+                == expected_type
+            )
+        if condition.relationship_type:
+            if str(relationship.get("relationship_type") or "").strip() != str(
+                condition.relationship_type or ""
+            ).strip():
+                return False
+        if condition.threshold is not None:
+            return self._check_threshold(
+                float(relationship.get("affinity") or 0.0),
+                float(condition.threshold),
+                condition.comparison or "gte",
+            )
+        return True
+
     def _check_threshold(
         self,
         value: float,

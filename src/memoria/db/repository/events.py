@@ -866,6 +866,122 @@ def _save_runtime_state_in_transaction(
         """), {"p0": player_id, "p1": player_id_node, "p2": character_id_node, "p3": affection_level, "p4": now, "p5": now})
 
 
+def _apply_relationship_update_in_transaction(
+    conn,
+    *,
+    owner_user_id: str,
+    character_id_a: str,
+    character_id_b: str,
+    relationship_type: str | None,
+    affinity: float | None,
+    affinity_delta: float | None,
+    description: str | None,
+    now: str,
+) -> None:
+    """Apply one modify_relationship effect without leaving the batch transaction."""
+    from memoria.db.repository.relationships import (
+        _normalize_relationship_pair,
+        _sync_runtime_affection_from_player_edge,
+        _touch_character_relationship_revision,
+    )
+
+    character_id_a = str(character_id_a or "").strip()
+    character_id_b = str(character_id_b or "").strip()
+    if not character_id_a or not character_id_b:
+        raise ValueError("relationship update requires two endpoints")
+    normalized_a, normalized_b = _normalize_relationship_pair(
+        character_id_a,
+        character_id_b,
+    )
+
+    row = conn.execute(text("""
+        SELECT relationship_type, affinity, description
+        FROM character_relationship
+        WHERE owner_user_id = :p0 AND character_id_a = :p1 AND character_id_b = :p2
+        """), {"p0": owner_user_id, "p1": normalized_a, "p2": normalized_b}).mappings().fetchone()
+
+    if row is None:
+        if affinity_delta is not None and affinity is None:
+            affinity = float(affinity_delta)
+        affinity = float(affinity if affinity is not None else 0.0)
+        affinity = max(-100.0, min(100.0, affinity))
+        relationship_type = str(relationship_type or "相识").strip()
+        conn.execute(text("""
+            INSERT INTO character_relationship
+            (owner_user_id, character_id_a, character_id_b, relationship_type,
+             affinity, description, created_at, updated_at)
+            VALUES (:p0, :p1, :p2, :p3, :p4, :p5, :p6, :p7)
+            """), {
+            "p0": owner_user_id,
+            "p1": normalized_a,
+            "p2": normalized_b,
+            "p3": relationship_type,
+            "p4": affinity,
+            "p5": str(description or "").strip() or None,
+            "p6": now,
+            "p7": now,
+        })
+    else:
+        current_type = str(row["relationship_type"] or "相识")
+        current_affinity = float(row["affinity"] or 0.0)
+        current_description = str(row["description"] or "") or None
+        next_type = current_type
+        if relationship_type is not None:
+            cleaned_type = str(relationship_type or "").strip()
+            if cleaned_type:
+                next_type = cleaned_type
+        next_description = (
+            str(description or "").strip() or None
+            if description is not None
+            else current_description
+        )
+        next_affinity = current_affinity
+        if affinity is not None:
+            next_affinity = float(affinity)
+        if affinity_delta is not None:
+            next_affinity += float(affinity_delta)
+        next_affinity = max(-100.0, min(100.0, next_affinity))
+        conn.execute(text("""
+            UPDATE character_relationship
+            SET relationship_type = :p3,
+                affinity = :p4,
+                description = :p5,
+                updated_at = :p7
+            WHERE owner_user_id = :p0 AND character_id_a = :p1 AND character_id_b = :p2
+            """), {
+            "p0": owner_user_id,
+            "p1": normalized_a,
+            "p2": normalized_b,
+            "p3": next_type,
+            "p4": next_affinity,
+            "p5": next_description,
+            "p7": now,
+        })
+
+    _touch_character_relationship_revision(
+        conn,
+        owner_user_id,
+        normalized_a,
+        normalized_b,
+        now,
+    )
+    _sync_runtime_affection_from_player_edge(
+        conn,
+        owner_user_id=owner_user_id,
+        character_id_a=normalized_a,
+        character_id_b=normalized_b,
+        affinity=float(
+            conn.execute(text("""
+                SELECT affinity FROM character_relationship
+                WHERE owner_user_id = :p0 AND character_id_a = :p1
+                  AND character_id_b = :p2
+                """), {"p0": owner_user_id, "p1": normalized_a, "p2": normalized_b}
+            ).mappings().fetchone()["affinity"] or 0.0
+        ),
+        now=now,
+    )
+
+
 def _commit_dialogue_turn_in_transaction(
     conn,
     dialogue_turn: dict,
@@ -1336,6 +1452,22 @@ def commit_event_execution_batch(
             runtime_states=runtime_states,
             now=now,
         )
+
+        for execution in executions:
+            if execution["status"] != "succeeded":
+                continue
+            for relationship_update in execution.get("relationship_updates") or []:
+                _apply_relationship_update_in_transaction(
+                    conn,
+                    owner_user_id=player_id,
+                    character_id_a=relationship_update["character_id_a"],
+                    character_id_b=relationship_update["character_id_b"],
+                    relationship_type=relationship_update.get("relationship_type"),
+                    affinity=relationship_update.get("affinity"),
+                    affinity_delta=relationship_update.get("affinity_delta"),
+                    description=relationship_update.get("description"),
+                    now=now,
+                )
 
         if schedule_completion:
             _complete_event_schedule_in_transaction(

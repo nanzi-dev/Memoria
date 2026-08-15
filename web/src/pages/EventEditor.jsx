@@ -11,7 +11,6 @@ import {
   ChevronUp,
   X,
   AlertCircle,
-  AlertTriangle,
   Wand2,
   Workflow,
   Sparkles,
@@ -38,6 +37,7 @@ const TRIGGER_TYPES = [
   { value: 'state_delta', label: '状态变化量' },
   { value: 'event_history', label: '事件历史' },
   { value: 'world_time_window', label: '世界时间窗口' },
+  { value: 'relationship_change', label: '关系变化' },
   { value: 'composite', label: '复合条件' },
 ];
 
@@ -60,19 +60,10 @@ const EFFECT_TYPES = [
   { value: 'branch_event', label: '分支事件' },
   { value: 'npc_proactive_dialogue', label: 'NPC 主动发言' },
   { value: 'update_event_progress', label: '更新事件进度' },
+  { value: 'modify_relationship', label: '修改关系' },
 ];
 const EFFECT_LABELS = Object.fromEntries(EFFECT_TYPES.map(et => [et.value, et.label]));
 
-const UNAVAILABLE_TRIGGER_TYPES = new Set([
-  'item_acquired',
-  'quest_completed',
-  'relationship_change',
-]);
-const UNAVAILABLE_EFFECT_TYPES = new Set([
-  'grant_item',
-  'start_quest',
-  'modify_relationship',
-]);
 const MATCH_MODES = [
   { value: 'any', label: '任一匹配' },
   { value: 'all', label: '全部匹配' },
@@ -128,6 +119,8 @@ const DEFAULT_SUB_CONDITION = {
   time_window_start: '',
   time_window_end: '',
   weekdays: [],
+  target_character_id: '',
+  relationship_type: '',
   cooldown_hours: 0,
 };
 
@@ -203,6 +196,17 @@ function sanitizeEffect(effect) {
     }));
   }
 
+  if (cleaned.relationship_change && typeof cleaned.relationship_change === 'object') {
+    const relationshipChange = { ...cleaned.relationship_change };
+    if (
+      'relationship_type' in relationshipChange
+      && !String(relationshipChange.relationship_type || '').trim()
+    ) {
+      delete relationshipChange.relationship_type;
+    }
+    cleaned.relationship_change = relationshipChange;
+  }
+
   return cleaned;
 }
 
@@ -216,6 +220,8 @@ function sanitizeCondition(condition) {
     'event_status',
     'time_window_start',
     'time_window_end',
+    'target_character_id',
+    'relationship_type',
   ]) {
     if (key in cleaned) cleaned[key] = sanitizeOptionalString(cleaned[key]);
   }
@@ -257,20 +263,6 @@ function sanitizeEventPayload(form) {
   };
 }
 
-function collectUnavailableConfiguration(condition, effects, messages = []) {
-  if (UNAVAILABLE_TRIGGER_TYPES.has(condition?.trigger_type)) {
-    messages.push(`触发类型 ${condition.trigger_type} 尚未实现`);
-  }
-  for (const child of condition?.sub_conditions || []) {
-    collectUnavailableConfiguration(child, [], messages);
-  }
-  for (const effect of effects || []) {
-    if (UNAVAILABLE_EFFECT_TYPES.has(effect.effect_type)) {
-      messages.push(`效果类型 ${effect.effect_type} 尚未实现`);
-    }
-  }
-  return messages;
-}
 
 function validateEventForm(form) {
   const errors = [];
@@ -285,9 +277,6 @@ function validateEventForm(form) {
 
   function validateCondition(current, label = '触发条件') {
     const triggerType = current?.trigger_type;
-    if (UNAVAILABLE_TRIGGER_TYPES.has(triggerType)) {
-      errors.push(`${label}使用未实现类型 ${triggerType}，请更换后保存`);
-    }
     if (
       (triggerType === 'keyword_match' || triggerType === 'npc_keyword_match')
       && !(current.keywords || []).some(keyword => String(keyword || '').trim())
@@ -331,6 +320,20 @@ function validateEventForm(form) {
     ) {
       errors.push(`${label}需要填写开始和结束时间`);
     }
+    if (triggerType === 'relationship_change') {
+      if (!['affinity', 'relationship_type'].includes(current.state_field || 'affinity')) {
+        errors.push(`${label}的关系判断字段无效`);
+      }
+      if ((current.state_field || 'affinity') === 'affinity' && current.threshold == null) {
+        errors.push(`${label}按 affinity 判断关系需要填写阈值`);
+      }
+      if (
+        (current.state_field || 'affinity') === 'relationship_type'
+        && !String(current.relationship_type || '').trim()
+      ) {
+        errors.push(`${label}按关系类型判断需要填写关系类型`);
+      }
+    }
     if (triggerType === 'composite') {
       if (!(current.sub_conditions || []).length) {
         errors.push(`${label}需要至少 1 个子条件`);
@@ -345,9 +348,6 @@ function validateEventForm(form) {
 
   (form.effects || []).forEach((effect, index) => {
     const label = `效果 #${index + 1}`;
-    if (UNAVAILABLE_EFFECT_TYPES.has(effect.effect_type)) {
-      errors.push(`${label} 使用未实现类型 ${effect.effect_type}，请更换后保存`);
-    }
     if (effect.effect_type === 'modify_state' && !Object.keys(effect.state_changes || {}).length) {
       errors.push(`${label} 需要至少 1 个状态变化`);
     }
@@ -391,6 +391,31 @@ function validateEventForm(form) {
     }
     if (effect.effect_type === 'npc_proactive_dialogue' && !String(effect.proactive_prompt || '').trim()) {
       errors.push(`${label} 需要填写主动发言提示`);
+    }
+    if (effect.effect_type === 'modify_relationship') {
+      if (!String(effect.target_character_id || '').trim()) {
+        errors.push(`${label} 需要填写目标角色 ID（可使用 @player）`);
+      }
+      const changes = effect.relationship_change || {};
+      const allowedKeys = ['relationship_type', 'affinity', 'affinity_delta', 'description'];
+      const unknownKeys = Object.keys(changes).filter(key => !allowedKeys.includes(key));
+      if (unknownKeys.length) errors.push(`${label} 包含不支持的关系字段: ${unknownKeys.join(', ')}`);
+      const meaningfulKeys = allowedKeys.filter(key => {
+        if (key === 'relationship_type') return String(changes[key] || '').trim().length > 0;
+        if (key === 'affinity' || key === 'affinity_delta') {
+          return changes[key] !== undefined && changes[key] !== null && changes[key] !== '';
+        }
+        return true;
+      });
+      if (!meaningfulKeys.length) {
+        errors.push(`${label} 需要至少 1 个关系变化字段`);
+      }
+      if ('affinity' in changes && (Number(changes.affinity) < -100 || Number(changes.affinity) > 100)) {
+        errors.push(`${label} 的关系 affinity 必须位于 -100 到 100`);
+      }
+      if ('affinity_delta' in changes && (Number(changes.affinity_delta) < -100 || Number(changes.affinity_delta) > 100)) {
+        errors.push(`${label} 的关系 affinity_delta 必须位于 -100 到 100`);
+      }
     }
     if (
       effect.effect_type === 'update_event_progress'
@@ -515,7 +540,6 @@ function SubConditionEditor({ condition, onChange, onDelete, eventOptions, depth
 function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = false, depth = 0 }) {
   const update = (k, v) => onChange({ ...condition, [k]: v });
   const t = condition?.trigger_type || 'keyword_match';
-  const unavailable = UNAVAILABLE_TRIGGER_TYPES.has(t);
   const thresholdType = ['affinity_threshold', 'trust_threshold', 'state_delta'].includes(t);
 
   return (
@@ -526,19 +550,11 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
           onChange={e => onChange({ ...DEFAULT_SUB_CONDITION, trigger_type: e.target.value })}
           className="min-h-11 max-w-full rounded border border-primary/35 bg-background px-3 text-xs font-archive-mono text-primary focus:border-primary/40 focus:outline-none"
         >
-          {unavailable && <option value={t}>{t}（未实现）</option>}
           {TRIGGER_TYPES.filter(tt => isSub ? tt.value !== 'composite' : true).map(tt => (
             <option key={tt.value} value={tt.value}>{tt.label}</option>
           ))}
         </select>
       </div>
-
-      {unavailable && (
-        <div className="flex items-start gap-2 rounded border border-border bg-muted/35 p-3 text-[10px] font-archive-mono text-muted-foreground">
-          <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-          该旧触发类型尚未实现，原配置已保留。请切换到可用类型后再保存。
-        </div>
-      )}
 
       {thresholdType && (
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,180px)_minmax(0,140px)]">
@@ -808,6 +824,54 @@ function TriggerConditionForm({ condition, onChange, eventOptions = [], isSub = 
         </div>
       )}
 
+      {t === 'relationship_change' && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,220px)_minmax(0,180px)]">
+            <input
+              type="text"
+              value={condition.target_character_id || ''}
+              onChange={e => update('target_character_id', e.target.value)}
+              placeholder="另一端角色 ID，留空表示 @player"
+              className="min-h-11 w-full rounded border border-border bg-background px-3 text-xs font-archive-mono text-primary focus:border-primary/40 focus:outline-none"
+            />
+            <select
+              value={condition.state_field || 'affinity'}
+              onChange={e => update('state_field', e.target.value)}
+              className="min-h-11 rounded border border-border bg-background px-3 text-xs text-primary"
+            >
+              <option value="affinity">判断 affinity</option>
+              <option value="relationship_type">判断关系类型</option>
+            </select>
+          </div>
+          {(condition.state_field || 'affinity') === 'affinity' ? (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,180px)_minmax(0,140px)]">
+              <select
+                value={condition.comparison || 'gte'}
+                onChange={e => update('comparison', e.target.value)}
+                className="min-h-11 rounded border border-border bg-background px-3 text-xs font-archive-mono text-foreground"
+              >
+                {COMPARISONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+              <input
+                type="number"
+                value={condition.threshold ?? ''}
+                onChange={e => update('threshold', e.target.value === '' ? null : Number(e.target.value))}
+                placeholder="affinity 阈值"
+                className="min-h-11 w-full rounded border border-border bg-background px-3 text-xs font-archive-mono text-primary focus:border-primary/40 focus:outline-none"
+              />
+            </div>
+          ) : (
+            <input
+              type="text"
+              value={condition.relationship_type || ''}
+              onChange={e => update('relationship_type', e.target.value)}
+              placeholder="关系类型，例如 ally"
+              className="min-h-11 w-full rounded border border-border bg-background px-3 text-xs font-archive-mono text-primary sm:max-w-sm focus:border-primary/40 focus:outline-none"
+            />
+          )}
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
         <label className="text-[10px] font-archive-mono text-muted-foreground">冷却时间</label>
         <input
@@ -907,7 +971,6 @@ function TagInput({ tags, onChange, placeholder }) {
 function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
   const update = (k, v) => onChange({ ...effect, [k]: v });
   const t = effect.effect_type || 'modify_state';
-  const unavailable = UNAVAILABLE_EFFECT_TYPES.has(t);
 
   return (
     <div className="space-y-3 rounded border border-border bg-muted/25 p-3 sm:p-4">
@@ -919,7 +982,6 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
             onChange={e => onChange({ ...cloneJson(DEFAULT_EFFECT), effect_type: e.target.value })}
             className="min-h-11 min-w-0 rounded border border-primary/35 bg-background px-3 text-xs font-archive-mono text-primary focus:border-primary/40 focus:outline-none"
           >
-            {unavailable && <option value={t}>{t}（未实现）</option>}
             {EFFECT_TYPES.map(et => (
               <option key={et.value} value={et.value}>{et.label}</option>
             ))}
@@ -935,13 +997,6 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
           <Trash2 size={14} />
         </button>
       </div>
-
-      {unavailable && (
-        <div className="flex items-start gap-2 rounded border border-border bg-muted/35 p-3 text-[10px] font-archive-mono text-muted-foreground">
-          <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-          该旧效果尚未实现，原始字段仍保留。请切换到可用效果后再保存。
-        </div>
-      )}
 
       {t === 'modify_state' && (
         <div className="space-y-2">
@@ -1104,6 +1159,54 @@ function EffectEditor({ effect, onChange, onDelete, index, eventOptions }) {
           eventOptions={eventOptions}
           placeholder="选择后续事件"
         />
+      )}
+
+      {t === 'modify_relationship' && (
+        <div className="space-y-2">
+          <input
+            type="text"
+            value={effect.target_character_id || ''}
+            onChange={e => update('target_character_id', e.target.value)}
+            placeholder="目标角色 ID（可使用 @player）"
+            className="min-h-11 w-full rounded border border-border bg-background px-3 text-xs font-archive-mono text-primary sm:max-w-sm focus:border-primary/40 focus:outline-none"
+          />
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <input
+              type="text"
+              value={effect.relationship_change?.relationship_type || ''}
+              onChange={e => update('relationship_change', { ...(effect.relationship_change || {}), relationship_type: e.target.value })}
+              placeholder="关系类型（可选）"
+              className="min-h-11 w-full rounded border border-border bg-background px-3 text-xs font-archive-mono text-primary focus:border-primary/40 focus:outline-none"
+            />
+            <input
+              type="number"
+              value={effect.relationship_change?.affinity ?? ''}
+              onChange={e => update('relationship_change', {
+                ...(effect.relationship_change || {}),
+                affinity: e.target.value === '' ? undefined : Number(e.target.value),
+              })}
+              placeholder="affinity 绝对值（可选）"
+              className="min-h-11 w-full rounded border border-border bg-background px-3 text-xs font-archive-mono text-primary focus:border-primary/40 focus:outline-none"
+            />
+            <input
+              type="number"
+              value={effect.relationship_change?.affinity_delta ?? ''}
+              onChange={e => update('relationship_change', {
+                ...(effect.relationship_change || {}),
+                affinity_delta: e.target.value === '' ? undefined : Number(e.target.value),
+              })}
+              placeholder="affinity 变化量（可选）"
+              className="min-h-11 w-full rounded border border-border bg-background px-3 text-xs font-archive-mono text-primary focus:border-primary/40 focus:outline-none"
+            />
+          </div>
+          <textarea
+            value={effect.relationship_change?.description || ''}
+            onChange={e => update('relationship_change', { ...(effect.relationship_change || {}), description: e.target.value })}
+            placeholder="关系说明（可选）"
+            rows={2}
+            className="w-full rounded border border-border bg-background px-3 py-2 text-xs font-archive-mono text-primary focus:border-primary/40 focus:outline-none"
+          />
+        </div>
       )}
 
       {t === 'branch_event' && (
@@ -1295,11 +1398,6 @@ export default function EventEditor() {
     form.character_id
     && !characters.some(character => character.character_id === form.character_id)
   );
-  const unavailableConfiguration = useMemo(
-    () => collectUnavailableConfiguration(form.trigger_condition, form.effects, []),
-    [form.trigger_condition, form.effects]
-  );
-
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -1471,8 +1569,7 @@ export default function EventEditor() {
 
   const actionPending = saving || deleting;
   const saveDisabled = loading || actionPending || Boolean(loadError)
-    || (isExistingEvent && loadedEventId !== eventId)
-    || unavailableConfiguration.length > 0;
+    || (isExistingEvent && loadedEventId !== eventId);
   const primaryAction = useMemo(() => (
     <Button type="button" size="lg" onClick={handleSave} disabled={saveDisabled}>
       {saving ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
@@ -1577,7 +1674,7 @@ export default function EventEditor() {
   const previousStep = editorSteps[activeStepIndex - 1];
   const nextStep = editorSteps[activeStepIndex + 1];
 
-  const notice = (saveMsg || unavailableConfiguration.length > 0 || validationWarnings.length > 0) ? (
+  const notice = (saveMsg || validationWarnings.length > 0) ? (
     <div className="mb-4 space-y-2">
       {saveMsg && (
         <div
@@ -1593,20 +1690,6 @@ export default function EventEditor() {
         >
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <span className="min-w-0 break-words">{saveMsg}</span>
-        </div>
-      )}
-      {unavailableConfiguration.length > 0 && (
-        <div
-          className="flex items-start gap-3 border border-destructive/25 bg-destructive/5 px-4 py-3 text-xs text-foreground"
-          role="alert"
-        >
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
-          <div className="min-w-0">
-            <p className="font-medium text-foreground">存在不可用的旧配置，当前禁止保存</p>
-            <p className="mt-1 break-words font-archive-mono text-[11px] leading-5 text-muted-foreground">
-              {unavailableConfiguration.join('；')}。原字段不会被静默替换，请在对应位置切换类型。
-            </p>
-          </div>
         </div>
       )}
       {validationWarnings.length > 0 && (

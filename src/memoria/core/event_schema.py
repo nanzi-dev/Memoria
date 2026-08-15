@@ -22,8 +22,8 @@ class TriggerType(str, Enum):
     KEYWORD_MATCH = "keyword_match"                # 关键词匹配
     DIALOGUE_COUNT = "dialogue_count"              # 对话次数达到
     TIME_BASED = "time_based"                      # 基于时间（会话时长、真实时间等）
-    ITEM_ACQUIRED = "item_acquired"                # 获得特定物品（扩展功能）
-    QUEST_COMPLETED = "quest_completed"            # 完成任务（扩展功能）
+    ITEM_ACQUIRED = "item_acquired"                # 获得特定物品（枚举保留）
+    QUEST_COMPLETED = "quest_completed"            # 完成任务（枚举保留）
     RELATIONSHIP_CHANGE = "relationship_change"     # 与其他角色关系变化
     MOOD_MATCH = "mood_match"                      # 特定情绪状态
     NPC_KEYWORD_MATCH = "npc_keyword_match"        # NPC 回复关键词匹配
@@ -66,13 +66,17 @@ class TriggerCondition(BaseModel):
     mood: Optional[str] = None                     # 目标情绪
 
     # 状态变化量 / 事件历史 / 世界时间窗口
-    state_field: Optional[str] = None              # affinity / trust
+    state_field: Optional[str] = None              # affinity / trust / relationship_type
     event_id: Optional[str] = None                 # 依赖的历史事件 ID
     event_status: Optional[str] = "succeeded"      # 依赖事件状态
     min_occurrences: Optional[int] = 1             # 最少历史执行次数
     time_window_start: Optional[str] = None         # HH:MM
     time_window_end: Optional[str] = None           # HH:MM
     weekdays: Optional[list[int]] = None            # 0=Monday ... 6=Sunday
+
+    # 关系变化条件
+    target_character_id: Optional[str] = None      # 关系变化条件的另一端角色（可为 @player）
+    relationship_type: Optional[str] = None        # 需要匹配的关系类型（可选）
     
     # 复合条件
     sub_conditions: Optional[list["TriggerCondition"]] = None  # 子条件列表
@@ -93,8 +97,8 @@ class EffectType(str, Enum):
     ADD_MEMORY = "add_memory"                      # 添加记忆
     CHANGE_MOOD = "change_mood"                    # 改变情绪
     NOTIFY_PLAYER = "notify_player"                # 通知玩家（UI 提示）
-    GRANT_ITEM = "grant_item"                      # 给予物品（扩展功能）
-    START_QUEST = "start_quest"                    # 开启任务（扩展功能）
+    GRANT_ITEM = "grant_item"                      # 给予物品（枚举保留）
+    START_QUEST = "start_quest"                    # 开启任务（枚举保留）
     MODIFY_RELATIONSHIP = "modify_relationship"    # 修改与其他角色的关系
     TRIGGER_EVENT = "trigger_event"                # 触发另一个事件（事件链）
     BRANCH_EVENT = "branch_event"                  # 按上下文分支触发事件
@@ -130,7 +134,7 @@ class EventEffect(BaseModel):
     notification_message: Optional[str] = None     # 通知消息
     notification_type: Optional[str] = "info"      # info, success, warning, error
     
-    # 物品和任务（扩展）
+    # 物品和任务（枚举保留，暂不开放执行）
     item_id: Optional[str] = None
     quest_id: Optional[str] = None
     

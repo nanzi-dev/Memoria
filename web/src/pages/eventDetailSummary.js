@@ -9,6 +9,7 @@ const EFFECT_LABELS = {
   branch_event: '分支事件',
   npc_proactive_dialogue: 'NPC 主动发言',
   update_event_progress: '更新事件进度',
+  modify_relationship: '修改关系',
 };
 
 export function mergeEventDetail(listRecord = {}, detailRecord = {}) {
@@ -71,6 +72,12 @@ export function describeEventTrigger(condition, fallbackType, triggerLabels = {}
     return `${source.time_window_start || '--:--'} 至 ${source.time_window_end || '--:--'}`;
   }
   if (type === 'event_history') return `关联事件：${source.event_id || '未设置'}`;
+  if (type === 'relationship_change') {
+    if ((source.state_field || 'affinity') === 'relationship_type') {
+      return `关系 ${source.target_character_id || '@player'} = ${source.relationship_type || '未设置'}`;
+    }
+    return `关系 ${source.target_character_id || '@player'} affinity ${comparison} ${source.threshold ?? '未设置'}`;
+  }
   if (type === 'composite') {
     return `${Array.isArray(source.sub_conditions) ? source.sub_conditions.length : 0} 个子条件`;
   }
@@ -112,6 +119,12 @@ export function summarizeEventEffect(effect = {}) {
   }
 
   if (effect.effect_type === 'npc_proactive_dialogue') return '安排 NPC 主动发言';
+  if (effect.effect_type === 'modify_relationship') {
+    const keys = Object.keys(effect.relationship_change || {}).filter(Boolean);
+    return keys.length
+      ? `修改与 ${effect.target_character_id || '目标'} 的关系`
+      : '修改角色关系';
+  }
   if (effect.effect_type === 'update_event_progress') {
     return effect.progress_delta != null ? '相对调整事件进度' : '设置事件进度';
   }

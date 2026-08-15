@@ -52,6 +52,7 @@ class EventExecutor:
             "unlock_keys": [],
             "inbox_items": [],
             "proactive_messages": [],
+            "relationship_updates": [],
         }
 
         for index, effect in enumerate(event.effects):
@@ -105,6 +106,7 @@ class EventExecutor:
                     "unlock_keys": [],
                     "inbox_items": [],
                     "proactive_messages": [],
+                    "relationship_updates": [],
                 }
                 break
 
@@ -275,11 +277,54 @@ class EventExecutor:
             })
             return "通知已加入原子提交", notification.model_dump(mode="json")
 
-        if effect_type == EffectType.MODIFY_RELATIONSHIP:
-            raise ValueError("modify_relationship 尚未开放，请先完善关系事务语义")
-
         if effect_type in {EffectType.GRANT_ITEM, EffectType.START_QUEST}:
             raise ValueError(f"{effect_type.value} 尚未实现，不能执行")
+
+        if effect_type == EffectType.MODIFY_RELATIONSHIP:
+            target_id = str(effect.target_character_id or "").strip()
+            if target_id == "@player":
+                target_id = repository.player_node_id(context.player_id)
+            if not target_id:
+                raise ValueError("修改关系效果缺少 target_character_id")
+            if (
+                repository.is_player_node_id(target_id)
+                and target_id != repository.player_node_id(context.player_id)
+            ):
+                raise ValueError("修改关系效果只能使用当前玩家的 @player 节点")
+            if target_id == context.character_id:
+                raise ValueError("修改关系效果不能以当前事件角色自身为目标")
+            changes = dict(effect.relationship_change or {})
+            if "relationship_type" in changes and not str(
+                changes.get("relationship_type") or ""
+            ).strip():
+                changes.pop("relationship_type", None)
+            allowed = {"relationship_type", "affinity", "affinity_delta", "description"}
+            unknown = set(changes) - allowed
+            if unknown:
+                raise ValueError(
+                    f"不支持的关系字段: {', '.join(sorted(unknown))}"
+                )
+            if not changes:
+                raise ValueError("修改关系效果缺少 relationship_change")
+            if not any(key in changes for key in allowed):
+                raise ValueError("修改关系效果缺少可应用的关系变化")
+            operations["relationship_updates"].append({
+                "character_id_a": context.character_id,
+                "character_id_b": target_id,
+                "relationship_type": changes.get("relationship_type"),
+                "affinity": changes.get("affinity"),
+                "affinity_delta": changes.get("affinity_delta"),
+                "description": changes.get("description"),
+            })
+            result.state_changes["relationship_updates"] = (
+                result.state_changes.get("relationship_updates") or []
+            )
+            result.state_changes["relationship_updates"].append({
+                "character_id_a": context.character_id,
+                "character_id_b": target_id,
+                **{key: changes[key] for key in sorted(changes)},
+            })
+            return "关系修改已加入原子提交", changes
 
         if effect_type == EffectType.TRIGGER_EVENT:
             event_id = str(effect.next_event_id or "").strip()

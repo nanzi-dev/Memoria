@@ -150,7 +150,7 @@ test('unknown and legacy trigger types use a neutral localized fallback', () => 
   );
   assert.equal(
     eventDetailSummary.describeEventTrigger?.(
-      { trigger_type: 'item_acquired' },
+      { trigger_type: 'unknown_trigger' },
       undefined,
       triggerLabels,
     ),

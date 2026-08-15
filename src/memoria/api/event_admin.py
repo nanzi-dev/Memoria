@@ -58,6 +58,8 @@ class TriggerConditionDTO(BaseModel):
     time_window_start: Optional[str] = None
     time_window_end: Optional[str] = None
     weekdays: Optional[list[int]] = None
+    target_character_id: Optional[str] = None
+    relationship_type: Optional[str] = None
     sub_conditions: Optional[list["TriggerConditionDTO"]] = None
     logic_operator: Optional[str] = "and"
     cooldown_hours: Optional[int] = 0
@@ -296,15 +298,15 @@ def _require_owned_character(
     return normalized_id
 
 
-UNIMPLEMENTED_EFFECTS = {
-    EffectType.GRANT_ITEM,
-    EffectType.START_QUEST,
-    EffectType.MODIFY_RELATIONSHIP,
-}
+# item_acquired / quest_completed 枚举保留，但暂不作为可用触发条件实现。
 UNIMPLEMENTED_TRIGGERS = {
     TriggerType.ITEM_ACQUIRED,
     TriggerType.QUEST_COMPLETED,
-    TriggerType.RELATIONSHIP_CHANGE,
+}
+# grant_item / start_quest 枚举保留，但暂不作为可用效果实现。
+UNIMPLEMENTED_EFFECTS = {
+    EffectType.GRANT_ITEM,
+    EffectType.START_QUEST,
 }
 
 
@@ -323,6 +325,8 @@ def _validate_cron(schedule: str) -> None:
 def _validate_condition_semantics(
     condition: TriggerCondition,
     current_user_id: str,
+    *,
+    event_character_id: str | None = None,
 ) -> None:
     if condition.trigger_type in UNIMPLEMENTED_TRIGGERS:
         raise HTTPException(
@@ -395,6 +399,34 @@ def _validate_condition_semantics(
             raise HTTPException(status_code=400, detail="世界时间窗口必须使用 HH:MM") from exc
         if any(day < 0 or day > 6 for day in condition.weekdays or []):
             raise HTTPException(status_code=400, detail="weekdays 必须位于 0 到 6")
+    if condition.trigger_type == TriggerType.RELATIONSHIP_CHANGE:
+        # target 可省略，省略时检测当前角色与玩家节点的关系边。
+        target_id = str(condition.target_character_id or "").strip()
+        if target_id:
+            if target_id == "@player":
+                pass
+            elif repository.is_player_node_id(target_id):
+                if target_id != repository.player_node_id(current_user_id):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="关系变化条件只能使用当前玩家的 @player 节点",
+                    )
+            else:
+                _require_owned_character(current_user_id, target_id)
+                if event_character_id and target_id == event_character_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="关系变化条件不能以当前事件角色自身为目标",
+                    )
+        if condition.crossing:
+            raise HTTPException(status_code=400, detail="关系变化条件暂不支持 crossing，请使用事件冷却管理重复触发")
+        state_field = str(condition.state_field or "affinity").strip().lower()
+        if state_field not in {"affinity", "relationship_type"}:
+            raise HTTPException(status_code=400, detail="关系变化条件的 state_field 必须为 affinity 或 relationship_type")
+        if state_field == "affinity" and condition.threshold is None:
+            raise HTTPException(status_code=400, detail="按 affinity 判断关系变化必须提供 threshold")
+        if state_field == "relationship_type" and not str(condition.relationship_type or "").strip():
+            raise HTTPException(status_code=400, detail="按 relationship_type 判断关系变化必须提供 relationship_type")
     if condition.trigger_type == TriggerType.COMPOSITE:
         if not condition.sub_conditions:
             raise HTTPException(status_code=400, detail="复合条件至少需要一个子条件")
@@ -403,12 +435,18 @@ def _validate_condition_semantics(
     if condition.schedule:
         _validate_cron(condition.schedule)
     for child in condition.sub_conditions or []:
-        _validate_condition_semantics(child, current_user_id)
+        _validate_condition_semantics(
+            child,
+            current_user_id,
+            event_character_id=event_character_id,
+        )
 
 
 def _validate_effect_semantics(
     effect: EventEffect,
     current_user_id: str,
+    *,
+    event_character_id: str | None = None,
 ) -> None:
     if effect.effect_type in UNIMPLEMENTED_EFFECTS:
         raise HTTPException(
@@ -433,6 +471,55 @@ def _validate_effect_semantics(
         raise HTTPException(status_code=400, detail="改变情绪效果必须提供 target_mood")
     if effect.effect_type == EffectType.NOTIFY_PLAYER and not str(effect.notification_message or "").strip():
         raise HTTPException(status_code=400, detail="通知效果必须提供 notification_message")
+    if effect.effect_type == EffectType.MODIFY_RELATIONSHIP:
+        target_id = str(effect.target_character_id or "").strip()
+        if not target_id:
+            raise HTTPException(status_code=400, detail="修改关系效果必须提供 target_character_id（可使用 @player）")
+        if target_id != "@player":
+            if repository.is_player_node_id(target_id):
+                if target_id != repository.player_node_id(current_user_id):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="修改关系效果只能使用当前玩家的 @player 节点",
+                    )
+            else:
+                _require_owned_character(current_user_id, target_id)
+        resolved_target = (
+            repository.player_node_id(current_user_id)
+            if target_id == "@player"
+            else target_id
+        )
+        if event_character_id and resolved_target == event_character_id:
+            raise HTTPException(
+                status_code=400,
+                detail="修改关系效果不能以当前事件角色自身为目标",
+            )
+        changes = dict(effect.relationship_change or {})
+        if "relationship_type" in changes and not str(
+            changes.get("relationship_type") or ""
+        ).strip():
+            changes.pop("relationship_type", None)
+        effect.relationship_change = changes
+        allowed = {"relationship_type", "affinity", "affinity_delta", "description"}
+        unknown = set(changes) - allowed
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"不支持的关系字段: {', '.join(sorted(unknown))}")
+        if not any(key in changes for key in allowed):
+            raise HTTPException(status_code=400, detail="修改关系效果必须至少提供一个关系变化字段")
+        if "affinity" in changes:
+            try:
+                if not -100 <= float(changes["affinity"]) <= 100:
+                    raise ValueError
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail="关系 affinity 必须位于 -100 到 100") from exc
+        if "affinity_delta" in changes:
+            try:
+                if not -100 <= float(changes["affinity_delta"]) <= 100:
+                    raise ValueError
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail="关系 affinity_delta 必须位于 -100 到 100") from exc
+    if effect.effect_type == EffectType.TRIGGER_EVENT and not str(effect.next_event_id or "").strip():
+        raise HTTPException(status_code=400, detail="触发事件效果必须提供 next_event_id")
     referenced_events: list[str] = []
     if effect.effect_type == EffectType.TRIGGER_EVENT and effect.next_event_id:
         referenced_events.append(effect.next_event_id)
@@ -456,10 +543,20 @@ def _validate_effect_semantics(
                 branch_condition = TriggerCondition.model_validate(condition_data)
             except Exception as exc:
                 raise HTTPException(status_code=400, detail=f"分支条件无效: {exc}") from exc
-            _validate_condition_semantics(branch_condition, current_user_id)
-    for character_id in (effect.target_character_id, effect.proactive_character_id):
+            _validate_condition_semantics(
+                branch_condition,
+                current_user_id,
+                event_character_id=event_character_id,
+            )
+    for character_id in (effect.proactive_character_id,):
         if character_id:
             _require_owned_character(current_user_id, character_id)
+    if (
+        effect.target_character_id
+        and effect.target_character_id != "@player"
+        and not repository.is_player_node_id(effect.target_character_id)
+    ):
+        _require_owned_character(current_user_id, effect.target_character_id)
     if (
         effect.effect_type == EffectType.NPC_PROACTIVE_DIALOGUE
         and effect.target_session_id
@@ -489,6 +586,15 @@ def _validate_effect_semantics(
                     detail="主动发言角色不是目标群聊的活跃参与者",
                 )
     if effect.effect_type == EffectType.UPDATE_EVENT_PROGRESS:
+        if (
+            effect.progress is None
+            and effect.progress_delta is None
+            and not str(effect.event_status or "").strip()
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="更新事件进度效果必须提供 progress、progress_delta 或 event_status",
+            )
         if effect.event_status and effect.event_status not in {"pending", "active", "completed", "failed"}:
             raise HTTPException(status_code=400, detail="事件进度状态无效")
         if effect.progress is not None and not 0 <= effect.progress <= 1:
@@ -499,15 +605,25 @@ def _validate_event_configuration(
     trigger_condition: TriggerConditionDTO,
     effects: list[EventEffectDTO],
     current_user_id: str,
+    *,
+    event_character_id: str | None = None,
 ) -> tuple[TriggerCondition, list[EventEffect]]:
     try:
         condition = TriggerCondition.model_validate(trigger_condition.model_dump())
         parsed_effects = [EventEffect.model_validate(effect.model_dump()) for effect in effects]
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"配置校验失败: {exc}") from exc
-    _validate_condition_semantics(condition, current_user_id)
+    _validate_condition_semantics(
+        condition,
+        current_user_id,
+        event_character_id=event_character_id,
+    )
     for effect in parsed_effects:
-        _validate_effect_semantics(effect, current_user_id)
+        _validate_effect_semantics(
+            effect,
+            current_user_id,
+            event_character_id=event_character_id,
+        )
     return condition, parsed_effects
 
 
@@ -687,6 +803,7 @@ def create_event(
         req.trigger_condition,
         req.effects,
         current_user_id,
+        event_character_id=character_id,
     )
     schedule = sanitize_schedule(req.schedule) or sanitize_schedule(
         validated_condition.schedule
@@ -808,7 +925,10 @@ def update_event(
             for item in json.loads(existing["effects_config"])
         ]
     validated_condition, validated_effects = _validate_event_configuration(
-        condition_dto, effects_dto, current_user_id
+        condition_dto,
+        effects_dto,
+        current_user_id,
+        event_character_id=character_id,
     )
     trigger_json = validated_condition.model_dump_json()
     effects_json = json.dumps(

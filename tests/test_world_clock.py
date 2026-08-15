@@ -947,9 +947,8 @@ def test_unimplemented_scheduled_effect_rolls_back_all_side_effects():
                 memory_importance=8,
             ),
             EventEffect(
-                effect_type=EffectType.MODIFY_RELATIONSHIP,
-                target_character_id=target_character_id,
-                relationship_change={"affinity": 4},
+                effect_type=EffectType.GRANT_ITEM,
+                item_id="missing-system",
             ),
             EventEffect(
                 effect_type=EffectType.NOTIFY_PLAYER,
@@ -1024,9 +1023,8 @@ def test_scheduled_planning_failure_keeps_cron_due_for_retry(monkeypatch):
         schedule=schedule,
     )
     invalid_effect = EventEffect(
-        effect_type=EffectType.MODIFY_RELATIONSHIP,
-        target_character_id="npc_wuxian",
-        relationship_change={"affinity": 1},
+        effect_type=EffectType.GRANT_ITEM,
+        item_id="missing-system",
     )
     assert repository.save_event_definition(
         owner_user_id=player_id,
@@ -1095,7 +1093,7 @@ def test_scheduled_planning_failure_keeps_cron_due_for_retry(monkeypatch):
     assert failed_schedule["next_run_at"] == scheduled_for
     assert failed_schedule["next_due_real_at"] == scheduled_for
     assert failed_schedule["lease_owner"] is None
-    assert "modify_relationship" in failed_schedule["last_error"]
+    assert "grant_item" in failed_schedule["last_error"]
     assert failed_schedule["last_failed_at"] == scheduled_for
     assert repository.get_event_execution_batch(player_id, execution_key) is None
     assert repository.list_event_execution_history(

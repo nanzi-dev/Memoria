@@ -95,11 +95,18 @@ test('event editor keeps dependency loading, validation, operations, and persist
   assert.match(sources.event, /<EventOperationsPanel/);
 });
 
-test('event editor disables save while unavailable legacy configuration blocks persistence', () => {
+test('event editor keeps save gating and supports the implemented relationship types', () => {
   const saveDisabledExpression = sources.event.match(
     /const saveDisabled = ([\s\S]*?);/,
   )?.[1] || '';
 
-  assert.match(saveDisabledExpression, /unavailableConfiguration\.length > 0/);
+  assert.doesNotMatch(saveDisabledExpression, /unavailableConfiguration/);
   assert.match(sources.event, /disabled=\{saveDisabled\}/);
+  assert.match(sources.event, /'relationship_change', label: '关系变化'/);
+  assert.match(sources.event, /'modify_relationship', label: '修改关系'/);
+  assert.match(sources.event, /effect_type === 'modify_relationship'/);
+  assert.doesNotMatch(
+    sources.event,
+    /'item_acquired'|'quest_completed'|'grant_item'|'start_quest'/,
+  );
 });

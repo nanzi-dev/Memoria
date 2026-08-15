@@ -2,6 +2,7 @@
 用户注册、登录、资料管理 API
 """
 
+import base64
 import hashlib
 import hmac
 import secrets
@@ -603,8 +604,14 @@ def put_character_card(
     if "display_name" in fields and not fields["display_name"]:
         raise HTTPException(400, "角色名称不能为空")
     avatar_url = fields.get("avatar_url")
-    if avatar_url and not avatar_url.startswith("data:image/"):
-        raise HTTPException(400, "角色头像请通过头像上传或网络图片接口设置")
+    if avatar_url:
+        if not avatar_url.startswith("data:image/"):
+            raise HTTPException(400, "角色头像请通过头像上传或网络图片接口设置")
+        try:
+            encoded = avatar_url.split(",", 1)[1] if "," in avatar_url else ""
+            fields["avatar_url"] = avatar_data_url(base64.b64decode(encoded))
+        except Exception as exc:
+            raise HTTPException(400, "角色头像无效，请通过头像上传或网络图片接口设置") from exc
     card = repository.update_user_character_card(user_id, fields)
     if not card:
         raise HTTPException(404, "用户不存在")
