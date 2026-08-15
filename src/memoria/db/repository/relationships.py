@@ -101,7 +101,7 @@ def save_character_relationship(
     character_id_b: str,
     relationship_type: str,
     affinity: float = 0.0,
-    description: str = None
+    description: str | None = None
 ) -> bool:
     """保存角色关系（无向关系，自动排序确保唯一性）"""
     try:

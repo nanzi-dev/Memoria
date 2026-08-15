@@ -196,7 +196,7 @@ def update_user_password_hash(user_id: str, password_hash: str):
 _UNSET = object()
 
 
-def update_user_profile(user_id: str, username: str = None, gender: str = None, avatar_url=_UNSET):
+def update_user_profile(user_id: str, username: str | None = None, gender: str | None = None, avatar_url=_UNSET):
     values: dict[str, Any] = {}
     if username is not None:
         values["username"] = username

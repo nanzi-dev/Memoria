@@ -59,7 +59,7 @@ def record_claim(
     if source_kind not in SOURCE_KINDS:
         raise ValueError(f"unsupported fact claim source_kind: {source_kind}")
     if not isinstance(direct_support, bool):
-        raise ValueError("direct_support must be a boolean")
+        raise TypeError("direct_support must be a boolean")
     if provenance is not None and not isinstance(provenance, dict):
         raise ValueError("provenance must be a JSON object")
 

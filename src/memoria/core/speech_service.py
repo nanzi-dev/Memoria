@@ -684,7 +684,7 @@ class SpeechService:
         owner_user_id: str,
         character_id: str,
         **updates,
-    ) -> Path:
+    ) -> None:
         success = repository.patch_character_card_voice(
             owner_user_id,
             character_id,

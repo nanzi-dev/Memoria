@@ -239,9 +239,13 @@ def _character_name_and_aliases(player_id: str, character_id: str) -> tuple[str,
             card_data = json.loads(row.get("card_data") or "{}")
             meta = card_data.get("meta") or {}
             aliases.extend([
-                meta.get("name"),
-                meta.get("display_name"),
-                *(meta.get("aliases") or []),
+                alias
+                for alias in (
+                    meta.get("name"),
+                    meta.get("display_name"),
+                    *(meta.get("aliases") or []),
+                )
+                if alias
             ])
         except (TypeError, ValueError):
             pass

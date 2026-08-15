@@ -54,7 +54,7 @@ def measure(metric: str):
 def _percentile(values: list[float], percentile: float) -> float:
     if not values:
         return 0.0
-    index = int(round((len(values) - 1) * percentile))
+    index = round((len(values) - 1) * percentile)
     return values[index]
 
 

@@ -7,7 +7,8 @@ import {
   useState,
 } from 'react';
 
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import * as reactRouter from 'react-router-dom';
+const { useSearchParams, useNavigate } = reactRouter;
 
 import { useUser } from '../context/UserContext';
 

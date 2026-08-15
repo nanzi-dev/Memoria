@@ -885,7 +885,7 @@ def save_character_impression(
     observer_character_id: str,
     target_character_id: str,
     impression_text: str,
-    context: str = None,
+    context: str | None = None,
     importance: float = 0.5,
     world_occurred_at: str | None = None,
     evidence_id: str | None = None,
@@ -1055,7 +1055,7 @@ def save_shared_memory(
     character_a_id: str,
     character_b_id: str,
     memory_text: str,
-    context: str = None,
+    context: str | None = None,
     importance: float = 0.5,
 ) -> str:
     """兼容旧调用；按 A 观察 B 的定向角色印象保存。"""
@@ -1105,8 +1105,8 @@ def get_character_shared_memories(
 def save_group_memory(
     session_id: str,
     memory_text: str,
-    participants: list[str] = None,
-    context: str = None,
+    participants: list[str] | None = None,
+    context: str | None = None,
     importance: float = 0.5,
     world_occurred_at: str | None = None,
     evidence_id: str | None = None,
@@ -1163,8 +1163,8 @@ def save_group_memory(
         and world_occurred_at
         and evidence_id
         and participants
+        and session
     ):
-        if session:
             for character_id in dict.fromkeys(participants):
                 try:
                     record_memory_curve_evidence(

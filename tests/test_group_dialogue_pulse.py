@@ -647,7 +647,7 @@ def test_dialogue_decision_rejects_extra_fields_and_malformed_json():
         MultiCharacterOrchestrator._parse_dialogue_decision(
             '{"action":"wait","unexpected":true}'
         )
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):
         MultiCharacterOrchestrator._parse_dialogue_decision("这不是 JSON")
 
 

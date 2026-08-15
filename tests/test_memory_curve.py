@@ -897,7 +897,7 @@ def test_batch_advance_or_initialize(monkeypatch):
         memory_type="player_fact", items=items,
     )
     assert len(states) == 10
-    for mid, state in states.items():
+    for state in states.values():
         assert state["anchor_strength"] == 1.0
         assert state["owner_user_id"] == uid
 
@@ -913,7 +913,7 @@ def test_batch_advance_or_initialize(monkeypatch):
         memory_type="player_fact", items=items2,
     )
     assert len(states2) == 10
-    for mid, state in states2.items():
+    for state in states2.values():
         assert state["elapsed_decay_seconds"] == pytest.approx(5 * 86400)
 
 

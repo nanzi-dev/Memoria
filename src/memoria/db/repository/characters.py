@@ -20,10 +20,10 @@ def save_character_card_to_db(
     character_id: str,
     card_data_json: str,
     version: str = "1.0.0",
-    name: str = None,
-    display_name: str = None,
+    name: str | None = None,
+    display_name: str | None = None,
     source: str = "db",
-    avatar_url: str = None
+    avatar_url: str | None = None
 ) -> str | None:
     """
     保存或更新角色卡到数据库

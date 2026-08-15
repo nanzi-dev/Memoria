@@ -702,7 +702,7 @@ def put_character_card(
     response_model=UserCharacterCardResponse,
 )
 async def upload_character_card_avatar(
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008
     user_id: str = Depends(require_current_user_id),
 ):
     contents = await read_upload_limited(
@@ -850,7 +850,7 @@ def read_event_inbox_item(
 # =========================
 @router.post("/user/avatar/upload", response_model=OperationResponse)
 async def upload_avatar(
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008
     uid: str = Depends(require_current_user_id),
 ):
     contents = await read_upload_limited(

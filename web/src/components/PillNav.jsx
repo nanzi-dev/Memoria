@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import * as reactRouter from 'react-router-dom';
+const { Link, useLocation } = reactRouter;
 import { Menu, X } from 'lucide-react';
 import { gsap } from 'gsap';
 import './PillNav.css';

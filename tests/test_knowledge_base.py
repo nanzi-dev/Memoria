@@ -7,6 +7,7 @@ import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -594,7 +595,7 @@ def test_docx_table_chunks_repeat_header_and_keep_real_row_numbers():
     assert row_ranges[-1][1] == 7
     assert all(
         current_end + 1 == next_start
-        for (_, current_end), (next_start, _) in zip(row_ranges, row_ranges[1:])
+        for (_, current_end), (next_start, _) in pairwise(row_ranges)
     )
     assert all(chunk["source_metadata"]["table"] == 1 for chunk in chunks)
 

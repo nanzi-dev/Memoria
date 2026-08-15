@@ -274,7 +274,7 @@ def list_knowledge_documents(
 async def upload_knowledge_document(
     knowledge_base_id: str,
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008
     current_user_id: str = Depends(require_current_user_id),
 ):
     _require_base(current_user_id, knowledge_base_id)

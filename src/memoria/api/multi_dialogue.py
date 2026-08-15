@@ -447,13 +447,12 @@ def start_multi_session(
             )
 
         clean_group_name = (request.group_name or "").strip()
-        if clean_group_name:
-            # 仓储层按 LOWER(TRIM(...)) 比较；这里再把 casefold 结果传一次，确保
-            # 任何大小写/空白变体都能命中“同名”检查。
-            if repository.player_group_name_exists(
-                request.player_id, clean_group_name.casefold()
-            ):
-                raise HTTPException(status_code=400, detail="群聊名称已存在，请换一个名称")
+        # 仓储层按 LOWER(TRIM(...)) 比较；这里再把 casefold 结果传一次，确保
+        # 任何大小写/空白变体都能命中“同名”检查。
+        if clean_group_name and repository.player_group_name_exists(
+            request.player_id, clean_group_name.casefold()
+        ):
+            raise HTTPException(status_code=400, detail="群聊名称已存在，请换一个名称")
         
         try:
             player_character = repository.get_or_create_user_character_card(
@@ -584,6 +583,8 @@ def multi_dialogue_turn(
                 )
         else:
             # 单角色模式：返回单个回应
+            if not isinstance(result, dict):
+                raise HTTPException(status_code=500, detail="单角色模式返回数据格式异常")
             if event_executions is not None:
                 result["event_executions"] = event_executions
             if event_notifications is not None:

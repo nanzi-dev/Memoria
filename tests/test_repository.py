@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Barrier
+from typing import ClassVar
 
 import pytest
 
@@ -22,7 +23,7 @@ class TestRuntimeState:
         class Mood: default_mood = "neutral"
         rel = type("R",(),{"target_id":"player","affection_level":5,"trust_level":15})()
         class RTS:
-            relationships = [rel]
+            relationships: ClassVar[list] = [rel]
             current_mood = Mood()
         class Fake:
             runtime_state_schema = RTS()
@@ -35,7 +36,7 @@ class TestRuntimeState:
         repository.save_runtime_state("tC2e837a1","tP2e837a1",50.0,60.0,"happy")
         class Mood: default_mood = "neutral"
         class RTS:
-            relationships = []
+            relationships: ClassVar[list] = []
             current_mood = Mood()
         class Fake:
             runtime_state_schema = RTS()

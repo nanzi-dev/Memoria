@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import * as reactRouter from 'react-router-dom';
+const { useNavigate } = reactRouter;
 import {
   Activity,
   AlertCircle,

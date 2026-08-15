@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import * as reactRouter from 'react-router-dom';
+const { useParams, useNavigate } = reactRouter;
 import {
   BookOpen,
   Brain,

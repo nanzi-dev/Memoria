@@ -320,7 +320,7 @@ def get_relationship_network(
         # 解析角色 ID
         target_ids = set()
         if character_ids:
-            target_ids = set(cid.strip() for cid in character_ids.split(",") if cid.strip())
+            target_ids = {cid.strip() for cid in character_ids.split(",") if cid.strip()}
         
         # 获取所有关系
         all_relationships = []

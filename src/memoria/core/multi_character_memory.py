@@ -637,7 +637,7 @@ def save_character_impression(
     target_id: str,
     impression: str,
     session_id: str,
-    player_id: str = None,
+    player_id: str | None = None,
     importance: float = 0.6,
     world_occurred_at: str | None = None,
     evidence_id: str | None = None,
@@ -685,7 +685,7 @@ def save_character_impression(
 def get_character_impressions(
     observer_id: str,
     target_id: str,
-    player_id: str = None,
+    player_id: str | None = None,
     limit: int = 5
 ) -> list[dict]:
     """
@@ -1076,7 +1076,7 @@ def integrate_multi_character_context(
     player_id: str,
     session_id: str,
     other_character_ids: list[str],
-    query_context: str = None,
+    query_context: str | None = None,
     character_relationships: dict | None = None,
     relationship_aliases: list[str] | None = None,
     world_now: str | None = None,
@@ -1183,7 +1183,7 @@ def integrate_multi_character_context(
                 impressions = fb_imp
             if impressions:
                 # 提取 memory_text 用于 prompt 构建
-                context["character_impressions"][other_id] = [
+                context["character_impressions"][other_id] = [  # type: ignore[index]
                     imp["memory_text"] for imp in impressions[:3]
                 ]
     

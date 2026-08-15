@@ -1,4 +1,5 @@
-import { useNavigate } from 'react-router-dom';
+import * as reactRouter from 'react-router-dom';
+const { useNavigate } = reactRouter;
 import { lazy, memo, Suspense, useMemo } from 'react';
 import './Lanyard.css';
 import {

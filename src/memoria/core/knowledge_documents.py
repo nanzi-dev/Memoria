@@ -132,7 +132,7 @@ def _extract_markdown(data: bytes) -> ExtractedDocument:
             index += 1
             continue
 
-        if stripped.startswith("```") or stripped.startswith("~~~"):
+        if stripped.startswith(("```", "~~~")):
             fence = stripped[:3]
             block = [line]
             index += 1

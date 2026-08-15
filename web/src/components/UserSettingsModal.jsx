@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import * as reactRouter from 'react-router-dom';
+const { useNavigate } = reactRouter;
 import {
   AlertCircle,
   CalendarClock,

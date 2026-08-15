@@ -132,7 +132,7 @@ def normalize_evidence_entry(evidence: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"unsupported fact claim source_kind: {source_kind}")
     direct_support = evidence.get("direct_support")
     if not isinstance(direct_support, bool):
-        raise ValueError("direct_support must be a boolean")
+        raise TypeError("direct_support must be a boolean")
     details = evidence.get("details", {})
     if type(details) is not dict:
         raise ValueError("fact claim evidence details must be an object")

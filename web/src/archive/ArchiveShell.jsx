@@ -25,13 +25,8 @@ import {
   Sun,
   UserRound,
 } from 'lucide-react';
-import {
-  Link,
-  NavLink,
-  Outlet,
-  useLocation,
-  useNavigate,
-} from 'react-router-dom';
+import * as reactRouter from 'react-router-dom';
+const { Link, NavLink, Outlet, useLocation, useNavigate } = reactRouter;
 
 import { WorldClockDisplay } from '@/components/WorldClock';
 import { Button } from '@/components/ui/button';

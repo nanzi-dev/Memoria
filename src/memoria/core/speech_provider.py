@@ -293,12 +293,12 @@ class MiniMaxSpeechProvider:
                 if not response.is_success:
                     content = await response.aread()
                     raise _map_http_error(response, content=content)
-                async for payload in _sse_json_events(response):
-                    _raise_minimax_response_error(payload)
-                    audio_hex = _minimax_audio_hex(payload)
+                async for chunk in _sse_json_events(response):
+                    _raise_minimax_response_error(chunk)
+                    audio_hex = _minimax_audio_hex(chunk)
                     if not audio_hex:
                         continue
-                    data = payload.get("data")
+                    data = chunk.get("data")
                     is_final = (
                         isinstance(data, dict)
                         and str(data.get("status")) == "2"

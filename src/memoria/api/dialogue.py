@@ -431,6 +431,7 @@ def list_characters(current_user_id: str = Depends(require_current_user_id)):
                 core_identity_summary = card.identity.core_identity_summary,
             ))
         except Exception:
+            logger.warning("加载角色摘要失败: %s", cid, exc_info=True)
             continue
     return results
 

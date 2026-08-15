@@ -10,7 +10,6 @@
 import json
 import logging
 import re
-from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -348,9 +347,12 @@ def _validate_condition_semantics(
                     re.compile(pattern)
             except re.error as exc:
                 raise HTTPException(status_code=400, detail=f"关键词正则表达式无效: {exc}") from exc
-    if condition.trigger_type in {TriggerType.AFFINITY_THRESHOLD, TriggerType.TRUST_THRESHOLD, TriggerType.STATE_DELTA}:
-        if condition.threshold is None:
-            raise HTTPException(status_code=400, detail="阈值触发条件必须提供 threshold")
+    if (
+        condition.trigger_type
+        in {TriggerType.AFFINITY_THRESHOLD, TriggerType.TRUST_THRESHOLD, TriggerType.STATE_DELTA}
+        and condition.threshold is None
+    ):
+        raise HTTPException(status_code=400, detail="阈值触发条件必须提供 threshold")
     if condition.aggregation not in {"any", "all", "count"}:
         raise HTTPException(status_code=400, detail="跨角色聚合模式无效")
     if condition.aggregation == "count":
@@ -374,9 +376,8 @@ def _validate_condition_semantics(
                 detail="character_ids 不能全为空",
             )
         condition.character_ids = cleaned_character_ids
-    if condition.trigger_type == TriggerType.DIALOGUE_COUNT:
-        if condition.count is None or condition.count < 0:
-            raise HTTPException(status_code=400, detail="对话次数条件必须提供非负 count")
+    if condition.trigger_type == TriggerType.DIALOGUE_COUNT and (condition.count is None or condition.count < 0):
+        raise HTTPException(status_code=400, detail="对话次数条件必须提供非负 count")
     if condition.trigger_type == TriggerType.TIME_BASED:
         if condition.duration_minutes is None and not condition.schedule:
             raise HTTPException(status_code=400, detail="时间条件必须提供 duration_minutes 或 schedule")
@@ -394,11 +395,10 @@ def _validate_condition_semantics(
     if condition.trigger_type == TriggerType.WORLD_TIME_WINDOW:
         if not condition.time_window_start or not condition.time_window_end:
             raise HTTPException(status_code=400, detail="世界时间窗口需要开始和结束时间")
-        try:
-            datetime.strptime(condition.time_window_start, "%H:%M")
-            datetime.strptime(condition.time_window_end, "%H:%M")
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="世界时间窗口必须使用 HH:MM") from exc
+        if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", condition.time_window_start) or not re.fullmatch(
+            r"(?:[01]\d|2[0-3]):[0-5]\d", condition.time_window_end
+        ):
+            raise HTTPException(status_code=400, detail="世界时间窗口必须使用 HH:MM")
         if any(day < 0 or day > 6 for day in condition.weekdays or []):
             raise HTTPException(status_code=400, detail="weekdays 必须位于 0 到 6")
     if condition.trigger_type == TriggerType.RELATIONSHIP_CHANGE:

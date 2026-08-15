@@ -331,10 +331,7 @@ def is_relationship_memory_text(
     if has_alias and (has_explicit_marker or has_claim_pattern):
         return True
 
-    if has_generic_alias_claim:
-        return True
-
-    return False
+    return bool(has_generic_alias_claim)
 
 
 def memory_created_before_or_unknown(created_at: str | None, cutoff: str | None) -> bool:
@@ -387,7 +384,4 @@ def relationship_text_conflicts_with_graph(
     ):
         return False
 
-    if not is_relationship_memory_text(text, aliases, relationship_context=False, relationship=relationship):
-        return False
-
-    return True
+    return bool(is_relationship_memory_text(text, aliases, relationship_context=False, relationship=relationship))

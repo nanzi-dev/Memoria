@@ -825,8 +825,10 @@ def call_role_turn(
     stream_error = None
     stream_mode = "json"
     response_format_name = "json_object" if supports_response_format else "none"
-    with tracing.start_span("llm.role_turn", **{"llm.model": model, "llm.response_format": response_format_name}):
-        with performance.measure("llm.role_turn"):
+    with (
+        tracing.start_span("llm.role_turn", **{"llm.model": model, "llm.response_format": response_format_name}),
+        performance.measure("llm.role_turn"),
+    ):
             request_started_at = perf_counter()
             _record_llm_call(kind="role", task_name=task_name, model=model)
             try:
@@ -902,8 +904,10 @@ def call_role_turn(
         if debug:
             _emit_debug(debug_sink, "role_turn.request_without_response_format", fallback_request)
 
-        with tracing.start_span("llm.role_turn", **{"llm.model": model, "llm.response_format": "none"}):
-            with performance.measure("llm.role_turn"):
+        with (
+            tracing.start_span("llm.role_turn", **{"llm.model": model, "llm.response_format": "none"}),
+            performance.measure("llm.role_turn"),
+        ):
                 request_started_at = perf_counter()
                 _record_llm_call(kind="role", task_name=task_name, model=model)
                 try:

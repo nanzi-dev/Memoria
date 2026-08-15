@@ -40,8 +40,11 @@ class TestHealthEndpoints:
     def test_ready_db_fail(self, monkeypatch):
         from memoria.main import ready
 
+        class _DBError(Exception):
+            pass
+
         def fail_session():
-            raise Exception("DB down")
+            raise _DBError("DB down")
 
         monkeypatch.setattr("memoria.db.repository.db_session", fail_session)
 

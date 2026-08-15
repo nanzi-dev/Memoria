@@ -68,7 +68,7 @@ try:
 
     APP_VERSION = version("memoria")
 except PackageNotFoundError:  # 源码直跑且未安装包时回退
-    APP_VERSION = "0.5.0"
+    APP_VERSION = "1.0.0"
 
 # =========================
 # 配置校验

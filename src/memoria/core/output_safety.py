@@ -98,7 +98,7 @@ _MAX_RISK_TEXT_LENGTH = max(len(text) for text in _EXACT_RISK_TEXTS)
 
 def _could_be_risk_prefix(text: str) -> bool:
     lowered = text.lower()
-    if any(risk_text.startswith(text) or risk_text.startswith(lowered) for risk_text in _EXACT_RISK_TEXTS):
+    if any(risk_text.startswith((text, lowered)) for risk_text in _EXACT_RISK_TEXTS):
         return True
     for prefix, targets in _WILDCARD_RISK_TEXTS:
         if prefix.startswith(text):

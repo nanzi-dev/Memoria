@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import * as reactRouter from 'react-router-dom';
+const { BrowserRouter } = reactRouter;
 import App from './App';
 import { UserProvider } from './context/UserContext';
 import { DialogProvider } from './context/DialogContext';

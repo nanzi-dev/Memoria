@@ -283,7 +283,7 @@ def get_conn():
             try:
                 raw.rollback()
             except Exception:
-                pass
+                logger.debug("数据库回滚失败", exc_info=True)
             raise
         finally:
             raw.close()

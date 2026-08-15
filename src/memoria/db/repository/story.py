@@ -284,15 +284,7 @@ def _event_execution_domain_event_id(
     aggregate_id: str,
     event_type: str,
 ) -> str:
-    identity = "\0".join(
-        (
-            "event_execution",
-            execution_id,
-            aggregate_type,
-            aggregate_id,
-            event_type,
-        )
-    )
+    identity = f"event_execution\0{execution_id}\0{aggregate_type}\0{aggregate_id}\0{event_type}"
     return uuid.uuid5(uuid.NAMESPACE_URL, identity).hex
 
 

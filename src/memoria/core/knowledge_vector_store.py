@@ -85,7 +85,7 @@ class KnowledgeVectorStore:
         top_k: int,
         knowledge_base_ids: list[str] | None = None,
     ) -> list[dict]:
-        where = {"owner_user_id": owner_user_id}
+        where: dict[str, object] = {"owner_user_id": owner_user_id}
         if knowledge_base_ids is not None:
             if not knowledge_base_ids:
                 return []

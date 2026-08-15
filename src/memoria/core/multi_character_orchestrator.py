@@ -371,14 +371,12 @@ class MultiCharacterOrchestrator(
 
 
 
-    @staticmethod
 
 
 
 
 
 
-    @staticmethod
 
 
 
@@ -389,8 +387,8 @@ class MultiCharacterOrchestrator(
     
     def trigger_character_interaction(
         self,
-        trigger_character_id: str = None,
-        prompt: str = None,
+        trigger_character_id: str | None = None,
+        prompt: str | None = None,
         *,
         persist: bool = True,
     ) -> dict:
@@ -679,7 +677,7 @@ class MultiCharacterOrchestrator(
     def _generate_character_interaction(
         self,
         trigger_character_id: str,
-        prompt: str = None,
+        prompt: str | None = None,
         *,
         clock_snapshot=None,
         persist: bool = True,

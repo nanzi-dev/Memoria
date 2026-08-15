@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
-import { Navigate, Routes, Route } from 'react-router-dom';
+import * as reactRouter from 'react-router-dom';
+const { Navigate, Routes, Route } = reactRouter;
 
 import ArchiveRouteLoading from './archive/ArchiveRouteLoading';
 import ArchiveShell from './archive/ArchiveShell';

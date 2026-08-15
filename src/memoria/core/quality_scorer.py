@@ -15,7 +15,7 @@ from memoria.core.llm_client import _extract_json
 
 
 def _clamp_score(value: float) -> int:
-    return max(0, min(100, int(round(value))))
+    return max(0, min(100, round(value)))
 
 
 def _assistant_messages(messages: list[dict]) -> list[str]:

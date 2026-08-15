@@ -125,7 +125,7 @@ Memoria/
 
 ## 系统管理端点
 
-- `GET /health` — 仅做进程存活检查，返回 `{"status": "ok", "version": "0.5.0"}`
+- `GET /health` — 仅做进程存活检查，返回 `{"status": "ok", "version": "1.0.0"}`
 - `GET /ready` — 数据库就绪检查，失败返回 503 和 `{"status": "not_ready", "database": "unavailable"}`；具体异常只写入服务端日志
 - `POST /admin/log-level?level=DEBUG` — 动态调整日志级别，仅限系统管理员
 

@@ -90,7 +90,7 @@ def build_frontend(skip: bool) -> None:
             fail("web/dist 缺失且无法构建前端（缺少 node_modules），请先 npm install")
         return
     log("正在构建前端 (npm run build) ...")
-    proc = subprocess.run(["npm", "run", "build"], cwd=str(ROOT / "web"))
+    proc = subprocess.run(["npm", "run", "build"], cwd=str(ROOT / "web"), check=False)
     if proc.returncode != 0:
         fail("前端构建失败，请检查 npm 输出")
     if not (dist / "index.html").is_file():

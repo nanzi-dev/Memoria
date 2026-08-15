@@ -41,7 +41,7 @@ def get_runtime_state(
     character_id: str, 
     player_id: str, 
     card,
-    query_context: str = None,
+    query_context: str | None = None,
     memory_created_after: str | None = None
 ) -> dict:
      """
@@ -158,7 +158,7 @@ def get_long_term_facts(
     character_id: str, 
     player_id: str, 
     limit: int = 20,
-    query_context: str = None,
+    query_context: str | None = None,
     created_after: str | None = None
 ) -> list[str]:
     """
@@ -188,7 +188,7 @@ def get_long_term_fact_records(
     character_id: str,
     player_id: str,
     limit: int = 20,
-    query_context: str = None,
+    query_context: str | None = None,
     created_after: str | None = None
 ) -> list[dict]:
     """
@@ -204,8 +204,10 @@ def get_long_term_fact_records(
             vector_store = get_vector_store()
             
             # 向量检索获取相关记忆
-            with tracing.start_span("memory.vector_search", character_id=character_id):
-                with performance.measure("memory.vector_search"):
+            with (
+                tracing.start_span("memory.vector_search", character_id=character_id),
+                performance.measure("memory.vector_search"),
+            ):
                     vector_results = vector_store.search_similar_memories(
                         character_id=character_id,
                         player_id=player_id,

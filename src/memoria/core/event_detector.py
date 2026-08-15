@@ -216,13 +216,12 @@ class EventDetector:
             )
         
         # 基于时间（会话时长）
-        if trigger_type == TriggerType.TIME_BASED:
-            if condition.duration_minutes is not None:
-                return self._check_threshold(
-                    context.session_duration_minutes,
-                    condition.duration_minutes,
-                    condition.comparison
-                )
+        if trigger_type == TriggerType.TIME_BASED and condition.duration_minutes is not None:
+            return self._check_threshold(
+                context.session_duration_minutes,
+                condition.duration_minutes,
+                condition.comparison
+            )
         
         # 情绪匹配
         if trigger_type == TriggerType.MOOD_MATCH:
@@ -315,11 +314,10 @@ class EventDetector:
                 str(relationship.get("relationship_type") or "").strip()
                 == expected_type
             )
-        if condition.relationship_type:
-            if str(relationship.get("relationship_type") or "").strip() != str(
-                condition.relationship_type or ""
-            ).strip():
-                return False
+        if condition.relationship_type and str(relationship.get("relationship_type") or "").strip() != str(
+            condition.relationship_type or ""
+        ).strip():
+            return False
         if condition.threshold is not None:
             return self._check_threshold(
                 float(relationship.get("affinity") or 0.0),

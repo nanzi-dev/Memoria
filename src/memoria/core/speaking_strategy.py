@@ -314,10 +314,9 @@ class SmartSelectionStrategy(SpeakingStrategy):
             score = 0.0
             
             # 1. 关键词匹配（玩家提到角色）
-            if player_message:
-                if any(n in player_message for n in _names_for_card(card)):
-                    score += 50.0
-                    logger.debug(f"[智能策略] {char_id} 被提及，+50")
+            if player_message and any(n in player_message for n in _names_for_card(card)):
+                score += 50.0
+                logger.debug(f"[智能策略] {char_id} 被提及，+50")
 
             relevance_score = _topic_relevance_score(player_message, card)
             if relevance_score:
@@ -444,10 +443,9 @@ class HybridStrategy(SpeakingStrategy):
         
         # 1. 检查强关键词触发
         for keyword, char_id in self.keyword_triggers.items():
-            if keyword in player_message:
-                if any(p["character_id"] == char_id for p in participants):
-                    logger.info(f"[混合策略] 关键词触发 {char_id}")
-                    return char_id
+            if keyword in player_message and any(p["character_id"] == char_id for p in participants):
+                logger.info(f"[混合策略] 关键词触发 {char_id}")
+                return char_id
         
         # 2. 检查角色名被提及（强匹配）
         for p in participants:

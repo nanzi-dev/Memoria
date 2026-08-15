@@ -81,8 +81,8 @@ def pytest_sessionstart(session):
                 cur.execute("SET session_replication_role = replica")
                 cur.execute("COMMIT")  # 立即提交，避免被后续事务隐式覆盖
                 cur.close()
-            except Exception:
-                pass  # 非 PG 驱动（如有）忽略
+            except Exception:  # noqa: S110 - 非 PG 驱动（如有）忽略
+                pass
 
         engine = create_engine(pg_url, pool_pre_ping=True)
         with engine.begin() as conn:

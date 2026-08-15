@@ -2,7 +2,7 @@
 
 测试日期：2026-08-01（Asia/Shanghai）
 测试环境：真实 FastAPI + 真实 SQLite
-API：`http://127.0.0.1:8003`，`GET /health` 返回 `{"status":"ok","version":"0.5.0"}`
+API：`http://127.0.0.1:8003`，`GET /health` 返回 `{"status":"ok","version":"1.0.0"}`
 真实数据库：`data/sqlite_db/memoria.db`
 自动化请求记录：`/tmp/next_door_playthrough.jsonl`
 

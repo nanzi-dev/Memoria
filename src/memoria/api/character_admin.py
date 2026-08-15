@@ -535,7 +535,7 @@ def _schedule_avatar_download(
     """Schedule a bounded post-response download for remote avatar URLs."""
     if not avatar_url or avatar_url.startswith("data:"):
         return
-    if avatar_url.startswith("http://") or avatar_url.startswith("https://"):
+    if avatar_url.startswith(("http://", "https://")):
         background_tasks.add_task(
             _download_and_store_avatar,
             owner_user_id,
@@ -579,7 +579,7 @@ def get_character_avatar(
 @router.post("/admin/characters/{character_id}/avatar/upload", response_model=OperationResponse)
 async def upload_character_avatar(
     character_id: str,
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008
     current_user_id: str = Depends(require_current_user_id),
 ):
     """

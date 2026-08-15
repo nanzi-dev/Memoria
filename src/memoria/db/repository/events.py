@@ -47,17 +47,17 @@ def _save_event_definition_in_transaction(
     event_name: str,
     trigger_config: str,
     effects_config: str,
-    character_id: str = None,
-    description: str = None,
+    character_id: str | None = None,
+    description: str | None = None,
     priority: int = 0,
-    exclusive_group: str = None,
+    exclusive_group: str | None = None,
     exclusive_scope: str = "turn",
     max_triggers_per_turn: int = 3,
     stop_processing: bool = False,
     is_active: bool = True,
-    schedule: str = None,
-    template_id: str = None,
-    story_id: str = None,
+    schedule: str | None = None,
+    template_id: str | None = None,
+    story_id: str | None = None,
 ) -> None:
     now = _now()
     conn.execute(text("""
@@ -103,17 +103,17 @@ def save_event_definition(
     event_name: str,
     trigger_config: str,
     effects_config: str,
-    character_id: str = None,
-    description: str = None,
+    character_id: str | None = None,
+    description: str | None = None,
     priority: int = 0,
-    exclusive_group: str = None,
+    exclusive_group: str | None = None,
     exclusive_scope: str = "turn",
     max_triggers_per_turn: int = 3,
     stop_processing: bool = False,
     is_active: bool = True,
-    schedule: str = None,
-    template_id: str = None,
-    story_id: str = None,
+    schedule: str | None = None,
+    template_id: str | None = None,
+    story_id: str | None = None,
 ) -> bool:
     """保存事件定义"""
     try:
@@ -150,7 +150,7 @@ def get_event_definition(owner_user_id: str, event_id: str) -> dict | None:
 
 def list_event_definitions(
     owner_user_id: str,
-    character_id: str = None,
+    character_id: str | None = None,
     only_active: bool = True
 ) -> list[dict]:
     """列出事件定义"""
@@ -221,9 +221,9 @@ def log_event_trigger(
             """), {"p0": event_id, "p1": character_id, "p2": player_id, "p3": session_id, "p4": _now(), "p5": context_snapshot, "p6": effects_applied})
 
 def get_event_trigger_history(
-    event_id: str = None,
-    character_id: str = None,
-    player_id: str = None,
+    event_id: str | None = None,
+    character_id: str | None = None,
+    player_id: str | None = None,
     limit: int = 50
 ) -> list[dict]:
     """获取事件触发历史"""
@@ -1645,7 +1645,7 @@ def save_event_context_state(
     context_data: str,
     status: str = "active",
     progress: float = 0.0,
-    last_session_id: str = None,
+    last_session_id: str | None = None,
 ) -> bool:
     """保存事件进度上下文，同一 event+character+player 只保留一条。"""
     try:
@@ -1680,9 +1680,9 @@ def get_event_context_state(event_id: str, character_id: str, player_id: str) ->
 
 
 def list_event_context_states(
-    character_id: str = None,
-    player_id: str = None,
-    status: str = None,
+    character_id: str | None = None,
+    player_id: str | None = None,
+    status: str | None = None,
     limit: int = 100,
 ) -> list[dict]:
     """列出事件上下文，可按角色、玩家和状态过滤。"""
@@ -1753,10 +1753,10 @@ def _save_event_schedule_state_in_transaction(
     character_id: str,
     player_id: str,
     schedule: str,
-    next_run_at: str = None,
-    next_due_real_at: str = None,
-    last_checked_at: str = None,
-    last_run_at: str = None,
+    next_run_at: str | None = None,
+    next_due_real_at: str | None = None,
+    last_checked_at: str | None = None,
+    last_run_at: str | None = None,
     status: str = "active",
     missed_count: int = 0,
 ) -> None:
@@ -1840,10 +1840,10 @@ def save_event_schedule_state(
     character_id: str,
     player_id: str,
     schedule: str,
-    next_run_at: str = None,
-    next_due_real_at: str = None,
-    last_checked_at: str = None,
-    last_run_at: str = None,
+    next_run_at: str | None = None,
+    next_due_real_at: str | None = None,
+    last_checked_at: str | None = None,
+    last_run_at: str | None = None,
     status: str = "active",
     missed_count: int = 0,
 ) -> bool:
@@ -1877,17 +1877,17 @@ def save_event_definition_with_schedule(
     effects_config: str,
     *,
     schedule_state: dict | None,
-    character_id: str = None,
-    description: str = None,
+    character_id: str | None = None,
+    description: str | None = None,
     priority: int = 0,
-    exclusive_group: str = None,
+    exclusive_group: str | None = None,
     exclusive_scope: str = "turn",
     max_triggers_per_turn: int = 3,
     stop_processing: bool = False,
     is_active: bool = True,
-    schedule: str = None,
-    template_id: str = None,
-    story_id: str = None,
+    schedule: str | None = None,
+    template_id: str | None = None,
+    story_id: str | None = None,
 ) -> bool:
     """Atomically save an event definition and its single schedule state."""
     try:
@@ -2445,7 +2445,7 @@ def save_event_template(
     description: str,
     trigger_config: str,
     effects_config: str,
-    metadata: str = None,
+    metadata: str | None = None,
 ) -> bool:
     """保存事件模板。"""
     try:
@@ -2471,7 +2471,7 @@ def save_event_template(
         return False
 
 
-def list_event_templates(category: str = None) -> list[dict]:
+def list_event_templates(category: str | None = None) -> list[dict]:
     """列出事件模板。"""
     with db_session() as conn:
         query = "SELECT * FROM event_template WHERE 1=1"
