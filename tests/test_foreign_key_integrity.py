@@ -38,27 +38,25 @@ def test_character_card_requires_existing_user():
             )
         )
 
-    with pytest.raises(IntegrityError):
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    "INSERT INTO character_card "
-                    "(owner_user_id, character_id, card_data, name, display_name, created_at, updated_at, is_active, source) "
-                    "VALUES ('ghost', 'c', '{}', 'c', 'c', 'now', 'now', 1, 'db')"
-                )
+    with pytest.raises(IntegrityError), engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO character_card "
+                "(owner_user_id, character_id, card_data, name, display_name, created_at, updated_at, is_active, source) "
+                "VALUES ('ghost', 'c', '{}', 'c', 'c', 'now', 'now', 1, 'db')"
             )
+        )
 
 
 def test_user_character_card_requires_existing_user():
     engine = _fk_engine()
     Base.metadata.create_all(engine)
 
-    with pytest.raises(IntegrityError):
-        with engine.begin() as conn:
-            conn.execute(
-                text(
-                    "INSERT INTO user_character_card "
-                    "(user_id, display_name, gender, created_at, updated_at) "
-                    "VALUES ('ghost', 'Ghost', 'unknown', 'now', 'now')"
-                )
+    with pytest.raises(IntegrityError), engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO user_character_card "
+                "(user_id, display_name, gender, created_at, updated_at) "
+                "VALUES ('ghost', 'Ghost', 'unknown', 'now', 'now')"
             )
+        )
