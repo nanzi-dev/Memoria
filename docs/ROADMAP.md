@@ -33,7 +33,7 @@
 - [x] 事件管理 API（CRUD + 启用/禁用 + 触发历史查询 + 重置）
 
 ### 第四阶段 - 多角色对话
-- [x] 多角色群聊（至少 2 个不重复 NPC；公开 API 未设置参与人数上限，MultiCharacterOrchestrator）
+- [x] 多角色群聊（至少 2 个、最多 8 个不重复 NPC；MultiCharacterOrchestrator）
 - [x] 固定混合发言策略（MultiCharacterOrchestrator 始终使用 HybridStrategy；其他策略类未作为公开选项暴露）
 - [x] 讨论模式（角色连续发言，每轮按上下文动态选择回应人数；玩家发言后最多 3 个角色回应）
 - [x] 混合策略评分（关键词、角色关系、发言频率、近期活跃度等信号采用加法评分，并结合随机选择；不是固定百分比权重）

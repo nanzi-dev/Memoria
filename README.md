@@ -1,515 +1,97 @@
-# Memoria - 角色模拟系统
+# Memoria
 
-一个基于大语言模型的沉浸式角色扮演对话系统，支持动态记忆管理、外部知识库 RAG、情感状态追踪、事件系统、语音交互。
+基于大语言模型的沉浸式角色扮演对话系统，支持长期记忆、知识库 RAG、角色关系、事件系统、世界时钟、多角色对话、语音交互和 Web 前端。
 
-[![GitHub stars](https://img.shields.io/github/stars/nanzi-dev/Memoria?style=social)](https://github.com/nanzi-dev/Memoria)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[中文](README.md) | [English](README.en.md)
+
+[![License: Non-Commercial](https://img.shields.io/badge/License-Non--Commercial-red.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![React 18](https://img.shields.io/badge/React-18-61dafb.svg)](https://react.dev/)
 
----
+## 核心能力
 
-## 目录
+- **角色模拟**：结构化角色卡、玩家角色卡、动态语言风格和用户级资源隔离。
+- **沉浸式对话**：单角色对话、多角色群聊、SSE 流式输出、幂等轮次和逻辑群聊线程。
+- **记忆系统**：短期历史、会话摘要、长期事实、向量召回和世界时间记忆曲线。
+- **世界知识**：TXT、Markdown、PDF、DOCX 知识库，支持角色或群聊绑定和来源追溯。
+- **关系与剧情**：好感度、信任度、情绪、角色关系图谱、事件触发、事件链和剧情投影。
+- **安全运行**：Cookie CSRF、请求限流、输出安全过滤、用户隔离和远程资源防护。
 
-- [Memoria - 角色模拟系统](#memoria---角色模拟系统)
-  - [目录](#目录)
-  - [核心特性](#核心特性)
-    - [深度角色模拟](#深度角色模拟)
-    - [三层智能记忆系统](#三层智能记忆系统)
-    - [外部知识库 RAG](#外部知识库-rag)
-    - [关系与情感追踪](#关系与情感追踪)
-    - [多角色对话系统](#多角色对话系统)
-    - [语音](#语音)
-    - [事件系统](#事件系统)
-    - [沉浸感保护](#沉浸感保护)
-    - [多模型支持](#多模型支持)
-    - [Web 前端](#web-前端)
-  - [系统架构](#系统架构)
-  - [快速开始](#快速开始)
-    - [环境要求](#环境要求)
-    - [Docker 一键部署](#docker-一键部署)
-    - [安装步骤](#安装步骤)
-  - [完整演示模块](#完整演示模块)
-  - [文档导航](#文档导航)
-  - [环境变量](#环境变量)
-  - [运行测试](#运行测试)
-  - [许可证](#许可证)
-  - [致谢](#致谢)
-    - [开源项目](#开源项目)
-
----
-
-## 核心特性
-
-### 深度角色模拟
-- **结构化角色卡系统**：使用 JSON 格式定义角色的完整人格、背景、语言风格和行为模式
-- **多维度性格系统**：支持 MBTI、核心特质、价值观、恐惧与禁忌等多维度性格定义
-- **动态语言风格**：根据角色设定自动生成符合人设的对话内容和表达方式
-- **角色卡管理后台**：Web 界面管理当前用户的角色卡，支持创建、编辑、导入、导出和数据库存储
-
-### 三层智能记忆系统
-- **短期记忆**：保留最近对话历史（默认 8 轮），确保上下文连贯性
-- **中期记忆**：自动生成会话摘要，支持跨会话记忆持久化
-- **长期记忆**：自动提取和存储重要事实，RAG 向量检索智能召回相关记忆
-- **记忆萃取引擎**：使用 AI 从对话中智能提取关键信息并评估重要性
-- **世界时间记忆曲线**：玩家事实、角色印象和群体经历会随世界时间衰减，并可由新证据强化；弱记忆以可复现采样偶发闪回，原始记忆不会被删除。详见 [记忆曲线说明](docs/MEMORY_CURVE.md)
-- **图谱修订隔离**：角色关系图谱更新或删除后，单聊和群聊生成上下文只过滤图谱变更前的旧关系事实；普通长期记忆、共同经历和世界事实继续保留。最近对话里若出现与当前图谱冲突的关系表述，也会在送入模型前跳过，避免旧关系覆盖当前图谱
-
-### 外部知识库 RAG
-- **多格式文档导入**：支持上传 UTF-8 TXT、Markdown、PDF、DOCX，或直接粘贴文本
-- **异步处理与状态恢复**：文档按 `queued → processing → ready/failed` 流转；前端自动轮询，服务重启后会恢复排队中或被中断的任务
-- **精细绑定范围**：知识库可绑定为全局、指定角色或指定群聊线程，并可随时启用、禁用
-- **安全检索注入**：单聊和群聊按绑定范围检索知识块，知识内容只作为低优先级世界事实，不执行文档中的指令
-- **来源可追溯**：对话响应返回 `knowledge_sources`，管理页支持检索预览、失败原因展示和重试
-
-### 关系与情感追踪
-- **好感度系统**：根据对话内容动态调整角色对玩家的好感度（-100 ~ 100）；LLM 未返回增量时按文本和动作做有界确定性兜底，避免自然升温轮次关系完全不变化
-- **信任度机制**：追踪角色对玩家的信任程度，影响话题开放度
-- **情绪状态**：实时跟踪角色当前情绪，影响对话表现和反应
-- **角色关系网络**：支持当前用户私有的角色间关系定义并提供网络查询 API；关系类型是可自定义文本，不限制固定枚举。单聊和群聊都以当前关系图谱为最高优先级，缺失关系边表示未定义关系；`affinity` 在 prompt 中作为中性的关系强度呈现，具体含义以关系类型和说明为准
-
-### 多角色对话系统
-- **群聊模式**：每个群聊至少需要 2 个不重复 NPC；公开 API 当前不设置参与人数上限
-- **无自动开场白**：创建会话不再生成开场白（`opening` 恒为 `null`），对话由玩家第一条消息触发，避免每次会话角色重复自我介绍
-- **讨论模式**：角色可以连续发言，`max_responses` 接受 1-5，编排器按上下文动态决定回应人数，当前每个玩家轮次最多 3 个角色回应
-- **智能发言策略**：固定使用混合策略，优先处理关键词与角色点名，再综合关系、发言频率、均衡性和最近发言上下文选择角色
-- **角色间互动**：角色会相互回应和讨论
-- **多角色记忆**：个人记忆、角色间记忆、群体记忆三层管理；群聊结束时统一生成整场摘要并保存为群体记忆
-- **逻辑群聊线程**：`group_thread_id` 跨越物理 session 保持不变，结束后续聊仍可读取完整历史；历史消息提供稳定 `message_id`，支持按游标增量同步
-- **群聊脉冲**：世界时钟调度器可触发有剧情动机的 NPC 自主发言，事件效果也可立即触发群聊发言；当前每次脉冲最多提交 1 条角色消息
-- **未读聚合通知**：自主/事件脉冲在提交消息时原子创建线程级未读通知，客户端同步到最新消息后可整线程标记已读
-- **SSE 流式回复**：单聊和玩家发起的群聊轮次支持 Server-Sent Events，提供阶段、角色开始、增量文本、角色完成和最终结果事件
-
-### 语音
-- **语音输入**：浏览器录音上传到认证 STT 接口，按会话语言转写，可配置自动发送
-- **语音播放**：单聊和群聊的角色消息支持 TTS、自动播放和本地文件缓存
-- **角色声音**：支持内置声音与自定义声音授权、创建、状态查询和解绑；自定义声音不可用时回退内置声音
-
-### 事件系统
-- **多类型触发条件**：好感度阈值、信任度阈值、关键词匹配、对话次数、时间、情绪、复合条件；阈值条件支持按指定角色做 `any` / `all` / `count` 跨角色聚合
-- **丰富的事件效果**：状态修改、内容解锁、对话触发、记忆添加、情绪改变、玩家通知、关系修改、事件链、NPC 主动对话
-- **事件检测引擎**：自动检测触发条件并按优先级执行
-- **冷却时间管理**：支持事件冷却和触发次数限制
-- **深度集成**：支持 cron 式时间事件、事件模板库和跨会话事件上下文持久化
-- **用户隔离**：角色卡、事件定义和角色关系都按登录用户隔离，不同用户可以使用相同的 `character_id` / `event_id`
-- **世界时钟与通知**：每个用户拥有独立的 IANA 时区和 0/1/2/5/10 倍世界时间；事件通知持久化到用户收件箱并支持已读状态
-- **事件模拟**：管理 API 可在不执行、不写入副作用的情况下评估事件条件并预览计划结果
-
-### 沉浸感保护
-- **AI 身份检测**：`output_safety` 对完整回复与 SSE 增量做风险模式过滤，命中后替换为安全兜底句
-- **角色一致性**：严格约束模型输出，确保始终保持角色人设
-- **三层容错机制**：JSON 解析、修复重试、文本兜底
-
-### 多模型支持
-- **OpenAI 兼容接口**：支持 DeepSeek、Kimi、Qwen 等多种大模型
-- **主辅模型分离**：主对话使用高质量模型，记忆萃取使用轻量模型降低成本
-- **JSON 强制输出**：支持结构化输出的模型可获得更好的稳定性
-
-### Web 前端
-- **登录与用户资料**：支持用户注册、登录、资料编辑和头像设置；浏览器登录态使用 `memoria-token`（HttpOnly）与 `memoria-csrf`（可读）双 Cookie，写请求自动带 `X-CSRF-Token`，不把 token 持久化到 `localStorage`。CSRF 与限流覆盖 `/api/*` 与 `/admin/*`；登录另有按用户名的失败节流（15 分钟 / 10 次），且用户名不存在与密码错误的响应时间一致，无法据此枚举账号
-- **安全头像下载**：URL 头像由服务端校验并下载；仅允许公网 HTTP(S) 目标，逐跳校验重定向并固定连接到已验证 IP。在 Clash 等 Fake-IP 环境中会通过 DoH 取得真实地址，不把 `198.18.0.0/15` 代理地址直接视为可信目标
-- **玩家角色卡**：独立编辑玩家名称、头像、身份、外观、性格、背景和目标，并从下一条单聊或群聊消息开始参与 Prompt 与关系图谱
-- **角色卡编辑器**：分步编辑角色身份、性格、语言风格、背景和交互规则
-- **会话体验**：支持单角色对话、会话恢复、多角色群聊、录音转写和角色语音播放；好感度/信任度变化只在当前会话新回复上展示，历史加载消息不回放旧变化提示
-- **流式与群聊同步**：单聊和群聊按 SSE 增量展示回复；群聊使用逻辑线程合并续聊历史，并同步自主脉冲产生的新消息和聚合未读状态
-- **管理工作台**：事件与知识库页面采用左右分栏工作台，支持汇总、搜索、筛选、排序、详情查看及编辑；事件关联角色可直接选择当前用户已有角色
-- **用户设置**：账户、世界时间和语音设置分区管理；世界时钟按 IANA 时区展示，支持暂停、同步、设置、推进及 `0/1/2/5/10` 倍速
-
----
-
-## 系统架构
-
-```
-Memoria/
-├── src/memoria/                # 源代码
-│   ├── api/                    # REST API 路由层
-│   │   ├── dialogue.py         # 对话相关 API
-│   │   ├── streaming.py        # 同步编排器到 SSE 的流式桥接
-│   │   ├── character_admin.py  # 角色卡管理 API
-│   │   ├── event_admin.py      # 事件管理 API
-│   │   ├── multi_dialogue.py   # 多角色对话 API
-│   │   ├── relationship.py     # 角色关系 API
-│   │   ├── knowledge.py        # 知识库、文档与检索预览 API
-│   │   ├── knowledge_models.py # 知识库、文档、绑定等 API 数据模型
-│   │   ├── speech.py           # STT、TTS 与角色自定义声音 API
-│   │   ├── story.py            # 剧情状态投影 API
-│   │   ├── developer.py        # 回放、性能指标、质量评分等开发者 API
-│   │   ├── avatar_fetcher.py   # 远程头像 SSRF 防护与固定 IP 下载
-│   │   ├── avatar_image.py     # 头像格式、像素和尺寸规范化
-│   │   ├── upload_utils.py     # 上传文件校验与磁盘保存工具
-│   │   └── user.py             # 用户注册、登录、资料和头像 API
-│   ├── characters/              # 角色卡 JSON 配置文件
-│   │   ├── npc_luo_xiaohei.json
-│   │   ├── npc_wuxian.json
-│   │   └── ...
-│   ├── core/                   # 核心业务逻辑
-│   │   ├── config.py           # 全局配置管理
-│   │   ├── orchestrator.py     # 对话编排核心
-│   │   ├── llm_client.py       # LLM 调用适配层
-│   │   ├── memory_extractor.py # 记忆萃取模块
-│   │   ├── memory_curve.py     # 世界时间记忆衰减、强化与召回
-│   │   ├── prompt_builder.py   # Prompt 组装器
-│   │   ├── vector_memory.py    # 向量记忆管理
-│   │   ├── knowledge_documents.py    # 知识文档校验、提取与切块
-│   │   ├── knowledge_service.py      # 文档持久化与异步索引
-│   │   ├── knowledge_retriever.py    # 知识检索、排序与 Prompt 注入
-│   │   ├── knowledge_vector_store.py # 知识向量存储
-│   │   ├── world_clock.py      # 用户世界时钟
-│   │   ├── locale.py           # 会话语言约束与 STT 语言映射
-│   │   ├── speech_provider.py  # MiniMax TTS / OpenAI-compatible STT 适配层
-│   │   ├── speech_service.py   # 语音鉴权、缓存与角色声音工作流
-│   │   ├── character_loader.py # 角色卡加载与缓存
-│   │   ├── character_schema.py # 角色卡数据模型
-│   │   ├── event_detector.py   # 事件检测引擎
-│   │   ├── event_executor.py   # 事件执行器
-│   │   ├── event_runtime.py    # 事件上下文、检测、规划与执行协调
-│   │   ├── event_schema.py     # 事件数据模型
-│   │   ├── multi_character_orchestrator.py  # 多角色对话编排
-│   │   ├── multi_character_turn.py          # 多角色轮次执行与讨论决策
-│   │   ├── multi_character_context.py       # 多角色上下文构建与决策模型
-│   │   ├── multi_character_helpers.py       # 多角色共享工具函数
-│   │   ├── multi_character_memory.py        # 多角色记忆管理
-│   │   ├── multi_character_memory_ops.py    # 多角色记忆读写与摘要保存
-│   │   ├── relationship_context.py          # 关系图谱上下文与修订过滤
-│   │   ├── relationship_delta_policy.py     # 好感/信任增量确定性与兜底规则
-│   │   ├── group_dialogue_runtime.py        # 逻辑群聊自主/事件脉冲运行时
-│   │   ├── cron_schedule.py                 # cron 调度解析与下次运行时间
-│   │   ├── background_jobs.py                # 持久化 checkpoint 记忆任务工作器
-│   │   ├── domain_events.py                  # 领域事件账本与剧情状态投影
-│   │   ├── fact_claims.py / fact_claim_policy.py  # 事实声明与冲突策略
-│   │   ├── output_safety.py                # 完整回复与流式增量输出安全过滤
-│   │   ├── csrf.py                         # Cookie 会话双提交 CSRF
-│   │   └── speaking_strategy.py             # 发言策略系统
-│   ├── db/                     # 数据持久化层
-│   │   ├── engine.py           # SQLAlchemy Engine / Session 生命周期管理
-│   │   ├── models.py           # SQLAlchemy ORM 模型
-│   │   └── repository/         # SQLite / PostgreSQL 持久化包（facade + 领域子模块）
-│   │       ├── __init__.py     # 兼容 facade：`from memoria.db import repository`
-│   │       ├── _common.py      # 连接、schema、共享工具
-│   │       ├── users.py        # 用户与 auth_token
-│   │       ├── characters.py   # 角色卡
-│   │       ├── sessions_and_messages.py  # 会话、短期消息、对话轮次
-│   │       ├── events.py       # 事件定义、调度、触发
-│   │       ├── relationships.py
-│   │       ├── multi_session.py
-│   │       ├── knowledge.py
-│   │       ├── state_and_memory.py
-│   │       ├── fact_claims.py
-│   │       ├── memory_curve.py # 记忆曲线状态与幂等强化投影
-│   │       ├── story.py
-│   │       ├── domain_events.py
-│   │       ├── world_clock.py
-│   │       └── background_jobs.py
-│   └── main.py                 # 应用入口
-├── tests/                      # pytest 测试（核心、API、安全、知识库、世界时钟等）
-├── docs/                       # 项目文档
-│   ├── API.md                  # API 文档
-│   ├── ARCHITECTURE.md         # 系统架构与数据库
-│   ├── MEMORY_CURVE.md         # 世界时间记忆曲线
-│   ├── FAQ.md                  # 故障排查
-│   ├── ROADMAP.md              # 开发路线图
-│   └── CONTRIBUTING.md         # 贡献指南
-├── data/                       # 运行时数据
-│   ├── sqlite_db/              # SQLite 开发数据库
-│   ├── chroma_db/              # 向量数据库 (ChromaDB)
-│   ├── knowledge/              # 知识库上传原文件
-│   └── speech/                 # TTS 文件缓存
-├── scripts/                    # 工具脚本
-│   ├── chat.sh                 # CLI 聊天启动脚本
-│   ├── cli_chat.py             # 命令行对话工具
-│   ├── seed_next_door_demo.py    # 隔壁寝室演示模块播种脚本
-│   └── run_tests.sh            # 测试执行脚本
-├── examples/                   # 可播种的完整故事模块
-│   └── next_door/              # 隔壁寝室角色、事件、关系、知识与评测数据
-├── web/                        # React + Vite 前端
-│   ├── src/pages/              # Home、ChatRoom、CharacterEditor、PersonaEditor、EventList、EventEditor、RelationshipGraph、KnowledgeManager
-│   ├── src/components/         # 通用组件与编辑器步骤组件
-│   ├── src/context/            # 登录态与对话上下文
-│   ├── src/api/                # 前端 API 客户端
-│   ├── src/assets/             # 前端静态资源
-│   └── package.json            # 前端脚本与依赖
-├── config/                     # 配置文件
-│   ├── .env.example            # 环境变量模板
-│   └── settings.yaml           # 兼容性/参考标记，不参与运行时加载
-├── pyproject.toml              # 项目配置
-├── requirements.txt            # Python 依赖
-├── alembic.ini                 # Alembic 迁移配置
-├── alembic/                    # Alembic 迁移脚本
-└── README.md
-```
-
----
+完整功能说明见 [功能文档](docs/FEATURES.md)。
 
 ## 快速开始
 
-### 环境要求
-
-- Python 3.10+
-- Node.js 18+（运行 Web 前端时需要）
-- 支持 OpenAI 兼容接口的大模型 API（DeepSeek、Kimi、Qwen 等）
-- Docker / Docker Compose（使用一键部署时需要）
-
-### Docker 一键部署
-
-适合本地体验或生产前验证。默认启动 PostgreSQL、FastAPI 后端和 Nginx 前端：
+### Docker
 
 ```bash
 cd deploy/docker
 cp .env.example .env
-# 编辑 .env，填入 LLM_API_KEY，并设置高强度且唯一的
-# POSTGRES_PASSWORD 和 ADMIN_BOOTSTRAP_TOKEN（必填）
+# 填写 LLM_API_KEY、POSTGRES_PASSWORD 和 ADMIN_BOOTSTRAP_TOKEN
 docker compose up
 ```
 
-启动后访问：
+启动后访问 http://127.0.0.1:8080，API 文档位于 http://127.0.0.1:8080/docs。
 
-- Web 应用：http://127.0.0.1:8080
-- API 文档：http://127.0.0.1:8080/docs
-- 后端健康检查：http://127.0.0.1:8080/health
+### 本地开发
 
-首次启动后，通过 API 使用 `.env` 中的 `ADMIN_BOOTSTRAP_TOKEN` 创建唯一的初始管理员。普通 Web 注册不会提交该凭据，因此始终创建普通用户：
-
-```bash
-curl -c memoria-admin.cookies \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"replace-with-a-strong-password1","admin_bootstrap_token":"replace-with-your-bootstrap-token"}' \
-  http://127.0.0.1:8080/api/v1/user/register
-```
-
-Compose 默认使用 PostgreSQL，并通过 Docker volume 持久化数据库、ChromaDB 和模型缓存。本地 `models/` 会以只读方式挂载到容器；如需使用本地嵌入模型，在 `.env` 中设置：
-
-```bash
-EMBEDDING_MODEL=/app/models/sentence-transformers/all-MiniLM-L6-v2
-```
-
-常用命令：
-
-```bash
-docker compose up --build  # Dockerfile 或依赖变化后强制重建
-docker compose logs -f backend
-docker compose down
-docker compose down -v  # 同时删除 PostgreSQL/ChromaDB/模型缓存数据
-```
-
-### 安装步骤
-
-**1. 克隆项目**
-```bash
-git clone <repository_url>
-cd Memoria
-```
-
-**2. 创建虚拟环境（推荐）**
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-# 或
-venv\Scripts\activate     # Windows
-```
-
-**3. 安装依赖**
-```bash
+source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-> 首次启动时会自动下载嵌入模型（约 80MB），用于向量检索功能。
-
-**4. 配置环境变量**
-```bash
 cp config/.env.example .env
-# 编辑 .env 文件，填入你的 API 配置
-```
-
-**支持的模型供应商配置示例：**
-
-```bash
-# DeepSeek
-LLM_BASE_URL=https://api.deepseek.com/v1
-LLM_MODEL=deepseek-chat
-
-# Kimi (Moonshot)
-LLM_BASE_URL=https://api.moonshot.cn/v1
-LLM_MODEL=moonshot-v1-8k
-
-# Qwen (通义千问)
-LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-LLM_MODEL=qwen-plus
-
-# OpenAI
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-4-turbo-preview
-```
-
-**5. 启动服务**
-```bash
+# 至少填写 LLM_BASE_URL、LLM_API_KEY、LLM_MODEL
 uvicorn memoria.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
-**6. 访问应用**
-- API 文档 (Swagger): http://127.0.0.1:8001/docs
-- API 文档 (ReDoc): http://127.0.0.1:8001/redoc
-- CLI 聊天: `python scripts/cli_chat.py`
-- CLI 调试: `python scripts/cli_chat.py --debug`（输出 LLM 请求、Prompt 与原始响应到 stderr）
+前端开发：
 
-**7. 启动 Web 前端（可选）**
 ```bash
 cd web
 npm install
 npm run dev
 ```
 
-默认访问地址为 http://127.0.0.1:5173。
+完整安装、Docker、前端、测试、环境变量和示例模块说明见 [快速开始](docs/GETTING_STARTED.md) 与 [配置说明](docs/CONFIGURATION.md)。
 
----
+## 项目结构
 
-## 完整演示模块
-
-`examples/next_door/` 提供“隔壁寝室”完整故事模块，包含玩家角色卡、4 个 NPC、关系网络、事件、3 个知识库、群聊和检索评测问题。后端配置完成后可播种到独立的 `memoria_demo` 普通用户：
-
-```bash
-python scripts/seed_next_door_demo.py --password '<choose-a-strong-password>'
+```text
+Memoria/
+├── src/memoria/     # FastAPI 后端、领域逻辑和持久化
+├── web/             # React + Vite 前端
+├── tests/           # pytest 测试
+├── docs/            # 项目文档
+├── examples/        # 可播种的完整故事模块
+├── scripts/         # 开发、测试和 CLI 脚本
+├── deploy/          # Docker 部署配置
+└── release/         # 便携发布包
 ```
 
-只创建结构和知识文档队列、不加载本地嵌入模型时使用 `--skip-knowledge-index`；需要清理并重建该模块时使用 `--reset-module`。播种脚本不会创建或占用系统管理员名额。破冰指南见 [Next Door README](examples/next_door/README.md) 和 [WALKTHROUGH](examples/next_door/WALKTHROUGH.md)。
-
----
-
-## 文档导航
+## 文档
 
 | 文档 | 内容 |
 |------|------|
-| [API 文档](docs/API.md) | 完整 REST API 参考（对话/角色卡/事件/关系/多角色/知识库/语音/用户/系统管理），含请求/响应示例 |
-| [系统架构](docs/ARCHITECTURE.md) | 系统架构设计、数据库表结构、记忆、知识检索与语音架构、角色卡开发规范 |
-| [记忆曲线](docs/MEMORY_CURVE.md) | 基于世界时间的记忆衰减、证据强化、确定性召回和只读诊断说明 |
-| [开发路线图](docs/ROADMAP.md) | 已完成功能和未来规划 |
-| [故障排查](docs/FAQ.md) | 常见问题解决方案、调试技巧、性能优化建议 |
-| [贡献指南](docs/CONTRIBUTING.md) | 如何贡献代码、Commit 规范、代码审查标准 |
+| [快速开始](docs/GETTING_STARTED.md) | 安装、Docker、前端、测试和示例模块 |
+| [配置说明](docs/CONFIGURATION.md) | 环境变量、模型、数据库、语音和安全配置 |
+| [功能说明](docs/FEATURES.md) | 完整功能清单与行为边界 |
+| [系统架构](docs/ARCHITECTURE.md) | 架构、数据表、核心流程和安全设计 |
+| [API 文档](docs/API.md) | REST API、请求响应示例和流式事件 |
+| [记忆曲线](docs/MEMORY_CURVE.md) | 世界时间衰减、强化、采样和诊断 |
+| [开发路线图](docs/ROADMAP.md) | 已完成功能和后续规划 |
+| [故障排查](docs/FAQ.md) | 常见问题、调试和性能建议 |
+| [贡献指南](docs/CONTRIBUTING.md) | 开发环境、提交规范和代码审查 |
+| [发布包说明](release/RELEASE.md) | 便携包启动、配置、备份和升级 |
 
----
+## 技术栈
 
-## 环境变量
-
-完整环境变量说明：
-
-```bash
-# ====== 大模型 API 配置 ======
-LLM_BASE_URL=https://api.deepseek.com/v1      # API 基础 URL
-LLM_API_KEY=your-api-key-here                  # API 密钥
-LLM_MODEL=deepseek-chat                        # 主对话模型
-LLM_TIMEOUT_SECONDS=45                         # 单次 LLM 请求超时
-LLM_LIGHT_TIMEOUT_SECONDS=12                   # 轻量任务单次请求超时
-MAX_OUTPUT_TOKENS=400                          # 主模型单次最大输出 token 数
-
-# 轻量任务专用 API（可选，留空则使用主 LLM）
-LLM_LIGHT_BASE_URL=                            # 轻量 API 基础 URL
-LLM_LIGHT_API_KEY=                             # 轻量 API 密钥
-LLM_LIGHT_MODEL=                               # 轻量模型名称
-LIGHT_TASK_MAX_OUTPUT_TOKENS=400               # 轻量任务单次最大输出 token 数
-
-# ====== Speech 配置（可选） ======
-# TTS 默认使用 MiniMax 流式合成；STT 使用独立 OpenAI-compatible 转写端点
-SPEECH_TTS_PROVIDER=minimax
-SPEECH_TTS_API_KEY=                            # MiniMax API 密钥
-SPEECH_TTS_BASE_URL=https://api.minimax.io/v1
-SPEECH_TTS_MODEL=speech-2.8-turbo
-SPEECH_TTS_TIMEOUT_SECONDS=30
-SPEECH_TTS_MAX_RETRIES=1
-SPEECH_TTS_DEFAULT_VOICE=female-shaonv
-SPEECH_STT_PROVIDER=openai_compatible
-SPEECH_STT_API_KEY=                            # ASR API 密钥
-SPEECH_STT_BASE_URL=https://api.openai.com/v1
-SPEECH_STT_MODEL=gpt-4o-mini-transcribe
-SPEECH_STT_TIMEOUT_SECONDS=30
-SPEECH_STT_MAX_RETRIES=1
-SPEECH_OUTPUT_FORMAT=mp3
-SPEECH_STORAGE_PATH=./data/speech
-
-# ====== 应用配置 ======
-DATABASE_PATH=./data/sqlite_db/memoria.db      # SQLite 数据库文件路径（默认开发模式）
-DATABASE_URL=                                  # PostgreSQL 连接串；留空时使用 SQLite
-AUTH_COOKIE_SECURE=false                       # 本地 HTTP 为 false；HTTPS 部署必须设为 true
-ADMIN_BOOTSTRAP_TOKEN=                         # 一次性初始化管理员的高熵凭据
-FORWARDED_ALLOW_IPS=127.0.0.1                  # Uvicorn 信任的反向代理 IP；Docker 模式默认 *
-SHORT_TERM_MEMORY_TURNS=8                      # 短期记忆轮数
-LONG_TERM_MEMORY_INTERVAL_TURNS=5              # 每隔多少个玩家回合保存一次长期记忆
-MEMORIA_MEMORY_CURVE_ENABLED=true              # 启用世界时间记忆曲线（默认开启）
-WORLD_CLOCK_SCHEDULER_INTERVAL_SECONDS=30      # 世界时钟调度扫描间隔
-WORLD_CLOCK_SCHEDULER_LEASE_SECONDS=90         # 到期事件调度租约
-
-# ====== 向量数据库配置 ======
-VECTOR_DB_PATH=./data/chroma_db                # 向量数据库路径
-EMBEDDING_MODEL=./models/sentence-transformers/all-MiniLM-L6-v2  # 嵌入模型
-VECTOR_SEARCH_TOP_K=10                         # 向量检索返回数量
-KNOWLEDGE_RETRIEVAL_TOP_K=4                    # 每轮知识注入来源上限
-KNOWLEDGE_SIMILARITY_THRESHOLD=0.60            # 知识检索最低相似度
-```
-
-运行时配置统一由 `src/memoria/core/config.py` 的 `Configs` 定义，并通过环境变量或仓库根目录 `.env` 注入；`config/settings.yaml` 仅是兼容性/参考标记。默认知识上传限制为 10 MiB、Top-K 为 4、相似度阈值为 0.60；分块目标为 200 token、重叠 36 token、硬上限 240 token。
-
-语音的 TTS 与 STT 分别配置。TTS 默认使用 MiniMax 的 T2A v2 流式响应：浏览器在收到首个音频分块后即可播放，完整 MP3 会原子写入 `SPEECH_STORAGE_PATH/cache` 供历史消息复播。STT 始终调用独立的 OpenAI-compatible `/audio/transcriptions` 端点，不会请求 MiniMax TTS 地址。角色 Custom Voice 需要先上传授权录音，再上传参考样本；成功后会持久化 MiniMax `voice_id`，失败时继续回退到角色的内置音色。旧的 `SPEECH_PROVIDER`、`SPEECH_API_KEY`、`SPEECH_BASE_URL` 和 `SPEECH_TIMEOUT_SECONDS` 仅作为迁移回退，并会发出弃用警告。
-
-Docker 部署文件统一存放在 `deploy/docker/`。运行时 `deploy/docker/docker-compose.yml` 会自动生成容器内 PostgreSQL 连接串；通常只需要通过 `deploy/docker/.env` 配置 `POSTGRES_*`、`LLM_*`、`ADMIN_BOOTSTRAP_TOKEN`、语音、端口和模型参数。后端直连端口默认绑定 `127.0.0.1`，显式设置 `API_BIND_HOST=0.0.0.0` 才会对所有网络接口开放。Compose 默认设置 `FORWARDED_ALLOW_IPS=*`，以便后端从 Nginx 转发头取得真实客户端 IP；若后端端口直接对公网开放，必须把该值收紧到可信代理 IP 或网段。
-
-URL 头像下载默认关闭环境代理继承，并只连接经过校验的公网 IP。系统 DNS 返回 Clash/Mihomo 常用的 `198.18.0.0/15` Fake-IP 时，后端会通过 HTTPS 访问 `1.1.1.1` 或 `8.8.8.8` 的 DoH 服务取得真实 A/AAAA 地址，再保留原始 Host、TLS SNI 和证书主机名进行固定 IP 下载。使用 Fake-IP 的部署必须允许后端出站访问这些地址的 TCP 443；两个 DoH 端点都不可达时会安全拒绝 URL 头像，不会退回到直接信任 Fake-IP。详见 [FAQ](docs/FAQ.md#q-url-头像提示不允许访问内网或保留地址或无法安全解析图片-url-主机) 与 [架构文档](docs/ARCHITECTURE.md#远程头像安全下载)。
-
----
-
-## 运行测试
-
-```bash
-# 安装开发依赖
-pip install -e ".[dev]"
-
-# 运行全部测试（867 用例，约 45s）
-bash scripts/run_tests.sh
-
-# 可选：对真实 PostgreSQL 运行全量测试（Docker 示例）
-# docker run -d --name memoria-pg-test -e POSTGRES_USER=memoria \
-#   -e POSTGRES_PASSWORD=memoria_dev_pw -e POSTGRES_DB=memoria_test \
-#   -p 127.0.0.1:5432:5432 postgres:16-alpine
-# MEMORIA_PG_TEST_URL="postgresql+psycopg://memoria:memoria_dev_pw@127.0.0.1:5432/memoria_test" \
-#   PYTHONPATH=src pytest tests/ -q
-# PG 模式下 conftest 会 DROP 并重建全部表、预建共享测试用户，并绕过外键检查
-# （唯一约束与 NOT NULL 仍生效）；tests/test_postgres_real_integration.py 单独验证
-# PG 专属行为（BIGSERIAL、部分索引、UPDATE 中的标量钳制等）。
-
-# 按模块运行
-PYTHONPATH=src pytest tests/test_core.py -v               # 核心模块
-PYTHONPATH=src pytest tests/test_repository.py -v          # 数据库层
-PYTHONPATH=src pytest tests/test_events.py -v              # 事件系统
-PYTHONPATH=src pytest tests/test_event_e2e.py -v           # 事件端到端
-PYTHONPATH=src pytest tests/test_relationship_delta_policy.py -v  # 关系增量兜底
-PYTHONPATH=src pytest tests/test_memory_extractor.py -v    # 记忆萃取
-PYTHONPATH=src pytest tests/test_multi_dialogue_api.py -v  # 多角色 API
-PYTHONPATH=src pytest tests/test_csrf.py -v                # Cookie CSRF
-PYTHONPATH=src pytest tests/test_output_safety.py -v       # 输出安全
-PYTHONPATH=src pytest tests/test_world_clock.py -v         # 世界时钟
-PYTHONPATH=src pytest tests/test_knowledge_base.py -v      # 知识库 RAG
-PYTHONPATH=src pytest tests/test_fact_claims.py -v         # 事实声明与图谱
-PYTHONPATH=src pytest tests/test_security_fixes.py -v      # 安全修复
-PYTHONPATH=src pytest tests/test_domain_events.py -v       # 领域事件
-PYTHONPATH=src pytest tests/test_memory_curve.py -v        # 记忆曲线
-PYTHONPATH=src pytest tests/test_speech.py -v              # 语音模块
-```
-
-当前测试集合最近一次全量运行为 **879 passed, 3 skipped**（以 `pytest --collect-only -q` 为准），覆盖核心编排、关系增量兜底、跨角色事件聚合、`db/repository` 包、事件、单聊/群聊 API、CSRF、输出安全、知识库、语音、向量存储、世界时钟、事实声明、安全修复、记忆曲线和系统端点。前端测试由 `npm test` 收集。
-
----
+- 后端：Python 3.10+、FastAPI、Pydantic、SQLAlchemy、SQLite / PostgreSQL、ChromaDB。
+- 前端：React 18、Vite、Tailwind CSS、React Router、D3、Three.js。
+- 模型：OpenAI 兼容接口；主对话和轻量任务可使用不同模型。
 
 ## 许可证
 
-本项目使用 [MIT 许可证](LICENSE)。
+本项目使用 [PolyForm Noncommercial License 1.0.0](LICENSE)。
 
----
+仅允许个人学习、研究、实验、非商业组织和其它非商业用途。**禁止任何商业使用**；如需商用，必须事先取得版权持有者的书面授权。
 
-## 致谢
-
-### 开源项目
-
-感谢以下优秀的开源项目：
-
-- **[FastAPI](https://fastapi.tiangolo.com/)** - 现代化、高性能的 Web 框架
-- **[Pydantic](https://docs.pydantic.dev/)** - 强大的数据验证库
-- **[OpenAI Python SDK](https://github.com/openai/openai-python)** - LLM 客户端库
-- **[ChromaDB](https://www.trychroma.com/)** - 向量数据库，支持语义检索
-- **[sentence-transformers](https://www.sbert.net/)** - 文本嵌入模型库
-- **[Uvicorn](https://www.uvicorn.org/)** - 轻量级 ASGI 服务器
+PolyForm Noncommercial 不属于 OSI 认可的开源许可证，更准确的描述是“源码可见、仅限非商业使用”。

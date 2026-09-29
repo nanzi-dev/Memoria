@@ -618,10 +618,10 @@ def test_knowledge_runtime_config_has_one_source_and_fits_embedding_limit():
     assert "memoria.core.config.Configs" in compatibility_config
     assert "\nknowledge:" not in compatibility_config
 
-    readme = (root / "README.md").read_text(encoding="utf-8")
-    assert "`Configs`" in readme
-    assert "相似度阈值为 0.60" in readme
-    assert "硬上限 240 token" in readme
+    config_doc = (root / "docs/CONFIGURATION.md").read_text(encoding="utf-8")
+    assert "`Configs`" in config_doc
+    assert "相似度阈值为 0.60" in config_doc
+    assert "硬上限 240 token" in config_doc
 
     model_config_path = (
         root / fields["embedding_model"].default / "sentence_bert_config.json"

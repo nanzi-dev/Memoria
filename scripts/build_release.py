@@ -15,7 +15,7 @@
     ├── start.py / start.sh / start.bat   # 一键启动
     ├── run.py                            # 静态服务入口 (uvicorn run:app)
     ├── RELEASE.md                        # 使用说明
-    ├── requirements.txt / pyproject.toml / LICENSE / README.md
+    ├── requirements.txt / pyproject.toml / LICENSE / README.md / README.en.md
     ├── config/.env.example               # 仅模板，不含真实密钥
     ├── src/memoria/                      # 后端源码
     ├── web/dist/                         # 前端构建产物
@@ -46,6 +46,7 @@ INCLUDE = [
     ("requirements.txt", "requirements.txt"),
     ("LICENSE", "LICENSE"),
     ("README.md", "README.md"),
+    ("README.en.md", "README.en.md"),
     ("config/.env.example", "config/.env.example"),
     ("web/dist", "web/dist"),
     ("release/run.py", "run.py"),
